@@ -1,4 +1,4 @@
-# Reading Trainer Git Workflow Cheat Sheet
+# Jubly Reader Git Workflow Cheat Sheet
 
 This file is meant for the local diff-driven workflow you are using with Git, runtime review, and whichever implementation agent is currently in use.
 
@@ -17,12 +17,10 @@ For one active pass:
 
 ---
 
----
-
 ## 1. Go to the repo
 
 ```bat
-cd C:\Users\Triston Barker\Documents\GitHub\reading-comprehension\
+cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
 ```
 
 What it does:
@@ -76,7 +74,7 @@ git diff -- <file1> <file2> <file3> > quick_patch.diff
 Example:
 
 ```bat
-git diff -- docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js > quick_patch.diff
+git diff -- index.html css/shell.css js/evaluation.js js/shell.js > quick_patch.diff
 ```
 
 What it does:
@@ -118,7 +116,7 @@ What it does:
 This is the block to reuse once a pass has an active patch artifact:
 
 ```bat
-cd C:\Users\Triston Barker\Documents\GitHub\reading-comprehension\
+cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
 git status
 git diff -- <file1> <file2> <file3> > quick_patch.diff
 git apply --check quick_patch.diff
@@ -128,9 +126,9 @@ notepad quick_patch.diff
 Example:
 
 ```bat
-cd C:\Users\Triston Barker\Documents\GitHub\reading-comprehension\
+cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
 git status
-git diff -- docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js > quick_patch.diff
+git diff -- index.html css/shell.css js/evaluation.js js/shell.js > quick_patch.diff
 git apply --check quick_patch.diff
 notepad quick_patch.diff
 ```
@@ -156,7 +154,7 @@ Rules:
 - run `git apply --check` again after each revision
 
 This is the preferred loop once the owner layer and patch artifact are stable.
-Often that is after the first 1–2 Claude implementation passes, but treat that as a heuristic rather than a hard threshold.
+Often that is after the first 1–2 implementation passes, but treat that as a heuristic rather than a hard threshold.
 
 ---
 
@@ -207,7 +205,7 @@ git add <file1> <file2> <file3>
 Example:
 
 ```bat
-git add docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js
+git add index.html css/shell.css js/evaluation.js js/shell.js
 ```
 
 What it does:
@@ -261,7 +259,7 @@ git diff main...HEAD > branch-vs-main.diff
 
 What it does:
 - shows the changes on your current branch compared to `main`
-- useful when working in a Claude-created branch or worktree
+- useful when working in a branch or worktree
 
 ---
 
@@ -280,7 +278,7 @@ What it does:
 ## 18. Safe sequence before commit
 
 ```bat
-cd C:\Users\Triston Barker\Documents\GitHub\reading-comprehension\
+cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
 git status
 git diff -- <file1> <file2> <file3> > quick_patch.diff
 git apply --check quick_patch.diff

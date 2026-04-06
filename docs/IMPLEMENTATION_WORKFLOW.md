@@ -1,4 +1,4 @@
-# Reading Trainer — Implementation Workflow
+# Jubly Reader — Implementation Workflow
 
 This document defines the default development loop for implementation work.
 

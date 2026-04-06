@@ -1,11 +1,18 @@
 # Jubly Reader — IP, Code Exposure, Obfuscation, and Copyright Policy
 
-_Status: launch policy draft_
+_Status: active launch policy_
 
 ## Purpose
 This document explains, in plain language, how Jubly Reader should treat code exposure, code protection, copyright, trade secrets, and brand/IP policy.
 
 This is a product-and-engineering policy document, not legal advice.
+
+This document is not standalone.
+Read it alongside:
+- `02_RUNTIME_CONTRACT.md`
+- `03_ARCHITECTURE_MAP.md`
+- `05_LAUNCH_AND_INTEGRATION.md`
+- `07_AUTH_BILLING_WIRING_GUIDELINE.md`
 
 ## The simple rule
 For this system:
@@ -170,6 +177,32 @@ So the target is **not** “move the whole app server-side.”
 The target is:
 - keep the browser lean
 - move crown-jewel decisions out of exposed JS
+
+## How this changes other docs
+- `02_RUNTIME_CONTRACT.md` still wins on user experience. Protected-code work must not regress reading continuity, TTS truth, restore, importer honesty, or exit cleanup.
+- `03_ARCHITECTURE_MAP.md` defines the browser-vs-runtime-vs-backend ownership split. This policy adds a protection rule, not a second ownership model.
+- `05_LAUNCH_AND_INTEGRATION.md` must treat avoidable crown-jewel browser exposure as part of the launch gate.
+- `07_AUTH_BILLING_WIRING_GUIDELINE.md` already provides the resolved entitlement object pattern that should replace scattered client-side plan logic.
+
+## Engineer decision test
+### Keep it in browser only if all are true
+- it must run locally for responsiveness or browser-only interaction
+- exposing it would not materially help a copycat
+- it is not provider-selection, entitlement, usage, prompt, or premium-policy logic
+- moving it backend-side would materially harm the runtime contract
+
+### Move it backend-side if any are true
+- it resolves plan, entitlement, or usage truth
+- it selects provider or fallback policy
+- it contains prompts or non-obvious orchestration
+- it is algorithmically valuable
+- it would materially shorten a copycat’s path if exposed in the public bundle
+
+### Do not
+- put crown-jewel policy in `config.js`
+- rely on obfuscation as the main protection model
+- leave old domains or public debug paths as canonical
+- move code server-side in a way that breaks runtime truth promised in `02_RUNTIME_CONTRACT.md`
 
 ## Source-map and debug policy
 Production should not publicly expose:

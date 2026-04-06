@@ -1,8 +1,8 @@
-# Reading Trainer — Documentation Package
+# Jubly Reader — Documentation Package
 
 This is the active documentation set for the current project state.
 
-The goal is to keep the package small, current, and easy to use during patching.
+The goal is to keep the package small, current, and reliable during patching and major refactors.
 
 ## Read in this order
 1. `01_PROJECT_STATE.md`
@@ -26,7 +26,7 @@ Use this to judge behavior and reject regressions.
 ### `03_ARCHITECTURE_MAP.md`
 Who owns what.
 
-Use this to decide whether a fix belongs in shell, runtime, backend, or persistence.
+Use this to decide whether a fix belongs in shell, runtime, backend, persistence, or protected-server logic.
 
 ### `04_EXECUTION_BACKLOG.md`
 What still needs repair.
@@ -36,7 +36,7 @@ Use this as the working patch list.
 ### `05_LAUNCH_AND_INTEGRATION.md`
 What must be true before launch and how external integration fits.
 
-Use this for launch gating and Supabase/integration planning.
+Use this for launch gating, browser-vs-backend protection decisions, and Supabase/integration planning.
 
 ## Supporting policy and planning docs
 - `06_BUSINESS_SURFACES_AND_FUNCTIONALITY.md`
@@ -44,6 +44,8 @@ Use this for launch gating and Supabase/integration planning.
 - `08_IP_AND_CODE_PROTECTION_POLICY.md`
 
 Use these when the pass touches business flows, billing/auth wiring, or browser-vs-backend code exposure decisions.
+
+`08_IP_AND_CODE_PROTECTION_POLICY.md` is now an active launch companion, not an optional side note.
 
 ## Implementation workflow
 The preferred implementation workflow is now **scoped diff-driven patching** once the owner layer is known.
@@ -60,12 +62,12 @@ See:
 - `git_workflow_cheatsheet.md`
 
 ## Important clarification
-The shell layer is not only `docs/index.html`.
+The app web root is now the repository root.
 
 For the current codebase, the shell layer includes:
-- `docs/index.html`
-- `docs/js/shell.js`
-- live shell-facing CSS in `docs/css/`
+- `index.html`
+- `js/shell.js`
+- live shell-facing CSS in `css/`
 
 That does **not** change ownership.
 It only clarifies where current shell behavior lives.
@@ -82,15 +84,15 @@ That means the docs now treat these as current reality:
 - custom music is device-local and separate from durable preferences
 
 The CSS surface is still slightly transitional:
-- `docs/css/shell.css` is the live shell CSS patch surface today
-- `docs/css/components.css` and `docs/css/theme.css` still describe the intended split, but they are not the live implementation surface yet
+- `css/shell.css` is the live shell CSS patch surface today
+- `css/components.css` and `css/theme.css` still describe the intended split, but they are not the live implementation surface yet
 
 Treat that as logged debt, not as a reason to patch against dormant CSS files by default.
 
-## Agent note
-`CLAUDE_DEVELOPMENT_LOOP.md` is no longer a core process authority.
-If you keep it at all, treat it as archived tool-specific history.
-The active process truth now lives in the agent-neutral implementation workflow and the core docs above.
+## Archive note
+`archive/CLAUDE_DEVELOPMENT_LOOP.md` is retained only as archived tool-specific history.
+It is not a core process authority.
+The active process truth lives in the agent-neutral implementation workflow and the core docs above.
 
 ## Rules for keeping this package accurate
 - Update `01_PROJECT_STATE.md` when code reality changes.
@@ -98,11 +100,17 @@ The active process truth now lives in the agent-neutral implementation workflow 
 - Update `03_ARCHITECTURE_MAP.md` when ownership boundaries change.
 - Update `04_EXECUTION_BACKLOG.md` after implementation or validation status changes.
 - Update `05_LAUNCH_AND_INTEGRATION.md` when launch gates or integration scope changes.
+- Update `08_IP_AND_CODE_PROTECTION_POLICY.md` when browser-vs-backend protection policy changes.
 - Update `IMPLEMENTATION_WORKFLOW.md` when the default development loop changes.
 - Update `git_workflow_cheatsheet.md` when the patch artifact commands or naming standards change.
 
-## Retired documents
-Older overlapping docs should be treated as archive/reference material, not active sources of truth, once this package is adopted.
+## During major refactors
+If a document is clearly out of sync with the live scaffold shape or ownership model:
+- do not quietly keep using it as authority
+- either rewrite it into sync
+- or archive it explicitly
+
+Do not let mixed-era docs silently steer implementation.
 
 ## Before an implementation pass
 Before handing a large objective to any agent:

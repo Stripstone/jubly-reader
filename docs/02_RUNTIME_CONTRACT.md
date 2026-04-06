@@ -1,4 +1,4 @@
-# Reading Trainer — Runtime Contract
+# Jubly Reader — Runtime Contract
 
 This document defines the behavior the user should experience.
 

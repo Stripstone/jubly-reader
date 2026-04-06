@@ -1,4 +1,4 @@
-# Reading Trainer — Business Surfaces and Intended Functionality
+# Jubly Reader — Business Surfaces and Intended Functionality
 
 This document defines the intended user-facing behavior for auth, account, pricing, subscription, usage, and entitlement surfaces.
 

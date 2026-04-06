@@ -1,4 +1,4 @@
-# Reading Trainer — Architecture Map
+# Jubly Reader — Architecture Map
 
 This document defines ownership.
 
@@ -32,7 +32,7 @@ The shell must not own, mirror, infer, or compete with runtime truth in launch-c
 - importer lifecycle
 - restore and reading continuity
 - reading exit cleanup
-- mode/tier gating logic
+- mode/tier gating logic once entitlement truth is resolved
 - selected theme state
 - appearance state
 - Explorer settings state
@@ -46,6 +46,7 @@ The shell must not own, mirror, infer, or compete with runtime truth in launch-c
 - import conversion
 - cloud TTS
 - prompt contracts and server helpers
+- protected provider policy and non-obvious orchestration when feasible
 
 ### Supabase owns
 - durable account data
@@ -60,27 +61,30 @@ It stores durable records that runtime interprets.
 ## Current file map
 
 ### Shell files
-- `docs/index.html`
-- `docs/js/shell.js`
-- `docs/css/shell.css`
+- `index.html`
+- `js/shell.js`
+- `css/shell.css`
 
 ### Runtime files
-- `docs/js/app.js`
-- `docs/js/state.js`
-- `docs/js/tts.js`
-- `docs/js/import.js`
-- `docs/js/library.js`
-- `docs/js/evaluation.js`
-- `docs/js/ui.js`
-- `docs/js/audio.js`
-- `docs/js/anchors.js`
-- `docs/js/utils.js`
-- `docs/js/config.js`
-- `docs/js/embers.js`
-- `docs/js/music.js`
+- `js/app.js`
+- `js/state.js`
+- `js/tts.js`
+- `js/import.js`
+- `js/library.js`
+- `js/evaluation.js`
+- `js/ui.js`
+- `js/audio.js`
+- `js/anchors.js`
+- `js/utils.js`
+- `js/config.js`
+- `js/embers.js`
+- `js/music.js`
 
 ### Backend files
 - `api/*`
+
+### Documentation files
+- `docs/*.md`
 
 ## Hard implementation rules
 1. Do not move reading, TTS, importer, restore, or cleanup authority into shell code.
@@ -126,9 +130,17 @@ This order is part of the runtime contract.
 - importer state
 - restore
 - progress or completion truth
-- mode or tier enforcement
+- mode or tier enforcement once runtime has resolved entitlement truth
 - selected theme or appearance truth
 - theme gating or custom music permission
+
+### Put it backend-side when feasible if it affects
+- provider selection or fallback policy
+- premium-resolution logic
+- usage enforcement
+- prompt logic or prompt contracts
+- evaluation/import/TTS orchestration
+- any non-obvious rule that would materially help a copycat if exposed
 
 ## Theme rule
 Themes are a presentation layer over one locked reading layout.
@@ -152,14 +164,13 @@ The intended long-term split is still:
 - appearance in `theme.css`
 
 But the live implementation surface today is:
-- `docs/css/shell.css`
+- `css/shell.css`
 
 Treat this as logged transitional debt.
 Do not wake up dormant CSS files during unrelated passes unless the pass is explicitly a CSS-surface redistribution pass.
 
 ## Redistribution rule
 When shell behavior and scaffold behavior overlap, the scaffold wins by default unless the concern is purely presentational.
-
 
 ## Code exposure rule
 Anything shipped to the browser is inspectable.
@@ -169,6 +180,7 @@ Rules:
 - do not move reading continuity, active page truth, or local control truth server-side just for secrecy
 - move crown-jewel business logic, premium resolution, provider policy, prompt logic, usage enforcement, and non-obvious orchestration backend-side when feasible
 - do not rely on obfuscation as the ownership model
+- do not let `config.js` become a second hidden authority layer for protected decisions
 
 ## Implementation artifact rule
 Once the owner layer is known, prefer a scoped pass diff over a sprawling rewrite.

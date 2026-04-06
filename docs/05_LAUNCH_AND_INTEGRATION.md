@@ -1,6 +1,9 @@
-# Reading Trainer — Launch and Integration
+# Jubly Reader — Launch and Integration
 
 This document covers launch gating and external integration.
+
+`08_IP_AND_CODE_PROTECTION_POLICY.md` is part of this launch package.
+If browser-vs-backend exposure decisions are relevant to launch readiness, read `08` alongside this document.
 
 ## Launch promise
 Launch is honest only when a user can:
@@ -21,7 +24,7 @@ These must be true in code and runtime behavior:
 - TTS behavior is runtime-owned
 - importer reset is runtime-owned
 - exit cleanup is runtime-owned
-- tier/mode enforcement is runtime-owned
+- tier/mode enforcement is runtime-owned once entitlement truth is resolved
 - theme and appearance truth are runtime-owned
 
 ### Shell-owned requirements
@@ -33,11 +36,21 @@ These must be true in presentation:
 - theme/tier visuals match actual runtime state
 - theme controls stay as presentation surfaces, not policy owners
 
+### Code-exposure requirements
+These must be true before launch is considered honest:
+- the public browser bundle does not contain avoidable crown-jewel business logic
+- prompts and non-obvious orchestration rules are not unnecessarily exposed in client JS
+- provider/fallback policy is server-owned where feasible
+- public production bundles do not expose source maps or similar debug aids by default
+- old public domains and links redirect to the canonical public domain
+- protected-code work does not break runtime reading responsiveness or truth
+
 ## Current launch priorities
 1. runtime continuity first
 2. shell layout stability second
-3. launch regression testing third
-4. external integrations after that
+3. protected-logic redistribution and code-exposure reduction third
+4. launch regression testing fourth
+5. external integrations after that
 
 ## Supabase role
 Supabase is the cloud persistence layer for runtime-owned truths.
@@ -136,6 +149,12 @@ Rules:
 - bars remain governed by global Light/Dark appearance
 - theme gating follows runtime-owned entitlement checks
 - child modals in reading stack above parent reading settings correctly
+
+### Code exposure
+- old public domains redirect to the canonical domain
+- public bundles do not expose source maps by default
+- crown-jewel provider/premium/orchestration policy is not left in browser JS unnecessarily
+- the browser remains fast and truthful for reading behavior after redistribution
 
 ### Signed-in persistence later
 - settings restore after sign-in
