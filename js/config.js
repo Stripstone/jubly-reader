@@ -57,6 +57,37 @@ function currentOriginServesApi() {
   }
 }
 
+
+function isLocalDevHost() {
+  try {
+    const hostname = String(window.location.hostname || '').toLowerCase();
+    return hostname === 'localhost' || hostname === '127.0.0.1';
+  } catch (_) {
+    return false;
+  }
+}
+
+function isCanonicalProductionHost() {
+  try {
+    return String(window.location.hostname || '').toLowerCase() === 'jubly-reader.vercel.app';
+  } catch (_) {
+    return false;
+  }
+}
+
+function isPreviewHost() {
+  try {
+    const hostname = String(window.location.hostname || '').toLowerCase();
+    return hostname.endsWith('.vercel.app') && !isCanonicalProductionHost();
+  } catch (_) {
+    return false;
+  }
+}
+
+function canSimulateTierOnCurrentHost() {
+  return isLocalDevHost() || isPreviewHost();
+}
+
 function normalizeApiBase(value) {
   return String(value || '').trim().replace(/\/$/, '');
 }

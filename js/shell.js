@@ -135,7 +135,27 @@
     }
 
     // ── Tier — drives #tierSelect so ui.js applyTierAccess() fires ──
+    function canSimulateTierSelection() {
+        return !!(window.rcPolicy && typeof window.rcPolicy.canSimulateTier === 'function' && window.rcPolicy.canSimulateTier());
+    }
+
+    function syncTierButtonState() {
+        const current = (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function')
+            ? window.rcEntitlements.getTier()
+            : ((typeof appTier !== 'undefined' && appTier) ? appTier : 'free');
+        const map = { free: 'Basic', paid: 'Pro', premium: 'Premium' };
+        document.querySelectorAll('.tier-btn').forEach((btn) => {
+            const next = map[current] || 'Basic';
+            btn.classList.toggle('active', btn.textContent.trim() === next);
+            btn.disabled = !canSimulateTierSelection();
+        });
+        const rows = new Set();
+        document.querySelectorAll('.tier-btn').forEach((btn) => { if (btn.parentElement) rows.add(btn.parentElement); });
+        rows.forEach((row) => { row.style.display = canSimulateTierSelection() ? '' : 'none'; });
+    }
+
     function setTier(btn) {
+        if (!canSimulateTierSelection()) return;
         document.querySelectorAll('.tier-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const map = { 'Basic': 'free', 'Pro': 'paid', 'Premium': 'premium' };
@@ -884,13 +904,22 @@
         if (tierSel) {
             tierSel.addEventListener('change', () => {
                 updateTierPill();
+                syncTierButtonState();
                 updateExplorerSwatchState();
                 try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
                 try { syncExplorerMusicSource(); } catch (_) {}
                 refreshExplorerPanel();
             });
         }
+        document.addEventListener('rc:runtime-policy-changed', () => {
+            updateTierPill();
+            syncTierButtonState();
+            updateExplorerSwatchState();
+            try { syncExplorerMusicSource(); } catch (_) {}
+            refreshExplorerPanel();
+        });
         try { switchReadingSettingsTab('general'); } catch (_) {}
+        try { syncTierButtonState(); } catch (_) {}
 
         // After a successful import the engine fires Done; refresh shell library explicitly.
         const importDoneBtn = document.getElementById('importDoneBtn');

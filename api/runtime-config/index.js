@@ -1,6 +1,6 @@
 import { json, withCors } from "../_lib/http.js";
 import { getAllowedBrowserOrigins } from "../_lib/origins.js";
-import { buildRuntimePolicy, resolveRuntimeTier } from "../_lib/runtime-policy.js";
+import { buildRuntimePolicy, getDefaultRuntimeTier, isRuntimeTierSimulationAllowed, resolveRuntimeTier } from "../_lib/runtime-policy.js";
 
 function getTierFromReq(req) {
   try {
@@ -23,7 +23,21 @@ export default async function handler(req, res) {
     return json(res, 405, { error: 'Method not allowed' });
   }
 
-  const tier = getTierFromReq(req);
-  const policy = buildRuntimePolicy(tier);
-  return json(res, 200, { ok: true, policy });
+  const simulationAllowed = isRuntimeTierSimulationAllowed(req);
+  const requestedTier = getTierFromReq(req);
+  const tier = simulationAllowed ? requestedTier : getDefaultRuntimeTier();
+  const policy = {
+    ...buildRuntimePolicy(tier),
+    simulationAllowed,
+  };
+  return json(res, 200, {
+    ok: true,
+    policy,
+    meta: {
+      requestedTier,
+      effectiveTier: tier,
+      simulationAllowed,
+      tierSource: simulationAllowed ? 'requested' : 'server-default',
+    },
+  });
 }

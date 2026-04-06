@@ -65,6 +65,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   const SAFE_FALLBACK_POLICY = Object.freeze({
     version: 1,
     tier: 'free',
+    simulationAllowed: false,
     usageDailyLimit: 100,
     importSlotLimit: 2,
     features: Object.freeze({
@@ -94,6 +95,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     return {
       version: SAFE_FALLBACK_POLICY.version,
       tier,
+      simulationAllowed: typeof canSimulateTierOnCurrentHost === 'function' ? !!canSimulateTierOnCurrentHost() : false,
       usageDailyLimit: SAFE_FALLBACK_POLICY.usageDailyLimit,
       importSlotLimit: SAFE_FALLBACK_POLICY.importSlotLimit,
       features: {
@@ -129,6 +131,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     return {
       version: Number(source.version) || fallback.version,
       tier,
+      simulationAllowed: typeof source.simulationAllowed === 'boolean' ? source.simulationAllowed : fallback.simulationAllowed,
       usageDailyLimit: Number.isFinite(usageDailyLimit) && usageDailyLimit > 0
         ? usageDailyLimit
         : fallback.usageDailyLimit,
@@ -219,7 +222,8 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       const payload = await response.json();
       return applyResolvedRuntimePolicy(payload?.policy || payload, tier);
     } catch (_) {
-      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy(tier), tier);
+      const fallbackTier = (typeof canSimulateTierOnCurrentHost === 'function' && canSimulateTierOnCurrentHost()) ? tier : 'free';
+      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy(fallbackTier), fallbackTier);
     }
   }
 
@@ -972,6 +976,7 @@ window.rcPolicy = {
   get: getRuntimePolicy,
   refreshForTier: refreshRuntimePolicy,
   apply: applyResolvedRuntimePolicy,
+  canSimulateTier: canSimulateTierSelection,
   getTier: getRuntimeTier,
   getUsageDailyLimit: getRuntimeUsageAllowance,
   getImportSlotLimit: getRuntimeImportSlotLimit,
