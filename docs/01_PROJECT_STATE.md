@@ -11,9 +11,9 @@ Do not treat older builds or older notes as implementation truth.
 
 ### Shell layer
 Located in:
-- `index.html`
-- `js/shell.js`
-- `css/shell.css`
+- `docs/index.html`
+- `docs/js/shell.js`
+- `docs/css/shell.css`
 
 Current role:
 - section layout and navigation
@@ -26,7 +26,7 @@ Current role:
 - shell-side bridge calls into runtime APIs
 
 ### Runtime scaffold
-Loaded by `js/app.js` in this order:
+Loaded by `docs/js/app.js` in this order:
 - `state.js`
 - `tts.js`
 - `utils.js`
@@ -50,11 +50,11 @@ Current role:
 
 ### Supporting JS outside the loader
 Loaded before the scaffold:
-- `js/config.js`
-- `js/audio.js`
-- `js/embers.js`
-- `js/music.js`
-- `assets/books/embedded_books.js`
+- `docs/js/config.js`
+- `docs/js/audio.js`
+- `docs/js/embers.js`
+- `docs/js/music.js`
+- `docs/assets/books/embedded_books.js`
 
 Current role:
 - configuration/bootstrap inputs
@@ -103,9 +103,9 @@ Current role:
 - runtime owns the theme/music access checks; shell reflects locked/unlocked state
 
 ### Still transitional
-- `css/shell.css` is the live shell CSS surface today
-- `css/components.css` and `css/theme.css` still reflect intended separation more than live implementation
-- `js/music.js` is valid supporting JS but the broader local-asset subsystem is not yet generalized
+- `docs/css/shell.css` is the live shell CSS surface today
+- `docs/css/components.css` and `docs/css/theme.css` still reflect intended separation more than live implementation
+- `docs/js/music.js` is valid supporting JS but the broader local-asset subsystem is not yet generalized
 - some shell behavior still overlaps runtime-facing presentation glue even after the ownership cleanup
 - some older documents describe target state more strongly than current code supports
 
@@ -132,7 +132,7 @@ Current role:
 
 ## Logged transitional debt from the theme pass
 1. CSS surface alignment is still deferred.
-   - live theme work landed in `css/shell.css`
+   - live theme work landed in `docs/css/shell.css`
    - intended split across `components.css` and `theme.css` is not yet live
 2. Wallpaper asset localization is still deferred.
    - the current wallpaper path should eventually become a clean local asset/reference in the live scaffold

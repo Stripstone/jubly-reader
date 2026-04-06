@@ -60,24 +60,24 @@ It stores durable records that runtime interprets.
 ## Current file map
 
 ### Shell files
-- `index.html`
-- `js/shell.js`
-- `css/shell.css`
+- `docs/index.html`
+- `docs/js/shell.js`
+- `docs/css/shell.css`
 
 ### Runtime files
-- `js/app.js`
-- `js/state.js`
-- `js/tts.js`
-- `js/import.js`
-- `js/library.js`
-- `js/evaluation.js`
-- `js/ui.js`
-- `js/audio.js`
-- `js/anchors.js`
-- `js/utils.js`
-- `js/config.js`
-- `js/embers.js`
-- `js/music.js`
+- `docs/js/app.js`
+- `docs/js/state.js`
+- `docs/js/tts.js`
+- `docs/js/import.js`
+- `docs/js/library.js`
+- `docs/js/evaluation.js`
+- `docs/js/ui.js`
+- `docs/js/audio.js`
+- `docs/js/anchors.js`
+- `docs/js/utils.js`
+- `docs/js/config.js`
+- `docs/js/embers.js`
+- `docs/js/music.js`
 
 ### Backend files
 - `api/*`
@@ -152,13 +152,31 @@ The intended long-term split is still:
 - appearance in `theme.css`
 
 But the live implementation surface today is:
-- `css/shell.css`
+- `docs/css/shell.css`
 
 Treat this as logged transitional debt.
 Do not wake up dormant CSS files during unrelated passes unless the pass is explicitly a CSS-surface redistribution pass.
 
 ## Redistribution rule
 When shell behavior and scaffold behavior overlap, the scaffold wins by default unless the concern is purely presentational.
+
+
+## Code exposure rule
+Anything shipped to the browser is inspectable.
+
+Rules:
+- keep runtime-owned reading responsiveness local
+- do not move reading continuity, active page truth, or local control truth server-side just for secrecy
+- move crown-jewel business logic, premium resolution, provider policy, prompt logic, usage enforcement, and non-obvious orchestration backend-side when feasible
+- do not rely on obfuscation as the ownership model
+
+## Implementation artifact rule
+Once the owner layer is known, prefer a scoped pass diff over a sprawling rewrite.
+
+Default:
+- one bounded pass
+- one canonical diff
+- runtime feedback revises that same diff in place until the pass is accepted or reclassified
 
 ## Safe migration pattern
 1. expose runtime API

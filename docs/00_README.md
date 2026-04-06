@@ -11,7 +11,7 @@ The goal is to keep the package small, current, and easy to use during patching.
 4. `04_EXECUTION_BACKLOG.md`
 5. `05_LAUNCH_AND_INTEGRATION.md`
 
-## What each file does
+## Core authority docs
 
 ### `01_PROJECT_STATE.md`
 What exists right now.
@@ -38,13 +38,34 @@ What must be true before launch and how external integration fits.
 
 Use this for launch gating and Supabase/integration planning.
 
+## Supporting policy and planning docs
+- `06_BUSINESS_SURFACES_AND_FUNCTIONALITY.md`
+- `07_AUTH_BILLING_WIRING_GUIDELINE.md`
+- `08_IP_AND_CODE_PROTECTION_POLICY.md`
+
+Use these when the pass touches business flows, billing/auth wiring, or browser-vs-backend code exposure decisions.
+
+## Implementation workflow
+The preferred implementation workflow is now **scoped diff-driven patching** once the owner layer is known.
+
+Default rules:
+- one bounded pass at a time
+- one canonical `.diff` per active pass
+- runtime feedback revises that same diff in place
+- do not stack forward diffs for the same pass
+- create a `.zip` alongside the diff only when new files or assets make that necessary
+
+See:
+- `IMPLEMENTATION_WORKFLOW.md`
+- `git_workflow_cheatsheet.md`
+
 ## Important clarification
-The shell layer is not only `index.html`.
+The shell layer is not only `docs/index.html`.
 
 For the current codebase, the shell layer includes:
-- `index.html`
-- `js/shell.js`
-- live shell-facing CSS in `css/`
+- `docs/index.html`
+- `docs/js/shell.js`
+- live shell-facing CSS in `docs/css/`
 
 That does **not** change ownership.
 It only clarifies where current shell behavior lives.
@@ -61,16 +82,15 @@ That means the docs now treat these as current reality:
 - custom music is device-local and separate from durable preferences
 
 The CSS surface is still slightly transitional:
-- `css/shell.css` is the live shell CSS patch surface today
-- `css/components.css` and `css/theme.css` still describe the intended split, but they are not the live implementation surface yet
+- `docs/css/shell.css` is the live shell CSS patch surface today
+- `docs/css/components.css` and `docs/css/theme.css` still describe the intended split, but they are not the live implementation surface yet
 
 Treat that as logged debt, not as a reason to patch against dormant CSS files by default.
 
-## Optional companion for Claude work
-`CLAUDE_DEVELOPMENT_LOOP.md` is a working-method note.
-
-It is useful to hand directly to Claude Code, but it is **not** an authority document.
-If it conflicts with the five core docs above, the five core docs win.
+## Agent note
+`CLAUDE_DEVELOPMENT_LOOP.md` is no longer a core process authority.
+If you keep it at all, treat it as archived tool-specific history.
+The active process truth now lives in the agent-neutral implementation workflow and the core docs above.
 
 ## Rules for keeping this package accurate
 - Update `01_PROJECT_STATE.md` when code reality changes.
@@ -78,14 +98,16 @@ If it conflicts with the five core docs above, the five core docs win.
 - Update `03_ARCHITECTURE_MAP.md` when ownership boundaries change.
 - Update `04_EXECUTION_BACKLOG.md` after implementation or validation status changes.
 - Update `05_LAUNCH_AND_INTEGRATION.md` when launch gates or integration scope changes.
-- Update `CLAUDE_DEVELOPMENT_LOOP.md` only when the collaboration method changes.
+- Update `IMPLEMENTATION_WORKFLOW.md` when the default development loop changes.
+- Update `git_workflow_cheatsheet.md` when the patch artifact commands or naming standards change.
 
 ## Retired documents
 Older overlapping docs should be treated as archive/reference material, not active sources of truth, once this package is adopted.
 
-## Before a Claude pass
-Before handing a large objective to Claude:
+## Before an implementation pass
+Before handing a large objective to any agent:
 1. runtime-test enough to identify the real user failure
-2. write the Claude request using explicit runtime success and failure conditions
+2. write the request using explicit runtime success and failure conditions
+3. decide whether the next move is proof instrumentation, a bounded patch pass, or diff-driven cleanup
 
-Do not send Claude a large pass based only on code suspicion.
+Do not send a large pass based only on code suspicion.

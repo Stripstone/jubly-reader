@@ -1,8 +1,21 @@
 # Reading Trainer Git Workflow Cheat Sheet
 
-This file is meant for the local workflow you are using with Claude Code, GitHub Desktop, and manual runtime review.
+This file is meant for the local diff-driven workflow you are using with Git, runtime review, and whichever implementation agent is currently in use.
 
 Use it as a quick reference during the patch loop.
+
+---
+
+## 0. Canonical diff lifecycle
+
+For one active pass:
+- create one canonical diff
+- runtime-test it
+- revise that same diff in place after feedback
+- do not stack forward diffs for the same pass
+- start a new diff only when the work becomes a new pass
+
+---
 
 ---
 
@@ -63,7 +76,7 @@ git diff -- <file1> <file2> <file3> > quick_patch.diff
 Example:
 
 ```bat
-git diff -- index.html css/shell.css js/evaluation.js js/shell.js > quick_patch.diff
+git diff -- docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js > quick_patch.diff
 ```
 
 What it does:
@@ -117,7 +130,7 @@ Example:
 ```bat
 cd C:\Users\Triston Barker\Documents\GitHub\reading-comprehension\
 git status
-git diff -- index.html css/shell.css js/evaluation.js js/shell.js > quick_patch.diff
+git diff -- docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js > quick_patch.diff
 git apply --check quick_patch.diff
 notepad quick_patch.diff
 ```
@@ -194,7 +207,7 @@ git add <file1> <file2> <file3>
 Example:
 
 ```bat
-git add index.html css/shell.css js/evaluation.js js/shell.js
+git add docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js
 ```
 
 What it does:
