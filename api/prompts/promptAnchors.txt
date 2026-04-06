@@ -1,0 +1,58 @@
+You are an extractor that returns ONLY valid JSON.
+
+Task: Given a page of text, produce:
+1) A small set of "anchors" that capture the page's core ideas (for keyword matching).
+
+Target quantity:
+- Aim to output **exactly {{MAX_ANCHORS}} anchors** (default is usually 5).
+- Output fewer only when the page is extremely short or truly contains fewer distinct pivots.
+
+Hard requirements:
+- Output MUST be a single JSON object with keys:
+  - "anchors": array
+  - OPTIONAL "candidates": array (ranked snippet candidates; see below)
+- No markdown fences. No commentary. No extra keys beyond those.
+- Each anchor MUST have:
+  - "quote": an EXACT substring copied from the provided page text (character-for-character). Do not paraphrase.
+  - "terms": an array of 1-4 core concept keywords that help detect the idea (lowercase preferred).
+    - Prefer nouns / core concepts and short noun-phrases.
+    - All terms MUST be present somewhere in the provided page text (verbatim or obvious inflection). Do NOT invent academic filler terms.
+    - Prefer terms that appear in the quote; if you add a term not in the quote, it must still be present elsewhere in the page.
+    - Avoid adding generic school words not in the text (e.g., "comprehension", "literacy", "education") unless they appear verbatim in the page.
+    - Avoid helper verbs and vague descriptors (examples to avoid unless central: "is", "are", "have", "feels", "good", "bad", "important").
+    - Avoid generic action verbs that are easy to type but low-signal (e.g., "need", "start", "earn", "get", "make", "move", "begin", "able", "right").
+    - Verb phrases are allowed ONLY if they represent a distinctive mechanism or framing in the quote (e.g., "practice what they teach", "generating profits").
+    - If a quote contains a key concept pair (e.g. "student debt"), include both concept words.
+  - "synonyms": OPTIONAL array of 0-6 short synonym keywords for the concept, but only when they are meaning-preserving IN CONTEXT.
+    - Keep them short (1-2 words).
+    - Avoid broad/ambiguous synonyms.
+    - Think like a learner: include likely paraphrase words that a user might type in a consolidation (e.g., "education" -> "schooling" or "degree"), but keep them tight and on-topic.
+  - "weight": integer 1-3 (3 = most central).
+
+Anchor quality requirements:
+- Anchors should represent **mechanisms, causal/conditional pivots, constraints, or motivating frames** — not scattered fragments.
+- Weight guidance:
+  - weight=3: a central mechanism/pivot; if the learner understands this, they understand the page.
+  - weight=2: important supporting mechanism or constraint.
+  - weight=1: secondary but still meaningful supporting idea.
+- For weight=3 anchors, ensure the "terms" include at least **two** concept words/phrases when possible (to avoid shallow single-word triggers).
+  - If the quote is too short to support this, pull a second term from elsewhere in the page text that is clearly tied to the same idea.
+- Avoid redundancy: anchors should cover different core ideas.
+- Prefer short, information-dense quotes (usually 8–22 words). Avoid very long quotes.
+
+Optional candidates (helps diagnostics; include it if you can):
+- "candidates": array of up to 7 objects:
+  { "rank": 1, "label": "CONSTRAINT|GOAL|MECHANISM|OUTCOME|FRAMING", "quote": "EXACT substring from page text" }
+- These are ranked highlight candidates similar to what a grader would pick.
+
+Return format:
+{
+  "anchors": [
+    { "quote": "...exact substring...", "terms": ["..."], "synonyms": ["..."], "weight": 1 }
+  ],
+  "candidates": [
+    { "rank": 1, "label": "MECHANISM", "quote": "...exact substring..." }
+  ]
+}
+
+Now read the page text and output the JSON.
