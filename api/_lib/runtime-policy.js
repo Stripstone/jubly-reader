@@ -41,6 +41,19 @@ export function getDefaultRuntimeTier() {
   return resolveRuntimeTier(process.env.RUNTIME_DEFAULT_TIER || 'free');
 }
 
+export function getRequestedRuntimeTier(req) {
+  try {
+    const q = req?.query?.tier;
+    if (typeof q === 'string' && q.trim()) return resolveRuntimeTier(q);
+  } catch (_) {}
+  try {
+    const url = new URL(req.url, 'http://localhost');
+    return resolveRuntimeTier(url.searchParams.get('tier'));
+  } catch (_) {
+    return 'free';
+  }
+}
+
 export function buildRuntimePolicy(inputTier = "free") {
   const tier = resolveRuntimeTier(inputTier);
   const elevated = tier !== "free";
@@ -77,5 +90,22 @@ export function buildRuntimePolicy(inputTier = "free") {
         customMusic: elevated,
       },
     },
+  };
+}
+
+export function getResolvedRuntimePolicyForRequest(req) {
+  const simulationAllowed = isRuntimeTierSimulationAllowed(req);
+  const requestedTier = getRequestedRuntimeTier(req);
+  const tier = simulationAllowed ? requestedTier : getDefaultRuntimeTier();
+  const policy = {
+    ...buildRuntimePolicy(tier),
+    simulationAllowed,
+  };
+  return {
+    requestedTier,
+    effectiveTier: tier,
+    simulationAllowed,
+    tierSource: simulationAllowed ? 'requested' : 'server-default',
+    policy,
   };
 }

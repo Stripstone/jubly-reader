@@ -1850,9 +1850,13 @@
           }
         }
 
-        // Anchors (lazy): first meaningful engagement triggers anchor generation for this page.
-        // This avoids the huge cost of precomputing anchors for every loaded page.
-        try { hydrateAnchorsIntoPageEl(page, i); } catch (_) {}
+        // Anchors (lazy): first meaningful engagement triggers anchor generation for this page
+        // only when the active runtime policy allows anchors.
+        try {
+          const policyApi = window.rcPolicy || {};
+          const canUseAnchors = typeof policyApi.canUseAnchors === 'function' ? !!policyApi.canUseAnchors() : false;
+          if (canUseAnchors) hydrateAnchorsIntoPageEl(page, i);
+        } catch (_) {}
 
         startTimer(i, sand, timerDiv, wrapper, textarea);
       });

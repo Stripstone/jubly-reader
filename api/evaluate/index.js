@@ -8,6 +8,7 @@ import {
 } from "../_lib/grader.js";
 import { json, withCors, readJsonBody } from "../_lib/http.js";
 import { getAllowedBrowserOrigins } from "../_lib/origins.js";
+import { getResolvedRuntimePolicyForRequest } from "../_lib/runtime-policy.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile"; // replacement model per Groq deprecations
@@ -34,6 +35,18 @@ export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
       return json(res, 405, { error: "Method not allowed. Use POST." });
+    }
+
+    const resolved = getResolvedRuntimePolicyForRequest(req);
+    if (!resolved.policy?.features?.aiEvaluate) {
+      return json(res, 403, {
+        error: "AI evaluation is not available for the active runtime policy",
+        code: "ai_evaluate_unavailable",
+        meta: {
+          effectiveTier: resolved.effectiveTier,
+          simulationAllowed: resolved.simulationAllowed,
+        },
+      });
     }
 
     const body = await readJsonBody(req);

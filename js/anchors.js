@@ -673,6 +673,12 @@ function writeAnchorsToCache(pageHash, payload) {
   function bindHintButton(pageEl, pageIndex) {
     const btn = pageEl.querySelector('.hint-btn');
     if (!btn) return;
+    if (!canUseAnchorsRuntime()) {
+      btn.disabled = true;
+      btn.setAttribute('aria-disabled', 'true');
+      btn.title = 'Anchors are not available on the active plan';
+      return;
+    }
     btn.addEventListener('click', async () => {
       const pd = pageData?.[pageIndex];
 
@@ -731,6 +737,7 @@ function writeAnchorsToCache(pageHash, payload) {
   }
 
   async function hydrateAnchorsIntoPageEl(pageEl, pageIndex) {
+    if (!canUseAnchorsRuntime()) return;
     const text = String(pages?.[pageIndex] || '');
     if (!pageEl || !text) return;
     const textEl = pageEl.querySelector('.page-text');
