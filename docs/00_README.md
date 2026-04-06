@@ -39,12 +39,12 @@ What must be true before launch and how external integration fits.
 Use this for launch gating and Supabase/integration planning.
 
 ## Important clarification
-The shell layer is not only `docs/index.html`.
+The shell layer is not only `index.html`.
 
 For the current codebase, the shell layer includes:
-- `docs/index.html`
-- `docs/js/shell.js`
-- live shell-facing CSS in `docs/css/`
+- `index.html`
+- `js/shell.js`
+- live shell-facing CSS in `css/`
 
 That does **not** change ownership.
 It only clarifies where current shell behavior lives.
@@ -61,8 +61,8 @@ That means the docs now treat these as current reality:
 - custom music is device-local and separate from durable preferences
 
 The CSS surface is still slightly transitional:
-- `docs/css/shell.css` is the live shell CSS patch surface today
-- `docs/css/components.css` and `docs/css/theme.css` still describe the intended split, but they are not the live implementation surface yet
+- `css/shell.css` is the live shell CSS patch surface today
+- `css/components.css` and `css/theme.css` still describe the intended split, but they are not the live implementation surface yet
 
 Treat that as logged debt, not as a reason to patch against dormant CSS files by default.
 

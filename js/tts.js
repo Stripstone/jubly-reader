@@ -2,7 +2,7 @@
 // File: tts.js
 // Note: This is still global-script architecture (no bundler/modules required).
 
-//  - Preferred: Amazon Polly via /api/tts (consistent neural voice)
+//  - Preferred: Cloud TTS via /api/tts when available
 //  - Fallback: Browser SpeechSynthesis (free)
 // ==============================
 
@@ -1446,7 +1446,7 @@ async function ttsSpeakQueue(key, parts) {
     TTS_STATE.playbackBlockedReason = String(err && err.message ? err.message : err);
     TTS_DEBUG.lastError = { at: new Date().toISOString(), path: 'cloud', key, message: TTS_STATE.playbackBlockedReason };
     ttsDiagPush('cloud-playback-failed', { key, message: TTS_STATE.playbackBlockedReason, route: ri });
-    console.warn('Polly TTS unavailable, falling back to browser TTS:', err);
+    console.warn('Cloud TTS unavailable, falling back to browser TTS:', err);
     ttsStop();
     if (!ri.browserFallbackAllowed) {
       TTS_DEBUG.lastResolvedPath = ri.selected.explicitCloud ? 'cloud-failure-no-browser-fallback' : 'cloud-failure-no-fallback';

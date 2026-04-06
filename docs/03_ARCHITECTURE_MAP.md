@@ -60,24 +60,24 @@ It stores durable records that runtime interprets.
 ## Current file map
 
 ### Shell files
-- `docs/index.html`
-- `docs/js/shell.js`
-- `docs/css/shell.css`
+- `index.html`
+- `js/shell.js`
+- `css/shell.css`
 
 ### Runtime files
-- `docs/js/app.js`
-- `docs/js/state.js`
-- `docs/js/tts.js`
-- `docs/js/import.js`
-- `docs/js/library.js`
-- `docs/js/evaluation.js`
-- `docs/js/ui.js`
-- `docs/js/audio.js`
-- `docs/js/anchors.js`
-- `docs/js/utils.js`
-- `docs/js/config.js`
-- `docs/js/embers.js`
-- `docs/js/music.js`
+- `js/app.js`
+- `js/state.js`
+- `js/tts.js`
+- `js/import.js`
+- `js/library.js`
+- `js/evaluation.js`
+- `js/ui.js`
+- `js/audio.js`
+- `js/anchors.js`
+- `js/utils.js`
+- `js/config.js`
+- `js/embers.js`
+- `js/music.js`
 
 ### Backend files
 - `api/*`
@@ -152,7 +152,7 @@ The intended long-term split is still:
 - appearance in `theme.css`
 
 But the live implementation surface today is:
-- `docs/css/shell.css`
+- `css/shell.css`
 
 Treat this as logged transitional debt.
 Do not wake up dormant CSS files during unrelated passes unless the pass is explicitly a CSS-surface redistribution pass.

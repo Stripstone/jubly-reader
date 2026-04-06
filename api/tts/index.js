@@ -1,6 +1,6 @@
 // api/tts/index.js
 // TTS endpoint with S3 caching.
-// Provider selection: Azure Neural TTS (preferred, if AZURE_SPEECH_KEY is set) or Amazon Polly (fallback).
+// Provider selection: Azure Neural TTS when AZURE_SPEECH_KEY is set, otherwise Amazon Polly.
 //
 // Request JSON:
 //   - text (string, required)
@@ -165,7 +165,6 @@ export default async function handler(req, res) {
     let resolvedVoiceId;
     let provider;
     let providerRequested;
-    let azureFallback = false;
 
     if (useAzure) {
       provider = "azure";
@@ -207,28 +206,7 @@ export default async function handler(req, res) {
     if (!cacheHit) {
       let audioBuf;
       if (useAzure) {
-        try {
-          audioBuf = await azureSynthesize(text, resolvedVoiceId);
-        } catch (azErr) {
-          const pollyVoice = requiredEnv("POLLY_VOICE_ID_FEMALE") || requiredEnv("POLLY_VOICE_ID");
-          if (!pollyVoice) {
-            console.error("[tts] Azure failed, no Polly fallback configured:", azErr);
-            throw azErr;
-          }
-          console.warn("[tts] Azure failed, falling back to Polly:", azErr.message);
-          provider = "polly";
-          azureFallback = true;
-          resolvedVoiceId = voiceVariant === "male"
-            ? (requiredEnv("POLLY_VOICE_ID_MALE") || pollyVoice)
-            : pollyVoice;
-          const cmd = new SynthesizeSpeechCommand({
-            OutputFormat: "mp3", Text: text, VoiceId: resolvedVoiceId,
-            Engine: "neural", TextType: "text",
-          });
-          const out = await (new PollyClient({ region: awsRegion })).send(cmd);
-          if (!out?.AudioStream) return json(res, 502, { error: "Polly synthesis failed (Azure fallback)" });
-          audioBuf = await streamToBuffer(out.AudioStream);
-        }
+        audioBuf = await azureSynthesize(text, resolvedVoiceId);
       } else {
         const engineRaw = String(body?.engine || (debug ? "neural" : "standard")).trim().toLowerCase();
         const engine = engineRaw === "standard" ? "standard" : "neural";
@@ -293,7 +271,7 @@ export default async function handler(req, res) {
 
     const payload = { url, cacheHit, provider };
     if (wantSentenceMarks && Array.isArray(sentenceMarks)) payload.sentenceMarks = sentenceMarks;
-    if (debug) payload.debug = { providerRequested: providerRequested || provider, providerResolved: provider, voiceId: resolvedVoiceId, objectKey, textLength: text.length, cacheHit, azureFallback };
+    if (debug) payload.debug = { providerRequested: providerRequested || provider, providerResolved: provider, voiceId: resolvedVoiceId, objectKey, textLength: text.length, cacheHit };
     return json(res, 200, payload);
 
   } catch (err) {

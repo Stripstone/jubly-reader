@@ -26,7 +26,7 @@ Each launch-critical item should make user expectation, edge cases, owner, and d
 ## 1. Restore returns the user to the correct page
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/state.js` with `docs/js/library.js`
+**Owner:** `js/state.js` with `js/library.js`
 
 ### User expectation
 When the user leaves and comes back, they return to the right page.
@@ -47,7 +47,7 @@ When the user leaves and comes back, they return to the right page.
 ## 2. TTS starts on the current active page
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/library.js` + `docs/js/tts.js`
+**Owner:** `js/library.js` + `js/tts.js`
 
 ### User expectation
 If the user presses `Read page` or `Play`, the app reads the page they are actually on.
@@ -66,7 +66,7 @@ If the user presses `Read page` or `Play`, the app reads the page they are actua
 ## 3. Pause and resume feel real during active TTS
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/tts.js`
+**Owner:** `js/tts.js`
 
 ### User expectation
 When the user presses Pause, reading pauses. When they press Play or Resume, reading resumes in a defined way.
@@ -87,7 +87,7 @@ When the user presses Pause, reading pauses. When they press Play or Resume, rea
 ## 4. Speed changes behave live and consistently
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/tts.js`
+**Owner:** `js/tts.js`
 
 ### User expectation
 Changing speed during active TTS should affect the current speech immediately when the active path supports it.
@@ -110,7 +110,7 @@ Changing speed during active TTS should affect the current speech immediately wh
 ## 5. Leaving reading runs one cleanup path
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/tts.js` + `docs/js/audio.js` + `docs/js/library.js`
+**Owner:** `js/tts.js` + `js/audio.js` + `js/library.js`
 
 ### User expectation
 Leaving reading stops reading-owned audio and clears reading-only transient state.
@@ -130,7 +130,7 @@ Leaving reading stops reading-owned audio and clears reading-only transient stat
 ## 6. Library startup state must not mislead the user
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/library.js`
+**Owner:** `js/library.js`
 
 ### User expectation
 The app should not briefly imply there are no books before it checks.
@@ -170,7 +170,7 @@ The footer belongs at the bottom of the page.
 ## 8. Importer close/dismiss clears staged state completely
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/import.js`
+**Owner:** `js/import.js`
 
 ### User expectation
 Closing importer means the staged file is gone.
@@ -214,7 +214,7 @@ Controls should reflect what the app is actually doing, not what the shell guess
 ## 10. Switching book or chapter must replace page state cleanly
 **Risk:** 🔴 Critical  
 **Status:** Validated  
-**Owner:** `docs/js/library.js`
+**Owner:** `js/library.js`
 
 ### User expectation
 Changing book or chapter should show only the pages for that selected source.
@@ -247,7 +247,7 @@ Confirmed:
 ## 11. Isolated theme system is implemented and runtime-owned
 **Risk:** 🟡 High  
 **Status:** Validated  
-**Owner:** `docs/js/state.js` + `docs/js/shell.js` + live shell CSS
+**Owner:** `js/state.js` + `js/shell.js` + live shell CSS
 
 ### User expectation
 Theme choice, Explorer customization, and global appearance should feel coherent without changing reading flow truth.
@@ -287,7 +287,7 @@ The intended CSS split is still:
 - appearance in `theme.css`
 
 But the live implementation surface today is:
-- `docs/css/shell.css`
+- `css/shell.css`
 
 ### Why deferred
 Reactivating dormant CSS files during the bounded theme pass would have turned the work into a broader scaffold redistribution/refactor.

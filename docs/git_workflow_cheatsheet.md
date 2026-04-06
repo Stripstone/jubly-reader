@@ -63,7 +63,7 @@ git diff -- <file1> <file2> <file3> > quick_patch.diff
 Example:
 
 ```bat
-git diff -- docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js > quick_patch.diff
+git diff -- index.html css/shell.css js/evaluation.js js/shell.js > quick_patch.diff
 ```
 
 What it does:
@@ -117,7 +117,7 @@ Example:
 ```bat
 cd C:\Users\Triston Barker\Documents\GitHub\reading-comprehension\
 git status
-git diff -- docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js > quick_patch.diff
+git diff -- index.html css/shell.css js/evaluation.js js/shell.js > quick_patch.diff
 git apply --check quick_patch.diff
 notepad quick_patch.diff
 ```
@@ -194,7 +194,7 @@ git add <file1> <file2> <file3>
 Example:
 
 ```bat
-git add docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js
+git add index.html css/shell.css js/evaluation.js js/shell.js
 ```
 
 What it does:
