@@ -735,9 +735,14 @@ function browserSpeakPageFromSentence(key, blockIdx, reason) {
 // ─── Support / routing ────────────────────────────────────────────────────────
 
 function getResolvedTtsPolicy() {
-  const policy = (window.rcPolicy && typeof window.rcPolicy.get === 'function') ? window.rcPolicy.get() : null;
-  const tier = (policy && policy.tier) ? String(policy.tier) : ((typeof appTier !== 'undefined' && appTier) ? String(appTier) : 'free');
-  const cloudVoiceAccess = typeof policy?.features?.cloudVoices === 'boolean' ? policy.features.cloudVoices : (tier !== 'free');
+  const policyApi = window.rcPolicy || {};
+  const policy = typeof policyApi.get === 'function' ? policyApi.get() : null;
+  const tier = typeof policyApi.getTier === 'function'
+    ? String(policyApi.getTier())
+    : ((policy && policy.tier) ? String(policy.tier) : ((typeof appTier !== 'undefined' && appTier) ? String(appTier) : 'free'));
+  const cloudVoiceAccess = typeof policyApi.canUseCloudVoices === 'function'
+    ? !!policyApi.canUseCloudVoices()
+    : !!policy?.features?.cloudVoices;
   return { tier, cloudVoiceAccess, policy };
 }
 

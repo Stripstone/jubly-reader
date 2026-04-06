@@ -470,7 +470,7 @@
           tokens: {
             tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
             remaining: sessionTokens?.remaining ?? '—',
-            allowance: (window.rcPolicy && typeof window.rcPolicy.get === 'function') ? (window.rcPolicy.get()?.usageDailyLimit ?? '—') : ((typeof TOKEN_ALLOWANCES !== 'undefined' && appTier) ? TOKEN_ALLOWANCES[appTier] : '—'),
+            allowance: (window.rcPolicy && typeof window.rcPolicy.getUsageDailyLimit === 'function') ? window.rcPolicy.getUsageDailyLimit() : '—',
             totalSpent,
             breakdown: sessionTokens?.spent || {},
           },
@@ -653,61 +653,39 @@
   syncTierPolicy(appTier);
 
   function applyTierAccess() {
-    // Tier access rules (prototype: feature gating active, usage unrestricted).
-    //
-    // free    — Reading mode only. Comprehension and Research disabled.
-    //           No AI Evaluate, no TTS voices beyond default.
-    // paid    — All modes accessible. AI Evaluate available. Standard voices.
-    // premium — Full access. All voices, all modes, all features.
-    //
-    // NOTE: These rules gate UI visibility only. No server-side enforcement yet.
+    const policyApi = window.rcPolicy || {};
+    const canComprehension = typeof policyApi.canUseMode === 'function' ? policyApi.canUseMode('comprehension') : false;
+    const canResearch = typeof policyApi.canUseMode === 'function' ? policyApi.canUseMode('research') : false;
+    const canAiEvaluate = typeof policyApi.canUseAiEvaluate === 'function' ? policyApi.canUseAiEvaluate() : false;
+    const canAnchors = typeof policyApi.canUseAnchors === 'function' ? policyApi.canUseAnchors() : false;
 
-    const policy = (window.rcPolicy && typeof window.rcPolicy.get === 'function') ? window.rcPolicy.get() : null;
-    const tier = (policy && policy.tier) ? policy.tier : appTier;
-    const canComprehension = typeof policy?.features?.modes?.comprehension === 'boolean' ? policy.features.modes.comprehension : (tier !== 'free');
-    const canResearch = typeof policy?.features?.modes?.research === 'boolean' ? policy.features.modes.research : (tier !== 'free');
-    const canAiEvaluate = typeof policy?.features?.aiEvaluate === 'boolean' ? policy.features.aiEvaluate : (tier !== 'free');
-    const canAnchors = typeof policy?.features?.anchors === 'boolean' ? policy.features.anchors : (tier !== 'free');
-
-    // Mode options:
-    //   Free        — Reading only. Comprehension disabled.
-    //   Paid+       — Reading + Comprehension.
-    //   All tiers   — Research always disabled until implemented.
     const modeSelect = document.getElementById('modeSelect');
     if (modeSelect) {
       const comprehensionOpt = modeSelect.querySelector('option[value="comprehension"]');
-      const researchOpt      = modeSelect.querySelector('option[value="research"]');
+      const researchOpt = modeSelect.querySelector('option[value="research"]');
       if (comprehensionOpt) comprehensionOpt.disabled = !canComprehension;
-      // Research is selectable on Paid/Premium (evaluation.js shows coming-soon alert on use).
-      // Disabled only on Free alongside Comprehension.
-      if (researchOpt)      researchOpt.disabled = !canResearch;
+      if (researchOpt) researchOpt.disabled = !canResearch;
 
-      // If currently on a gated mode, drop back to Reading
-      if (!canComprehension && appMode !== 'reading') {
+      if (appMode === 'comprehension' && !canComprehension) {
+        modeSelect.value = 'reading';
+        appMode = 'reading';
+        if (typeof applyModeVisibility === 'function') applyModeVisibility();
+      }
+      if (appMode === 'research' && !canResearch) {
         modeSelect.value = 'reading';
         appMode = 'reading';
         if (typeof applyModeVisibility === 'function') applyModeVisibility();
       }
     }
 
-    // Anchors row (counter + Hint button) — hidden on Free tier AND in reading mode.
-    // applyModeVisibility already hides these in reading mode; we must not override that.
     const isReadingMode = appMode === 'reading';
     document.querySelectorAll('.anchors-row').forEach(el => {
-      if (!canAnchors || isReadingMode) {
-        el.style.display = 'none';
-      } else {
-        el.style.display = '';
-      }
+      el.style.display = (!canAnchors || isReadingMode) ? 'none' : '';
     });
 
-    // AI Evaluate buttons and Submit — hidden on Free and in reading mode
     document.querySelectorAll('.ai-btn, #submitBtn').forEach(el => {
       el.style.display = (!canAiEvaluate || isReadingMode) ? 'none' : '';
     });
-
-    // Voice dropdowns are visible at all tiers — Free sees browser voices,
-    // Paid/Premium see server-backed cloud voices at the top. No hiding needed.
   }
 })();
 

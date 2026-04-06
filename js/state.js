@@ -62,11 +62,26 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     research: 3,
   };
 
-  const TOKEN_ALLOWANCES = {
-    free:    100,
-    paid:    1000,
-    premium: 10000,
-  };
+  const SAFE_FALLBACK_POLICY = Object.freeze({
+    version: 1,
+    tier: 'free',
+    usageDailyLimit: 100,
+    importSlotLimit: 2,
+    features: Object.freeze({
+      modes: Object.freeze({
+        reading: true,
+        comprehension: false,
+        research: false,
+      }),
+      aiEvaluate: false,
+      anchors: false,
+      cloudVoices: false,
+      themes: Object.freeze({
+        explorer: false,
+        customMusic: false,
+      }),
+    }),
+  });
 
 
   function normalizeAppTier(value) {
@@ -76,24 +91,23 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
 
   function getFallbackRuntimePolicy(tierInput) {
     const tier = normalizeAppTier(tierInput);
-    const elevated = tier !== 'free';
     return {
-      version: 1,
+      version: SAFE_FALLBACK_POLICY.version,
       tier,
-      usageDailyLimit: TOKEN_ALLOWANCES[tier] || TOKEN_ALLOWANCES.free,
-      importSlotLimit: tier === 'premium' ? null : (tier === 'paid' ? 5 : 2),
+      usageDailyLimit: SAFE_FALLBACK_POLICY.usageDailyLimit,
+      importSlotLimit: SAFE_FALLBACK_POLICY.importSlotLimit,
       features: {
         modes: {
           reading: true,
-          comprehension: elevated,
-          research: elevated,
+          comprehension: SAFE_FALLBACK_POLICY.features.modes.comprehension,
+          research: SAFE_FALLBACK_POLICY.features.modes.research,
         },
-        aiEvaluate: elevated,
-        anchors: elevated,
-        cloudVoices: elevated,
+        aiEvaluate: SAFE_FALLBACK_POLICY.features.aiEvaluate,
+        anchors: SAFE_FALLBACK_POLICY.features.anchors,
+        cloudVoices: SAFE_FALLBACK_POLICY.features.cloudVoices,
         themes: {
-          explorer: elevated,
-          customMusic: elevated,
+          explorer: SAFE_FALLBACK_POLICY.features.themes.explorer,
+          customMusic: SAFE_FALLBACK_POLICY.features.themes.customMusic,
         },
       },
     };
@@ -146,7 +160,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
 
   function getRuntimeUsageAllowance() {
     const limit = Number(getRuntimePolicy()?.usageDailyLimit);
-    return Number.isFinite(limit) && limit > 0 ? limit : (TOKEN_ALLOWANCES[normalizeAppTier(appTier)] || TOKEN_ALLOWANCES.free);
+    return Number.isFinite(limit) && limit > 0 ? limit : SAFE_FALLBACK_POLICY.usageDailyLimit;
   }
 
 
@@ -160,6 +174,25 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     const normalizedCount = Number.isFinite(count) && count >= 0 ? count : 0;
     const limit = getRuntimeImportSlotLimit();
     return limit == null ? true : normalizedCount < limit;
+  }
+
+  function canUseMode(modeName) {
+    const mode = String(modeName || '').trim().toLowerCase();
+    if (mode === 'reading') return true;
+    const policy = getRuntimePolicy();
+    return !!policy?.features?.modes?.[mode];
+  }
+
+  function canUseAiEvaluate() {
+    return !!getRuntimePolicy()?.features?.aiEvaluate;
+  }
+
+  function canUseAnchors() {
+    return !!getRuntimePolicy()?.features?.anchors;
+  }
+
+  function canUseCloudVoices() {
+    return !!getRuntimePolicy()?.features?.cloudVoices;
   }
 
   function applyResolvedRuntimePolicy(policyLike, tierHint) {
@@ -177,7 +210,6 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
 
   async function refreshRuntimePolicy(requestedTier) {
     const tier = normalizeAppTier(requestedTier || getRuntimeTier());
-    applyResolvedRuntimePolicy(getFallbackRuntimePolicy(tier), tier);
     try {
       const response = await fetch(apiUrl(`/api/runtime-config?tier=${encodeURIComponent(tier)}`), {
         method: 'GET',
@@ -187,12 +219,12 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       const payload = await response.json();
       return applyResolvedRuntimePolicy(payload?.policy || payload, tier);
     } catch (_) {
-      return getRuntimePolicy();
+      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy(tier), tier);
     }
   }
 
   let sessionTokens = {
-    remaining: TOKEN_ALLOWANCES['free'],
+    remaining: SAFE_FALLBACK_POLICY.usageDailyLimit,
     spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
   };
 
@@ -941,8 +973,13 @@ window.rcPolicy = {
   refreshForTier: refreshRuntimePolicy,
   apply: applyResolvedRuntimePolicy,
   getTier: getRuntimeTier,
+  getUsageDailyLimit: getRuntimeUsageAllowance,
   getImportSlotLimit: getRuntimeImportSlotLimit,
-  hasImportCapacity: hasRuntimeImportCapacity
+  hasImportCapacity: hasRuntimeImportCapacity,
+  canUseMode,
+  canUseAiEvaluate,
+  canUseAnchors,
+  canUseCloudVoices
 };
 
 window.rcEntitlements = {
