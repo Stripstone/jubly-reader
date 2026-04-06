@@ -6,6 +6,16 @@ export function json(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+function matchesAllowedOrigin(origin, rule) {
+  if (!origin || !rule) return false;
+  if (typeof rule === "string") return rule === origin;
+  if (rule instanceof RegExp) return rule.test(origin);
+  if (typeof rule === "function") {
+    try { return !!rule(origin); } catch { return false; }
+  }
+  return false;
+}
+
 export function withCors(req, res, allowlistOrigins = []) {
   const origin = req.headers.origin;
 
@@ -13,7 +23,7 @@ export function withCors(req, res, allowlistOrigins = []) {
   let allowedOrigin = "";
   if (!origin) {
     allowedOrigin = "*";
-  } else if (allowlistOrigins.includes(origin)) {
+  } else if (allowlistOrigins.some((rule) => matchesAllowedOrigin(origin, rule))) {
     allowedOrigin = origin;
   }
 

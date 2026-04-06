@@ -177,7 +177,7 @@
       // Voice selects — two dropdowns, one per gender.
       // Selecting from either dropdown sets both the active variant and specific voice.
       // Free tier: browser voices only.
-      // Paid/Premium: Polly cloud voices at the top, browser voices below.
+      // Paid/Premium: server-backed cloud voices at the top, browser voices below.
       const voiceFemaleSelect = document.getElementById('voiceFemaleSelect');
       const voiceMaleSelect   = document.getElementById('voiceMaleSelect');
 
@@ -302,7 +302,7 @@
           if (!val) return;
           setVoiceVariant(gender);
           if (val.startsWith('polly:') || val.startsWith('cloud:')) {
-            // Cloud voice — store the full value so pollyFetchUrl can forward the model id
+            // Cloud voice — store the full value so cloudFetchUrl can forward the selected model id
             try { window.__rcSessionVoiceSelection = val; } catch(_) {}
           } else {
             // Browser voice
@@ -690,7 +690,7 @@
     });
 
     // Voice dropdowns are visible at all tiers — Free sees browser voices,
-    // Paid/Premium see cloud voices at the top. No hiding needed.
+    // Paid/Premium see server-backed cloud voices at the top. No hiding needed.
   }
 })();
 

@@ -7,6 +7,7 @@ import {
   scoreToCompassRating,
 } from "../_lib/grader.js";
 import { json, withCors, readJsonBody } from "../_lib/http.js";
+import { getAllowedBrowserOrigins } from "../_lib/origins.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile"; // replacement model per Groq deprecations
@@ -27,11 +28,7 @@ function sanitizeUserFacingFeedback(text) {
 }
 
 export default async function handler(req, res) {
-  const allowed = [
-    "https://stripstone.github.io",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-  ];
+  const allowed = getAllowedBrowserOrigins();
   if (withCors(req, res, allowed)) return;
 
   try {

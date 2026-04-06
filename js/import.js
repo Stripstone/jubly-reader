@@ -521,8 +521,7 @@
           return;
         }
 
-        const base = (typeof resolveApiBase === 'function') ? resolveApiBase() : '';
-        const endpoint = base ? `${base}/api/book-import` : '/api/book-import';
+        const endpoint = apiUrl('/api/book-import');
 
         // ── Step 1: Get a FreeConvert upload URL (API key stays server-side) ──
         setStatus('Preparing upload…');

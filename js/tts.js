@@ -2,8 +2,8 @@
 // File: tts.js
 // Note: This is still global-script architecture (no bundler/modules required).
 
-//  - Preferred: Cloud TTS via /api/tts when available
-//  - Fallback: Browser SpeechSynthesis (free)
+//  - Browser SpeechSynthesis remains the baseline local path
+//  - Cloud TTS policy is resolved server-side via /api/tts
 // ==============================
 
 // ─── Block-based session model ───────────────────────────────────────────────
@@ -105,11 +105,11 @@ function getStoredSelectedVoice() {
 
 function getSelectedVoicePreference() {
   const stored = getStoredSelectedVoice();
-  const type = stored.startsWith('cloud:') || stored.startsWith('polly:') ? 'cloud' : (stored ? 'browser' : 'auto');
+  const type = stored.startsWith('cloud:') || stored.startsWith('polly:') || stored.startsWith('azure:') ? 'cloud' : (stored ? 'browser' : 'auto');
   return {
     stored, type,
     explicitCloud: type === 'cloud',
-    requestedCloudVoiceId: type === 'cloud' ? stored.replace(/^(cloud:|polly:)/, '') : null,
+    requestedCloudVoiceId: type === 'cloud' ? stored.replace(/^(cloud:|polly:|azure:)/, '') : null,
   };
 }
 
@@ -401,7 +401,7 @@ function ttsPrepareEstimatedHighlight(key, rawText, audio) {
   audio.addEventListener('timeupdate', onTimeUpdate);
 }
 
-// Highlight loop for cloud path. Updates TTS_STATE.activeBlockIndex as audio advances.
+// Highlight loop for server-resolved cloud path. Updates TTS_STATE.activeBlockIndex as audio advances.
 function ttsStartHighlightLoop(audio) {
   if (!audio || !TTS_STATE.highlightSpans || !TTS_STATE.highlightMarks) return;
   let lastIdx = -1;
@@ -759,13 +759,28 @@ function getPreferredTtsRouteInfo() {
   const tier = support.tier;
   const cloudCapable = tier !== 'free';
   const selected = getSelectedVoicePreference();
-  let requestedPath = cloudCapable ? 'cloud-preferred' : 'browser-free';
-  let reason = cloudCapable ? 'paid-tier-cloud-path' : 'free-tier-browser-path';
-  if (selected.explicitCloud) {
-    requestedPath = cloudCapable ? 'cloud-selected' : 'browser-free';
-    reason = cloudCapable ? 'explicit-cloud-selection' : 'cloud-selection-blocked-by-tier';
+  const browserSelected = selected.type === 'browser';
+
+  let requestedPath = 'browser-tier-default';
+  let reason = 'tier-browser-only';
+
+  if (cloudCapable) {
+    if (browserSelected) {
+      requestedPath = 'browser-selected';
+      reason = 'explicit-browser-selection';
+    } else if (selected.explicitCloud) {
+      requestedPath = 'cloud-selected';
+      reason = 'explicit-cloud-selection';
+    } else {
+      requestedPath = 'cloud-tier-default';
+      reason = 'tier-cloud-default';
+    }
+  } else if (selected.explicitCloud) {
+    requestedPath = 'browser-tier-default';
+    reason = 'cloud-selection-blocked-by-tier';
   }
-  return { tier, cloudCapable, requestedPath, reason, selected, support, browserFallbackAllowed: cloudCapable && !selected.explicitCloud };
+
+  return { tier, cloudCapable, requestedPath, reason, selected, support };
 }
 
 // ─── Status ────────────────────────────────────────────────────────────────────
@@ -1311,7 +1326,7 @@ function pauseOrResumeReading() {
 
 // ─── Cloud TTS path ───────────────────────────────────────────────────────────
 
-async function pollyFetchUrl(text, opts = {}) {
+async function cloudFetchUrl(text, opts = {}) {
   const controller = new AbortController();
   TTS_STATE.abort = controller;
   const payload = { text };
@@ -1323,8 +1338,7 @@ async function pollyFetchUrl(text, opts = {}) {
   try { if (String(TTS_STATE.voiceVariant || '').toLowerCase() === 'male') payload.voiceVariant = 'male'; } catch (_) {}
   try { const saved = getStoredSelectedVoice(); if (saved.startsWith('cloud:')) payload.voiceId = saved.slice('cloud:'.length); } catch (_) {}
   try { if (localStorage.getItem('tts_nocache') === '1') payload.nocache = true; } catch (_) {}
-  const base = (typeof resolveApiBase === 'function') ? resolveApiBase() : '';
-  const endpoint = base ? `${base}/api/tts` : '/api/tts';
+  const endpoint = apiUrl('/api/tts');
   const res = await fetch(endpoint, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload), signal: controller.signal,
@@ -1401,7 +1415,7 @@ async function ttsSpeakQueue(key, parts) {
     for (let i = 0; i < queue.length; i++) {
       const wantMarks = (i === 0 && optsForKeySentenceMarks(key));
       if (i === 0 && optsForKeySentenceMarks(key)) { try { if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {} }
-      const tts = await pollyFetchUrl(queue[i], { sentenceMarks: wantMarks });
+      const tts = await cloudFetchUrl(queue[i], { sentenceMarks: wantMarks });
       if (TTS_STATE.activeSessionId !== sessionId) return;
       const url = tts.url;
       if (wantMarks) {
@@ -1446,13 +1460,10 @@ async function ttsSpeakQueue(key, parts) {
     TTS_STATE.playbackBlockedReason = String(err && err.message ? err.message : err);
     TTS_DEBUG.lastError = { at: new Date().toISOString(), path: 'cloud', key, message: TTS_STATE.playbackBlockedReason };
     ttsDiagPush('cloud-playback-failed', { key, message: TTS_STATE.playbackBlockedReason, route: ri });
-    console.warn('Cloud TTS unavailable, falling back to browser TTS:', err);
+    console.warn('Cloud TTS unavailable; keeping browser fallback disabled for predictable voice behavior:', err);
     ttsStop();
-    if (!ri.browserFallbackAllowed) {
-      TTS_DEBUG.lastResolvedPath = ri.selected.explicitCloud ? 'cloud-failure-no-browser-fallback' : 'cloud-failure-no-fallback';
-      return;
-    }
-    browserSpeakQueue(key, queue);
+    TTS_DEBUG.lastResolvedPath = ri.selected.explicitCloud ? 'cloud-failure-explicit' : 'cloud-failure';
+    return;
   }
 }
 
@@ -1460,7 +1471,7 @@ async function ttsSpeakQueue(key, parts) {
 //
 // Operates on TTS_STATE.activeBlockIndex. Not on vague currentTime offsets.
 // At page boundaries: next crosses to next page; prev restarts block 0.
-// Clipping protection: 60ms before target block start time on cloud path.
+// Clipping protection: 60ms before target block start time on the cloud-audio path.
 // Browser path: no clip risk (each utterance starts from char 0 of sentence).
 
 function isRuntimePausedForContract() {
@@ -1541,7 +1552,7 @@ async function ttsPreparePausedCloudPage(pageIndex) {
   try { ttsHighlightBlock(0); } catch (_) {}
 
   try {
-    const tts = await pollyFetchUrl(text, { sentenceMarks: true });
+    const tts = await cloudFetchUrl(text, { sentenceMarks: true });
     if (TTS_STATE.activeSessionId !== sessionId) return false;
     const audio = TTS_AUDIO_ELEMENT;
     try { audio.loop = false; audio.pause(); } catch (_) {}

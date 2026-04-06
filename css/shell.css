@@ -371,7 +371,6 @@
         .reading-divider { width: 1px; height: 16px; background: #e2e8f0; flex-shrink: 0; }
         .tier-pill { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; background: #f5f3ff; color: var(--jubly-purple); border: 1px solid #ddd6fe; white-space: nowrap; flex-shrink: 0; }
         .pb-icon-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px; padding: 7px 12px; border-radius: 8px; font-size: 0.82rem; font-weight: 700; color: #64748b; background: transparent; border: none; cursor: pointer; transition: background 0.15s, color 0.15s; white-space: nowrap; flex-shrink: 0; }
-        #shell-prev-btn, #shell-next-btn { min-width: 38px; padding-left: 10px; padding-right: 10px; font-size: 0.95rem; }
         #shell-play-btn { min-width: 104px; font-size: 0.94rem; }
         .pb-icon-btn:hover { background: #f1f5f9; color: #1e293b; }
         .pb-icon-btn.active { background: var(--theme-accent-soft); color: var(--theme-accent); }
@@ -394,8 +393,6 @@
         }
         #session-complete { max-width: 900px; margin: 0 auto; padding: 0 2rem; }
         .page-text { line-height: 1.75; font-size: 1rem; }
-        /* Footer padding — clears fixed support footer */
-        #dashboard, #profile-page { padding-bottom: calc(var(--support-footer-height) + 24px); }
 
         /* ── Reading mode page card styles (scoped; zero effect outside reading mode) ── */
         #reading-mode .page {
