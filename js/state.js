@@ -81,6 +81,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       version: 1,
       tier,
       usageDailyLimit: TOKEN_ALLOWANCES[tier] || TOKEN_ALLOWANCES.free,
+      importSlotLimit: tier === 'premium' ? null : (tier === 'paid' ? 5 : 2),
       features: {
         modes: {
           reading: true,
@@ -103,6 +104,10 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     const source = raw && typeof raw === 'object' ? raw : {};
     const tier = normalizeAppTier(source.tier || fallback.tier);
     const usageDailyLimit = Number(source.usageDailyLimit);
+    const rawImportSlotLimit = source.importSlotLimit;
+    const normalizedImportSlotLimit = rawImportSlotLimit == null
+      ? null
+      : Number(rawImportSlotLimit);
     const features = source.features && typeof source.features === 'object' ? source.features : {};
     const modes = features.modes && typeof features.modes === 'object' ? features.modes : {};
     const themes = features.themes && typeof features.themes === 'object' ? features.themes : {};
@@ -113,6 +118,9 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       usageDailyLimit: Number.isFinite(usageDailyLimit) && usageDailyLimit > 0
         ? usageDailyLimit
         : fallback.usageDailyLimit,
+      importSlotLimit: normalizedImportSlotLimit == null
+        ? fallback.importSlotLimit
+        : (Number.isFinite(normalizedImportSlotLimit) && normalizedImportSlotLimit > 0 ? Math.floor(normalizedImportSlotLimit) : fallback.importSlotLimit),
       features: {
         modes: {
           reading: true,
@@ -139,6 +147,19 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   function getRuntimeUsageAllowance() {
     const limit = Number(getRuntimePolicy()?.usageDailyLimit);
     return Number.isFinite(limit) && limit > 0 ? limit : (TOKEN_ALLOWANCES[normalizeAppTier(appTier)] || TOKEN_ALLOWANCES.free);
+  }
+
+
+  function getRuntimeImportSlotLimit() {
+    const limit = getRuntimePolicy()?.importSlotLimit;
+    return limit == null ? null : (Number.isFinite(Number(limit)) && Number(limit) > 0 ? Math.floor(Number(limit)) : null);
+  }
+
+  function hasRuntimeImportCapacity(currentCount) {
+    const count = Number(currentCount);
+    const normalizedCount = Number.isFinite(count) && count >= 0 ? count : 0;
+    const limit = getRuntimeImportSlotLimit();
+    return limit == null ? true : normalizedCount < limit;
   }
 
   function applyResolvedRuntimePolicy(policyLike, tierHint) {
@@ -919,7 +940,9 @@ window.rcPolicy = {
   get: getRuntimePolicy,
   refreshForTier: refreshRuntimePolicy,
   apply: applyResolvedRuntimePolicy,
-  getTier: getRuntimeTier
+  getTier: getRuntimeTier,
+  getImportSlotLimit: getRuntimeImportSlotLimit,
+  hasImportCapacity: hasRuntimeImportCapacity
 };
 
 window.rcEntitlements = {

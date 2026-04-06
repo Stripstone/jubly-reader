@@ -248,8 +248,12 @@
       if (advancedToggleBtn) advancedToggleBtn.textContent = _advancedMode ? 'Contents' : 'Advanced';
     }
 
-    function showModal() {
+    async function showModal() {
+      const guard = await guardImportCapacity();
+      syncImportEntryState(guard.snapshot);
+      if (!guard.ok) return;
       resetImporterState({ keepModalOpen: true });
+      setStatus(describeCapacity(guard.snapshot));
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
     }
@@ -269,6 +273,54 @@
       if (!uploadStatus) return;
       uploadStatus.style.display = msg ? 'block' : 'none';
       uploadStatus.textContent = msg || '';
+    }
+
+    async function getLocalBookCount() {
+      try {
+        if (typeof localBooksGetAll === 'function') {
+          const books = await localBooksGetAll();
+          return Array.isArray(books) ? books.length : 0;
+        }
+      } catch (_) {}
+      return 0;
+    }
+
+    async function getImportCapacitySnapshot() {
+      const count = await getLocalBookCount();
+      const limit = (window.rcPolicy && typeof window.rcPolicy.getImportSlotLimit === 'function')
+        ? window.rcPolicy.getImportSlotLimit()
+        : null;
+      const hasCapacity = (window.rcPolicy && typeof window.rcPolicy.hasImportCapacity === 'function')
+        ? window.rcPolicy.hasImportCapacity(count)
+        : true;
+      return { count, limit, hasCapacity };
+    }
+
+    async function guardImportCapacity() {
+      const snapshot = await getImportCapacitySnapshot();
+      if (snapshot.hasCapacity) return { ok: true, snapshot };
+      const msg = snapshot.limit == null
+        ? 'Import is currently unavailable.'
+        : `This tier is full (${snapshot.count}/${snapshot.limit} saved books). Delete a book or upgrade to add another.`;
+      setStatus(msg);
+      try { if (typeof openModal === 'function') openModal('pricing-modal'); } catch (_) {}
+      return { ok: false, snapshot, message: msg };
+    }
+
+    function describeCapacity(snapshot) {
+      if (!snapshot) return '';
+      return snapshot.limit == null
+        ? `Saved on this device: ${snapshot.count}`
+        : `Saved on this device: ${snapshot.count}/${snapshot.limit}`;
+    }
+
+    function syncImportEntryState(snapshot) {
+      if (!openBtn) return;
+      const blocked = !!snapshot && snapshot.hasCapacity === false;
+      openBtn.dataset.slotBlocked = blocked ? 'true' : 'false';
+      openBtn.title = blocked
+        ? `Import limit reached (${snapshot.count}/${snapshot.limit}). Delete a book or upgrade to add another.`
+        : 'Import a book to this device';
     }
 
     function setProgress(pct, meta, detail) {
@@ -639,6 +691,13 @@
       if (selectedIds.size === 0) return;
 
       try {
+        const guard = await guardImportCapacity();
+        syncImportEntryState(guard.snapshot);
+        if (!guard.ok) {
+          showStage('upload');
+          return;
+        }
+
         showStage('progress');
         doneBtn.style.display = 'none';
         setProgress(0, 'Preparing', '');
@@ -691,6 +750,8 @@
 
         // Refresh book dropdown
         try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
+        try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: await getLocalBookCount() } })); } catch (_) {}
+        try { syncImportEntryState(await getImportCapacitySnapshot()); } catch (_) {}
       } catch (e) {
         console.error('EPUB import error:', e);
         setProgress(100, 'Import failed', 'Try again with a different file.');
@@ -716,6 +777,13 @@
     openBtn.addEventListener('click', showModal);
     closeBtn?.addEventListener('click', hideModal);
     modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(); });
+    try { getImportCapacitySnapshot().then(syncImportEntryState).catch(() => {}); } catch (_) {}
+    window.addEventListener('rc:runtime-policy-changed', () => {
+      try { getImportCapacitySnapshot().then(syncImportEntryState).catch(() => {}); } catch (_) {}
+    });
+    window.addEventListener('rc:local-library-changed', () => {
+      try { getImportCapacitySnapshot().then(syncImportEntryState).catch(() => {}); } catch (_) {}
+    });
 
     // Upload
     // Keep behavior consistent: desktop supports click-to-browse + drag/drop.

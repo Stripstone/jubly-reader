@@ -2128,6 +2128,18 @@
       listEl.innerHTML = '';
       let books = [];
       try { books = await localBooksGetAll(); } catch (_) { books = []; }
+
+      const count = books.length;
+      const limit = (window.rcPolicy && typeof window.rcPolicy.getImportSlotLimit === 'function')
+        ? window.rcPolicy.getImportSlotLimit()
+        : null;
+      const meta = document.createElement('div');
+      meta.className = 'import-status';
+      meta.textContent = limit == null
+        ? `Saved on this device: ${count}`
+        : `Saved on this device: ${count}/${limit}`;
+      listEl.appendChild(meta);
+
       if (!books.length) {
         const empty = document.createElement('div');
         empty.className = 'import-status';
@@ -2167,6 +2179,7 @@
             try {
               await localBookDelete(b.id);
               try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
+              try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: Math.max(0, books.length - 1) } })); } catch (_) {}
               render();
             } catch (e) {
               alert('Delete failed.');

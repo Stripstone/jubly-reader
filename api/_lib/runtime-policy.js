@@ -15,10 +15,17 @@ export function buildRuntimePolicy(inputTier = "free") {
       ? 1000
       : 100;
 
+  const importSlotLimit = tier === "premium"
+    ? null
+    : tier === "paid"
+      ? 5
+      : 2;
+
   return {
     version: 1,
     tier,
     usageDailyLimit,
+    importSlotLimit,
     features: {
       modes: {
         reading: true,
