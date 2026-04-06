@@ -158,6 +158,9 @@
     }
 
     function getCurrentTier() {
+        if (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function') {
+            try { return window.rcEntitlements.getTier(); } catch (_) {}
+        }
         const sel = document.getElementById('tierSelect');
         if (sel && sel.value) return sel.value;
         return (typeof appTier !== 'undefined' && appTier) ? appTier : 'free';

@@ -192,7 +192,9 @@
 
       function buildVoiceSelect(selectEl, gender) {
         if (!selectEl) return;
-        const isFree      = typeof appTier !== 'undefined' && appTier === 'free';
+        const resolvedPolicy = (window.rcPolicy && typeof window.rcPolicy.get === 'function') ? window.rcPolicy.get() : null;
+        const cloudVoicesAllowed = !!resolvedPolicy?.features?.cloudVoices;
+        const isFree      = !cloudVoicesAllowed;
         const isActive    = String(TTS_STATE?.voiceVariant || 'female').toLowerCase() === gender;
         const savedBrowser = (() => { try { return (typeof getStoredSelectedVoice === 'function' ? getStoredSelectedVoice() : (window.__rcSessionVoiceSelection || '')) || ''; } catch(_) { return ''; } })();
         const savedVariant = (() => { try { return String(TTS_STATE?.voiceVariant || window.__rcSessionVoiceVariant || 'female'); } catch(_) { return 'female'; } })();
@@ -351,6 +353,8 @@
       window.isReadingSettingsModalOpen = () => volumePanel.style.display === 'flex';
 
       // Repopulate when voices load asynchronously (Chrome/Edge)
+      window.populateBrowserVoicePicker = populateBrowserVoicePicker;
+
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.addEventListener('voiceschanged', populateBrowserVoicePicker);
       }
@@ -464,9 +468,9 @@
         const totalSpent = Object.values(sessionTokens?.spent || {}).reduce((a, b) => a + b, 0);
         const merged = {
           tokens: {
-            tier: typeof appTier !== 'undefined' ? appTier : 'unknown',
+            tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
             remaining: sessionTokens?.remaining ?? '—',
-            allowance: (typeof TOKEN_ALLOWANCES !== 'undefined' && appTier) ? TOKEN_ALLOWANCES[appTier] : '—',
+            allowance: (window.rcPolicy && typeof window.rcPolicy.get === 'function') ? (window.rcPolicy.get()?.usageDailyLimit ?? '—') : ((typeof TOKEN_ALLOWANCES !== 'undefined' && appTier) ? TOKEN_ALLOWANCES[appTier] : '—'),
             totalSpent,
             breakdown: sessionTokens?.spent || {},
           },
@@ -627,16 +631,26 @@
   // Restore persisted tier
   select.value = appTier;
 
+  async function syncTierPolicy(nextTier) {
+    const targetTier = VALID_TIERS.includes(String(nextTier || '').toLowerCase()) ? String(nextTier).toLowerCase() : 'free';
+    appTier = targetTier;
+    if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
+      try { await window.rcPolicy.refreshForTier(targetTier); } catch (_) {}
+    } else {
+      try { if (typeof tokenReset === 'function') tokenReset(); } catch (_) {}
+    }
+    applyTierAccess();
+    try { if (typeof window.populateBrowserVoicePicker === 'function') window.populateBrowserVoicePicker(); } catch (_) {}
+  }
+
   select.addEventListener('change', () => {
     const newTier = select.value;
     if (!VALID_TIERS.includes(newTier) || newTier === appTier) return;
-    appTier = newTier;
-    try { if (typeof tokenReset === 'function') tokenReset(); } catch(_) {}
-    applyTierAccess();
+    syncTierPolicy(newTier);
   });
 
   // Apply on boot
-  applyTierAccess();
+  syncTierPolicy(appTier);
 
   function applyTierAccess() {
     // Tier access rules (prototype: feature gating active, usage unrestricted).
@@ -648,9 +662,12 @@
     //
     // NOTE: These rules gate UI visibility only. No server-side enforcement yet.
 
-    const isFree    = appTier === 'free';
-    const isPaid    = appTier === 'paid';
-    const isPremium = appTier === 'premium';
+    const policy = (window.rcPolicy && typeof window.rcPolicy.get === 'function') ? window.rcPolicy.get() : null;
+    const tier = (policy && policy.tier) ? policy.tier : appTier;
+    const canComprehension = typeof policy?.features?.modes?.comprehension === 'boolean' ? policy.features.modes.comprehension : (tier !== 'free');
+    const canResearch = typeof policy?.features?.modes?.research === 'boolean' ? policy.features.modes.research : (tier !== 'free');
+    const canAiEvaluate = typeof policy?.features?.aiEvaluate === 'boolean' ? policy.features.aiEvaluate : (tier !== 'free');
+    const canAnchors = typeof policy?.features?.anchors === 'boolean' ? policy.features.anchors : (tier !== 'free');
 
     // Mode options:
     //   Free        — Reading only. Comprehension disabled.
@@ -660,13 +677,13 @@
     if (modeSelect) {
       const comprehensionOpt = modeSelect.querySelector('option[value="comprehension"]');
       const researchOpt      = modeSelect.querySelector('option[value="research"]');
-      if (comprehensionOpt) comprehensionOpt.disabled = isFree;
+      if (comprehensionOpt) comprehensionOpt.disabled = !canComprehension;
       // Research is selectable on Paid/Premium (evaluation.js shows coming-soon alert on use).
       // Disabled only on Free alongside Comprehension.
-      if (researchOpt)      researchOpt.disabled = isFree;
+      if (researchOpt)      researchOpt.disabled = !canResearch;
 
       // If currently on a gated mode, drop back to Reading
-      if (isFree && appMode !== 'reading') {
+      if (!canComprehension && appMode !== 'reading') {
         modeSelect.value = 'reading';
         appMode = 'reading';
         if (typeof applyModeVisibility === 'function') applyModeVisibility();
@@ -677,7 +694,7 @@
     // applyModeVisibility already hides these in reading mode; we must not override that.
     const isReadingMode = appMode === 'reading';
     document.querySelectorAll('.anchors-row').forEach(el => {
-      if (isFree || isReadingMode) {
+      if (!canAnchors || isReadingMode) {
         el.style.display = 'none';
       } else {
         el.style.display = '';
@@ -686,7 +703,7 @@
 
     // AI Evaluate buttons and Submit — hidden on Free and in reading mode
     document.querySelectorAll('.ai-btn, #submitBtn').forEach(el => {
-      el.style.display = (isFree || isReadingMode) ? 'none' : '';
+      el.style.display = (!canAiEvaluate || isReadingMode) ? 'none' : '';
     });
 
     // Voice dropdowns are visible at all tiers — Free sees browser voices,

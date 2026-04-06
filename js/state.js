@@ -42,6 +42,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   // Current subscription tier: 'free', 'paid', 'premium'
   // During prototype: controls feature access in UI but does not enforce usage limits.
   let appTier = 'free';
+  let runtimePolicy = null;
 
   // ---- Token Tracking ----
   // Session token counter. Counts consumption per category for diagnostic purposes.
@@ -67,6 +68,108 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     premium: 10000,
   };
 
+
+  function normalizeAppTier(value) {
+    const tier = String(value || '').trim().toLowerCase();
+    return ['free', 'paid', 'premium'].includes(tier) ? tier : 'free';
+  }
+
+  function getFallbackRuntimePolicy(tierInput) {
+    const tier = normalizeAppTier(tierInput);
+    const elevated = tier !== 'free';
+    return {
+      version: 1,
+      tier,
+      usageDailyLimit: TOKEN_ALLOWANCES[tier] || TOKEN_ALLOWANCES.free,
+      features: {
+        modes: {
+          reading: true,
+          comprehension: elevated,
+          research: elevated,
+        },
+        aiEvaluate: elevated,
+        anchors: elevated,
+        cloudVoices: elevated,
+        themes: {
+          explorer: elevated,
+          customMusic: elevated,
+        },
+      },
+    };
+  }
+
+  function normalizeRuntimePolicy(raw, tierHint) {
+    const fallback = getFallbackRuntimePolicy(tierHint);
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const tier = normalizeAppTier(source.tier || fallback.tier);
+    const usageDailyLimit = Number(source.usageDailyLimit);
+    const features = source.features && typeof source.features === 'object' ? source.features : {};
+    const modes = features.modes && typeof features.modes === 'object' ? features.modes : {};
+    const themes = features.themes && typeof features.themes === 'object' ? features.themes : {};
+
+    return {
+      version: Number(source.version) || fallback.version,
+      tier,
+      usageDailyLimit: Number.isFinite(usageDailyLimit) && usageDailyLimit > 0
+        ? usageDailyLimit
+        : fallback.usageDailyLimit,
+      features: {
+        modes: {
+          reading: true,
+          comprehension: typeof modes.comprehension === 'boolean' ? modes.comprehension : fallback.features.modes.comprehension,
+          research: typeof modes.research === 'boolean' ? modes.research : fallback.features.modes.research,
+        },
+        aiEvaluate: typeof features.aiEvaluate === 'boolean' ? features.aiEvaluate : fallback.features.aiEvaluate,
+        anchors: typeof features.anchors === 'boolean' ? features.anchors : fallback.features.anchors,
+        cloudVoices: typeof features.cloudVoices === 'boolean' ? features.cloudVoices : fallback.features.cloudVoices,
+        themes: {
+          explorer: typeof themes.explorer === 'boolean' ? themes.explorer : fallback.features.themes.explorer,
+          customMusic: typeof themes.customMusic === 'boolean' ? themes.customMusic : fallback.features.themes.customMusic,
+        },
+      },
+    };
+  }
+
+  function getRuntimePolicy() {
+    if (runtimePolicy && typeof runtimePolicy === 'object') return runtimePolicy;
+    runtimePolicy = getFallbackRuntimePolicy(appTier);
+    return runtimePolicy;
+  }
+
+  function getRuntimeUsageAllowance() {
+    const limit = Number(getRuntimePolicy()?.usageDailyLimit);
+    return Number.isFinite(limit) && limit > 0 ? limit : (TOKEN_ALLOWANCES[normalizeAppTier(appTier)] || TOKEN_ALLOWANCES.free);
+  }
+
+  function applyResolvedRuntimePolicy(policyLike, tierHint) {
+    runtimePolicy = normalizeRuntimePolicy(policyLike, tierHint);
+    appTier = runtimePolicy.tier;
+    try { tokenReset(); } catch (_) {}
+    try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
+    try {
+      const detail = { policy: runtimePolicy };
+      document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
+      window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
+    } catch (_) {}
+    return runtimePolicy;
+  }
+
+  async function refreshRuntimePolicy(requestedTier) {
+    const tier = normalizeAppTier(requestedTier || getRuntimeTier());
+    applyResolvedRuntimePolicy(getFallbackRuntimePolicy(tier), tier);
+    try {
+      const response = await fetch(apiUrl(`/api/runtime-config?tier=${encodeURIComponent(tier)}`), {
+        method: 'GET',
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(`runtime-config ${response.status}`);
+      const payload = await response.json();
+      return applyResolvedRuntimePolicy(payload?.policy || payload, tier);
+    } catch (_) {
+      return getRuntimePolicy();
+    }
+  }
+
   let sessionTokens = {
     remaining: TOKEN_ALLOWANCES['free'],
     spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
@@ -81,7 +184,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
 
   function tokenReset() {
     sessionTokens = {
-      remaining: TOKEN_ALLOWANCES[appTier] || 1000,
+      remaining: getRuntimeUsageAllowance(),
       spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
     };
   }
@@ -560,9 +663,11 @@ function saveDiagnosticsPrefs(payload) {
 
 function getRuntimeTier() {
   try {
+    const fromPolicy = normalizeAppTier(runtimePolicy?.tier || '');
+    if (fromPolicy && fromPolicy !== 'free') return fromPolicy;
     const sel = document.getElementById('tierSelect');
     const tier = sel && sel.value ? String(sel.value) : String(appTier || 'free');
-    return ['free', 'paid', 'premium'].includes(tier) ? tier : 'free';
+    return normalizeAppTier(tier);
   } catch (_) {
     return 'free';
   }
@@ -570,12 +675,12 @@ function getRuntimeTier() {
 
 function canUseTheme(themeId) {
   const theme = String(themeId || 'default');
-  if (theme === 'explorer') return getRuntimeTier() !== 'free';
+  if (theme === 'explorer') return !!getRuntimePolicy()?.features?.themes?.explorer;
   return true;
 }
 
 function canUseCustomMusic() {
-  return canUseTheme('explorer');
+  return !!getRuntimePolicy()?.features?.themes?.customMusic;
 }
 
 function applyThemeClass(themeName) {
@@ -810,13 +915,22 @@ window.rcDiagnosticsPrefs = {
   }
 };
 
+window.rcPolicy = {
+  get: getRuntimePolicy,
+  refreshForTier: refreshRuntimePolicy,
+  apply: applyResolvedRuntimePolicy,
+  getTier: getRuntimeTier
+};
+
 window.rcEntitlements = {
   getTier: getRuntimeTier,
+  getResolvedPolicy: getRuntimePolicy,
   canUseTheme,
   canUseCustomMusic,
   enforceThemeAccess
 };
 
+applyResolvedRuntimePolicy(getFallbackRuntimePolicy(appTier), appTier);
 loadAppearance();
 loadTheme();
 

@@ -734,18 +734,26 @@ function browserSpeakPageFromSentence(key, blockIdx, reason) {
 
 // ─── Support / routing ────────────────────────────────────────────────────────
 
+function getResolvedTtsPolicy() {
+  const policy = (window.rcPolicy && typeof window.rcPolicy.get === 'function') ? window.rcPolicy.get() : null;
+  const tier = (policy && policy.tier) ? String(policy.tier) : ((typeof appTier !== 'undefined' && appTier) ? String(appTier) : 'free');
+  const cloudVoiceAccess = typeof policy?.features?.cloudVoices === 'boolean' ? policy.features.cloudVoices : (tier !== 'free');
+  return { tier, cloudVoiceAccess, policy };
+}
+
 function getTtsSupportStatus() {
-  const tier = (typeof appTier !== 'undefined' && appTier) ? String(appTier) : 'free';
+  const resolved = getResolvedTtsPolicy();
+  const tier = resolved.tier;
   const browserSupported = !!browserTtsSupported();
   let browserVoices = 0;
   try { browserVoices = browserSupported ? (window.speechSynthesis.getVoices() || []).filter(v => (v.lang || '').toLowerCase().startsWith('en')).length : 0; } catch (_) {}
   const browserVoice = browserSupported ? browserPickVoice() : null;
   const freePlayable = browserSupported && !!browserVoice;
-  const basePlayable = tier === 'free' ? freePlayable : true;
+  const basePlayable = resolved.cloudVoiceAccess ? true : freePlayable;
   const blockedReason = String(TTS_STATE.playbackBlockedReason || '');
   const playable = (!blockedReason) && basePlayable;
   return {
-    tier, browserSupported, browserVoices,
+    tier, cloudVoiceAccess: !!resolved.cloudVoiceAccess, browserSupported, browserVoices,
     browserVoiceAvailable: !!browserVoice,
     browserVoiceName: browserVoice ? (browserVoice.name || null) : null,
     freePlayable, playable,
@@ -757,7 +765,7 @@ function getTtsSupportStatus() {
 function getPreferredTtsRouteInfo() {
   const support = getTtsSupportStatus();
   const tier = support.tier;
-  const cloudCapable = tier !== 'free';
+  const cloudCapable = !!support.cloudVoiceAccess;
   const selected = getSelectedVoicePreference();
   const browserSelected = selected.type === 'browser';
 
