@@ -2258,18 +2258,31 @@ function _installScrollPageTracker() {
       raf = 0;
       try {
         if (!Array.isArray(pages) || !pages.length) return;
-        const idx = inferCurrentPageIndex();
-        if (!Number.isFinite(idx) || idx < 0) return;
-        const pageEls = document.querySelectorAll('.page');
-        const target = pageEls[idx];
-        if (!target) return;
-        // Only update when the page is actually visible (guards hidden sections).
-        if (target.getBoundingClientRect().height <= 0) return;
-        lastFocusedPageIndex = idx;
+        // Measure the visible page by viewport proximity ONLY.
+        // inferCurrentPageIndex() is intentionally not used here: it prioritises
+        // document.activeElement, which stays on the last-clicked element (e.g. a
+        // "Read Page" button inside a .page card) after release. That causes the
+        // tracker to keep reporting the wrong page index even after the user has
+        // manually scrolled to a different page.
+        const pageEls = Array.from(document.querySelectorAll('.page'));
+        if (!pageEls.length) return;
+        let bestEl = null, bestIdx = -1, bestDist = Infinity;
+        for (const el of pageEls) {
+          const rect = el.getBoundingClientRect();
+          if (rect.height <= 0) continue; // skip hidden / collapsed pages
+          const dataIdx = parseInt(el.dataset.pageIndex || '-1', 10);
+          if (Number.isNaN(dataIdx) || dataIdx < 0) continue;
+          const dist = Math.abs(rect.top);
+          if (dist < bestDist) { bestDist = dist; bestIdx = dataIdx; bestEl = el; }
+        }
+        if (!bestEl || !Number.isFinite(bestIdx) || bestIdx < 0) return;
+        // Guard: skip if the winning element is in a hidden section (double-check).
+        if (bestEl.getBoundingClientRect().height <= 0) return;
+        lastFocusedPageIndex = bestIdx;
         // Keep reading target in sync so bottom-bar Play speaks the scrolled-to page.
         try {
           const _ctx = window.getReadingTargetContext();
-          if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: idx });
+          if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
         } catch (_) {}
       } catch (_) {}
     });

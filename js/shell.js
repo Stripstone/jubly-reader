@@ -474,6 +474,13 @@
         return 0;
     }
 
+    // RETIRED (Pass 2): syncVisiblePageAsPlayTarget is no longer called.
+    // Its only call site was handlePausePlay(), which has been updated to
+    // delegate without pre-empting runtime page truth. Runtime owns current-
+    // page targeting through _installScrollPageTracker + __rcReadingTarget.
+    // getVisibleReadingPageIndex() below is kept because it still feeds the
+    // progress display (not launch-critical truth). If progress display is
+    // later moved to a runtime-owned readout, both functions can be deleted.
     function syncVisiblePageAsPlayTarget() {
         const idx = getVisibleReadingPageIndex();
         if (!Number.isFinite(idx) || idx < 0) return false;
@@ -620,16 +627,15 @@
         // Shell is a pure delegate. All routing — resume, pause, countdown
         // cancel+restart, and fresh-start — is owned by pauseOrResumeReading()
         // in tts.js. Shell does not inspect eligibility or countdown here.
+        // PASS2: Removed syncVisiblePageAsPlayTarget() call. Runtime owns
+        // current-page truth via _installScrollPageTracker (library.js), which
+        // keeps __rcReadingTarget.pageIndex current on every scroll frame.
+        // startFocusedPageTts() reads that directly. Shell must not pre-empt
+        // the runtime's page truth with a DOM-visibility inference.
         const before = {
             playback: (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null,
             countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
         };
-        // Fresh Play should follow the page currently in view when playback is
-        // not active. This releases the prior Read Page / Next target once the
-        // user has stopped playback and scrolled elsewhere.
-        if (!before.playback?.active && !before.countdown?.active) {
-            syncVisiblePageAsPlayTarget();
-        }
         let result = false;
         try { if (typeof pauseOrResumeReading === 'function') result = !!pauseOrResumeReading(); } catch (_) {}
         setTimeout(syncShellPlaybackControls, 0);

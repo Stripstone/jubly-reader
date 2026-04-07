@@ -402,9 +402,17 @@
             position: relative; overflow: hidden;
             animation: rmSlideIn 0.4s ease-out backwards;
             transition: border-left-color 0.3s, box-shadow 0.3s;
+            /* Offset scrollIntoView so the fixed reading-top-bar (52px) never
+               covers the page-header when a card is scrolled into view.
+               8px extra breathing room above the bar. */
+            scroll-margin-top: 60px;
         }
         @media (max-width: 1024px) { #reading-mode .page { padding: 22px 20px; } }
+        /* Tablet bar is 48px → 56px offset */
+        @media (max-width: 900px)  { #reading-mode .page { scroll-margin-top: 56px; } }
         @media (max-width: 768px)  { #reading-mode .page { padding: 18px 16px; } }
+        /* Mobile bar min-height is 60px → 68px offset */
+        @media (max-width: 640px)  { #reading-mode .page { scroll-margin-top: 68px; } }
         #reading-mode .page.page-active {
             border-left-width: 6px;
             box-shadow: var(--rm-shadow), -6px 0 12px -2px rgba(99,68,245,0.20);
