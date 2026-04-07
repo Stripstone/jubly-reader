@@ -91,11 +91,19 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   }
 
   function getFallbackRuntimePolicy(tierInput) {
+    // PASS3: Fallback is always the minimum safe free-tier policy.
+    // tierInput is accepted for callers that pass a hint, but it NEVER elevates
+    // features above free-tier when the server is unreachable.
+    // simulationAllowed is never granted from client-side host inference:
+    //   - it was previously set from canSimulateTierOnCurrentHost(), which let the
+    //     client grant itself simulation capability when the server was down.
+    //   - now it is always false; simulation capability comes from the server only.
     const tier = normalizeAppTier(tierInput);
     return {
       version: SAFE_FALLBACK_POLICY.version,
       tier,
-      simulationAllowed: typeof canSimulateTierOnCurrentHost === 'function' ? !!canSimulateTierOnCurrentHost() : false,
+      simulationAllowed: false,
+      resolutionMode: 'client-fallback',
       usageDailyLimit: SAFE_FALLBACK_POLICY.usageDailyLimit,
       importSlotLimit: SAFE_FALLBACK_POLICY.importSlotLimit,
       features: {
@@ -132,6 +140,11 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       version: Number(source.version) || fallback.version,
       tier,
       simulationAllowed: typeof source.simulationAllowed === 'boolean' ? source.simulationAllowed : fallback.simulationAllowed,
+      // resolutionMode: consumed from server meta (passed in via applyResolvedRuntimePolicy).
+      // 'production'    — server default tier, client request ignored.
+      // 'simulation'    — preview/local only, client ?tier= honored.
+      // 'client-fallback' — server unreachable, safe free-tier only.
+      resolutionMode: typeof source.resolutionMode === 'string' ? source.resolutionMode : (fallback.resolutionMode || 'client-fallback'),
       usageDailyLimit: Number.isFinite(usageDailyLimit) && usageDailyLimit > 0
         ? usageDailyLimit
         : fallback.usageDailyLimit,
@@ -220,10 +233,21 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       });
       if (!response.ok) throw new Error(`runtime-config ${response.status}`);
       const payload = await response.json();
-      return applyResolvedRuntimePolicy(payload?.policy || payload, tier);
+      // Merge server meta.resolutionMode into the policy object before normalizing,
+      // so normalizeRuntimePolicy can store it alongside capabilities.
+      const policyWithMeta = payload?.policy
+        ? { ...payload.policy, resolutionMode: payload?.meta?.resolutionMode }
+        : payload;
+      return applyResolvedRuntimePolicy(policyWithMeta, tier);
     } catch (_) {
-      const fallbackTier = (typeof canSimulateTierOnCurrentHost === 'function' && canSimulateTierOnCurrentHost()) ? tier : 'free';
-      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy(fallbackTier), fallbackTier);
+      // Server unreachable. Apply minimum safe free-tier fallback only.
+      // PASS3: Do not preserve the requested tier (even on localhost) when the
+      // server is down. The previous path used canSimulateTierOnCurrentHost() to
+      // grant the requested tier in fallback — that made the client a second policy
+      // engine when the server failed. Now the fallback is always safe-free.
+      // When the server becomes reachable, the next refreshForTier call will fetch
+      // the correct server-resolved policy.
+      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('free'), 'free');
     }
   }
 
@@ -719,12 +743,13 @@ function saveDiagnosticsPrefs(payload) {
 }
 
 function getRuntimeTier() {
+  // PASS3: Read exclusively from server-resolved runtimePolicy.
+  // Previously fell back to reading #tierSelect DOM value, which made DOM
+  // an authority for policy tier. Tier simulation now routes through
+  // refreshForTier (ui.js owns #tierSelect → syncTierPolicy → refreshForTier),
+  // which fetches from the server and sets runtimePolicy directly.
   try {
-    const fromPolicy = normalizeAppTier(runtimePolicy?.tier || '');
-    if (fromPolicy && fromPolicy !== 'free') return fromPolicy;
-    const sel = document.getElementById('tierSelect');
-    const tier = sel && sel.value ? String(sel.value) : String(appTier || 'free');
-    return normalizeAppTier(tier);
+    return normalizeAppTier(runtimePolicy?.tier || 'free');
   } catch (_) {
     return 'free';
   }
@@ -972,6 +997,17 @@ window.rcDiagnosticsPrefs = {
   }
 };
 
+// PASS3: Define canSimulateTierSelection locally in state.js.
+// Previously this referenced shell.js's canSimulateTierSelection (defined later
+// in load order), so window.rcPolicy.canSimulateTier was always undefined at
+// assignment time — causing simulation UI buttons to always be hidden.
+// Now it reads simulationAllowed directly from the server-resolved runtimePolicy.
+// Shell.js's canSimulateTierSelection checks window.rcPolicy.canSimulateTier(),
+// which now resolves correctly without a circular shell dependency.
+function canSimulateTierSelection() {
+  return !!(getRuntimePolicy()?.simulationAllowed);
+}
+
 window.rcPolicy = {
   get: getRuntimePolicy,
   refreshForTier: refreshRuntimePolicy,
@@ -985,6 +1021,62 @@ window.rcPolicy = {
   canUseAiEvaluate,
   canUseAnchors,
   canUseCloudVoices
+};
+
+// PASS3: Interim server-owned usage capacity API.
+// window.rcUsage.check(category) is the authoritative pre-flight gate before
+// any protected cloud action (TTS, evaluate, anchors, research).
+// The server resolves its own policy limits — the client cannot inflate them
+// by claiming a higher tier on production.
+// Spend tracking (sessionTokens) is kept for display/diagnostics only.
+// Falls back to client-side check only when the server is unreachable.
+window.rcUsage = {
+  // Returns { allowed, cost, remaining, limit, meta } from server.
+  // Await this before any cloud action and block if allowed === false.
+  check: async function rcUsageCheck(category) {
+    const spent = sessionTokens?.spent || {};
+    try {
+      const resp = await fetch(
+        (typeof apiUrl === 'function' ? apiUrl('/api/usage-check') : '/api/usage-check'),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: category, spent }),
+          cache: 'no-store',
+        }
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        return {
+          allowed: !!data.allowed,
+          cost: data.cost,
+          remaining: data.remaining,
+          limit: data.limit,
+          meta: data.meta || {},
+        };
+      }
+    } catch (_) {}
+    // Server unreachable: degrade to client-side check (safe-free behavior only).
+    // BRIDGE: client fallback until server is reliably reachable.
+    // Real owner: /api/usage-check + server-resolved policy.
+    // This fallback uses the server-resolved limit (from the last successful
+    // policy fetch) so it is not a full client-only path.
+    const limit = getRuntimeUsageAllowance();
+    const totalSpent = Object.values(spent).reduce((a, b) => a + b, 0);
+    const cost = TOKEN_COSTS[category] || 0;
+    const remaining = Math.max(0, limit - totalSpent);
+    return {
+      allowed: remaining >= cost,
+      cost,
+      remaining,
+      limit,
+      meta: { policySource: 'client-fallback' },
+    };
+  },
+  // Local spend tracking for display/diagnostics. Not enforcement authority.
+  spend: function rcUsageSpend(category) {
+    try { if (typeof tokenSpend === 'function') tokenSpend(category); } catch (_) {}
+  },
 };
 
 window.rcEntitlements = {

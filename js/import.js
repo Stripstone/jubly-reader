@@ -316,7 +316,32 @@
 
     async function guardImportCapacity() {
       const snapshot = await getImportCapacitySnapshot();
-      if (snapshot.hasCapacity) return { ok: true, snapshot };
+      // Pass 3: back the capacity verdict with a server-owned policy check.
+      // The server resolves its own tier (production ignores client claims).
+      // count is still client-provided (interim until Pass 4 durable tracking).
+      let hasCapacity = snapshot.hasCapacity;
+      try {
+        const resp = await fetch(
+          (typeof apiUrl === 'function' ? apiUrl('/api/import-capacity') : '/api/import-capacity'),
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ count: snapshot.count }),
+            cache: 'no-store',
+          }
+        );
+        if (resp.ok) {
+          const data = await resp.json();
+          hasCapacity = !!data.hasCapacity;
+          // Sync server-resolved limit back so display stays accurate.
+          if (typeof data.limit !== 'undefined') snapshot.limit = data.limit;
+        }
+      } catch (_) {
+        // Server unreachable: fall back to client snapshot verdict.
+        // BRIDGE: client verdict is the fallback until server is reachable.
+        // Real owner: /api/import-capacity.
+      }
+      if (hasCapacity) return { ok: true, snapshot };
       const msg = snapshot.limit == null
         ? 'Import is currently unavailable.'
         : `This tier is full (${snapshot.count}/${snapshot.limit} saved books). Delete a book or upgrade to add another.`;

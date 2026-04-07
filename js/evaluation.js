@@ -295,6 +295,21 @@
     // remove undefined keys (optional)
     if (!requestPayload.debug) delete requestPayload.debug;
 
+    // Pre-flight usage check before cloud evaluation call.
+    // Pass 3: server verdict gates the action; client counter is display-only.
+    if (window.rcUsage && typeof window.rcUsage.check === 'function') {
+      try {
+        const verdict = await window.rcUsage.check('evaluate');
+        if (!verdict.allowed) {
+          throw new Error('Usage limit reached. Upgrade your plan to continue using AI evaluation.');
+        }
+      } catch (usageErr) {
+        // Only re-throw if it was the usage-limit block, not a network error.
+        if (usageErr.message && usageErr.message.includes('Usage limit')) throw usageErr;
+        // Server unreachable: proceed (safe degraded behavior).
+      }
+    }
+
     try {
       const response = await fetch(apiUrl("/api/evaluate"), {
         method: "POST",
@@ -314,7 +329,7 @@
         };
         throw new Error(rawText);
       }
-      // Spend 2 tokens for AI evaluation
+      // Spend 2 tokens for AI evaluation (display/diagnostics tracking only).
       try { if (typeof tokenSpend === 'function') tokenSpend('evaluate'); } catch(_) {}
 
       const data = JSON.parse(rawText || "{}");
