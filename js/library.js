@@ -1254,8 +1254,11 @@
       if (!hasExplicitChapters) {
         chapterControls.style.display = "none";
         currentChapterIndex = null;
-        const pages = parsePagesWithTitles(currentBookRaw);
-        populatePagesSelect(pages);
+        const bookPages = parsePagesWithTitles(currentBookRaw);
+        populatePagesSelect(bookPages);
+        // Auto-render all pages as one set — no Load click required.
+        const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
+        if (allText) applySelectionToBulkInput(allText, { append: false });
         return;
       }
 
@@ -1265,8 +1268,11 @@
       chapterSelect.value = "0";
       currentChapterIndex = 0;
 
-      const pages = parsePagesWithTitles(getCurrentChapterRaw());
-      populatePagesSelect(pages);
+      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
+      populatePagesSelect(chapterPages);
+      // Auto-render chapter 0 — no Load click required.
+      const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
+      if (chapterText) applySelectionToBulkInput(chapterText, { append: false });
     }
 
     async function loadManifest() {
@@ -1705,6 +1711,8 @@
     const container = document.getElementById("pages");
     container.innerHTML = "";
 
+    const _isReadingMode = appMode === 'reading';
+
     pages.forEach((text, i) => {
       timers[i] ??= 0;
 
@@ -1712,16 +1720,21 @@
       page.className = "page";
       page.dataset.pageIndex = String(i);
 
+      // Evaluation/consolidation block is intentionally omitted from the DOM
+      // in reading mode. applyModeVisibility() handles display toggling when
+      // mode changes, but in reading mode these elements simply do not exist.
       page.innerHTML = `
         <div class="page-header">Page ${i + 1}</div>
         <div class="page-text">${escapeHtml(text)}</div>
 
+        ${_isReadingMode ? '' : `
         <div class="anchors-row">
           <div class="anchors-ui anchors-ui--right">
             <div class="anchors-counter" title="Anchors">Anchors Found: 0/0</div>
             <button type="button" class="top-btn hint-btn">Hint</button>
           </div>
         </div>
+        `}
 
         <div class="page-actions">
           <button type="button" class="top-btn tts-btn" data-tts="page" data-page="${i}">🔊 Read page</button>
@@ -1731,6 +1744,7 @@
           <button class="top-btn next-btn" onclick="goToNext(${i})">▶ Next</button>
         </div>
 
+        ${_isReadingMode ? '' : `
         <div class="page-header">Consolidation</div>
 
         <div class="sand-wrapper">
@@ -1758,10 +1772,11 @@
             <button class="ai-btn" data-page="${i}" style="display: none;">▼ AI Evaluate&nbsp;&nbsp;</button>
           </div>
         </div>
-        
+
         <div class="ai-feedback" data-page="${i}" style="display: none;">
           <!-- AI feedback will be inserted here -->
         </div>
+        `}
       `;
 
       const textarea = page.querySelector("textarea");
@@ -1802,103 +1817,108 @@
       }
 
 
-      // Character tracking
-      textarea.value = pageData[i].consolidation || "";
-      charCountSpan.textContent = Math.min(pageData[i].charCount, goalCharCount);
-      
-      textarea.addEventListener("input", (e) => {
-        const count = e.target.value.length;
-        pageData[i].consolidation = e.target.value;
-        pageData[i].charCount = count;
-        charCountSpan.textContent = Math.min(count, goalCharCount);
+      // Character tracking — only present in non-reading-mode cards.
+      if (textarea && charCountSpan) {
+        textarea.value = pageData[i].consolidation || "";
+        charCountSpan.textContent = Math.min(pageData[i].charCount, goalCharCount);
 
-        // Anchors: deterministic matching (UI-only; no inference).
-        updateAnchorsUIForPage(page, i, e.target.value);
-        
-        // Check if all pages have text to unlock compasses
-        checkCompassUnlock();
-      });
+        textarea.addEventListener("input", (e) => {
+          const count = e.target.value.length;
+          pageData[i].consolidation = e.target.value;
+          pageData[i].charCount = count;
+          charCountSpan.textContent = Math.min(count, goalCharCount);
 
-      // Persist learner work when they leave the field (reduces churn while typing).
-      textarea.addEventListener("blur", () => {
-        schedulePersistSession();
-      });
+          // Anchors: deterministic matching (UI-only; no inference).
+          updateAnchorsUIForPage(page, i, e.target.value);
+
+          // Check if all pages have text to unlock compasses
+          checkCompassUnlock();
+        });
+
+        // Persist learner work when they leave the field (reduces churn while typing).
+        textarea.addEventListener("blur", () => {
+          schedulePersistSession();
+        });
+      }
 
       // Clicking anywhere on the page should make "Next" advance from that page.
       page.addEventListener("pointerdown", () => {
         lastFocusedPageIndex = i;
       });
 
-      // Timer events
-      textarea.addEventListener("focus", () => {
-        
-        lastFocusedPageIndex = i;
-// Scroll to show entire page card (passage + textarea) instead of centering on textarea
-        const pageCard = textarea.closest('.page');
-        pageCard.scrollIntoView({ 
-          behavior: 'instant',
-          block: 'start',
-          inline: 'nearest'
-        });
-        
-        // Page turn immersion: activate stripe if starting fresh
-        if (pageData[i].charCount === 0) {
-          page.classList.add('page-active');
-          if (!allSoundsMuted) {
-            pageTurnSound.currentTime = 0;
-            pageTurnSound.play();
+      // Timer events and keyboard nav — only present in non-reading-mode cards.
+      if (textarea) {
+        textarea.addEventListener("focus", () => {
+
+          lastFocusedPageIndex = i;
+          // Scroll to show entire page card (passage + textarea) instead of centering on textarea
+          const pageCard = textarea.closest('.page');
+          pageCard.scrollIntoView({
+            behavior: 'instant',
+            block: 'start',
+            inline: 'nearest'
+          });
+
+          // Page turn immersion: activate stripe if starting fresh
+          if (pageData[i].charCount === 0) {
+            page.classList.add('page-active');
+            if (!allSoundsMuted) {
+              pageTurnSound.currentTime = 0;
+              pageTurnSound.play();
+            }
           }
-        }
 
-        // Anchors (lazy): first meaningful engagement triggers anchor generation for this page
-        // only when the active runtime policy allows anchors.
-        try {
-          const policyApi = window.rcPolicy || {};
-          const canUseAnchors = typeof policyApi.canUseAnchors === 'function' ? !!policyApi.canUseAnchors() : false;
-          if (canUseAnchors) hydrateAnchorsIntoPageEl(page, i);
-        } catch (_) {}
+          // Anchors (lazy): first meaningful engagement triggers anchor generation for this page
+          // only when the active runtime policy allows anchors.
+          try {
+            const policyApi = window.rcPolicy || {};
+            const canUseAnchors = typeof policyApi.canUseAnchors === 'function' ? !!policyApi.canUseAnchors() : false;
+            if (canUseAnchors) hydrateAnchorsIntoPageEl(page, i);
+          } catch (_) {}
 
-        startTimer(i, sand, timerDiv, wrapper, textarea);
-      });
-      
-      textarea.addEventListener("blur", () => {
-        // Deactivate page stripe when leaving
-        page.classList.remove('page-active');
-        stopTimer(i);
-        checkCompassUnlock(); // Check if compasses should unlock when user leaves textarea
-      });
-
-
-      // Keyboard navigation (iPad + desktop)
-      textarea.addEventListener("keydown", (e) => {
-        // Enter: unfocus textarea (Shift+Enter remains normal newline behavior)
-        // This makes iPad flow smoother: user can hit Enter to dismiss keyboard,
-        // then press Enter again (global) to jump to next box or click AI.
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          // Prevent the global Enter handler from running in the same event.
-          // (blur changes activeElement, which would otherwise trigger goToNext).
-          e.stopPropagation();
-          textarea.blur();
-          return;
-        }
-
-        // Esc: unfocus textarea
-        if (e.key === "Escape") {
-          e.preventDefault();
-          textarea.blur();
-        }
-      });
-
-      // Compass click handlers
-      const stars = starsDiv.querySelectorAll(".star");
-      stars.forEach(star => {
-        star.addEventListener("click", () => {
-          if (starsDiv.classList.contains("locked")) return;
-          const value = parseInt(star.dataset.value);
-          setRating(i, value, stars);
+          startTimer(i, sand, timerDiv, wrapper, textarea);
         });
-      });
+
+        textarea.addEventListener("blur", () => {
+          // Deactivate page stripe when leaving
+          page.classList.remove('page-active');
+          stopTimer(i);
+          checkCompassUnlock(); // Check if compasses should unlock when user leaves textarea
+        });
+
+        // Keyboard navigation (iPad + desktop)
+        textarea.addEventListener("keydown", (e) => {
+          // Enter: unfocus textarea (Shift+Enter remains normal newline behavior)
+          // This makes iPad flow smoother: user can hit Enter to dismiss keyboard,
+          // then press Enter again (global) to jump to next box or click AI.
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            // Prevent the global Enter handler from running in the same event.
+            // (blur changes activeElement, which would otherwise trigger goToNext).
+            e.stopPropagation();
+            textarea.blur();
+            return;
+          }
+
+          // Esc: unfocus textarea
+          if (e.key === "Escape") {
+            e.preventDefault();
+            textarea.blur();
+          }
+        });
+      }
+
+      // Compass click handlers — only present in non-reading-mode cards.
+      if (starsDiv) {
+        const stars = starsDiv.querySelectorAll(".star");
+        stars.forEach(star => {
+          star.addEventListener("click", () => {
+            if (starsDiv.classList.contains("locked")) return;
+            const value = parseInt(star.dataset.value);
+            setRating(i, value, stars);
+          });
+        });
+      }
       
       // AI button click handler
       const aiBtn = page.querySelector(".ai-btn");
@@ -1932,8 +1952,8 @@
         }
       }
       
-      // Restore previous rating if exists
-      if (pageData[i].rating > 0) {
+      // Restore previous rating — only present in non-reading-mode cards.
+      if (starsDiv && pageData[i].rating > 0) {
         const evalStars = starsDiv.querySelectorAll(".star");
         evalStars.forEach((star, starIdx) => {
           if (starIdx < pageData[i].rating) {
@@ -1943,23 +1963,27 @@
         // Stop animation since this page is already rated
         starsDiv.classList.add('rated');
       }
-      
-      // Restore sandstone state if applicable
-      if (pageData[i].isSandstone) {
-        wrapper.classList.add("sandstone");
-        textarea.readOnly = true;
-        const evalStars = page.querySelector(".evaluation-section .stars");
-        evalStars.classList.add("locked");
-        evalStars.style.opacity = "0.15";
-        sand.style.height = "100%";
-      } else if (timers[i] > 0) {
-        // Restore partial sand if timer was running
-        const sandStartTime = goalTime * (1 - SAND_START_PERCENTAGE);
-	const sandDuration = goalTime * SAND_START_PERCENTAGE;
-        if (timers[i] >= sandStartTime) {
-          const sandElapsed = timers[i] - sandStartTime;
-          const pct = Math.min(sandElapsed / sandDuration, 1);
-          sand.style.height = `${pct * 100}%`;
+
+      // Restore sandstone state if applicable — only present in non-reading-mode cards.
+      if (wrapper && sand && textarea) {
+        if (pageData[i].isSandstone) {
+          wrapper.classList.add("sandstone");
+          textarea.readOnly = true;
+          const evalStars = page.querySelector(".evaluation-section .stars");
+          if (evalStars) {
+            evalStars.classList.add("locked");
+            evalStars.style.opacity = "0.15";
+          }
+          sand.style.height = "100%";
+        } else if (timers[i] > 0) {
+          // Restore partial sand if timer was running
+          const sandStartTime = goalTime * (1 - SAND_START_PERCENTAGE);
+          const sandDuration = goalTime * SAND_START_PERCENTAGE;
+          if (timers[i] >= sandStartTime) {
+            const sandElapsed = timers[i] - sandStartTime;
+            const pct = Math.min(sandElapsed / sandDuration, 1);
+            sand.style.height = `${pct * 100}%`;
+          }
         }
       }
 
@@ -2178,7 +2202,7 @@
           del.type = 'button';
           del.textContent = 'Delete';
           del.addEventListener('click', async () => {
-            const ok = confirm(`Delete “${b.title || 'this book'}” from this device?`);
+            const ok = confirm(`Delete “${b.title || 'this book'}” from this device?\n\nThis cannot be undone.`);
             if (!ok) return;
             try {
               await localBookDelete(b.id);

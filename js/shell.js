@@ -567,6 +567,20 @@
             if (disabled) pageBtn.title = support.reason || 'Playback unavailable';
             else pageBtn.removeAttribute('title');
         });
+        // Surface blocked/no-voice/error state visibly rather than leaving dead controls.
+        const blockedMsgEl = document.getElementById('shell-tts-blocked-msg');
+        if (blockedMsgEl) {
+            const blockedReason = !canPlay && !status.active && !countdown.active
+                ? String(support.reason || eligibility.reasons?.canPlay || '')
+                : '';
+            if (blockedReason) {
+                blockedMsgEl.textContent = blockedReason;
+                blockedMsgEl.style.display = '';
+            } else {
+                blockedMsgEl.textContent = '';
+                blockedMsgEl.style.display = 'none';
+            }
+        }
         // PATCH(speed-sync): Keep #shell-speed in sync with TTS_STATE.rate.
         // Previously, if setPlaybackRate() was called from any path other than
         // the shell select itself (e.g. programmatic change, restored preference),
@@ -844,21 +858,12 @@
         if (zone) { zone.style.borderColor = 'transparent'; zone.style.background = ''; }
         const files = e.dataTransfer && e.dataTransfer.files;
         if (!files || !files.length) return;
-        const openBtn = document.getElementById('importBookBtn');
-        if (openBtn) openBtn.click();
-        else {
-            const modal = document.getElementById('importBookModal');
-            if (modal) { modal.style.display = 'flex'; modal.setAttribute('aria-hidden', 'false'); }
-        }
-        const inp = document.getElementById('importFileInput');
-        if (inp) {
-            try {
-                const dt = new DataTransfer();
-                dt.items.add(files[0]);
-                inp.value = '';
-                inp.files = dt.files;
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch(_) {}
+        // Use the one authoritative importer-entry path so the capacity check,
+        // modal open, state reset, and file staging happen in a single async
+        // sequence — eliminates the race where showModal()'s reset cleared a
+        // file staged immediately before via click+dispatch.
+        if (typeof window.openImporterWithFile === 'function') {
+            window.openImporterWithFile(files[0]);
         }
     }
 

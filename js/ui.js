@@ -598,7 +598,11 @@
 
   try {
     const saved = localStorage.getItem('rc_app_mode');
-    if (saved && ['reading','comprehension','research','thesis'].includes(saved)) appMode = saved === 'thesis' ? 'research' : saved;
+    if (saved && ['reading','comprehension','research','thesis'].includes(saved)) {
+      const candidate = saved === 'thesis' ? 'research' : saved;
+      // Normalize illegal saved modes back to reading on boot.
+      appMode = (typeof canUseMode === 'function' && !canUseMode(candidate)) ? 'reading' : candidate;
+    }
   } catch (_) {}
 
   select.value = appMode;
@@ -606,6 +610,13 @@
   select.addEventListener('change', () => {
     const newMode = select.value;
     if (newMode === appMode) return;
+
+    // Block before mutating state — proactively disabled options cover the common
+    // path; this guard catches any race or dev-tools bypass.
+    if (typeof canUseMode === 'function' && !canUseMode(newMode)) {
+      select.value = appMode;
+      return;
+    }
 
     const hasPages = typeof pages !== 'undefined' && Array.isArray(pages) && pages.length > 0;
     if (hasPages) {

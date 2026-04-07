@@ -748,6 +748,8 @@
             </button>
             <button id="shell-next-btn" onclick="handleTtsStep(1)" class="pb-icon-btn pb-step-btn" title="Next skip" disabled aria-disabled="true"><span class="pb-step-glyph" aria-hidden="true">↻</span><span class="sr-only">Next skip</span></button>
         </div>
+        <!-- Visible playback blocked/error state — hidden when playback is healthy -->
+        <div id="shell-tts-blocked-msg" role="status" aria-live="polite" style="display:none;font-size:0.72rem;color:#b45309;padding:2px 8px;border-radius:6px;background:#fef3c7;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
         <!-- Page progress — plain text counter, no dots -->
         <div class="reading-bottom-actions flex-shrink-0">
             <span class="page-progress" id="shell-page-progress">Page 1 / 1</span>

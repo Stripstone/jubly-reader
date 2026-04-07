@@ -222,6 +222,24 @@
       return resetImporterState(opts);
     };
 
+    // One authoritative entry path when a file is already in hand (e.g. page-level
+    // drag/drop). Does the capacity check, opens the modal, resets stale state, and
+    // stages the file — all in one async sequence so the reset always precedes the
+    // file staging and there is no race between showModal()'s reset and an external
+    // file dispatch.
+    window.openImporterWithFile = async function openImporterWithFile(file) {
+      if (!file || !modal) return false;
+      const guard = await guardImportCapacity();
+      syncImportEntryState(guard.snapshot);
+      if (!guard.ok) return false;
+      resetImporterState({ keepModalOpen: true });
+      setStatus(describeCapacity(guard.snapshot));
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden', 'false');
+      onFileSelected(file);
+      return true;
+    };
+
     window.getImporterDiagnosticsSnapshot = function getImporterDiagnosticsSnapshot() {
       return {
         hasFile: !!_file,
@@ -826,6 +844,10 @@
     advancedToggleBtn?.addEventListener('click', () => setAdvancedMode(!_advancedMode));
     doImportBtn?.addEventListener('click', doImportSelected);
     doneBtn?.addEventListener('click', hideModal);
+
+    // Close button and backdrop click both clear all staged state completely.
+    closeBtn?.addEventListener('click', hideModal);
+    modal?.addEventListener('click', (e) => { if (e.target === modal) hideModal(); });
   })();
 
   // ===================================

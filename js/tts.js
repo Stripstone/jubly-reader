@@ -495,7 +495,12 @@ function browserSpeakQueue(key, parts, opts = {}) {
   TTS_DEBUG.lastPlayRequest = { key, parts: (parts || []).length, path: 'browser' };
   ttsDiagPush('browser-speak-request', TTS_DEBUG.lastPlayRequest);
 
-  if (!browserTtsSupported()) { alert('Text-to-speech is not supported in this browser.'); return; }
+  if (!browserTtsSupported()) {
+    TTS_STATE.playbackBlockedReason = 'Text-to-speech is not supported in this browser.';
+    ttsDiagPush('browser-unsupported', { key, reason: TTS_STATE.playbackBlockedReason });
+    try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
+    return;
+  }
   const support = getTtsSupportStatus();
   if (!support.browserVoiceAvailable) {
     TTS_STATE.playbackBlockedReason = support.reason || 'No browser voice available';
@@ -858,7 +863,13 @@ function getPlaybackControlEligibility() {
     blockCount: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0,
   };
   const hasSession = !!(TTS_STATE.activeKey || TTS_STATE.pausedPageKey);
-  const canResume = !!playback.active && !!playback.paused && hasSession;
+  // canResume requires both a paused active session AND a real resume hook.
+  // A session that is "paused" with no hook (browserSpeakFromBlock cleared, or
+  // audio element gone) cannot actually resume — marking it resumable would show
+  // a Resume label that calls ttsResume() and fails silently.
+  const hasRealResumeHook = !!(TTS_STATE.audio && TTS_STATE.audio.paused) ||
+    !!(TTS_STATE.browserPaused && TTS_STATE.browserSpeakFromBlock);
+  const canResume = !!playback.active && !!playback.paused && hasSession && hasRealResumeHook;
   const canPause = !!playback.active && !playback.paused;
   const canPlay = canResume || !!countdown.active || !!support.playable;
   const prev = computeSkipEligibility(-1);
@@ -870,7 +881,7 @@ function getPlaybackControlEligibility() {
     reasons: {
       canPlay: canPlay ? (canResume ? 'resume-paused-session' : (countdown.active ? 'countdown-active' : 'playback-supported')) : (support.reason || 'playback-unavailable'),
       canPause: canPause ? 'active-unpaused-session' : 'no-active-unpaused-session',
-      canResume: canResume ? 'active-paused-session' : 'no-paused-session',
+      canResume: canResume ? 'active-paused-session' : (hasSession && !hasRealResumeHook ? 'stale-paused-no-hook' : 'no-paused-session'),
       canSkipPrev: prev.reason,
       canSkipNext: next.reason,
     },
@@ -1321,6 +1332,36 @@ function pauseOrResumeReading() {
   }
 
   if (before.playback.paused) {
+    // Check whether the paused session has a real resume hook before attempting.
+    // A stale paused session (browserSpeakFromBlock cleared, audio element gone)
+    // should restart the current focused page rather than looping into a failed
+    // ttsResume() call.
+    const hasRealResumeHook = !!(TTS_STATE.audio && TTS_STATE.audio.paused) ||
+      !!(TTS_STATE.browserPaused && TTS_STATE.browserSpeakFromBlock);
+    if (!hasRealResumeHook) {
+      // Stale session: clear paused state so startFocusedPageTts gets a clean run.
+      TTS_STATE.browserPaused = false;
+      TTS_STATE.pausedBlockIndex = -1;
+      TTS_STATE.pausedPageKey = null;
+      route = 'stale-paused-restart-focused';
+      ttsDiagPush('pause-resume-action', {
+        action: 'stale-resume-cleared',
+        route, outcome: 'clearing-stale-session',
+        before, after: ttsBlockSnapshot(),
+      });
+      try {
+        if (typeof window.startFocusedPageTts === 'function') {
+          const started = window.startFocusedPageTts();
+          outcome = started ? 'started' : 'failed';
+          ttsDiagPush('pause-resume-action', {
+            action: 'play', route, outcome,
+            outcomeClass: started ? 'full-restart' : 'blocked',
+            before, after: ttsBlockSnapshot(),
+          });
+        }
+      } catch (_) {}
+      return getPlaybackStatus();
+    }
     const resumed = ttsResume();
     route = 'resume';
     outcome = resumed && resumed.success ? 'resumed' : 'resume-failed';
