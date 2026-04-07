@@ -19,6 +19,11 @@ export default async function handler(req, res) {
       requestedTier: resolved.requestedTier,
       effectiveTier: resolved.effectiveTier,
       simulationAllowed: resolved.simulationAllowed,
+      // resolutionMode: 'production'  → server-default tier, client request ignored
+      //                 'simulation'  → preview/local only, client ?tier= honored
+      // Diagnostics should surface this so it is never unclear whether a policy
+      // response came from production resolution or simulation.
+      resolutionMode: resolved.resolutionMode,
       tierSource: resolved.tierSource,
     },
   });

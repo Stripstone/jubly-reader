@@ -1468,7 +1468,22 @@ async function ttsSpeakQueue(key, parts) {
   try {
     for (let i = 0; i < queue.length; i++) {
       const wantMarks = (i === 0 && optsForKeySentenceMarks(key));
-      if (i === 0 && optsForKeySentenceMarks(key)) { try { if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {} }
+      // Pre-flight usage check before the first cloud TTS request.
+      // Pass 3: server verdict gates the action; client counter is display-only.
+      if (i === 0 && optsForKeySentenceMarks(key)) {
+        if (window.rcUsage && typeof window.rcUsage.check === 'function') {
+          try {
+            const verdict = await window.rcUsage.check('tts');
+            if (!verdict.allowed) {
+              try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
+              ttsSetButtonActive(key, false);
+              ttsSetHintButton(key, false);
+              return;
+            }
+          } catch (_) {} // server unreachable: proceed (safe degraded behavior)
+        }
+        try { if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
+      }
       const tts = await cloudFetchUrl(queue[i], { sentenceMarks: wantMarks });
       if (TTS_STATE.activeSessionId !== sessionId) return;
       const url = tts.url;

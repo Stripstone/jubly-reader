@@ -368,6 +368,20 @@ function writeAnchorsToCache(pageHash, payload) {
   }
 
   async function fetchAnchorsForPageText(pageText, pageHash) {
+    // Pre-flight usage check before cloud anchors call.
+    // Pass 3: server verdict gates the action; client counter is display-only.
+    if (window.rcUsage && typeof window.rcUsage.check === 'function') {
+      try {
+        const verdict = await window.rcUsage.check('anchors');
+        if (!verdict.allowed) {
+          throw new Error('Usage limit reached. Upgrade your plan to continue generating anchors.');
+        }
+      } catch (usageErr) {
+        if (usageErr.message && usageErr.message.includes('Usage limit')) throw usageErr;
+        // Server unreachable: proceed (safe degraded behavior).
+      }
+    }
+
     const debug = isDebugEnabledFromUrl();
     const url = apiUrl('/api/anchors');
     const resp = await fetch(url, {
@@ -383,7 +397,7 @@ function writeAnchorsToCache(pageHash, payload) {
       err.details = data;
       throw err;
     }
-    // Spend 1 token for anchor generation
+    // Spend 1 token for anchor generation (display/diagnostics tracking only).
     try { if (typeof tokenSpend === 'function') tokenSpend('anchors'); } catch(_) {}
     // Basic schema check
     if (!Array.isArray(data?.anchors) || !data?.meta?.pageHash) {

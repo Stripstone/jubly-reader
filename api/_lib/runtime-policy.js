@@ -97,6 +97,11 @@ export function getResolvedRuntimePolicyForRequest(req) {
   const simulationAllowed = isRuntimeTierSimulationAllowed(req);
   const requestedTier = getRequestedRuntimeTier(req);
   const tier = simulationAllowed ? requestedTier : getDefaultRuntimeTier();
+  // 'production': RUNTIME_DEFAULT_TIER env var owns the tier; client ?tier= is ignored.
+  // 'simulation': preview/local only; client ?tier= is honored by the server.
+  const resolutionMode = simulationAllowed ? 'simulation' : 'production';
+  // policy = capabilities / limits only.
+  // resolutionMode is diagnostic meta — returned separately, not mixed into policy.
   const policy = {
     ...buildRuntimePolicy(tier),
     simulationAllowed,
@@ -105,6 +110,7 @@ export function getResolvedRuntimePolicyForRequest(req) {
     requestedTier,
     effectiveTier: tier,
     simulationAllowed,
+    resolutionMode,
     tierSource: simulationAllowed ? 'requested' : 'server-default',
     policy,
   };
