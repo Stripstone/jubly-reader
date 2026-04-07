@@ -13,6 +13,7 @@ Read it alongside:
 - `03_ARCHITECTURE_MAP.md`
 - `05_LAUNCH_AND_INTEGRATION.md`
 - `07_AUTH_BILLING_WIRING_GUIDELINE.md`
+- `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
 
 ## The simple rule
 For this system:
@@ -67,6 +68,15 @@ The browser should keep:
 - device-only flows that must happen in the browser
 
 It should not be the primary home of the most valuable logic.
+
+## Architectural discipline consequence
+Protected-code work fails if scaffold and ownership discipline are weak.
+
+Practical rule:
+- first remove duplicate truth layers
+- then identify crown-jewel logic in client files
+- then move the protected decisions server-side where feasible
+- do not let prototype conveniences or mixed-era scaffolds keep policy logic alive in the browser by accident
 
 ## Obfuscation policy
 ### What obfuscation is for
@@ -183,6 +193,7 @@ The target is:
 - `03_ARCHITECTURE_MAP.md` defines the browser-vs-runtime-vs-backend ownership split. This policy adds a protection rule, not a second ownership model.
 - `05_LAUNCH_AND_INTEGRATION.md` must treat avoidable crown-jewel browser exposure as part of the launch gate.
 - `07_AUTH_BILLING_WIRING_GUIDELINE.md` already provides the resolved entitlement object pattern that should replace scattered client-side plan logic.
+- `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md` defines the scaffold and ownership discipline required so protected-code work does not recreate prototype debt.
 
 ## Engineer decision test
 ### Keep it in browser only if all are true
@@ -203,6 +214,7 @@ The target is:
 - rely on obfuscation as the main protection model
 - leave old domains or public debug paths as canonical
 - move code server-side in a way that breaks runtime truth promised in `02_RUNTIME_CONTRACT.md`
+- keep protected logic client-side simply because prototype wiring made it convenient
 
 ## Source-map and debug policy
 Production should not publicly expose:
@@ -220,6 +232,7 @@ Before launch, Jubly Reader should satisfy all of the following:
 4. Public production bundles do not expose source maps or similar debug aids by default.
 5. Branding is consistent and old domains/links are redirected to the canonical public domain.
 6. The browser remains fast and truthful for reading behavior.
+7. Architectural discipline is strong enough that protected logic does not quietly drift back into browser-owned prototype paths.
 
 ## What this means for engineering order
 Recommended order:

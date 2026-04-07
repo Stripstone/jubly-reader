@@ -8,8 +8,9 @@ The goal is to keep the package small, current, and reliable during patching and
 1. `01_PROJECT_STATE.md`
 2. `02_RUNTIME_CONTRACT.md`
 3. `03_ARCHITECTURE_MAP.md`
-4. `04_EXECUTION_BACKLOG.md`
-5. `05_LAUNCH_AND_INTEGRATION.md`
+4. `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
+5. `04_EXECUTION_BACKLOG.md`
+6. `05_LAUNCH_AND_INTEGRATION.md`
 
 ## Core authority docs
 
@@ -27,6 +28,11 @@ Use this to judge behavior and reject regressions.
 Who owns what.
 
 Use this to decide whether a fix belongs in shell, runtime, backend, persistence, or protected-server logic.
+
+### `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
+What architectural behavior is forbidden, what scaffold discipline is non-negotiable, and how prototype conveniences must be retired.
+
+Use this during refactors, scaffold changes, ownership cleanup, and any pass that risks introducing duplicate truth.
 
 ### `04_EXECUTION_BACKLOG.md`
 What still needs repair.
@@ -73,6 +79,21 @@ That does **not** change ownership.
 It only clarifies where current shell behavior lives.
 Runtime still owns reading entry, active page truth, TTS, restore, importer state, countdown truth, theme truth, appearance truth, and reading exit cleanup.
 
+## Architectural standards note
+The project now treats scaffold shape and architectural discipline as first-class authority.
+
+That means:
+- folder scaffolding is part of architecture, not cosmetic organization
+- mixed-era scaffolds must not silently steer implementation
+- prototype conveniences must be marked, bounded, and retired deliberately
+- shell bridges are temporary unless explicitly promoted and documented
+- duplicate truth across shell/runtime/backend is a defect, not an implementation style
+
+See:
+- `03_ARCHITECTURE_MAP.md`
+- `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
+- `IMPLEMENTATION_WORKFLOW.md`
+
 ## Current documentation note
 The theme enhancement is now implemented.
 
@@ -101,6 +122,7 @@ The active process truth lives in the agent-neutral implementation workflow and 
 - Update `04_EXECUTION_BACKLOG.md` after implementation or validation status changes.
 - Update `05_LAUNCH_AND_INTEGRATION.md` when launch gates or integration scope changes.
 - Update `08_IP_AND_CODE_PROTECTION_POLICY.md` when browser-vs-backend protection policy changes.
+- Update `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md` when architectural discipline or scaffold rules change.
 - Update `IMPLEMENTATION_WORKFLOW.md` when the default development loop changes.
 - Update `git_workflow_cheatsheet.md` when the patch artifact commands or naming standards change.
 

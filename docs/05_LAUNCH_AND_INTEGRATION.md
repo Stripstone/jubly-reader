@@ -4,6 +4,7 @@ This document covers launch gating and external integration.
 
 `08_IP_AND_CODE_PROTECTION_POLICY.md` is part of this launch package.
 If browser-vs-backend exposure decisions are relevant to launch readiness, read `08` alongside this document.
+Read `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md` alongside this document when scaffold or ownership stability is part of launch risk.
 
 ## Launch promise
 Launch is honest only when a user can:
@@ -36,6 +37,14 @@ These must be true in presentation:
 - theme/tier visuals match actual runtime state
 - theme controls stay as presentation surfaces, not policy owners
 
+### Architectural discipline requirements
+These must be true before launch is considered honest:
+- current production artifact matches the documented scaffold shape
+- prototype-only conveniences are removed, locked to development, or clearly non-authoritative
+- no launch-critical truth is split across shell and runtime without an explicit temporary bridge rule
+- mixed-era scaffold assumptions are not present in packaging, deployment, or patch flow
+- current architecture docs and current code agree on where app truth lives
+
 ### Code-exposure requirements
 These must be true before launch is considered honest:
 - the public browser bundle does not contain avoidable crown-jewel business logic
@@ -49,8 +58,9 @@ These must be true before launch is considered honest:
 1. runtime continuity first
 2. shell layout stability second
 3. protected-logic redistribution and code-exposure reduction third
-4. launch regression testing fourth
-5. external integrations after that
+4. architectural/scaffold integrity fourth
+5. launch regression testing fifth
+6. external integrations after that
 
 ## Supabase role
 Supabase is the cloud persistence layer for runtime-owned truths.
@@ -149,6 +159,12 @@ Rules:
 - bars remain governed by global Light/Dark appearance
 - theme gating follows runtime-owned entitlement checks
 - child modals in reading stack above parent reading settings correctly
+
+### Architectural/scaffold integrity
+- deployed artifact matches the documented folder scaffold
+- no production path depends on dev-only simulation controls
+- no launch-critical truth is only reachable through shell workaround paths
+- current docs still match the live artifact shape used for deployment
 
 ### Code exposure
 - old public domains redirect to the canonical domain

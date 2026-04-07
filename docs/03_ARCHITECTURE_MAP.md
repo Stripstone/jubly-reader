@@ -3,6 +3,7 @@
 This document defines ownership.
 
 Use it to decide where code should live and what should not be duplicated.
+Read `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md` alongside this document during refactors, scaffold changes, or any pass that could create duplicate truth.
 
 ## Governing rule
 The shell layer presents controls and forwards intent.
@@ -86,6 +87,20 @@ It stores durable records that runtime interprets.
 ### Documentation files
 - `docs/*.md`
 
+## Scaffold discipline
+Folder scaffolding is not a presentation preference.
+It is part of architecture.
+
+For the current project state:
+- the app web root is repository root
+- `index.html` is the live shell HTML entry
+- `js/` contains the live shell/runtime/supporting JS
+- `css/` contains the live shell-facing CSS surface
+- `docs/` is documentation only
+
+Do not quietly reintroduce older scaffold shapes.
+If scaffold shape changes, update this document and `01_PROJECT_STATE.md` in the same pass.
+
 ## Hard implementation rules
 1. Do not move reading, TTS, importer, restore, or cleanup authority into shell code.
 2. Do not remove shell bridge code until the runtime replacement exists.
@@ -93,6 +108,9 @@ It stores durable records that runtime interprets.
 4. Do not silently change backend contracts during frontend cleanup.
 5. Do not assume module or bundler semantics.
 6. Do not break scaffold load order.
+7. Do not treat prototype convenience paths as production authority.
+8. Do not let two layers own the same launch-critical truth.
+9. Do not introduce a bridge without also defining the condition for its retirement.
 
 ## Current load order
 `app.js` loads runtime files in this order:
@@ -141,6 +159,65 @@ This order is part of the runtime contract.
 - prompt logic or prompt contracts
 - evaluation/import/TTS orchestration
 - any non-obvious rule that would materially help a copycat if exposed
+
+## Required local vs backend placement
+
+### Must stay local
+- reading entry responsiveness
+- active page truth
+- page rendering and visible card replacement
+- local playback controls and runtime state needed for responsiveness
+- importer staged-state truth in the browser
+- theme/appearance application
+
+### May stay local temporarily
+- shell bridges waiting for an explicit runtime replacement
+- local development simulation surfaces that are clearly bounded and not production authority
+- transitional CSS surfaces documented as debt
+
+### Must move backend-side before launch when feasible
+- premium-resolution logic
+- usage enforcement
+- provider/fallback policy
+- prompts and non-obvious orchestration
+- evaluation/import conversion rules that are valuable beyond ordinary UI wiring
+
+## Prototype-to-production rule
+Prototype conveniences are allowed only if all are true:
+- they are explicitly named as temporary
+- the real owner is known
+- the removal or retirement condition is documented
+- they are not silently treated as launch-ready authority
+
+Examples of prototype conveniences that require explicit retirement planning:
+- dev-tier simulation controls
+- fake auth or fake billing flows
+- shell auto-click bridges
+- DOM polling used to trigger runtime behavior
+- permissive client-side gating that is meant to be server-resolved later
+
+## Bridge lifecycle rule
+A shell/runtime bridge is acceptable only when:
+- the runtime replacement does not yet exist
+- the bridge points to a known target runtime API or behavior
+- the bridge does not create a second competing owner
+- the bridge is tracked as temporary architecture
+
+A bridge should be removed when:
+- the runtime replacement exists
+- runtime validation proves the replacement owns the behavior cleanly
+- the bridge is no longer reducing risk
+
+## Runtime anti-pattern blacklist
+Treat these as architectural defects unless explicitly documented as temporary and justified:
+- DOM polling as truth
+- mirroring runtime state in shell variables
+- auto-clicking buttons to trigger hidden state changes
+- duplicate mode/tier checks in multiple files
+- shell-side fallback logic that silently becomes runtime authority
+- production policy derived from cosmetic UI state
+- prototype helper paths that bypass the real owner layer
+- broad scaffold reshapes mixed into unrelated bug-fix passes
 
 ## Theme rule
 Themes are a presentation layer over one locked reading layout.

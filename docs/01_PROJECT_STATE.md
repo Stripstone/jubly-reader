@@ -96,6 +96,19 @@ Current role:
 - The app is now served from root with `/api/*` alongside it.
 - `docs/` is now documentation only.
 
+### Architectural discipline now treated as active project state
+- folder scaffolding is part of architecture and must be treated as an authority surface
+- the repository-root web app shape is intentional, not a cosmetic preference
+- mixed-era scaffolds are a real regression risk and must be rejected before patching
+- temporary shell bridges are allowed only when the runtime replacement does not yet exist
+- prototype conveniences must not silently become production authority
+- duplicate truth across shell/runtime/backend is treated as architectural debt or a defect
+
+See:
+- `03_ARCHITECTURE_MAP.md`
+- `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
+- `IMPLEMENTATION_WORKFLOW.md`
+
 ### Theme system now implemented
 - selected theme state belongs to runtime
 - appearance state belongs to runtime
@@ -129,6 +142,7 @@ Current role:
 - Validate important behavior in a served environment.
 - Do not wake up dormant CSS files just to satisfy the aspirational scaffold unless the pass is explicitly a CSS-surface redistribution pass.
 - Treat browser-delivered code as inspectable and move crown-jewel decision logic backend-side when feasible.
+- Treat scaffold verification as a precondition to implementation, not a cleanup step after patching.
 
 ## Current priority areas
 1. restore continuity
@@ -147,6 +161,8 @@ Current role:
    - the current wallpaper path should eventually become a clean local asset/reference in the live scaffold
 3. Theme/music support files are still narrow utilities.
    - `music.js` and `embers.js` are acceptable, but not yet part of a broader cleaned supporting-asset subsystem
+4. Some shell bridge behavior still needs deliberate retirement.
+   - these bridges must be tracked as temporary architecture, not accepted as permanent truth layers
 
 ## What this project is not yet
 It is not yet:

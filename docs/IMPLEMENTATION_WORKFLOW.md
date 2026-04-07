@@ -5,13 +5,24 @@ This document defines the default development loop for implementation work.
 It is agent-neutral.
 Use it whether the work is produced by OpenAI, Claude, or a human.
 
+Read `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md` alongside this workflow when a pass touches scaffold shape, ownership cleanup, or prototype-to-production migration.
+
 ## Core workflow
+
+### 0. Verify current scaffold and artifact reality
+Before planning or editing:
+- start from the latest accepted artifact or current runtime state
+- unpack into a fresh clean workspace
+- verify shape sentinels against current project state
+- confirm the pass is not using a mixed-era scaffold by accident
+
+If the base is wrong, discard the pass and restart from the correct state.
 
 ### 1. Define one bounded pass
 A pass should cover one coherent runtime-owned system or one contained follow-up inside that system.
 
 ### 2. Identify the owner layer
-Use the architecture map and runtime contract to decide where truth belongs.
+Use the architecture map, guardrails, and runtime contract to decide where truth belongs.
 
 Rule:
 - upstream authority first
@@ -40,6 +51,7 @@ Rules:
 - revise that same diff in place after runtime feedback
 - do not stack forward diffs for the same pass
 - produce a `.zip` only when new files or assets make that necessary
+- if new files are introduced, apply the current version-marker rule for the target artifact
 
 ### 5. Runtime test
 Served runtime results decide status.
@@ -55,12 +67,35 @@ Reclassify the work when:
 - the current diff is patching symptoms instead of authority
 - repeated revisions are not reducing the failure surface
 
+## Architectural discipline rules for implementation
+
+### Prototype-to-production rule
+If a pass still depends on a prototype convenience:
+- name it explicitly
+- confirm the real target owner
+- avoid letting it silently become permanent authority
+
+### Bridge rule
+If a bridge remains in place after the pass:
+- say which runtime owner it is waiting on
+- say why it still exists
+- do not add a second bridge casually in the same area
+
+### Scaffold rule
+Do not quietly patch against the wrong scaffold and “fix it later.”
+Scaffold mismatch invalidates the pass base.
+
+### Anti-pattern rule
+Do not use a pass to normalize bad architecture by accident.
+If the pass would legitimize duplicate truth, reclassify it and fix ownership first.
+
 ## Patch-safety rules
 - do not move runtime truth into shell
 - do not remove a bridge until the runtime replacement exists
 - do not widen a pass casually
 - do not let one fix silently redefine ownership
 - do not mix unrelated cleanup into a bounded pass
+- do not treat scaffold changes as harmless file moves; they are architectural changes
 
 ## Deliverables policy
 Every patch handoff should return:
@@ -77,6 +112,16 @@ Every active diff handoff should also say:
 - exact diff filename in play
 - whether the diff is cumulative or follow-up
 - latest runtime caveat, if any
+
+## Refactor entry questions
+Before starting a major refactor or redistribution pass, answer:
+- what is the owner layer?
+- what older layer is being retired or narrowed?
+- what scaffold shape is authoritative for this pass?
+- what prototype conveniences still exist here?
+- what runtime behavior must remain unchanged?
+
+If these answers are not clear, do proof or documentation sync first.
 
 ## When to stop using direct broad implementation
 Stop using broad implementation passes and switch to diff-driven cleanup when:
