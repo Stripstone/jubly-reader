@@ -705,46 +705,10 @@
             try { refreshExplorerPanel(); } catch (_) {}
         }, 500);
         patchRefreshHook();
-
-        const bookSel = document.getElementById('bookSelect');
-        const chSel   = document.getElementById('chapterSelect');
-        const loadBtn = document.getElementById('loadBookSelection');
-        const pageStart = document.getElementById('pageStart');
-        const pageEnd   = document.getElementById('pageEnd');
-        if (bookSel && chSel && loadBtn && pageStart && pageEnd) {
-            const waitForPages = (timeout = 2500) => new Promise(resolve => {
-                const started = Date.now();
-                (function poll() {
-                    if (pageStart.options.length > 0 && pageEnd.options.length > 0 && pageStart.value !== '' && pageEnd.value !== '') return resolve(true);
-                    if (Date.now() - started > timeout) return resolve(false);
-                    setTimeout(poll, 50);
-                })();
-            });
-            bookSel.addEventListener('change', async () => {
-                if (document.getElementById('reading-mode')?.classList.contains('hidden-section')) return;
-                // PATCH(source-continuity): Clear page selects before polling so stale options
-                // from the previous book cannot satisfy waitForPages() prematurely.
-                // loadBook() in library.js is async — it starts on the same tick but has not
-                // cleared the selects yet when this handler runs. Without this guard,
-                // waitForPages() resolves with old-book options and loadBtn fires against
-                // the previous book's currentPages/currentBookRaw.
-                pageStart.options.length = 0;
-                pageEnd.options.length = 0;
-                const ready = await waitForPages();
-                if (ready) {
-                    loadBtn.click();
-                    setTimeout(() => { try { if (typeof window.__jublyAfterRender === 'function') window.__jublyAfterRender(); } catch(_) {} }, 120);
-                }
-            });
-            chSel.addEventListener('change', async () => {
-                if (document.getElementById('reading-mode')?.classList.contains('hidden-section')) return;
-                const ready = await waitForPages();
-                if (ready) {
-                    loadBtn.click();
-                    setTimeout(() => { try { if (typeof window.__jublyAfterRender === 'function') window.__jublyAfterRender(); } catch(_) {} }, 120);
-                }
-            });
-        }
+        // Reading entry is now fully runtime-owned via startReadingFromPreview → __rcLoadBook.
+        // The previous poll/auto-click bridge (bookSel change → waitForPages → loadBtn.click)
+        // has been retired: loadBook() in library.js calls render() directly, and render()
+        // calls __jublyAfterRender itself. No shell polling or synthetic click is needed.
     });
 
     // ── Library table — populated by __jublyLibraryRefresh hook called from library.js ──
@@ -842,13 +806,13 @@
         openModal('preview-modal');
     }
 
-    function startReading() {
+    async function startReading() {
         closeModal('preview-modal');
         const signal = document.getElementById('session-complete');
         if (signal) signal.classList.add('hidden-section');
         showSection('reading-mode');
         if (!_previewBookId) return;
-        try { if (typeof startReadingFromPreview === 'function') startReadingFromPreview(_previewBookId); } catch (_) {}
+        try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(_previewBookId); } catch (_) {}
     }
 
     // Empty state drag/drop

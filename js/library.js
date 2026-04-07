@@ -1541,6 +1541,8 @@
     // Expose context helper so out-of-closure callers (startFocusedPageTts,
     // focusReadingPage, _installScrollPageTracker) can reach it.
     window.getReadingTargetContext = getReadingTargetContext;
+    // Expose the authoritative book load path for the runtime reading-entry API.
+    window.__rcLoadBook = loadBook;
   }
 
 
@@ -2006,6 +2008,7 @@
     try { applyPendingReadingRestore(); } catch (_) {}
     try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
     _installScrollPageTracker();
+    try { if (typeof window.__jublyAfterRender === 'function') window.__jublyAfterRender(); } catch (_) {}
   }
 
   function applyModeVisibility() {
@@ -2333,18 +2336,34 @@ window.startFocusedPageTts = function startFocusedPageTts() {
 
 window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 
+// Runtime-owned reading-entry API.
+// Resolves the book, prepares all page content, and renders page cards.
+// Returns true when reading is ready; shell awaits this rather than polling.
+// No selector event dispatch — the entire entry path is direct and awaited.
 window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
+  if (!bookId) return false;
+
+  // Set source selector to book mode for UI accuracy.
+  // setSourceUI() is display-only so no change event dispatch is needed here.
   const sourceSel = document.getElementById('importSource');
+  if (sourceSel && sourceSel.value !== 'book') sourceSel.value = 'book';
+
+  // Keep bookSelect value in sync for diagnostics and chapter navigation,
+  // but do not dispatch a change event — the load path is direct, not event-driven.
   const bookSel = document.getElementById('bookSelect');
-  if (!sourceSel || !bookSel || !bookId) return false;
-  sourceSel.value = 'book';
-  sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
-  const optionValues = Array.from(bookSel.options || []).map(opt => String(opt.value || ''));
-  const desiredBookId = optionValues.includes(String(bookId))
-    ? String(bookId)
-    : (optionValues.includes(`local:${bookId}`) ? `local:${bookId}` : String(bookId));
-  bookSel.value = desiredBookId;
-  bookSel.dispatchEvent(new Event('change', { bubbles: true }));
+  if (bookSel) {
+    const opts = Array.from(bookSel.options || []).map(o => String(o.value || ''));
+    const normalizedId = opts.includes(String(bookId)) ? String(bookId)
+      : (opts.includes(`local:${bookId}`) ? `local:${bookId}` : String(bookId));
+    bookSel.value = normalizedId;
+  }
+
+  // Await the runtime-owned book load path directly.
+  // loadBook fetches book data, prepares pages, and calls render() before returning.
+  // Reading is ready when this resolves — no polling or secondary click needed.
+  if (typeof window.__rcLoadBook === 'function') {
+    try { await window.__rcLoadBook(String(bookId)); } catch (_) {}
+  }
   return true;
 };
 
