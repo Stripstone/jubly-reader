@@ -253,6 +253,7 @@ When shell behavior and scaffold behavior overlap, the scaffold wins by default 
 Anything shipped to the browser is inspectable.
 
 Rules:
+- the client target is a lean runtime shell: presentation, local responsiveness, and thin backend adapters — not protected business or policy ownership
 - keep runtime-owned reading responsiveness local
 - do not move reading continuity, active page truth, or local control truth server-side just for secrecy
 - move crown-jewel business logic, premium resolution, provider policy, prompt logic, usage enforcement, and non-obvious orchestration backend-side when feasible

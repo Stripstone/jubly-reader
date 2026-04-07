@@ -69,6 +69,29 @@ The browser should keep:
 
 It should not be the primary home of the most valuable logic.
 
+## Minimal frontend standard
+Jubly Reader should ship a **minimal frontend by responsibility**, not merely by file count.
+
+The frontend may contain only what must remain browser-side for:
+- rendering and presentation
+- local reading interaction and responsiveness
+- local runtime state required for truthful controls
+- visual/theme application
+- device-only flows
+- thin adapters that call backend-owned truth
+- commodity or vendor/browser SDK code that does not reveal Jubly-specific business logic
+
+The frontend must not be the primary home of:
+- entitlement, plan, trial, or usage truth
+- provider-selection or fallback policy
+- prompts or prompt contracts
+- premium-resolution logic
+- non-obvious orchestration or algorithmically valuable rules
+- hidden debug or override paths that expose internal policy
+
+Practical rule:
+If exposing a client file would materially shorten a copycat’s path, that logic is in the wrong place unless browser-local execution is truly required for runtime responsiveness.
+
 ## Architectural discipline consequence
 Protected-code work fails if scaffold and ownership discipline are weak.
 

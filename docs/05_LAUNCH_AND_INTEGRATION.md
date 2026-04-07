@@ -48,6 +48,7 @@ These must be true before launch is considered honest:
 ### Code-exposure requirements
 These must be true before launch is considered honest:
 - the public browser bundle does not contain avoidable crown-jewel business logic
+- the frontend bundle is limited to presentation, local responsiveness, and thin adapters rather than owning protected business or policy truth
 - prompts and non-obvious orchestration rules are not unnecessarily exposed in client JS
 - provider/fallback policy is server-owned where feasible
 - public production bundles do not expose source maps or similar debug aids by default

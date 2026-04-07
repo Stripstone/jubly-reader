@@ -25,6 +25,8 @@ Folder scaffolding and architecture are part of behavior discipline, not mere co
 
 If a scaffold shape, bridge pattern, or prototype convenience makes ownership ambiguous, that is an architectural problem even before runtime breaks visibly.
 
+Treat any drift from thin-client responsibilities toward client-owned business or policy truth as protected-code regression, even if runtime behavior still appears correct.
+
 ## Non-negotiable rules
 
 ### 1. One owner per launch-critical truth
