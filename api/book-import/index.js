@@ -11,6 +11,7 @@
 // so no single function invocation risks a timeout.
 
 import { json, withCors, readJsonBody } from "../_lib/http.js";
+import { getAllowedBrowserOrigins } from "../_lib/origins.js";
 
 const FC_API = "https://api.freeconvert.com/v1";
 
@@ -29,11 +30,7 @@ function fcHeaders() {
 }
 
 export default async function handler(req, res) {
-  const allowed = [
-    "https://stripstone.github.io",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-  ];
+  const allowed = getAllowedBrowserOrigins();
   // withCors handles OPTIONS preflight and sets headers on all responses.
   // Returns true if it already responded (preflight), so we stop here.
   if (withCors(req, res, allowed)) return;

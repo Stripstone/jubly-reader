@@ -42,6 +42,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   // Current subscription tier: 'free', 'paid', 'premium'
   // During prototype: controls feature access in UI but does not enforce usage limits.
   let appTier = 'free';
+  let runtimePolicy = null;
 
   // ---- Token Tracking ----
   // Session token counter. Counts consumption per category for diagnostic purposes.
@@ -61,14 +62,173 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     research: 3,
   };
 
-  const TOKEN_ALLOWANCES = {
-    free:    100,
-    paid:    1000,
-    premium: 10000,
-  };
+  const SAFE_FALLBACK_POLICY = Object.freeze({
+    version: 1,
+    tier: 'free',
+    simulationAllowed: false,
+    usageDailyLimit: 100,
+    importSlotLimit: 2,
+    features: Object.freeze({
+      modes: Object.freeze({
+        reading: true,
+        comprehension: false,
+        research: false,
+      }),
+      aiEvaluate: false,
+      anchors: false,
+      cloudVoices: false,
+      themes: Object.freeze({
+        explorer: false,
+        customMusic: false,
+      }),
+    }),
+  });
+
+
+  function normalizeAppTier(value) {
+    const tier = String(value || '').trim().toLowerCase();
+    return ['free', 'paid', 'premium'].includes(tier) ? tier : 'free';
+  }
+
+  function getFallbackRuntimePolicy(tierInput) {
+    const tier = normalizeAppTier(tierInput);
+    return {
+      version: SAFE_FALLBACK_POLICY.version,
+      tier,
+      simulationAllowed: typeof canSimulateTierOnCurrentHost === 'function' ? !!canSimulateTierOnCurrentHost() : false,
+      usageDailyLimit: SAFE_FALLBACK_POLICY.usageDailyLimit,
+      importSlotLimit: SAFE_FALLBACK_POLICY.importSlotLimit,
+      features: {
+        modes: {
+          reading: true,
+          comprehension: SAFE_FALLBACK_POLICY.features.modes.comprehension,
+          research: SAFE_FALLBACK_POLICY.features.modes.research,
+        },
+        aiEvaluate: SAFE_FALLBACK_POLICY.features.aiEvaluate,
+        anchors: SAFE_FALLBACK_POLICY.features.anchors,
+        cloudVoices: SAFE_FALLBACK_POLICY.features.cloudVoices,
+        themes: {
+          explorer: SAFE_FALLBACK_POLICY.features.themes.explorer,
+          customMusic: SAFE_FALLBACK_POLICY.features.themes.customMusic,
+        },
+      },
+    };
+  }
+
+  function normalizeRuntimePolicy(raw, tierHint) {
+    const fallback = getFallbackRuntimePolicy(tierHint);
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const tier = normalizeAppTier(source.tier || fallback.tier);
+    const usageDailyLimit = Number(source.usageDailyLimit);
+    const rawImportSlotLimit = source.importSlotLimit;
+    const normalizedImportSlotLimit = rawImportSlotLimit == null
+      ? null
+      : Number(rawImportSlotLimit);
+    const features = source.features && typeof source.features === 'object' ? source.features : {};
+    const modes = features.modes && typeof features.modes === 'object' ? features.modes : {};
+    const themes = features.themes && typeof features.themes === 'object' ? features.themes : {};
+
+    return {
+      version: Number(source.version) || fallback.version,
+      tier,
+      simulationAllowed: typeof source.simulationAllowed === 'boolean' ? source.simulationAllowed : fallback.simulationAllowed,
+      usageDailyLimit: Number.isFinite(usageDailyLimit) && usageDailyLimit > 0
+        ? usageDailyLimit
+        : fallback.usageDailyLimit,
+      importSlotLimit: normalizedImportSlotLimit == null
+        ? fallback.importSlotLimit
+        : (Number.isFinite(normalizedImportSlotLimit) && normalizedImportSlotLimit > 0 ? Math.floor(normalizedImportSlotLimit) : fallback.importSlotLimit),
+      features: {
+        modes: {
+          reading: true,
+          comprehension: typeof modes.comprehension === 'boolean' ? modes.comprehension : fallback.features.modes.comprehension,
+          research: typeof modes.research === 'boolean' ? modes.research : fallback.features.modes.research,
+        },
+        aiEvaluate: typeof features.aiEvaluate === 'boolean' ? features.aiEvaluate : fallback.features.aiEvaluate,
+        anchors: typeof features.anchors === 'boolean' ? features.anchors : fallback.features.anchors,
+        cloudVoices: typeof features.cloudVoices === 'boolean' ? features.cloudVoices : fallback.features.cloudVoices,
+        themes: {
+          explorer: typeof themes.explorer === 'boolean' ? themes.explorer : fallback.features.themes.explorer,
+          customMusic: typeof themes.customMusic === 'boolean' ? themes.customMusic : fallback.features.themes.customMusic,
+        },
+      },
+    };
+  }
+
+  function getRuntimePolicy() {
+    if (runtimePolicy && typeof runtimePolicy === 'object') return runtimePolicy;
+    runtimePolicy = getFallbackRuntimePolicy(appTier);
+    return runtimePolicy;
+  }
+
+  function getRuntimeUsageAllowance() {
+    const limit = Number(getRuntimePolicy()?.usageDailyLimit);
+    return Number.isFinite(limit) && limit > 0 ? limit : SAFE_FALLBACK_POLICY.usageDailyLimit;
+  }
+
+
+  function getRuntimeImportSlotLimit() {
+    const limit = getRuntimePolicy()?.importSlotLimit;
+    return limit == null ? null : (Number.isFinite(Number(limit)) && Number(limit) > 0 ? Math.floor(Number(limit)) : null);
+  }
+
+  function hasRuntimeImportCapacity(currentCount) {
+    const count = Number(currentCount);
+    const normalizedCount = Number.isFinite(count) && count >= 0 ? count : 0;
+    const limit = getRuntimeImportSlotLimit();
+    return limit == null ? true : normalizedCount < limit;
+  }
+
+  function canUseMode(modeName) {
+    const mode = String(modeName || '').trim().toLowerCase();
+    if (mode === 'reading') return true;
+    const policy = getRuntimePolicy();
+    return !!policy?.features?.modes?.[mode];
+  }
+
+  function canUseAiEvaluate() {
+    return !!getRuntimePolicy()?.features?.aiEvaluate;
+  }
+
+  function canUseAnchors() {
+    return !!getRuntimePolicy()?.features?.anchors;
+  }
+
+  function canUseCloudVoices() {
+    return !!getRuntimePolicy()?.features?.cloudVoices;
+  }
+
+  function applyResolvedRuntimePolicy(policyLike, tierHint) {
+    runtimePolicy = normalizeRuntimePolicy(policyLike, tierHint);
+    appTier = runtimePolicy.tier;
+    try { tokenReset(); } catch (_) {}
+    try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
+    try {
+      const detail = { policy: runtimePolicy };
+      document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
+      window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
+    } catch (_) {}
+    return runtimePolicy;
+  }
+
+  async function refreshRuntimePolicy(requestedTier) {
+    const tier = normalizeAppTier(requestedTier || getRuntimeTier());
+    try {
+      const response = await fetch(apiUrl(`/api/runtime-config?tier=${encodeURIComponent(tier)}`), {
+        method: 'GET',
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(`runtime-config ${response.status}`);
+      const payload = await response.json();
+      return applyResolvedRuntimePolicy(payload?.policy || payload, tier);
+    } catch (_) {
+      const fallbackTier = (typeof canSimulateTierOnCurrentHost === 'function' && canSimulateTierOnCurrentHost()) ? tier : 'free';
+      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy(fallbackTier), fallbackTier);
+    }
+  }
 
   let sessionTokens = {
-    remaining: TOKEN_ALLOWANCES['free'],
+    remaining: SAFE_FALLBACK_POLICY.usageDailyLimit,
     spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
   };
 
@@ -81,7 +241,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
 
   function tokenReset() {
     sessionTokens = {
-      remaining: TOKEN_ALLOWANCES[appTier] || 1000,
+      remaining: getRuntimeUsageAllowance(),
       spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
     };
   }
@@ -560,9 +720,11 @@ function saveDiagnosticsPrefs(payload) {
 
 function getRuntimeTier() {
   try {
+    const fromPolicy = normalizeAppTier(runtimePolicy?.tier || '');
+    if (fromPolicy && fromPolicy !== 'free') return fromPolicy;
     const sel = document.getElementById('tierSelect');
     const tier = sel && sel.value ? String(sel.value) : String(appTier || 'free');
-    return ['free', 'paid', 'premium'].includes(tier) ? tier : 'free';
+    return normalizeAppTier(tier);
   } catch (_) {
     return 'free';
   }
@@ -570,12 +732,12 @@ function getRuntimeTier() {
 
 function canUseTheme(themeId) {
   const theme = String(themeId || 'default');
-  if (theme === 'explorer') return getRuntimeTier() !== 'free';
+  if (theme === 'explorer') return !!getRuntimePolicy()?.features?.themes?.explorer;
   return true;
 }
 
 function canUseCustomMusic() {
-  return canUseTheme('explorer');
+  return !!getRuntimePolicy()?.features?.themes?.customMusic;
 }
 
 function applyThemeClass(themeName) {
@@ -810,13 +972,30 @@ window.rcDiagnosticsPrefs = {
   }
 };
 
+window.rcPolicy = {
+  get: getRuntimePolicy,
+  refreshForTier: refreshRuntimePolicy,
+  apply: applyResolvedRuntimePolicy,
+  canSimulateTier: canSimulateTierSelection,
+  getTier: getRuntimeTier,
+  getUsageDailyLimit: getRuntimeUsageAllowance,
+  getImportSlotLimit: getRuntimeImportSlotLimit,
+  hasImportCapacity: hasRuntimeImportCapacity,
+  canUseMode,
+  canUseAiEvaluate,
+  canUseAnchors,
+  canUseCloudVoices
+};
+
 window.rcEntitlements = {
   getTier: getRuntimeTier,
+  getResolvedPolicy: getRuntimePolicy,
   canUseTheme,
   canUseCustomMusic,
   enforceThemeAccess
 };
 
+applyResolvedRuntimePolicy(getFallbackRuntimePolicy(appTier), appTier);
 loadAppearance();
 loadTheme();
 

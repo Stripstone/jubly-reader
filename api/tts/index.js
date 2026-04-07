@@ -1,13 +1,15 @@
 // api/tts/index.js
-// TTS endpoint with S3 caching.
-// Provider selection: Azure Neural TTS (preferred, if AZURE_SPEECH_KEY is set) or Amazon Polly (fallback).
+// Cloud TTS endpoint with S3 caching.
+// Provider selection and fallback policy live here, not in browser JS.
+// Current provider order:
+//   1) Azure Neural TTS when AZURE_SPEECH_KEY + AZURE_SPEECH_REGION are both set
+//   2) Amazon Polly otherwise
 //
 // Request JSON:
 //   - text (string, required)
 //   - voiceId (string, optional)      // Azure voice short name (e.g. "en-US-AriaNeural") or Polly voice id
-//   - voiceVariant (string, optional) // 'male' | 'female' — maps to env var defaults
-//   - engine (string, optional)       // Polly only: 'neural' | 'standard'
-//   - speechMarks (string, optional)  // Polly only: 'sentence' to request timing marks
+//   - voiceVariant (string, optional) // 'male' | 'female' — maps to server defaults
+//   - speechMarks (string, optional)  // sentence timing request; fulfilled only when provider supports it
 //   - nocache (bool, optional)        // bypass S3 cache (dev use)
 //   - debug (bool, optional)          // return extra metadata
 //
@@ -15,22 +17,22 @@
 //   - url (string)        // presigned S3 URL for the mp3
 //   - cacheHit (boolean)
 //   - provider (string)   // 'azure' | 'polly'
-//
-// Azure env vars:
-//   AZURE_SPEECH_KEY      (required for Azure)
-//   AZURE_SPEECH_REGION   (required for Azure, e.g. "eastus")
-//   AZURE_VOICE_FEMALE    (default female voice, e.g. "en-US-AriaNeural")
-//   AZURE_VOICE_MALE      (default male voice, e.g. "en-US-RyanNeural")
+//   - sentenceMarks?      // present only when the active provider returned them
 
 import crypto from "node:crypto";
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { S3Client, HeadObjectCommand, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { json, withCors, readJsonBody } from "../_lib/http.js";
+import { getAllowedBrowserOrigins } from "../_lib/origins.js";
 
 function requiredEnv(name) {
   const v = process.env[name];
   return typeof v === "string" && v.trim() ? v.trim() : "";
+}
+
+function hasAzureCloudTts() {
+  return !!(requiredEnv("AZURE_SPEECH_KEY") && requiredEnv("AZURE_SPEECH_REGION"));
 }
 
 function sha256Hex(s) {
@@ -78,29 +80,62 @@ function escapeXml(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+function resolveAzureVoiceId(voiceVariant, explicitVoiceId) {
+  if (explicitVoiceId) return String(explicitVoiceId).trim();
+  const envFemale = requiredEnv("AZURE_VOICE_FEMALE") || "en-US-AriaNeural";
+  const envMale = requiredEnv("AZURE_VOICE_MALE") || "en-US-RyanNeural";
+  return String(voiceVariant === "male" ? envMale : envFemale).trim();
+}
+
+function resolvePollyDefaults(debug) {
+  const envStandard = requiredEnv("POLLY_ENGINE_STANDARD") || requiredEnv("POLLY_ENGINE") || "standard";
+  const envPremium = requiredEnv("POLLY_ENGINE_PREMIUM") || requiredEnv("POLLY_ENGINE") || "neural";
+  const engine = (debug ? envPremium : envStandard) === "standard" ? "standard" : "neural";
+  const envFemale = requiredEnv("POLLY_VOICE_ID_FEMALE") || requiredEnv("POLLY_VOICE_ID") || "Joanna";
+  const envMaleStd = requiredEnv("POLLY_VOICE_ID_MALE") || requiredEnv("POLLY_VOICE_ID") || "Matthew";
+  const envMaleNeural = requiredEnv("POLLY_VOICE_ID_MALE_2") || envMaleStd;
+  return { engine, envFemale, envMaleStd, envMaleNeural };
+}
+
+function resolveCloudPolicy(body, debug) {
+  const voiceVariant = String(body?.voiceVariant ?? "").trim().toLowerCase();
+  const explicitVoiceId = String(body?.voiceId ?? "").trim();
+
+  if (hasAzureCloudTts()) {
+    return {
+      provider: "azure",
+      voiceId: resolveAzureVoiceId(voiceVariant, explicitVoiceId),
+      sentenceMarksMode: "client-estimated",
+    };
+  }
+
+  const pollyDefaults = resolvePollyDefaults(debug);
+  const voiceId = explicitVoiceId || (voiceVariant === "male"
+    ? (pollyDefaults.engine === "standard" ? pollyDefaults.envMaleStd : pollyDefaults.envMaleNeural)
+    : pollyDefaults.envFemale);
+
+  return {
+    provider: "polly",
+    voiceId: String(voiceId || "Joanna").trim(),
+    engine: pollyDefaults.engine,
+    sentenceMarksMode: "provider-sentence-marks",
+  };
 }
 
 // ── Azure Neural TTS synthesis ────────────────────────────────────────────────
 // Azure Cognitive Services Speech REST API.
 // Uses SSML for voice selection with slight rate reduction for reading clarity.
 // Returns raw audio/mpeg at 24kHz.
-//
-// Curated English narration voices:
-//   Female: en-US-AriaNeural, en-US-JennyNeural, en-US-SaraNeural,
-//           en-GB-SoniaNeural, en-AU-NatashaNeural
-//   Male:   en-US-RyanNeural, en-US-GuyNeural, en-US-DavisNeural,
-//           en-GB-RyanNeural, en-AU-WilliamNeural
-
 async function azureSynthesize(text, voiceName) {
-  const key    = requiredEnv("AZURE_SPEECH_KEY");
+  const key = requiredEnv("AZURE_SPEECH_KEY");
   const region = requiredEnv("AZURE_SPEECH_REGION");
   if (!key || !region) throw new Error("AZURE_SPEECH_KEY or AZURE_SPEECH_REGION not set");
 
   const voice = voiceName || "en-US-AriaNeural";
-
-  // rate="0.95" — slight reduction for reading comprehension clarity
   const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
   <voice name="${voice}">
     <prosody rate="0.95">${escapeXml(text)}</prosody>
@@ -108,14 +143,13 @@ async function azureSynthesize(text, voiceName) {
 </speak>`;
 
   const endpoint = `https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`;
-
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Ocp-Apim-Subscription-Key": key,
       "Content-Type": "application/ssml+xml",
       "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
-      "User-Agent": "ReadingTrainer/1.0",
+      "User-Agent": "JublyReader/1.0",
     },
     body: ssml,
   });
@@ -128,13 +162,72 @@ async function azureSynthesize(text, voiceName) {
   return Buffer.from(await res.arrayBuffer());
 }
 
+async function synthesizeCloudAudio({ awsRegion, text, policy }) {
+  if (policy.provider === "azure") {
+    return azureSynthesize(text, policy.voiceId);
+  }
+
+  const cmd = new SynthesizeSpeechCommand({
+    OutputFormat: "mp3",
+    Text: text,
+    VoiceId: policy.voiceId,
+    Engine: policy.engine,
+    TextType: "text",
+  });
+  const out = await new PollyClient({ region: awsRegion }).send(cmd);
+  if (!out?.AudioStream) throw new Error("Polly synthesis failed");
+  return streamToBuffer(out.AudioStream);
+}
+
+async function resolveSentenceMarks({ awsRegion, bucket, cacheHit, nocache, marksKey, policy, s3, text }) {
+  if (policy.provider !== "polly") return null;
+
+  let marksCacheHit = false;
+  if (!nocache) {
+    try {
+      await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: marksKey }));
+      marksCacheHit = true;
+    } catch (_) {}
+  }
+
+  try {
+    if (!marksCacheHit) {
+      const marksCmd = new SynthesizeSpeechCommand({
+        OutputFormat: "json",
+        Text: text,
+        VoiceId: policy.voiceId,
+        Engine: policy.engine,
+        TextType: "text",
+        SpeechMarkTypes: ["sentence"],
+      });
+      const marksOut = await new PollyClient({ region: awsRegion }).send(marksCmd);
+      if (!marksOut?.AudioStream) return [];
+      const marksBuf = await streamToBuffer(marksOut.AudioStream);
+      const sentenceMarks = parseSpeechMarksLines(marksBuf);
+      await s3.send(new PutObjectCommand({
+        Bucket: bucket,
+        Key: marksKey,
+        Body: Buffer.from(JSON.stringify(sentenceMarks), "utf8"),
+        ContentType: "application/json; charset=utf-8",
+        CacheControl: "public, max-age=31536000, immutable",
+      }));
+      return sentenceMarks;
+    }
+
+    const got = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: marksKey }));
+    const buf = got?.Body ? await streamToBuffer(got.Body) : Buffer.from("[]");
+    try {
+      return JSON.parse(buf.toString("utf8"));
+    } catch (_) {
+      return [];
+    }
+  } catch (_) {
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
-  const allowed = [
-    "https://stripstone.github.io",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "null",
-  ];
+  const allowed = [...getAllowedBrowserOrigins(), "null"];
   if (withCors(req, res, allowed)) return;
 
   try {
@@ -158,144 +251,70 @@ export default async function handler(req, res) {
       return json(res, 500, { error: "Missing AWS S3 configuration", detail: "Set AWS_REGION and AWS_S3_BUCKET." });
     }
 
-    // ── Provider selection ────────────────────────────────────────────────────
-    const useAzure = Boolean(requiredEnv("AZURE_SPEECH_KEY"));
-    const voiceVariant = String(body?.voiceVariant ?? "").trim().toLowerCase();
+    const policy = resolveCloudPolicy(body, debug);
 
-    let resolvedVoiceId;
-    let provider;
-    let providerRequested;
-    let azureFallback = false;
-
-    if (useAzure) {
-      provider = "azure";
-      providerRequested = "azure";
-      const envFemale = requiredEnv("AZURE_VOICE_FEMALE") || "en-US-AriaNeural";
-      const envMale   = requiredEnv("AZURE_VOICE_MALE")   || "en-US-RyanNeural";
-      resolvedVoiceId = String(body?.voiceId || (voiceVariant === "male" ? envMale : envFemale)).trim();
-    } else {
-      provider = "polly";
-      providerRequested = "polly";
-      const envStandard   = requiredEnv("POLLY_ENGINE_STANDARD") || requiredEnv("POLLY_ENGINE") || "standard";
-      const envPremium    = requiredEnv("POLLY_ENGINE_PREMIUM")  || requiredEnv("POLLY_ENGINE") || "neural";
-      const engine        = (debug ? envPremium : envStandard) === "standard" ? "standard" : "neural";
-      const envFemale     = requiredEnv("POLLY_VOICE_ID_FEMALE") || requiredEnv("POLLY_VOICE_ID");
-      const envMaleStd    = requiredEnv("POLLY_VOICE_ID_MALE")   || requiredEnv("POLLY_VOICE_ID");
-      const envMaleNeural = requiredEnv("POLLY_VOICE_ID_MALE_2") || envMaleStd;
-      resolvedVoiceId = String(body?.voiceId || (voiceVariant === "male"
-        ? (engine === "standard" ? envMaleStd : envMaleNeural)
-        : envFemale
-      ) || "Joanna").trim();
-    }
-
-    // ── S3 caching ────────────────────────────────────────────────────────────
-    const prefix    = toSafePrefix(requiredEnv("AWS_S3_PREFIX"));
-    const identity  = JSON.stringify({ provider, voiceId: resolvedVoiceId, text });
-    const hash      = sha256Hex(identity);
+    const prefix = toSafePrefix(requiredEnv("AWS_S3_PREFIX"));
+    const identity = JSON.stringify({ provider: policy.provider, voiceId: policy.voiceId, text });
+    const hash = sha256Hex(identity);
     const objectKey = `${prefix}${hash}.mp3`;
-    const marksKey  = `${prefix}${hash}.sentence.json`;
+    const marksKey = `${prefix}${hash}.sentence.json`;
 
     const s3 = new S3Client({ region: awsRegion });
 
     let cacheHit = false;
     if (!nocache) {
-      try { await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey })); cacheHit = true; }
-      catch (_) { cacheHit = false; }
+      try {
+        await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey }));
+        cacheHit = true;
+      } catch (_) {
+        cacheHit = false;
+      }
     }
 
-    // ── Synthesis ─────────────────────────────────────────────────────────────
     if (!cacheHit) {
-      let audioBuf;
-      if (useAzure) {
-        try {
-          audioBuf = await azureSynthesize(text, resolvedVoiceId);
-        } catch (azErr) {
-          const pollyVoice = requiredEnv("POLLY_VOICE_ID_FEMALE") || requiredEnv("POLLY_VOICE_ID");
-          if (!pollyVoice) {
-            console.error("[tts] Azure failed, no Polly fallback configured:", azErr);
-            throw azErr;
-          }
-          console.warn("[tts] Azure failed, falling back to Polly:", azErr.message);
-          provider = "polly";
-          azureFallback = true;
-          resolvedVoiceId = voiceVariant === "male"
-            ? (requiredEnv("POLLY_VOICE_ID_MALE") || pollyVoice)
-            : pollyVoice;
-          const cmd = new SynthesizeSpeechCommand({
-            OutputFormat: "mp3", Text: text, VoiceId: resolvedVoiceId,
-            Engine: "neural", TextType: "text",
-          });
-          const out = await (new PollyClient({ region: awsRegion })).send(cmd);
-          if (!out?.AudioStream) return json(res, 502, { error: "Polly synthesis failed (Azure fallback)" });
-          audioBuf = await streamToBuffer(out.AudioStream);
-        }
-      } else {
-        const engineRaw = String(body?.engine || (debug ? "neural" : "standard")).trim().toLowerCase();
-        const engine = engineRaw === "standard" ? "standard" : "neural";
-        const cmd = new SynthesizeSpeechCommand({
-          OutputFormat: "mp3", Text: text, VoiceId: resolvedVoiceId,
-          Engine: engine, TextType: "text",
-        });
-        const out = await (new PollyClient({ region: awsRegion })).send(cmd);
-        if (!out?.AudioStream) return json(res, 502, { error: "Polly synthesis failed" });
-        audioBuf = await streamToBuffer(out.AudioStream);
-      }
-
+      const audioBuf = await synthesizeCloudAudio({ awsRegion, text, policy });
       await s3.send(new PutObjectCommand({
-        Bucket: bucket, Key: objectKey, Body: audioBuf,
+        Bucket: bucket,
+        Key: objectKey,
+        Body: audioBuf,
         ContentType: "audio/mpeg",
         CacheControl: "public, max-age=31536000, immutable",
       }));
     }
 
-    // ── Sentence marks (Polly only — Azure SSML word boundaries not implemented) ──
     let sentenceMarks = null;
-    if (wantSentenceMarks && !useAzure) {
-      let marksCacheHit = false;
-      if (!nocache) {
-        try { await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: marksKey })); marksCacheHit = true; }
-        catch (_) {}
-      }
-      try {
-        if (!marksCacheHit) {
-          const polly = new PollyClient({ region: awsRegion });
-          const engineRaw = String(body?.engine || (debug ? "neural" : "standard")).trim().toLowerCase();
-          const engine = engineRaw === "standard" ? "standard" : "neural";
-          const marksCmd = new SynthesizeSpeechCommand({
-            OutputFormat: "json", Text: text, VoiceId: resolvedVoiceId,
-            Engine: engine, TextType: "text", SpeechMarkTypes: ["sentence"],
-          });
-          const marksOut = await polly.send(marksCmd);
-          if (marksOut?.AudioStream) {
-            const marksBuf = await streamToBuffer(marksOut.AudioStream);
-            sentenceMarks = parseSpeechMarksLines(marksBuf);
-            await s3.send(new PutObjectCommand({
-              Bucket: bucket, Key: marksKey,
-              Body: Buffer.from(JSON.stringify(sentenceMarks), "utf8"),
-              ContentType: "application/json; charset=utf-8",
-              CacheControl: "public, max-age=31536000, immutable",
-            }));
-          } else { sentenceMarks = []; }
-        } else {
-          const got = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: marksKey }));
-          const buf = got?.Body ? await streamToBuffer(got.Body) : Buffer.from("[]");
-          try { sentenceMarks = JSON.parse(buf.toString("utf8")); } catch(_) { sentenceMarks = []; }
-        }
-      } catch(_) { sentenceMarks = null; }
+    if (wantSentenceMarks) {
+      sentenceMarks = await resolveSentenceMarks({
+        awsRegion,
+        bucket,
+        cacheHit,
+        nocache,
+        marksKey,
+        policy,
+        s3,
+        text,
+      });
     }
 
-    // ── Response ──────────────────────────────────────────────────────────────
     const url = await getSignedUrl(
       s3,
       new GetObjectCommand({ Bucket: bucket, Key: objectKey }),
       { expiresIn: 60 * 60 }
     );
 
-    const payload = { url, cacheHit, provider };
+    const payload = { url, cacheHit, provider: policy.provider };
     if (wantSentenceMarks && Array.isArray(sentenceMarks)) payload.sentenceMarks = sentenceMarks;
-    if (debug) payload.debug = { providerRequested: providerRequested || provider, providerResolved: provider, voiceId: resolvedVoiceId, objectKey, textLength: text.length, cacheHit, azureFallback };
+    if (debug) {
+      payload.debug = {
+        providerResolved: policy.provider,
+        voiceId: policy.voiceId,
+        objectKey,
+        textLength: text.length,
+        cacheHit,
+        sentenceMarksMode: policy.sentenceMarksMode,
+      };
+    }
     return json(res, 200, payload);
-
   } catch (err) {
     return json(res, 500, { error: "Server error", detail: String(err) });
   }

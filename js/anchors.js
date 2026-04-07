@@ -5,33 +5,12 @@
   // Anchors (core idea targets)
   // ===================================
 
-  // API base:
-  // - On Vercel (static+API together) we can use relative paths.
-  // - On GitHub Pages (static only) we need an absolute Vercel URL.
-  // Override precedence:
+  // API base is resolved centrally in config.js.
+  // Override precedence remains:
   //   1) ?api=https://your-vercel.app
   //   2) localStorage rc_api_base
-  //   3) default fallback
-  const DEFAULT_API_BASE = "https://reading-comprehension-rpwd.vercel.app";
-  function resolveApiBase() {
-    try {
-      const qs = new URLSearchParams(window.location.search);
-      const fromQs = (qs.get('api') || '').trim();
-      if (fromQs) return fromQs.replace(/\/$/, '');
-      const fromLs = (localStorage.getItem('rc_api_base') || '').trim();
-      if (fromLs) return fromLs.replace(/\/$/, '');
-      // If we're already on a host that should serve /api (e.g., Vercel), prefer relative.
-      if (window.location.hostname.endsWith('vercel.app')) return "";
-      return DEFAULT_API_BASE;
-    } catch (_) {
-      return DEFAULT_API_BASE;
-    }
-  }
-  const API_BASE = resolveApiBase();
-  function apiUrl(path) {
-    // path should start with '/'
-    return API_BASE ? (API_BASE + path) : path;
-  }
+  //   3) same-origin when the current host serves /api
+  //   4) canonical public Vercel origin
   // ----------------------------------------------------
   // Anchor cache invalidation
   // ----------------------------------------------------
@@ -390,7 +369,7 @@ function writeAnchorsToCache(pageHash, payload) {
 
   async function fetchAnchorsForPageText(pageText, pageHash) {
     const debug = isDebugEnabledFromUrl();
-    const url = `${API_BASE}/api/anchors`;
+    const url = apiUrl('/api/anchors');
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -694,6 +673,12 @@ function writeAnchorsToCache(pageHash, payload) {
   function bindHintButton(pageEl, pageIndex) {
     const btn = pageEl.querySelector('.hint-btn');
     if (!btn) return;
+    if (!canUseAnchorsRuntime()) {
+      btn.disabled = true;
+      btn.setAttribute('aria-disabled', 'true');
+      btn.title = 'Anchors are not available on the active plan';
+      return;
+    }
     btn.addEventListener('click', async () => {
       const pd = pageData?.[pageIndex];
 
@@ -752,6 +737,7 @@ function writeAnchorsToCache(pageHash, payload) {
   }
 
   async function hydrateAnchorsIntoPageEl(pageEl, pageIndex) {
+    if (!canUseAnchorsRuntime()) return;
     const text = String(pages?.[pageIndex] || '');
     if (!pageEl || !text) return;
     const textEl = pageEl.querySelector('.page-text');

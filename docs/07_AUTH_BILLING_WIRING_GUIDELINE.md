@@ -1,4 +1,4 @@
-# Reading Trainer — Auth and Billing Wiring Guideline
+# Jubly Reader — Auth and Billing Wiring Guideline
 
 This document explains how to wire auth, pricing, subscription, billing, usage, and entitlement surfaces into the current architecture without breaking runtime authority.
 

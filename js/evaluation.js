@@ -209,6 +209,12 @@
     const feedbackDiv = document.querySelector(`.ai-feedback[data-page="${pageIndex}"]`);
     if (!aiBtn || !feedbackDiv) return;
 
+    const policyApi = window.rcPolicy || {};
+    if (typeof policyApi.canUseAiEvaluate === 'function' && !policyApi.canUseAiEvaluate()) {
+      alert('AI evaluation is not available on the active plan.');
+      return;
+    }
+
     if (appMode === 'research') {
       alert('Research Mode evaluation is coming soon!\n\nIn this mode, your consolidations will be evaluated for consistency with your research thesis rather than general comprehension.');
       return;

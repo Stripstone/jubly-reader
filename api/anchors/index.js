@@ -1,22 +1,32 @@
 // api/anchors/index.js
 import { buildAnchorsMessages } from "../_lib/prompt.js";
 import { json, withCors, readJsonBody } from "../_lib/http.js";
+import { getAllowedBrowserOrigins } from "../_lib/origins.js";
 import { normalizeAnchorsWithDebug, sha256Hex, ANCHOR_VERSION } from "../_lib/anchors.js";
+import { getResolvedRuntimePolicyForRequest } from "../_lib/runtime-policy.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 export default async function handler(req, res) {
-  const allowed = [
-    "https://stripstone.github.io",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-  ];
+  const allowed = getAllowedBrowserOrigins();
   if (withCors(req, res, allowed)) return;
 
   try {
     if (req.method !== "POST") {
       return json(res, 405, { error: "Method not allowed. Use POST." });
+    }
+
+    const resolved = getResolvedRuntimePolicyForRequest(req);
+    if (!resolved.policy?.features?.anchors) {
+      return json(res, 403, {
+        error: "Anchors are not available for the active runtime policy",
+        code: "anchors_unavailable",
+        meta: {
+          effectiveTier: resolved.effectiveTier,
+          simulationAllowed: resolved.simulationAllowed,
+        },
+      });
     }
 
     const body = await readJsonBody(req);

@@ -177,7 +177,7 @@
       // Voice selects — two dropdowns, one per gender.
       // Selecting from either dropdown sets both the active variant and specific voice.
       // Free tier: browser voices only.
-      // Paid/Premium: Polly cloud voices at the top, browser voices below.
+      // Paid/Premium: server-backed cloud voices at the top, browser voices below.
       const voiceFemaleSelect = document.getElementById('voiceFemaleSelect');
       const voiceMaleSelect   = document.getElementById('voiceMaleSelect');
 
@@ -192,7 +192,9 @@
 
       function buildVoiceSelect(selectEl, gender) {
         if (!selectEl) return;
-        const isFree      = typeof appTier !== 'undefined' && appTier === 'free';
+        const resolvedPolicy = (window.rcPolicy && typeof window.rcPolicy.get === 'function') ? window.rcPolicy.get() : null;
+        const cloudVoicesAllowed = !!resolvedPolicy?.features?.cloudVoices;
+        const isFree      = !cloudVoicesAllowed;
         const isActive    = String(TTS_STATE?.voiceVariant || 'female').toLowerCase() === gender;
         const savedBrowser = (() => { try { return (typeof getStoredSelectedVoice === 'function' ? getStoredSelectedVoice() : (window.__rcSessionVoiceSelection || '')) || ''; } catch(_) { return ''; } })();
         const savedVariant = (() => { try { return String(TTS_STATE?.voiceVariant || window.__rcSessionVoiceVariant || 'female'); } catch(_) { return 'female'; } })();
@@ -302,7 +304,7 @@
           if (!val) return;
           setVoiceVariant(gender);
           if (val.startsWith('polly:') || val.startsWith('cloud:')) {
-            // Cloud voice — store the full value so pollyFetchUrl can forward the model id
+            // Cloud voice — store the full value so cloudFetchUrl can forward the selected model id
             try { window.__rcSessionVoiceSelection = val; } catch(_) {}
           } else {
             // Browser voice
@@ -351,6 +353,8 @@
       window.isReadingSettingsModalOpen = () => volumePanel.style.display === 'flex';
 
       // Repopulate when voices load asynchronously (Chrome/Edge)
+      window.populateBrowserVoicePicker = populateBrowserVoicePicker;
+
       if (typeof window !== 'undefined' && window.speechSynthesis) {
         window.speechSynthesis.addEventListener('voiceschanged', populateBrowserVoicePicker);
       }
@@ -464,9 +468,9 @@
         const totalSpent = Object.values(sessionTokens?.spent || {}).reduce((a, b) => a + b, 0);
         const merged = {
           tokens: {
-            tier: typeof appTier !== 'undefined' ? appTier : 'unknown',
+            tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
             remaining: sessionTokens?.remaining ?? '—',
-            allowance: (typeof TOKEN_ALLOWANCES !== 'undefined' && appTier) ? TOKEN_ALLOWANCES[appTier] : '—',
+            allowance: (window.rcPolicy && typeof window.rcPolicy.getUsageDailyLimit === 'function') ? window.rcPolicy.getUsageDailyLimit() : '—',
             totalSpent,
             breakdown: sessionTokens?.spent || {},
           },
@@ -594,7 +598,11 @@
 
   try {
     const saved = localStorage.getItem('rc_app_mode');
-    if (saved && ['reading','comprehension','research','thesis'].includes(saved)) appMode = saved === 'thesis' ? 'research' : saved;
+    if (saved && ['reading','comprehension','research','thesis'].includes(saved)) {
+      const candidate = saved === 'thesis' ? 'research' : saved;
+      // Normalize illegal saved modes back to reading on boot.
+      appMode = (typeof canUseMode === 'function' && !canUseMode(candidate)) ? 'reading' : candidate;
+    }
   } catch (_) {}
 
   select.value = appMode;
@@ -602,6 +610,13 @@
   select.addEventListener('change', () => {
     const newMode = select.value;
     if (newMode === appMode) return;
+
+    // Block before mutating state — proactively disabled options cover the common
+    // path; this guard catches any race or dev-tools bypass.
+    if (typeof canUseMode === 'function' && !canUseMode(newMode)) {
+      select.value = appMode;
+      return;
+    }
 
     const hasPages = typeof pages !== 'undefined' && Array.isArray(pages) && pages.length > 0;
     if (hasPages) {
@@ -627,70 +642,91 @@
   // Restore persisted tier
   select.value = appTier;
 
+  function applyTierSimulationUi() {
+    const policyApi = window.rcPolicy || {};
+    const simulationAllowed = typeof policyApi.canSimulateTier === 'function' ? !!policyApi.canSimulateTier() : false;
+    select.disabled = !simulationAllowed;
+    const buttonRows = new Set();
+    document.querySelectorAll('.tier-btn').forEach((btn) => {
+      btn.disabled = !simulationAllowed;
+      const row = btn.parentElement;
+      if (row) buttonRows.add(row);
+    });
+    buttonRows.forEach((row) => {
+      row.style.display = simulationAllowed ? '' : 'none';
+    });
+  }
+
+  async function syncTierPolicy(nextTier) {
+    const targetTier = VALID_TIERS.includes(String(nextTier || '').toLowerCase()) ? String(nextTier).toLowerCase() : 'free';
+    appTier = targetTier;
+    if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
+      try { await window.rcPolicy.refreshForTier(targetTier); } catch (_) {}
+    } else {
+      try { if (typeof tokenReset === 'function') tokenReset(); } catch (_) {}
+    }
+    select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : appTier;
+    applyTierSimulationUi();
+    applyTierAccess();
+    try { if (typeof window.populateBrowserVoicePicker === 'function') window.populateBrowserVoicePicker(); } catch (_) {}
+  }
+
   select.addEventListener('change', () => {
+    const policyApi = window.rcPolicy || {};
+    if (typeof policyApi.canSimulateTier === 'function' && !policyApi.canSimulateTier()) {
+      select.value = typeof policyApi.getTier === 'function' ? policyApi.getTier() : 'free';
+      return;
+    }
     const newTier = select.value;
     if (!VALID_TIERS.includes(newTier) || newTier === appTier) return;
-    appTier = newTier;
-    try { if (typeof tokenReset === 'function') tokenReset(); } catch(_) {}
-    applyTierAccess();
+    syncTierPolicy(newTier);
+  });
+
+  document.addEventListener('rc:runtime-policy-changed', () => {
+    try {
+      select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : appTier;
+      applyTierSimulationUi();
+      applyTierAccess();
+    } catch (_) {}
   });
 
   // Apply on boot
-  applyTierAccess();
+  syncTierPolicy(appTier);
 
   function applyTierAccess() {
-    // Tier access rules (prototype: feature gating active, usage unrestricted).
-    //
-    // free    — Reading mode only. Comprehension and Research disabled.
-    //           No AI Evaluate, no TTS voices beyond default.
-    // paid    — All modes accessible. AI Evaluate available. Standard voices.
-    // premium — Full access. All voices, all modes, all features.
-    //
-    // NOTE: These rules gate UI visibility only. No server-side enforcement yet.
+    const policyApi = window.rcPolicy || {};
+    const canComprehension = typeof policyApi.canUseMode === 'function' ? policyApi.canUseMode('comprehension') : false;
+    const canResearch = typeof policyApi.canUseMode === 'function' ? policyApi.canUseMode('research') : false;
+    const canAiEvaluate = typeof policyApi.canUseAiEvaluate === 'function' ? policyApi.canUseAiEvaluate() : false;
+    const canAnchors = typeof policyApi.canUseAnchors === 'function' ? policyApi.canUseAnchors() : false;
 
-    const isFree    = appTier === 'free';
-    const isPaid    = appTier === 'paid';
-    const isPremium = appTier === 'premium';
-
-    // Mode options:
-    //   Free        — Reading only. Comprehension disabled.
-    //   Paid+       — Reading + Comprehension.
-    //   All tiers   — Research always disabled until implemented.
     const modeSelect = document.getElementById('modeSelect');
     if (modeSelect) {
       const comprehensionOpt = modeSelect.querySelector('option[value="comprehension"]');
-      const researchOpt      = modeSelect.querySelector('option[value="research"]');
-      if (comprehensionOpt) comprehensionOpt.disabled = isFree;
-      // Research is selectable on Paid/Premium (evaluation.js shows coming-soon alert on use).
-      // Disabled only on Free alongside Comprehension.
-      if (researchOpt)      researchOpt.disabled = isFree;
+      const researchOpt = modeSelect.querySelector('option[value="research"]');
+      if (comprehensionOpt) comprehensionOpt.disabled = !canComprehension;
+      if (researchOpt) researchOpt.disabled = !canResearch;
 
-      // If currently on a gated mode, drop back to Reading
-      if (isFree && appMode !== 'reading') {
+      if (appMode === 'comprehension' && !canComprehension) {
+        modeSelect.value = 'reading';
+        appMode = 'reading';
+        if (typeof applyModeVisibility === 'function') applyModeVisibility();
+      }
+      if (appMode === 'research' && !canResearch) {
         modeSelect.value = 'reading';
         appMode = 'reading';
         if (typeof applyModeVisibility === 'function') applyModeVisibility();
       }
     }
 
-    // Anchors row (counter + Hint button) — hidden on Free tier AND in reading mode.
-    // applyModeVisibility already hides these in reading mode; we must not override that.
     const isReadingMode = appMode === 'reading';
     document.querySelectorAll('.anchors-row').forEach(el => {
-      if (isFree || isReadingMode) {
-        el.style.display = 'none';
-      } else {
-        el.style.display = '';
-      }
+      el.style.display = (!canAnchors || isReadingMode) ? 'none' : '';
     });
 
-    // AI Evaluate buttons and Submit — hidden on Free and in reading mode
     document.querySelectorAll('.ai-btn, #submitBtn').forEach(el => {
-      el.style.display = (isFree || isReadingMode) ? 'none' : '';
+      el.style.display = (!canAiEvaluate || isReadingMode) ? 'none' : '';
     });
-
-    // Voice dropdowns are visible at all tiers — Free sees browser voices,
-    // Paid/Premium see cloud voices at the top. No hiding needed.
   }
 })();
 

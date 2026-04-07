@@ -1,15 +1,27 @@
-# Reading Trainer Git Workflow Cheat Sheet
+# Jubly Reader Git Workflow Cheat Sheet
 
-This file is meant for the local workflow you are using with Claude Code, GitHub Desktop, and manual runtime review.
+This file is meant for the local diff-driven workflow you are using with Git, runtime review, and whichever implementation agent is currently in use.
 
 Use it as a quick reference during the patch loop.
+Read `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md` when the pass touches scaffold shape, ownership cleanup, or prototype-to-production hardening.
+
+---
+
+## 0. Canonical diff lifecycle
+
+For one active pass:
+- create one canonical diff
+- runtime-test it
+- revise that same diff in place after feedback
+- do not stack forward diffs for the same pass
+- start a new diff only when the work becomes a new pass
 
 ---
 
 ## 1. Go to the repo
 
 ```bat
-cd C:\Users\Triston Barker\Documents\GitHub\reading-comprehension\
+cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
 ```
 
 What it does:
@@ -17,7 +29,7 @@ What it does:
 
 ---
 
-## 2. Check what changed
+## 2. Check current scaffold and state before patching
 
 ```bat
 git status
@@ -27,6 +39,15 @@ What it does:
 - shows changed files
 - shows whether files are staged or unstaged
 - confirms which branch you are on
+
+Before editing, also verify:
+- root `index.html` exists
+- root `js/` exists
+- root `css/` exists if current docs expect it
+- `docs/` contains docs only
+- the current version marker matches whether new files are being introduced
+
+If the scaffold does not match the current project-state docs, stop and fix the base-state problem first.
 
 ---
 
@@ -48,6 +69,8 @@ Rules:
   - a follow-up patch against a previously patched base
 - do not mix those two without saying so
 - always run `git apply --check` before handing the diff off or runtime-testing it
+- if the pass adds new files, update the version marker according to the current project rule
+- if the pass edits only existing files, leave the version marker unchanged
 
 ---
 
@@ -63,7 +86,7 @@ git diff -- <file1> <file2> <file3> > quick_patch.diff
 Example:
 
 ```bat
-git diff -- docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js > quick_patch.diff
+git diff -- index.html css/shell.css js/evaluation.js js/shell.js > quick_patch.diff
 ```
 
 What it does:
@@ -105,7 +128,7 @@ What it does:
 This is the block to reuse once a pass has an active patch artifact:
 
 ```bat
-cd C:\Users\Triston Barker\Documents\GitHub\reading-comprehension\
+cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
 git status
 git diff -- <file1> <file2> <file3> > quick_patch.diff
 git apply --check quick_patch.diff
@@ -115,9 +138,9 @@ notepad quick_patch.diff
 Example:
 
 ```bat
-cd C:\Users\Triston Barker\Documents\GitHub\reading-comprehension\
+cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
 git status
-git diff -- docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js > quick_patch.diff
+git diff -- index.html css/shell.css js/evaluation.js js/shell.js > quick_patch.diff
 git apply --check quick_patch.diff
 notepad quick_patch.diff
 ```
@@ -143,7 +166,7 @@ Rules:
 - run `git apply --check` again after each revision
 
 This is the preferred loop once the owner layer and patch artifact are stable.
-Often that is after the first 1–2 Claude implementation passes, but treat that as a heuristic rather than a hard threshold.
+Often that is after the first 1–2 implementation passes, but treat that as a heuristic rather than a hard threshold.
 
 ---
 
@@ -194,7 +217,7 @@ git add <file1> <file2> <file3>
 Example:
 
 ```bat
-git add docs/index.html docs/css/shell.css docs/js/evaluation.js docs/js/shell.js
+git add index.html css/shell.css js/evaluation.js js/shell.js
 ```
 
 What it does:
@@ -248,7 +271,7 @@ git diff main...HEAD > branch-vs-main.diff
 
 What it does:
 - shows the changes on your current branch compared to `main`
-- useful when working in a Claude-created branch or worktree
+- useful when working in a branch or worktree
 
 ---
 
@@ -267,13 +290,14 @@ What it does:
 ## 18. Safe sequence before commit
 
 ```bat
-cd C:\Users\Triston Barker\Documents\GitHub\reading-comprehension\
+cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
 git status
 git diff -- <file1> <file2> <file3> > quick_patch.diff
 git apply --check quick_patch.diff
 ```
 
 Then:
+- verify the scaffold still matches current project-state docs
 - review the diff in GitHub Desktop or Notepad
 - test runtime
 - only then run `git add ...` and `git commit -m "..."`
@@ -288,3 +312,4 @@ Use:
 - `git apply --check quick_patch.diff` to verify the artifact before handoff or runtime testing
 - `git add` only after review
 - `git commit` only after runtime testing when the pass is important
+- scaffold verification before patching so a wrong-base pass is caught before it becomes a correction pass

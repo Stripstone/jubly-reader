@@ -1,12 +1,9 @@
 // api/health/index.js
 import { json, withCors } from "../_lib/http.js";
+import { getAllowedBrowserOrigins } from "../_lib/origins.js";
 
 export default async function handler(req, res) {
-  const allowed = [
-    "https://stripstone.github.io",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-  ];
+  const allowed = getAllowedBrowserOrigins();
   if (withCors(req, res, allowed)) return;
 
   return json(res, 200, {

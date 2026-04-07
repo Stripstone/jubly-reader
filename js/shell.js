@@ -135,7 +135,27 @@
     }
 
     // ── Tier — drives #tierSelect so ui.js applyTierAccess() fires ──
+    function canSimulateTierSelection() {
+        return !!(window.rcPolicy && typeof window.rcPolicy.canSimulateTier === 'function' && window.rcPolicy.canSimulateTier());
+    }
+
+    function syncTierButtonState() {
+        const current = (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function')
+            ? window.rcEntitlements.getTier()
+            : ((typeof appTier !== 'undefined' && appTier) ? appTier : 'free');
+        const map = { free: 'Basic', paid: 'Pro', premium: 'Premium' };
+        document.querySelectorAll('.tier-btn').forEach((btn) => {
+            const next = map[current] || 'Basic';
+            btn.classList.toggle('active', btn.textContent.trim() === next);
+            btn.disabled = !canSimulateTierSelection();
+        });
+        const rows = new Set();
+        document.querySelectorAll('.tier-btn').forEach((btn) => { if (btn.parentElement) rows.add(btn.parentElement); });
+        rows.forEach((row) => { row.style.display = canSimulateTierSelection() ? '' : 'none'; });
+    }
+
     function setTier(btn) {
+        if (!canSimulateTierSelection()) return;
         document.querySelectorAll('.tier-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const map = { 'Basic': 'free', 'Pro': 'paid', 'Premium': 'premium' };
@@ -158,6 +178,9 @@
     }
 
     function getCurrentTier() {
+        if (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function') {
+            try { return window.rcEntitlements.getTier(); } catch (_) {}
+        }
         const sel = document.getElementById('tierSelect');
         if (sel && sel.value) return sel.value;
         return (typeof appTier !== 'undefined' && appTier) ? appTier : 'free';
@@ -451,6 +474,13 @@
         return 0;
     }
 
+    // RETIRED (Pass 2): syncVisiblePageAsPlayTarget is no longer called.
+    // Its only call site was handlePausePlay(), which has been updated to
+    // delegate without pre-empting runtime page truth. Runtime owns current-
+    // page targeting through _installScrollPageTracker + __rcReadingTarget.
+    // getVisibleReadingPageIndex() below is kept because it still feeds the
+    // progress display (not launch-critical truth). If progress display is
+    // later moved to a runtime-owned readout, both functions can be deleted.
     function syncVisiblePageAsPlayTarget() {
         const idx = getVisibleReadingPageIndex();
         if (!Number.isFinite(idx) || idx < 0) return false;
@@ -544,6 +574,20 @@
             if (disabled) pageBtn.title = support.reason || 'Playback unavailable';
             else pageBtn.removeAttribute('title');
         });
+        // Surface blocked/no-voice/error state visibly rather than leaving dead controls.
+        const blockedMsgEl = document.getElementById('shell-tts-blocked-msg');
+        if (blockedMsgEl) {
+            const blockedReason = !canPlay && !status.active && !countdown.active
+                ? String(support.reason || eligibility.reasons?.canPlay || '')
+                : '';
+            if (blockedReason) {
+                blockedMsgEl.textContent = blockedReason;
+                blockedMsgEl.style.display = '';
+            } else {
+                blockedMsgEl.textContent = '';
+                blockedMsgEl.style.display = 'none';
+            }
+        }
         // PATCH(speed-sync): Keep #shell-speed in sync with TTS_STATE.rate.
         // Previously, if setPlaybackRate() was called from any path other than
         // the shell select itself (e.g. programmatic change, restored preference),
@@ -583,16 +627,15 @@
         // Shell is a pure delegate. All routing — resume, pause, countdown
         // cancel+restart, and fresh-start — is owned by pauseOrResumeReading()
         // in tts.js. Shell does not inspect eligibility or countdown here.
+        // PASS2: Removed syncVisiblePageAsPlayTarget() call. Runtime owns
+        // current-page truth via _installScrollPageTracker (library.js), which
+        // keeps __rcReadingTarget.pageIndex current on every scroll frame.
+        // startFocusedPageTts() reads that directly. Shell must not pre-empt
+        // the runtime's page truth with a DOM-visibility inference.
         const before = {
             playback: (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null,
             countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
         };
-        // Fresh Play should follow the page currently in view when playback is
-        // not active. This releases the prior Read Page / Next target once the
-        // user has stopped playback and scrolled elsewhere.
-        if (!before.playback?.active && !before.countdown?.active) {
-            syncVisiblePageAsPlayTarget();
-        }
         let result = false;
         try { if (typeof pauseOrResumeReading === 'function') result = !!pauseOrResumeReading(); } catch (_) {}
         setTimeout(syncShellPlaybackControls, 0);
@@ -668,46 +711,10 @@
             try { refreshExplorerPanel(); } catch (_) {}
         }, 500);
         patchRefreshHook();
-
-        const bookSel = document.getElementById('bookSelect');
-        const chSel   = document.getElementById('chapterSelect');
-        const loadBtn = document.getElementById('loadBookSelection');
-        const pageStart = document.getElementById('pageStart');
-        const pageEnd   = document.getElementById('pageEnd');
-        if (bookSel && chSel && loadBtn && pageStart && pageEnd) {
-            const waitForPages = (timeout = 2500) => new Promise(resolve => {
-                const started = Date.now();
-                (function poll() {
-                    if (pageStart.options.length > 0 && pageEnd.options.length > 0 && pageStart.value !== '' && pageEnd.value !== '') return resolve(true);
-                    if (Date.now() - started > timeout) return resolve(false);
-                    setTimeout(poll, 50);
-                })();
-            });
-            bookSel.addEventListener('change', async () => {
-                if (document.getElementById('reading-mode')?.classList.contains('hidden-section')) return;
-                // PATCH(source-continuity): Clear page selects before polling so stale options
-                // from the previous book cannot satisfy waitForPages() prematurely.
-                // loadBook() in library.js is async — it starts on the same tick but has not
-                // cleared the selects yet when this handler runs. Without this guard,
-                // waitForPages() resolves with old-book options and loadBtn fires against
-                // the previous book's currentPages/currentBookRaw.
-                pageStart.options.length = 0;
-                pageEnd.options.length = 0;
-                const ready = await waitForPages();
-                if (ready) {
-                    loadBtn.click();
-                    setTimeout(() => { try { if (typeof window.__jublyAfterRender === 'function') window.__jublyAfterRender(); } catch(_) {} }, 120);
-                }
-            });
-            chSel.addEventListener('change', async () => {
-                if (document.getElementById('reading-mode')?.classList.contains('hidden-section')) return;
-                const ready = await waitForPages();
-                if (ready) {
-                    loadBtn.click();
-                    setTimeout(() => { try { if (typeof window.__jublyAfterRender === 'function') window.__jublyAfterRender(); } catch(_) {} }, 120);
-                }
-            });
-        }
+        // Reading entry is now fully runtime-owned via startReadingFromPreview → __rcLoadBook.
+        // The previous poll/auto-click bridge (bookSel change → waitForPages → loadBtn.click)
+        // has been retired: loadBook() in library.js calls render() directly, and render()
+        // calls __jublyAfterRender itself. No shell polling or synthetic click is needed.
     });
 
     // ── Library table — populated by __jublyLibraryRefresh hook called from library.js ──
@@ -805,13 +812,13 @@
         openModal('preview-modal');
     }
 
-    function startReading() {
+    async function startReading() {
         closeModal('preview-modal');
         const signal = document.getElementById('session-complete');
         if (signal) signal.classList.add('hidden-section');
         showSection('reading-mode');
         if (!_previewBookId) return;
-        try { if (typeof startReadingFromPreview === 'function') startReadingFromPreview(_previewBookId); } catch (_) {}
+        try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(_previewBookId); } catch (_) {}
     }
 
     // Empty state drag/drop
@@ -821,21 +828,12 @@
         if (zone) { zone.style.borderColor = 'transparent'; zone.style.background = ''; }
         const files = e.dataTransfer && e.dataTransfer.files;
         if (!files || !files.length) return;
-        const openBtn = document.getElementById('importBookBtn');
-        if (openBtn) openBtn.click();
-        else {
-            const modal = document.getElementById('importBookModal');
-            if (modal) { modal.style.display = 'flex'; modal.setAttribute('aria-hidden', 'false'); }
-        }
-        const inp = document.getElementById('importFileInput');
-        if (inp) {
-            try {
-                const dt = new DataTransfer();
-                dt.items.add(files[0]);
-                inp.value = '';
-                inp.files = dt.files;
-                inp.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch(_) {}
+        // Use the one authoritative importer-entry path so the capacity check,
+        // modal open, state reset, and file staging happen in a single async
+        // sequence — eliminates the race where showModal()'s reset cleared a
+        // file staged immediately before via click+dispatch.
+        if (typeof window.openImporterWithFile === 'function') {
+            window.openImporterWithFile(files[0]);
         }
     }
 
@@ -881,13 +879,22 @@
         if (tierSel) {
             tierSel.addEventListener('change', () => {
                 updateTierPill();
+                syncTierButtonState();
                 updateExplorerSwatchState();
                 try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
                 try { syncExplorerMusicSource(); } catch (_) {}
                 refreshExplorerPanel();
             });
         }
+        document.addEventListener('rc:runtime-policy-changed', () => {
+            updateTierPill();
+            syncTierButtonState();
+            updateExplorerSwatchState();
+            try { syncExplorerMusicSource(); } catch (_) {}
+            refreshExplorerPanel();
+        });
         try { switchReadingSettingsTab('general'); } catch (_) {}
+        try { syncTierButtonState(); } catch (_) {}
 
         // After a successful import the engine fires Done; refresh shell library explicitly.
         const importDoneBtn = document.getElementById('importDoneBtn');

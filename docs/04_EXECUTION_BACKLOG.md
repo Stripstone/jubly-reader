@@ -1,4 +1,4 @@
-# Reading Trainer — Execution Backlog
+# Jubly Reader — Execution Backlog
 
 This is the current working backlog.
 
@@ -10,6 +10,25 @@ Each item should answer:
 
 Backlog items should stay behavior-first and objective.
 Each launch-critical item should make user expectation, edge cases, owner, and done-when criteria obvious enough that an engineer does not have to infer the intended behavior.
+
+## Execution note
+Once the owner layer is known, one active pass should usually map to one active diff artifact.
+Revise that same diff after runtime feedback before reopening architecture.
+Create a new diff only when the work becomes a new pass.
+
+## Diagnostics rule
+Add temporary proof instrumentation before patching when:
+- the runtime symptom is real, but the owner path is still ambiguous
+- two or more plausible owner files could explain the same symptom
+- code inspection has produced competing theories without runtime proof
+- a previous patch attempt failed or fixed the wrong layer
+- races, stale state, or competing callers are plausible
+
+Diagnostics must be:
+- narrow
+- removable
+- aimed at one failing case end-to-end
+- used to reduce the issue to one owner path before behavior patching
 
 ## Status
 - Open
@@ -26,7 +45,7 @@ Each launch-critical item should make user expectation, edge cases, owner, and d
 ## 1. Restore returns the user to the correct page
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/state.js` with `docs/js/library.js`
+**Owner:** `js/state.js` with `js/library.js`
 
 ### User expectation
 When the user leaves and comes back, they return to the right page.
@@ -47,7 +66,7 @@ When the user leaves and comes back, they return to the right page.
 ## 2. TTS starts on the current active page
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/library.js` + `docs/js/tts.js`
+**Owner:** `js/library.js` + `js/tts.js`
 
 ### User expectation
 If the user presses `Read page` or `Play`, the app reads the page they are actually on.
@@ -66,7 +85,7 @@ If the user presses `Read page` or `Play`, the app reads the page they are actua
 ## 3. Pause and resume feel real during active TTS
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/tts.js`
+**Owner:** `js/tts.js`
 
 ### User expectation
 When the user presses Pause, reading pauses. When they press Play or Resume, reading resumes in a defined way.
@@ -87,7 +106,7 @@ When the user presses Pause, reading pauses. When they press Play or Resume, rea
 ## 4. Speed changes behave live and consistently
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/tts.js`
+**Owner:** `js/tts.js`
 
 ### User expectation
 Changing speed during active TTS should affect the current speech immediately when the active path supports it.
@@ -110,7 +129,7 @@ Changing speed during active TTS should affect the current speech immediately wh
 ## 5. Leaving reading runs one cleanup path
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/tts.js` + `docs/js/audio.js` + `docs/js/library.js`
+**Owner:** `js/tts.js` + `js/audio.js` + `js/library.js`
 
 ### User expectation
 Leaving reading stops reading-owned audio and clears reading-only transient state.
@@ -130,7 +149,7 @@ Leaving reading stops reading-owned audio and clears reading-only transient stat
 ## 6. Library startup state must not mislead the user
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/library.js`
+**Owner:** `js/library.js`
 
 ### User expectation
 The app should not briefly imply there are no books before it checks.
@@ -170,7 +189,7 @@ The footer belongs at the bottom of the page.
 ## 8. Importer close/dismiss clears staged state completely
 **Risk:** 🔴 Critical  
 **Status:** Open  
-**Owner:** `docs/js/import.js`
+**Owner:** `js/import.js`
 
 ### User expectation
 Closing importer means the staged file is gone.
@@ -214,7 +233,7 @@ Controls should reflect what the app is actually doing, not what the shell guess
 ## 10. Switching book or chapter must replace page state cleanly
 **Risk:** 🔴 Critical  
 **Status:** Validated  
-**Owner:** `docs/js/library.js`
+**Owner:** `js/library.js`
 
 ### User expectation
 Changing book or chapter should show only the pages for that selected source.
@@ -247,7 +266,7 @@ Confirmed:
 ## 11. Isolated theme system is implemented and runtime-owned
 **Risk:** 🟡 High  
 **Status:** Validated  
-**Owner:** `docs/js/state.js` + `docs/js/shell.js` + live shell CSS
+**Owner:** `js/state.js` + `js/shell.js` + live shell CSS
 
 ### User expectation
 Theme choice, Explorer customization, and global appearance should feel coherent without changing reading flow truth.
@@ -287,7 +306,7 @@ The intended CSS split is still:
 - appearance in `theme.css`
 
 But the live implementation surface today is:
-- `docs/css/shell.css`
+- `css/shell.css`
 
 ### Why deferred
 Reactivating dormant CSS files during the bounded theme pass would have turned the work into a broader scaffold redistribution/refactor.
@@ -311,3 +330,26 @@ Reactivating dormant CSS files during the bounded theme pass would have turned t
 ### Done when
 - wallpaper/assets are localized cleanly in the live scaffold
 - supporting local asset handling is reviewed as a system rather than as one-off theme utilities
+
+---
+
+## 14. Crown-jewel browser logic exposure is reduced before launch
+**Risk:** 🔴 Critical  
+**Status:** Open  
+**Owner:** runtime/backend redistribution pass
+
+### User expectation
+The product should remain fast and truthful locally without shipping avoidable crown-jewel logic in the public browser bundle.
+
+### Edge cases
+- TTS provider selection and fallback policy
+- premium resolution or usage enforcement duplicated in client JS
+- prompts or orchestration rules exposed in browser-delivered code
+- moving too much off-client and degrading reading responsiveness
+
+### Done when
+- crown-jewel decision logic has been identified explicitly
+- browser-delivered code keeps only what must remain local for responsive reading behavior
+- provider policy, premium resolution, usage enforcement, and other high-value non-obvious rules move backend-side where feasible
+- launch does not depend on obfuscation alone as the protection model
+- runtime contract remains intact after redistribution
