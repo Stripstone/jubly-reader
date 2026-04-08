@@ -286,6 +286,20 @@
         showSection('landing-page');
     }
 
+    function authBack() {
+        _authClearMessages();
+        if (_authMode === 'signup' && _signupStep === 2) {
+            _signupStep = 1;
+            applyAuthModeUi();
+            try {
+                const emailField = document.getElementById('loginEmail');
+                if (emailField) emailField.focus();
+            } catch (_) {}
+            return;
+        }
+        returnToLanding();
+    }
+
     function showSignupPane(forceDirect = false) {
         closeModal('ownership-modal');
         closeModal('pricing-modal');
@@ -358,14 +372,15 @@
             if (heading) heading.textContent = 'Create account';
             if (toggleBtn) toggleBtn.textContent = 'Sign in instead';
             if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
-            if (emailWrap) emailWrap.classList.remove('hidden-section');
             if (_signupStep === 1) {
+                if (emailWrap) emailWrap.classList.remove('hidden-section');
                 if (subheading) subheading.textContent = 'Enter your email to begin.';
                 if (usernameWrap) usernameWrap.classList.add('hidden-section');
                 if (passwordWrap) passwordWrap.classList.add('hidden-section');
                 if (confirmWrap) confirmWrap.classList.add('hidden-section');
                 if (submitBtn) submitBtn.textContent = 'Submit';
             } else {
+                if (emailWrap) emailWrap.classList.add('hidden-section');
                 if (subheading) subheading.textContent = 'Choose a username and password.';
                 if (usernameWrap) usernameWrap.classList.remove('hidden-section');
                 if (passwordWrap) passwordWrap.classList.remove('hidden-section');
@@ -445,7 +460,7 @@
             }
         } else {
             if (!email || !username || !password || !confirm) {
-                _authShowError('Email, username, password, and confirmation are required.');
+                _authShowError('Username, password, and confirmation are required.');
                 return;
             }
             if (password !== confirm) {
