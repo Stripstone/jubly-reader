@@ -723,7 +723,11 @@ function loadThemePrefs() {
 }
 
 function saveThemePrefs(payload) {
-  return getPrefsAdapter().saveThemePrefs(payload);
+  const result = getPrefsAdapter().saveThemePrefs(payload);
+  // Pass 4: notify sync seam so durable settings stay in sync when signed in.
+  // sync.js listens for this event and calls rcSync.syncSettings with the combined snapshot.
+  try { document.dispatchEvent(new CustomEvent('rc:prefs-changed', { detail: { source: 'theme' } })); } catch (_) {}
+  return result;
 }
 
 function loadAppearancePrefs() {
@@ -731,7 +735,10 @@ function loadAppearancePrefs() {
 }
 
 function saveAppearancePrefs(payload) {
-  return getPrefsAdapter().saveAppearancePrefs(payload);
+  const result = getPrefsAdapter().saveAppearancePrefs(payload);
+  // Pass 4: same as saveThemePrefs — notify sync seam.
+  try { document.dispatchEvent(new CustomEvent('rc:prefs-changed', { detail: { source: 'appearance' } })); } catch (_) {}
+  return result;
 }
 
 function loadDiagnosticsPrefs() {

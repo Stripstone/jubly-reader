@@ -1,0 +1,792 @@
+diff --git a/index.html b/index.html
+index b7e4679..b3f38b2 100644
+--- a/index.html
++++ b/index.html
+@@ -8,6 +8,8 @@
+     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Lora:wght@400;500&family=Crimson+Pro:wght@400;600;700&display=swap" rel="stylesheet">
+     <!-- JSZip: required for EPUB import (app's import.js) -->
+     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
++    <!-- Supabase: UMD bundle exposes window.supabase — required by js/auth.js (Pass 4) -->
++    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+     <link rel="stylesheet" href="css/shell.css">
+ </head>
+ <body class="bg-white">
+@@ -371,9 +373,18 @@
+             <div class="flex items-center gap-1 font-bold px-3 py-1 rounded-full text-sm text-accent bg-accent-soft">
+                 <span>✨</span> <span>100</span>
+             </div>
++            <!-- auth: signed-in state — shown by shell when rcAuth reports signedIn -->
++            <div id="nav-auth-signed-in" class="hidden-section flex items-center gap-2">
++                <span id="nav-auth-email" class="text-xs font-semibold text-slate-500 max-w-[120px] truncate"></span>
++                <button onclick="shellSignOut()" class="text-xs font-bold text-slate-400 hover:text-slate-700 transition px-2 py-1 rounded-lg hover:bg-slate-100" title="Sign out">Sign out</button>
++            </div>
++            <!-- auth: signed-out state — shown by shell when on app pages and not signed in -->
++            <div id="nav-auth-signed-out" class="hidden-section">
++                <button onclick="showSection('login-page')" class="text-xs font-bold text-indigo-600 hover:underline px-2 py-1">Sign in</button>
++            </div>
+             <div class="cursor-pointer flex items-center gap-2" onclick="showSection('profile-page')">
+                 <div class="w-10 h-10 bg-slate-200 rounded-full overflow-hidden">
+-                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves" alt="avatar">
++                    <img id="nav-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves" alt="avatar">
+                 </div>
+             </div>
+         </div>
+@@ -432,34 +443,52 @@
+                 <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-xl bg-brand">J</div>
+                 <span class="text-3xl font-extrabold tracking-tighter text-slate-900">jubly</span>
+             </div>
+-            <h2 class="text-2xl font-extrabold text-slate-900">Welcome back</h2>
+-            <p class="text-slate-500 text-sm mt-1">Sign in to your account to continue</p>
++            <h2 id="auth-form-heading" class="text-2xl font-extrabold text-slate-900">Welcome back</h2>
++            <p id="auth-form-subheading" class="text-slate-500 text-sm mt-1">Sign in to your account to continue</p>
+         </div>
+         <div class="section-card shadow-sm space-y-4">
+-            <button onclick="login()" class="w-full flex items-center justify-center gap-3 border-2 border-slate-200 rounded-xl py-3 font-bold text-slate-700 hover:bg-slate-50 transition text-sm">
++            <!-- Google OAuth — not active in this pass. Button is visible but disabled and clearly labelled. -->
++            <button disabled class="w-full flex items-center justify-center gap-3 border-2 border-slate-100 rounded-xl py-3 font-bold text-slate-300 text-sm cursor-not-allowed opacity-60" title="Google sign-in is not yet available">
+                 <svg class="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+-                Continue with Google
++                Continue with Google (coming soon)
+             </button>
+             <div class="flex items-center gap-3">
+                 <div class="flex-1 h-[1px] bg-slate-200"></div>
+                 <span class="text-xs font-bold text-slate-400 uppercase">or</span>
+                 <div class="flex-1 h-[1px] bg-slate-200"></div>
+             </div>
++            <!-- error / status message -->
++            <div id="auth-error" class="hidden-section text-xs font-semibold text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
++            <div id="auth-success" class="hidden-section text-xs font-semibold text-green-600 bg-green-50 border border-green-200 rounded-lg px-3 py-2"></div>
+             <div>
+-                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Username or Email</label>
+-                <input type="text" placeholder="you@example.com" class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-indigo-400 transition bg-white">
++                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
++                <input id="loginEmail" type="email" autocomplete="email" placeholder="you@example.com"
++                    class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-indigo-400 transition bg-white"
++                    onkeydown="if(event.key==='Enter') authFormSubmit()">
+             </div>
+             <div>
+                 <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Password</label>
+-                <input type="password" placeholder="••••••••" class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-indigo-400 transition bg-white">
+-            </div>
+-            <div class="flex justify-end">
+-                <a href="#" class="text-xs font-semibold text-indigo-500 hover:underline">Forgot password?</a>
+-            </div>
+-            <button onclick="login()" class="btn-jubly w-full py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider">Sign In</button>
+-        </div>
+-        <p class="text-center text-sm text-slate-500 mt-6">New here? <button onclick="login()" class="font-bold text-indigo-600 hover:underline">Try for free</button></p>
+-        <p class="text-center mt-3"><button onclick="showSection('landing-page')" class="text-xs text-slate-400 hover:text-slate-600 transition">← Back to home</button></p>
++                <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••"
++                    class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-indigo-400 transition bg-white"
++                    onkeydown="if(event.key==='Enter') authFormSubmit()">
++            </div>
++            <!-- confirm password — shown only in sign-up mode -->
++            <div id="auth-confirm-wrap" class="hidden-section">
++                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Confirm Password</label>
++                <input id="loginPasswordConfirm" type="password" autocomplete="new-password" placeholder="••••••••"
++                    class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-indigo-400 transition bg-white"
++                    onkeydown="if(event.key==='Enter') authFormSubmit()">
++            </div>
++            <button id="auth-submit-btn" onclick="authFormSubmit()" class="btn-jubly w-full py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider">Sign In</button>
++        </div>
++        <p class="text-center text-sm text-slate-500 mt-6">
++            <span id="auth-toggle-label">New here?</span>
++            <button id="auth-toggle-btn" onclick="toggleAuthMode()" class="font-bold text-indigo-600 hover:underline ml-1">Create account</button>
++        </p>
++        <p class="text-center mt-2">
++            <button onclick="login()" class="text-xs text-slate-400 hover:text-slate-600 transition">Continue without signing in →</button>
++        </p>
++        <p class="text-center mt-2"><button onclick="showSection('landing-page')" class="text-xs text-slate-400 hover:text-slate-600 transition">← Back to home</button></p>
+     </div>
+ </div>
+ 
+@@ -857,6 +886,9 @@
+ </div>
+ 
+ <script src="js/shell.js"></script>
++<!-- Pass 4: auth core and durable sync seam. Load after shell.js, before app.js. -->
++<script src="js/auth.js"></script>
++<script src="js/sync.js"></script>
+ 
+ <!-- ── App scripts ──────────────────────────────────────────────
+      Load order matches original index.html exactly.
+diff --git a/js/library.js b/js/library.js
+index 5986182..aba5afd 100644
+--- a/js/library.js
++++ b/js/library.js
+@@ -2312,6 +2312,13 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
+   } catch (_) {}
+   try { if (window.TTS_STATE) window.TTS_STATE.playbackBlockedReason = ''; } catch (_) {}
+   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
++  // Pass 4: schedule durable reading progress sync if the user is signed in.
++  try {
++    if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
++      const _t = window.__rcReadingTarget || {};
++      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx);
++    }
++  } catch (_) {}
+   return { ok: true, index: idx, total };
+ };
+ 
+@@ -2377,6 +2384,24 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId)
+   if (typeof window.__rcLoadBook === 'function') {
+     try { await window.__rcLoadBook(String(bookId)); } catch (_) {}
+   }
++
++  // Pass 4: if the user is signed in, fetch their durable reading position and
++  // apply it. chapterIndex comes from the current reading target set by loadBook.
++  // rcSync.getReadingProgress returns null when not signed in or no record exists,
++  // so this is a safe no-op in the signed-out free path.
++  try {
++    if (window.rcSync && typeof window.rcSync.getReadingProgress === 'function') {
++      const _t = window.__rcReadingTarget || {};
++      const durable = await window.rcSync.getReadingProgress(String(bookId), _t.chapterIndex != null ? _t.chapterIndex : -1);
++      if (durable && typeof durable.pageIndex === 'number' && durable.pageIndex > 0) {
++        const total = Array.isArray(pages) ? pages.length : 0;
++        if (total > 0 && durable.pageIndex < total) {
++          window.focusReadingPage(durable.pageIndex, { behavior: 'auto' });
++        }
++      }
++    }
++  } catch (_) {}
++
+   return true;
+ };
+ 
+diff --git a/js/shell.js b/js/shell.js
+index d2c1eaa..e1a1977 100644
+--- a/js/shell.js
++++ b/js/shell.js
+@@ -118,13 +118,176 @@
+     function openModal(id)  { const el = document.getElementById(id); if (!el) return; el.classList.remove('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'flex'; }
+     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
+ 
+-    // ── Auth (SCAFFOLD) ──────────────────────────────────────────
+-    // SCAFFOLD: replace login() with real Supabase auth flow
++    // ── Auth — free path (no sign-in required) ───────────────────
++    // login() is the "Try it free" / "Continue without signing in" path.
++    // It routes directly to the dashboard without requiring auth.
++    // This is the Pass 4 free-path: value first, sign-in is optional.
+     function login() {
+         showSection('dashboard');
+         try { refreshLibrary(); } catch(_) {}
+     }
+ 
++    // ── Auth — Pass 4 sign-in / sign-up / sign-out ───────────────
++    // Shell is a thin presenter. It calls rcAuth, reflects state, and routes.
++    // It does not own auth state or Supabase operations.
++
++    let _authMode = 'signin'; // 'signin' | 'signup'
++
++    function toggleAuthMode() {
++        _authMode = _authMode === 'signin' ? 'signup' : 'signin';
++        const heading      = document.getElementById('auth-form-heading');
++        const subheading   = document.getElementById('auth-form-subheading');
++        const submitBtn    = document.getElementById('auth-submit-btn');
++        const toggleBtn    = document.getElementById('auth-toggle-btn');
++        const toggleLabel  = document.getElementById('auth-toggle-label');
++        const confirmWrap  = document.getElementById('auth-confirm-wrap');
++        const errEl        = document.getElementById('auth-error');
++        const okEl         = document.getElementById('auth-success');
++        const pwInput      = document.getElementById('loginPassword');
++        if (errEl) errEl.classList.add('hidden-section');
++        if (okEl)  okEl.classList.add('hidden-section');
++        if (_authMode === 'signup') {
++            if (heading)    heading.textContent    = 'Create account';
++            if (subheading) subheading.textContent = 'Start reading for free — no card required';
++            if (submitBtn)  submitBtn.textContent  = 'Create Account';
++            if (toggleBtn)  toggleBtn.textContent  = 'Sign in instead';
++            if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
++            if (confirmWrap) confirmWrap.classList.remove('hidden-section');
++            if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
++        } else {
++            if (heading)    heading.textContent    = 'Welcome back';
++            if (subheading) subheading.textContent = 'Sign in to your account to continue';
++            if (submitBtn)  submitBtn.textContent  = 'Sign In';
++            if (toggleBtn)  toggleBtn.textContent  = 'Create account';
++            if (toggleLabel) toggleLabel.textContent = 'New here?';
++            if (confirmWrap) confirmWrap.classList.add('hidden-section');
++            if (pwInput) pwInput.setAttribute('autocomplete', 'current-password');
++        }
++    }
++
++    function _authShowError(msg) {
++        const el = document.getElementById('auth-error');
++        const ok = document.getElementById('auth-success');
++        if (ok) ok.classList.add('hidden-section');
++        if (!el) return;
++        el.textContent = msg || 'Something went wrong. Please try again.';
++        el.classList.remove('hidden-section');
++    }
++
++    function _authShowSuccess(msg) {
++        const el = document.getElementById('auth-success');
++        const err = document.getElementById('auth-error');
++        if (err) err.classList.add('hidden-section');
++        if (!el) return;
++        el.textContent = msg || '';
++        el.classList.remove('hidden-section');
++    }
++
++    function _authClearMessages() {
++        const err = document.getElementById('auth-error');
++        const ok  = document.getElementById('auth-success');
++        if (err) err.classList.add('hidden-section');
++        if (ok)  ok.classList.add('hidden-section');
++    }
++
++    async function authFormSubmit() {
++        const email    = (document.getElementById('loginEmail')    || {}).value || '';
++        const password = (document.getElementById('loginPassword') || {}).value || '';
++        const confirm  = (document.getElementById('loginPasswordConfirm') || {}).value || '';
++        const btn      = document.getElementById('auth-submit-btn');
++
++        _authClearMessages();
++
++        if (!email.trim() || !password) {
++            _authShowError('Email and password are required.');
++            return;
++        }
++
++        if (!window.rcAuth || typeof window.rcAuth.signIn !== 'function') {
++            _authShowError('Auth is not available in this environment. You can still use jubly without signing in.');
++            return;
++        }
++
++        if (btn) { btn.disabled = true; btn.textContent = 'Please wait…'; }
++
++        try {
++            if (_authMode === 'signup') {
++                if (password !== confirm) {
++                    _authShowError('Passwords do not match.');
++                    return;
++                }
++                const { error } = await window.rcAuth.signUp(email.trim(), password);
++                if (error) {
++                    _authShowError(error.message || 'Sign-up failed. Please try again.');
++                } else {
++                    _authShowSuccess('Account created — check your email to confirm, then sign in.');
++                    // Switch to sign-in mode so user knows what to do next.
++                    if (_authMode !== 'signin') toggleAuthMode();
++                }
++            } else {
++                const { error } = await window.rcAuth.signIn(email.trim(), password);
++                if (error) {
++                    _authShowError(error.message || 'Sign-in failed. Check your email and password.');
++                }
++                // On success, rc:auth-changed fires → _handleAuthChanged routes to dashboard.
++            }
++        } catch (_) {
++            _authShowError('Unexpected error. Please try again.');
++        } finally {
++            if (btn) {
++                btn.disabled = false;
++                btn.textContent = _authMode === 'signup' ? 'Create Account' : 'Sign In';
++            }
++        }
++    }
++
++    async function shellSignOut() {
++        if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
++            await window.rcAuth.signOut();
++        }
++        // rc:auth-changed fires → _handleAuthChanged updates nav.
++        // User stays on whatever section they were on (free path still works).
++    }
++
++    // ── Auth state reflection (thin shell listener) ───────────────
++    // Shell updates the nav and routes on sign-in; it does not own auth truth.
++
++    function _handleAuthChanged(e) {
++        const { signedIn, user } = e.detail || {};
++
++        // Nav auth widgets
++        const signedInEl  = document.getElementById('nav-auth-signed-in');
++        const signedOutEl = document.getElementById('nav-auth-signed-out');
++        const emailEl     = document.getElementById('nav-auth-email');
++        const avatarEl    = document.getElementById('nav-avatar');
++
++        if (signedIn && user) {
++            if (signedInEl)  signedInEl.classList.remove('hidden-section');
++            if (signedOutEl) signedOutEl.classList.add('hidden-section');
++            if (emailEl)     emailEl.textContent = user.email || '';
++            // Seed avatar with email for a consistent visual — decorative only.
++            if (avatarEl && user.email) {
++                avatarEl.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.email)}`;
++            }
++            // Route to dashboard on explicit sign-in (not on page-load session restore).
++            const src = (e.detail || {}).source || '';
++            if (src === 'SIGNED_IN') {
++                showSection('dashboard');
++                try { refreshLibrary(); } catch(_) {}
++            }
++        } else {
++            if (signedInEl)  signedInEl.classList.add('hidden-section');
++            if (signedOutEl) signedOutEl.classList.remove('hidden-section');
++            if (emailEl)     emailEl.textContent = '';
++            if (avatarEl)    avatarEl.src = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
++        }
++    }
++
++    // Wire auth listener as soon as shell is ready.
++    try {
++        document.addEventListener('rc:auth-changed', _handleAuthChanged);
++    } catch(_) {}
++
+     // ── Profile tabs ─────────────────────────────────────────────
+     function switchTab(tabId) {
+         document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden-section'));
+diff --git a/js/state.js b/js/state.js
+index 3031a23..7c93ab5 100644
+--- a/js/state.js
++++ b/js/state.js
+@@ -723,7 +723,11 @@ function loadThemePrefs() {
+ }
+ 
+ function saveThemePrefs(payload) {
+-  return getPrefsAdapter().saveThemePrefs(payload);
++  const result = getPrefsAdapter().saveThemePrefs(payload);
++  // Pass 4: notify sync seam so durable settings stay in sync when signed in.
++  // sync.js listens for this event and calls rcSync.syncSettings with the combined snapshot.
++  try { document.dispatchEvent(new CustomEvent('rc:prefs-changed', { detail: { source: 'theme' } })); } catch (_) {}
++  return result;
+ }
+ 
+ function loadAppearancePrefs() {
+@@ -731,7 +735,10 @@ function loadAppearancePrefs() {
+ }
+ 
+ function saveAppearancePrefs(payload) {
+-  return getPrefsAdapter().saveAppearancePrefs(payload);
++  const result = getPrefsAdapter().saveAppearancePrefs(payload);
++  // Pass 4: same as saveThemePrefs — notify sync seam.
++  try { document.dispatchEvent(new CustomEvent('rc:prefs-changed', { detail: { source: 'appearance' } })); } catch (_) {}
++  return result;
+ }
+ 
+ function loadDiagnosticsPrefs() {
+diff --git a/api/public-config/index.js b/api/public-config/index.js
+new file mode 100644
+index 0000000..61a200c
+--- /dev/null
++++ b/api/public-config/index.js
+@@ -0,0 +1,40 @@
++// api/public-config/index.js
++// ─────────────────────────────────────────────────────────────────────────────
++// Pass 4: Returns public bootstrap config to the browser client.
++//
++// Currently returns the Supabase public URL and anon key so rcAuth can
++// initialize the Supabase client. Both are public by design — Supabase
++// restricts data access via Row Level Security, not by keeping the key secret.
++//
++// SUPABASE_SECRET_KEY is never returned here. It is backend-only.
++//
++// If env vars are absent (local dev without Supabase configured), returns
++// configured: false so rcAuth degrades gracefully — free-path reading
++// still works; durable sync simply does not run.
++//
++// Interim (Pass 4):
++//   Entitlement resolution from Supabase (Stripe-backed plan) is Pass 5.
++//   This endpoint only gates whether auth is configured at all.
++// ─────────────────────────────────────────────────────────────────────────────
++
++import { json, withCors } from '../_lib/http.js';
++import { getAllowedBrowserOrigins } from '../_lib/origins.js';
++
++export default async function handler(req, res) {
++  const allowed = getAllowedBrowserOrigins();
++  if (withCors(req, res, allowed)) return;
++
++  if (req.method !== 'GET') {
++    return json(res, 405, { error: 'Method not allowed. Use GET.' });
++  }
++
++  const url     = String(process.env.SUPABASE_URL      || '').trim();
++  const anonKey = String(process.env.SUPABASE_ANON_KEY || '').trim();
++
++  if (!url || !anonKey) {
++    // Not configured — client degrades to signed-out mode gracefully.
++    return json(res, 200, { configured: false, url: '', anonKey: '' });
++  }
++
++  return json(res, 200, { configured: true, url, anonKey });
++}
+diff --git a/js/auth.js b/js/auth.js
+new file mode 100644
+index 0000000..778c943
+--- /dev/null
++++ b/js/auth.js
+@@ -0,0 +1,152 @@
++// js/auth.js
++// ─────────────────────────────────────────────────────────────────────────────
++// Pass 4: Supabase auth core.
++//
++// window.rcAuth owns:
++//   - Supabase client bootstrap (via /api/public-config)
++//   - auth state: session, user
++//   - sign up / sign in / sign out
++//   - rc:auth-changed event emission
++//   - getClient() for sync seam access (js/sync.js)
++//
++// window.rcAuth does NOT own reading progress or settings persistence.
++// Those belong to js/sync.js which listens for rc:auth-changed and operates
++// against the client exposed by getClient().
++//
++// Interim (Pass 4):
++//   Email/password auth only. Google OAuth is out of scope for this pass.
++//   Entitlement resolution from Supabase (Stripe-backed plan) is Pass 5.
++// ─────────────────────────────────────────────────────────────────────────────
++
++window.rcAuth = (function () {
++  let _client      = null;
++  let _session     = null;
++  let _user        = null;
++  let _initDone    = false;
++  let _initPromise = null;
++
++  // ── Internal helpers ────────────────────────────────────────────────────
++
++  function _emit(name, detail) {
++    const ev = { detail };
++    try { document.dispatchEvent(new CustomEvent(name, ev)); } catch (_) {}
++    try { window.dispatchEvent(new CustomEvent(name, ev));   } catch (_) {}
++  }
++
++  async function _fetchConfig() {
++    try {
++      const resp = await fetch('/api/public-config', { cache: 'no-store' });
++      if (!resp.ok) return null;
++      const data = await resp.json();
++      return data && data.configured ? data : null;
++    } catch (_) { return null; }
++  }
++
++  // ── Init ────────────────────────────────────────────────────────────────
++
++  async function _doInit() {
++    if (_initDone) return;
++    _initDone = true;
++
++    const config = await _fetchConfig();
++    if (!config) {
++      // Supabase not configured for this environment.
++      // Free-path reading still works; durable sync does not run.
++      _emit('rc:auth-changed', {
++        user: null, session: null, signedIn: false, source: 'init-unconfigured',
++      });
++      return;
++    }
++
++    try {
++      // window.supabase is the UMD global from the CDN script loaded in index.html.
++      _client = window.supabase.createClient(config.url, config.anonKey, {
++        auth: { persistSession: true, autoRefreshToken: true },
++      });
++    } catch (_e) {
++      _emit('rc:auth-changed', {
++        user: null, session: null, signedIn: false, source: 'init-client-error',
++      });
++      return;
++    }
++
++    // Restore existing session from Supabase's own localStorage keys.
++    try {
++      const { data } = await _client.auth.getSession();
++      _session = data.session ?? null;
++      _user    = _session?.user ?? null;
++    } catch (_) {}
++
++    _emit('rc:auth-changed', {
++      user:     _user ? { id: _user.id, email: _user.email } : null,
++      session:  _session,
++      signedIn: !!_user,
++      source:   'init',
++    });
++
++    // Watch for future auth changes (token refresh, sign-out from another tab).
++    _client.auth.onAuthStateChange((event, session) => {
++      _session = session ?? null;
++      _user    = _session?.user ?? null;
++      _emit('rc:auth-changed', {
++        user:     _user ? { id: _user.id, email: _user.email } : null,
++        session:  _session,
++        signedIn: !!_user,
++        source:   event,
++      });
++    });
++  }
++
++  function init() {
++    if (_initPromise) return _initPromise;
++    _initPromise = _doInit().catch(() => {});
++    return _initPromise;
++  }
++
++  // ── Public auth operations ───────────────────────────────────────────────
++
++  function isSignedIn() { return !!_user; }
++
++  function getUser() {
++    return _user ? { id: _user.id, email: _user.email } : null;
++  }
++
++  function getSession() {
++    return _session ? { ..._session } : null;
++  }
++
++  // Exposed for the sync seam (js/sync.js) only.
++  // Other callers should use the auth operation methods below.
++  function getClient() { return _client; }
++
++  async function signUp(email, password) {
++    if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
++    return _client.auth.signUp({ email, password });
++  }
++
++  async function signIn(email, password) {
++    if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
++    return _client.auth.signInWithPassword({ email, password });
++  }
++
++  async function signOut() {
++    if (!_client) return;
++    try { await _client.auth.signOut(); } catch (_) {}
++  }
++
++  // ── Public API ──────────────────────────────────────────────────────────
++  return {
++    init,
++    isSignedIn,
++    getUser,
++    getSession,
++    getClient,
++    signUp,
++    signIn,
++    signOut,
++  };
++})();
++
++// Auto-initialize on load.
++// Shell and runtime (including js/sync.js) listen for rc:auth-changed.
++window.rcAuth.init();
+diff --git a/js/sync.js b/js/sync.js
+new file mode 100644
+index 0000000..b3a5277
+--- /dev/null
++++ b/js/sync.js
+@@ -0,0 +1,216 @@
++// js/sync.js
++// ─────────────────────────────────────────────────────────────────────────────
++// Pass 4: Durable sync seam.
++//
++// window.rcSync owns:
++//   - reading progress sync (write on navigation, read on book open)
++//   - settings/prefs sync (write on change, read on sign-in)
++//   - sync scheduling and debounce
++//   - Supabase table operations for durable user state
++//
++// This module does NOT own auth state or the Supabase client.
++// It borrows the authenticated client from rcAuth.getClient() and reads
++// the current user from rcAuth.getUser(). Auth events come via rc:auth-changed.
++//
++// Table shape is provisional — not frozen here. The progress schema maps
++// to runtime source truth (bookId, chapterIndex, pageIndex) but the exact
++// column names and composite key should be verified against the live
++// Supabase schema before marking this seam stable.
++//
++// Interim (Pass 4):
++//   Durable sync runs only when rcAuth is configured and the user is signed in.
++//   Local reading behavior is unaffected when signed out or when Supabase
++//   is not configured for the current environment.
++// ─────────────────────────────────────────────────────────────────────────────
++
++window.rcSync = (function () {
++  let _progressTimer = null;
++
++  // ── Internal helpers ────────────────────────────────────────────────────
++
++  function _client() {
++    try { return window.rcAuth && typeof window.rcAuth.getClient === 'function' ? window.rcAuth.getClient() : null; } catch (_) { return null; }
++  }
++
++  function _user() {
++    try { return window.rcAuth && typeof window.rcAuth.getUser === 'function' ? window.rcAuth.getUser() : null; } catch (_) { return null; }
++  }
++
++  function _ready() {
++    const c = _client();
++    const u = _user();
++    return !!(c && u && u.id);
++  }
++
++  // ── Reading progress ────────────────────────────────────────────────────
++
++  // Called after each page navigation. Debounced 500 ms to avoid flooding
++  // on rapid next/prev presses. bookId and chapterIndex identify the source;
++  // pageIndex is the 0-based page the user reached.
++  function scheduleProgressSync(bookId, chapterIndex, pageIndex) {
++    if (!_ready()) return;
++    if (_progressTimer) clearTimeout(_progressTimer);
++    _progressTimer = setTimeout(() => {
++      _progressTimer = null;
++      _writeProgress(bookId, chapterIndex, pageIndex);
++    }, 500);
++  }
++
++  async function _writeProgress(bookId, chapterIndex, pageIndex) {
++    const c = _client();
++    const u = _user();
++    if (!c || !u) return;
++    try {
++      await c.from('reading_progress').upsert({
++        user_id:       u.id,
++        book_id:       String(bookId || ''),
++        chapter_index: Number.isFinite(Number(chapterIndex)) ? Number(chapterIndex) : -1,
++        page_index:    Number.isFinite(Number(pageIndex)) && Number(pageIndex) >= 0 ? Number(pageIndex) : 0,
++        updated_at:    new Date().toISOString(),
++      }, { onConflict: 'user_id,book_id,chapter_index' });
++    } catch (_) {}
++  }
++
++  // Returns { pageIndex, updatedAt } or null if no record exists.
++  // Caller decides whether to apply the durable position.
++  async function getReadingProgress(bookId, chapterIndex) {
++    const c = _client();
++    const u = _user();
++    if (!c || !u) return null;
++    try {
++      const { data, error } = await c
++        .from('reading_progress')
++        .select('page_index, updated_at')
++        .eq('user_id',       u.id)
++        .eq('book_id',       String(bookId || ''))
++        .eq('chapter_index', Number.isFinite(Number(chapterIndex)) ? Number(chapterIndex) : -1)
++        .maybeSingle();
++      if (error || !data) return null;
++      const idx = Number(data.page_index);
++      return Number.isFinite(idx) && idx >= 0 ? { pageIndex: idx, updatedAt: data.updated_at } : null;
++    } catch (_) { return null; }
++  }
++
++  // ── Settings / preferences ──────────────────────────────────────────────
++  // prefs shape: { theme: {...}, appearance: {...} }
++  // Callers snapshot current local prefs before passing; rcSync writes them.
++
++  async function syncSettings(prefs) {
++    const c = _client();
++    const u = _user();
++    if (!c || !u || !prefs || typeof prefs !== 'object') return;
++    try {
++      await c.from('user_settings').upsert({
++        user_id:    u.id,
++        prefs:      prefs,
++        updated_at: new Date().toISOString(),
++      }, { onConflict: 'user_id' });
++    } catch (_) {}
++  }
++
++  // Returns stored prefs object or null if none exist yet.
++  async function getSettings() {
++    const c = _client();
++    const u = _user();
++    if (!c || !u) return null;
++    try {
++      const { data, error } = await c
++        .from('user_settings')
++        .select('prefs')
++        .eq('user_id', u.id)
++        .maybeSingle();
++      if (error || !data) return null;
++      return data.prefs && typeof data.prefs === 'object' ? data.prefs : null;
++    } catch (_) { return null; }
++  }
++
++  // ── Sign-in handler: pull and apply durable settings ───────────────────
++  // Called automatically when rc:auth-changed fires with signedIn: true.
++  // Pulls settings from Supabase and applies via rcTheme / rcAppearance.
++  // If no durable settings exist yet, pushes current local settings to seed them.
++
++  async function _onSignIn() {
++    // Pull durable settings.
++    const remote = await getSettings();
++
++    if (remote) {
++      // Apply remote theme prefs if present.
++      try {
++        if (remote.theme && window.rcTheme && typeof window.rcTheme.applyPrefs === 'function') {
++          window.rcTheme.applyPrefs(remote.theme);
++        }
++      } catch (_) {}
++      // Apply remote appearance prefs if present.
++      try {
++        if (remote.appearance && window.rcAppearance && typeof window.rcAppearance.applyPrefs === 'function') {
++          window.rcAppearance.applyPrefs(remote.appearance);
++        }
++      } catch (_) {}
++    } else {
++      // No remote settings yet — push current local prefs to seed the record.
++      try {
++        const localPrefs = _collectLocalPrefs();
++        if (localPrefs) await syncSettings(localPrefs);
++      } catch (_) {}
++    }
++  }
++
++  function _collectLocalPrefs() {
++    const prefs = {};
++    try {
++      if (window.rcTheme && typeof window.rcTheme.getPrefs === 'function') {
++        prefs.theme = window.rcTheme.getPrefs();
++      }
++    } catch (_) {}
++    try {
++      if (window.rcAppearance && typeof window.rcAppearance.getPrefs === 'function') {
++        prefs.appearance = window.rcAppearance.getPrefs();
++      }
++    } catch (_) {}
++    return Object.keys(prefs).length ? prefs : null;
++  }
++
++  // ── Listen for auth events ──────────────────────────────────────────────
++
++  function _handleAuthChanged(e) {
++    const { signedIn, source } = e.detail || {};
++    if (signedIn && source !== 'init-unconfigured' && source !== 'init-client-error') {
++      // Give runtime a tick to finish applying session state before pulling prefs.
++      setTimeout(() => { _onSignIn().catch(() => {}); }, 0);
++    }
++  }
++
++  try {
++    document.addEventListener('rc:auth-changed', _handleAuthChanged);
++  } catch (_) {}
++
++  // ── Listen for prefs-changed events ────────────────────────────────────
++  // state.js dispatches rc:prefs-changed after every saveThemePrefs /
++  // saveAppearancePrefs call. rcSync pushes the combined snapshot to Supabase
++  // when the user is signed in. No-ops silently when signed out.
++
++  let _prefsSyncTimer = null;
++
++  function _handlePrefsChanged() {
++    if (!_ready()) return;
++    // Debounce: theme + appearance saves can fire in quick succession.
++    if (_prefsSyncTimer) clearTimeout(_prefsSyncTimer);
++    _prefsSyncTimer = setTimeout(() => {
++      _prefsSyncTimer = null;
++      const prefs = _collectLocalPrefs();
++      if (prefs) syncSettings(prefs).catch(() => {});
++    }, 400);
++  }
++
++  try {
++    document.addEventListener('rc:prefs-changed', _handlePrefsChanged);
++  } catch (_) {}
++
++  // ── Public API ──────────────────────────────────────────────────────────
++  return {
++    scheduleProgressSync,
++    getReadingProgress,
++    syncSettings,
++    getSettings,
++  };
++})();

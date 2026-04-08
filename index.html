@@ -8,6 +8,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Lora:wght@400;500&family=Crimson+Pro:wght@400;600;700&display=swap" rel="stylesheet">
     <!-- JSZip: required for EPUB import (app's import.js) -->
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <!-- Supabase: UMD bundle exposes window.supabase — required by js/auth.js (Pass 4) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <link rel="stylesheet" href="css/shell.css">
 </head>
 <body class="bg-white">
@@ -368,17 +370,21 @@
             </div>
         </div>
         <div id="nav-user-controls" class="hidden-section flex items-center gap-3">
-            <div class="flex items-center gap-1 font-bold px-3 py-1 rounded-full text-sm text-accent bg-accent-soft">
-                <span>✨</span> <span>100</span>
+            <div id="nav-usage-pill" class="hidden-section flex items-center gap-1 font-bold px-3 py-1 rounded-full text-sm text-accent bg-accent-soft">
+                <span>✨</span> <span id="nav-usage-pill-value">100</span>
             </div>
-            <div class="cursor-pointer flex items-center gap-2" onclick="showSection('profile-page')">
+            <button id="nav-profile-trigger" type="button" class="flex items-center gap-2 rounded-full px-1.5 py-1 hover:bg-slate-100 transition" onclick="showSection('profile-page')">
+                <span id="nav-user-name" class="hidden-section text-xs font-semibold text-slate-600 max-w-[120px] truncate"></span>
                 <div class="w-10 h-10 bg-slate-200 rounded-full overflow-hidden">
-                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves" alt="avatar">
+                    <img id="nav-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves" alt="avatar">
                 </div>
-            </div>
+            </button>
+            <button id="nav-signout-btn" type="button" onclick="shellSignOut()" class="text-xs font-bold text-slate-400 hover:text-slate-700 transition px-2 py-1 rounded-lg hover:bg-slate-100" title="Sign out">Sign out</button>
         </div>
-        <div id="nav-landing-controls" class="flex items-center gap-3">
-            <button onclick="openModal('pricing-modal')" class="btn-subscribe">Subscribe</button>
+        <div id="nav-landing-controls" class="flex items-center gap-2 sm:gap-3">
+            <button id="nav-login-btn" type="button" onclick="showSigninPane()" class="text-xs font-bold text-slate-600 hover:text-slate-900 px-2 py-1 rounded-lg hover:bg-slate-100 transition">Login</button>
+            <button id="nav-signup-btn" type="button" onclick="showSignupPane()" class="text-xs font-bold text-indigo-600 hover:text-indigo-700 px-2 py-1 rounded-lg hover:bg-indigo-50 transition">Sign Up</button>
+            <button id="nav-subscribe-btn" type="button" onclick="openModal('pricing-modal')" class="btn-subscribe">Subscribe</button>
         </div>
     </div>
 </nav>
@@ -409,8 +415,8 @@
             Turn dense reading into manageable pages, listen with high-quality AI voices, and pick up exactly where you left off.
         </p>
         <div class="max-w-xs mx-auto md:mx-0 flex flex-col gap-3">
-            <button onclick="login()" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Try it free</button>
-            <button onclick="showSection('login-page')" class="btn-ghost w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Sign In</button>
+            <button onclick="openModal('pricing-modal')" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Try it free</button>
+            <button onclick="showSigninPane()" class="btn-ghost w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Sign In</button>
         </div>
     </div>
 </div>
@@ -432,34 +438,52 @@
                 <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-black text-xl bg-brand">J</div>
                 <span class="text-3xl font-extrabold tracking-tighter text-slate-900">jubly</span>
             </div>
-            <h2 class="text-2xl font-extrabold text-slate-900">Welcome back</h2>
-            <p class="text-slate-500 text-sm mt-1">Sign in to your account to continue</p>
+            <h2 id="auth-form-heading" class="text-2xl font-extrabold text-slate-900">Welcome back</h2>
+            <p id="auth-form-subheading" class="text-slate-500 text-sm mt-1">Sign in to your account to continue</p>
         </div>
         <div class="section-card shadow-sm space-y-4">
-            <button onclick="login()" class="w-full flex items-center justify-center gap-3 border-2 border-slate-200 rounded-xl py-3 font-bold text-slate-700 hover:bg-slate-50 transition text-sm">
+            <!-- Google OAuth — not active in this pass. Button is visible but disabled and clearly labelled. -->
+            <button disabled class="w-full flex items-center justify-center gap-3 border-2 border-slate-100 rounded-xl py-3 font-bold text-slate-300 text-sm cursor-not-allowed opacity-60" title="Google sign-in is not yet available">
                 <svg class="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                Continue with Google
+                Continue with Google (coming soon)
             </button>
             <div class="flex items-center gap-3">
                 <div class="flex-1 h-[1px] bg-slate-200"></div>
                 <span class="text-xs font-bold text-slate-400 uppercase">or</span>
                 <div class="flex-1 h-[1px] bg-slate-200"></div>
             </div>
+            <!-- error / status message -->
+            <div id="auth-error" class="hidden-section text-xs font-semibold text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+            <div id="auth-success" class="hidden-section text-xs font-semibold text-green-600 bg-green-50 border border-green-200 rounded-lg px-3 py-2"></div>
             <div>
-                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Username or Email</label>
-                <input type="text" placeholder="you@example.com" class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-indigo-400 transition bg-white">
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
+                <input id="loginEmail" type="email" autocomplete="email" placeholder="you@example.com"
+                    class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-indigo-400 transition bg-white"
+                    onkeydown="if(event.key==='Enter') authFormSubmit()">
             </div>
             <div>
                 <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Password</label>
-                <input type="password" placeholder="••••••••" class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-indigo-400 transition bg-white">
+                <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••"
+                    class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-indigo-400 transition bg-white"
+                    onkeydown="if(event.key==='Enter') authFormSubmit()">
             </div>
-            <div class="flex justify-end">
-                <a href="#" class="text-xs font-semibold text-indigo-500 hover:underline">Forgot password?</a>
+            <!-- confirm password — shown only in sign-up mode -->
+            <div id="auth-confirm-wrap" class="hidden-section">
+                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Confirm Password</label>
+                <input id="loginPasswordConfirm" type="password" autocomplete="new-password" placeholder="••••••••"
+                    class="w-full border-2 border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-indigo-400 transition bg-white"
+                    onkeydown="if(event.key==='Enter') authFormSubmit()">
             </div>
-            <button onclick="login()" class="btn-jubly w-full py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider">Sign In</button>
+            <button id="auth-submit-btn" onclick="authFormSubmit()" class="btn-jubly w-full py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider">Sign In</button>
         </div>
-        <p class="text-center text-sm text-slate-500 mt-6">New here? <button onclick="login()" class="font-bold text-indigo-600 hover:underline">Try for free</button></p>
-        <p class="text-center mt-3"><button onclick="showSection('landing-page')" class="text-xs text-slate-400 hover:text-slate-600 transition">← Back to home</button></p>
+        <p class="text-center text-sm text-slate-500 mt-6">
+            <span id="auth-toggle-label">New here?</span>
+            <button id="auth-toggle-btn" onclick="toggleAuthMode()" class="font-bold text-indigo-600 hover:underline ml-1">Create account</button>
+        </p>
+        <p class="text-center mt-2">
+            <button onclick="continueWithFree()" class="text-xs text-slate-400 hover:text-slate-600 transition"><span id="auth-free-link-text">Continue without signing in →</span></button>
+        </p>
+        <p class="text-center mt-2"><button onclick="showSection('landing-page')" class="text-xs text-slate-400 hover:text-slate-600 transition">← Back to home</button></p>
     </div>
 </div>
 
@@ -470,11 +494,27 @@
             <h2 class="text-3xl font-extrabold text-slate-900 tracking-tight">Library</h2>
             <p id="dashboard-subtitle" class="text-slate-500 text-sm mt-1">You've completed <strong>2 sessions</strong> this week. Keep the momentum going.</p>
         </div>
-        <div class="library-toolbar flex items-center gap-2">
+        <div id="library-toolbar" class="library-toolbar flex items-center gap-2">
             <button id="manageLibraryBtn" class="px-4 py-2.5 rounded-lg font-bold text-sm border-2 border-slate-200 text-slate-500 hover:bg-slate-50 transition">🗂️ Manage</button>
             <button id="importBookBtn"    class="btn-jubly px-6 py-2.5 rounded-lg font-bold text-sm shadow-sm">+ Import Book</button>
         </div>
     </header>
+
+    <section id="library-public-sample" class="hidden-section">
+        <div class="section-card shadow-sm border border-indigo-100 bg-indigo-50/40">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-5">
+                <div>
+                    <p class="text-xs font-black uppercase tracking-widest text-indigo-600 mb-2">Sample Book</p>
+                    <h3 class="text-2xl font-extrabold text-slate-900">Try Reading Training now</h3>
+                    <p class="text-sm text-slate-500 mt-2 max-w-2xl">Start with the built-in sample before creating an account. Sign in only when you want ownership, saved state, and your personal library.</p>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <button type="button" onclick="openSampleBookPreview()" class="btn-jubly px-6 py-3 rounded-xl font-bold text-sm">Open sample book</button>
+                    <button type="button" onclick="showSignupPane()" class="px-5 py-3 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Create account</button>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <!-- POPULATED STATE — rows injected by refreshLibrary() after import -->
     <div id="library-populated" class="hidden-section">
@@ -514,22 +554,36 @@
 <!-- PROFILE PAGE -->
 <main id="profile-page" class="hidden-section max-w-5xl mx-auto py-12 px-6 with-sidebar">
     <div class="flex flex-col md:flex-row gap-10">
-        <aside class="w-full md:w-64 flex-shrink-0">
-            <!-- Mobile only: nav shortcut (sidebar hidden on small screens) -->
-            <div class="flex gap-2 mb-3 sm:hidden">
-                <button onclick="showSection('dashboard')" class="flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-lg transition">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                    Library
-                </button>
+        <aside id="profile-sidebar" class="w-full md:w-64 flex-shrink-0">
+            <div id="profile-guest-card" class="hidden-section section-card shadow-sm">
+                <div class="text-center space-y-4">
+                    <div class="w-14 h-14 mx-auto rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl">👋</div>
+                    <div>
+                        <h3 class="font-bold text-base leading-tight">Account tools live here</h3>
+                        <p class="text-xs text-slate-400 mt-1">Sign in or create an account when you want saved settings, durable progress, and ownership tools.</p>
+                    </div>
+                    <div class="flex flex-col gap-2">
+                        <button type="button" onclick="showSigninPane()" class="btn-jubly w-full px-4 py-2.5 rounded-xl font-bold text-sm">Login</button>
+                        <button type="button" onclick="showSignupPane()" class="w-full px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Sign Up</button>
+                        <button type="button" onclick="continueWithFree()" class="text-xs text-slate-400 hover:text-slate-600 transition">Continue with Free →</button>
+                    </div>
+                </div>
             </div>
-            <div class="section-card shadow-sm">
+            <div id="profile-auth-card" class="section-card shadow-sm">
+                <!-- Mobile only: nav shortcut (sidebar hidden on small screens) -->
+                <div class="flex gap-2 mb-3 sm:hidden">
+                    <button onclick="showSection('dashboard')" class="flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-lg transition">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                        Library
+                    </button>
+                </div>
                 <div class="flex items-center gap-4 mb-4">
                     <div class="w-14 h-14 bg-slate-200 rounded-2xl overflow-hidden flex-shrink-0">
-                        <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves" class="rounded-2xl">
+                        <img id="profile-avatar-main" src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves" class="rounded-2xl">
                     </div>
                     <div>
-                        <h3 class="font-bold text-base leading-tight">Triston Barker</h3>
-                        <p class="text-xs text-slate-400 mt-0.5"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="f084829983849f9eb09588919d809c95de939f9d">[email&#160;protected]</a></p>
+                        <h3 id="profile-name-main" class="font-bold text-base leading-tight">Your account</h3>
+                        <p id="profile-email-main" class="text-xs text-slate-400 mt-0.5">Sign in to personalize this area.</p>
                     </div>
                 </div>
                 <div class="flex gap-1.5 mb-5">
@@ -543,12 +597,12 @@
                     <button data-tab="tab-subscription"  onclick="switchTab('tab-subscription')"  class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Subscription</button>
                     <button data-tab="tab-settings"      onclick="switchTab('tab-settings')"      class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Settings</button>
                     <hr class="my-2 border-slate-200">
-                    <button onclick="location.reload()" class="text-left px-4 py-2.5 rounded-lg font-semibold text-red-500 hover:bg-red-50 transition text-sm">Logout</button>
+                    <button type="button" onclick="shellSignOut()" class="text-left px-4 py-2.5 rounded-lg font-semibold text-red-500 hover:bg-red-50 transition text-sm">Logout</button>
                 </nav>
             </div>
         </aside>
 
-        <section class="flex-grow min-w-0">
+        <section id="profile-auth-content" class="flex-grow min-w-0">
             <!-- Profile Tab -->
             <div id="tab-profile" class="tab-content space-y-5">
                 <div class="grid grid-cols-2 gap-4">
@@ -602,37 +656,35 @@
             <!-- Subscription Tab -->
             <div id="tab-subscription" class="tab-content hidden-section space-y-5">
                 <div class="sub-hero">
-                    <h3 class="text-2xl font-extrabold mb-1">Your Plan</h3>
-                    <p class="text-purple-200 text-sm mb-5">You're currently on the <strong class="text-white">Pro</strong> plan.</p>
+                    <h3 class="text-2xl font-extrabold mb-1">Account access</h3>
+                    <p class="text-purple-200 text-sm mb-5">Billing and real entitlements land in a later pass. Current staging access is still controlled separately from this screen.</p>
                     <div class="flex gap-3 flex-wrap">
                         <button onclick="openModal('pricing-modal')" class="bg-white text-indigo-700 font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-indigo-50 transition">View Pricing</button>
-                        <button class="bg-white/20 text-white font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-white/30 transition border border-white/30">Manage Billing</button>
+                        <button class="bg-white/20 text-white font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-white/30 transition border border-white/30">Billing not live yet</button>
                     </div>
                 </div>
                 <div class="grid grid-cols-3 gap-4">
                     <div class="section-card shadow-sm text-center">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Files</p>
-                        <p class="text-2xl font-black text-slate-800">1 <span class="text-slate-300 text-base">/ 5</span></p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Imported books</p>
+                        <p class="text-2xl font-black text-slate-800">—</p>
                     </div>
                     <div class="section-card shadow-sm text-center">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Storage</p>
-                        <p class="text-2xl font-black text-slate-800">0.2 <span class="text-slate-300 text-base">GB</span></p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Durable sync</p>
+                        <p class="text-2xl font-black text-slate-800">Staging</p>
                     </div>
                     <div class="section-card shadow-sm text-center">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Renews</p>
-                        <p class="text-xl font-black text-slate-800 mt-1">Apr 1 <span class="text-slate-300 text-sm font-normal">2026</span></p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Billing</p>
+                        <p class="text-xl font-black text-slate-800 mt-1">Not live <span class="text-slate-300 text-sm font-normal">yet</span></p>
                     </div>
                 </div>
                 <div class="section-card shadow-sm">
-                    <h4 class="font-bold text-sm text-slate-700 mb-4">What's included in Pro</h4>
+                    <h4 class="font-bold text-sm text-slate-700 mb-4">Current stage</h4>
                     <ul class="space-y-2.5 text-sm text-slate-600 mb-5">
-                        <li class="flex items-center gap-2.5"><span class="text-emerald-500 font-bold">✓</span> 5 active documents</li>
-                        <li class="flex items-center gap-2.5"><span class="text-emerald-500 font-bold">✓</span> High-quality AI voices</li>
-                        <li class="flex items-center gap-2.5"><span class="text-emerald-500 font-bold">✓</span> Podcast RSS feed</li>
-                        <li class="flex items-center gap-2.5"><span class="text-slate-300 font-bold">✕</span> <span class="text-slate-400">Unlimited documents (Premium)</span></li>
-                        <li class="flex items-center gap-2.5"><span class="text-slate-300 font-bold">✕</span> <span class="text-slate-400">Priority processing (Premium)</span></li>
+                        <li class="flex items-center gap-2.5"><span class="text-emerald-500 font-bold">✓</span> Signed-out free path remains available</li>
+                        <li class="flex items-center gap-2.5"><span class="text-emerald-500 font-bold">✓</span> Signed-in auth, settings, and progress can sync</li>
+                        <li class="flex items-center gap-2.5"><span class="text-slate-300 font-bold">…</span> <span class="text-slate-400">Billing and real entitlements land in the next pass</span></li>
                     </ul>
-                    <button onclick="openModal('pricing-modal')" class="btn-jubly px-5 py-2.5 rounded-xl font-bold text-sm">Upgrade to Premium</button>
+                    <button onclick="openModal('pricing-modal')" class="btn-jubly px-5 py-2.5 rounded-xl font-bold text-sm">View Pricing</button>
                 </div>
             </div>
 
@@ -642,11 +694,11 @@
                     <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400">Account</h4>
                     <div class="flex items-center gap-4 pb-5 border-b border-slate-100">
                         <div class="w-14 h-14 bg-slate-200 rounded-2xl overflow-hidden flex-shrink-0">
-                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves" class="rounded-2xl">
+                            <img id="profile-avatar-settings" src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves" class="rounded-2xl">
                         </div>
                         <div class="flex-grow">
-                            <p class="font-bold text-slate-800">Triston Barker</p>
-                            <p class="text-sm text-slate-400"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="dfabadb6acabb0b19fbaa7beb2afb3baf1bcb0b2">[email&#160;protected]</a></p>
+                            <p id="profile-name-settings" class="font-bold text-slate-800">Your account</p>
+                            <p id="profile-email-settings" class="text-sm text-slate-400">Sign in to personalize this area.</p>
                         </div>
                         <button class="text-xs font-bold text-brand hover:underline">Edit</button>
                     </div>
@@ -674,6 +726,18 @@
                             <option>English</option><option>Spanish</option><option>French</option><option>German</option><option>Portuguese</option>
                         </select>
                     </div>
+                </div>
+            </div>
+        </section>
+        <section id="profile-guest-content" class="hidden-section flex-grow min-w-0">
+            <div class="section-card shadow-sm text-center py-12 px-8">
+                <div class="w-16 h-16 mx-auto rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-3xl mb-5">🔐</div>
+                <h3 class="text-2xl font-extrabold text-slate-900">Sign in for your account details</h3>
+                <p class="text-sm text-slate-500 mt-3 max-w-lg mx-auto">The free path lets you try the sample library without an account. Sign in only when you want profile details, saved preferences, and durable reading progress.</p>
+                <div class="flex flex-col sm:flex-row justify-center gap-3 mt-6">
+                    <button type="button" onclick="showSigninPane()" class="btn-jubly px-6 py-3 rounded-xl font-bold text-sm">Login</button>
+                    <button type="button" onclick="showSignupPane()" class="px-6 py-3 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Sign Up</button>
+                    <button type="button" onclick="continueWithFree()" class="px-6 py-3 rounded-xl font-bold text-sm border-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition">Continue with Free</button>
                 </div>
             </div>
         </section>
@@ -792,7 +856,7 @@
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> Standard AI voices</li>
                     <li class="flex items-center gap-2"><span class="text-slate-300">✕</span> <span class="text-slate-400">RSS feed</span></li>
                 </ul>
-                <button class="w-full border-2 border-slate-200 rounded-xl py-2.5 font-bold text-sm text-slate-400 hover:bg-slate-50 transition">Current Plan</button>
+                <button type="button" onclick="continueWithFree()" class="w-full border-2 border-slate-200 rounded-xl py-2.5 font-bold text-sm text-slate-600 hover:bg-slate-50 transition">Continue with Free</button>
             </div>
             <div class="pricing-card featured">
                 <div class="flex justify-between items-center mb-3">
@@ -806,7 +870,7 @@
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> High-quality AI voices</li>
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> Podcast RSS feed</li>
                 </ul>
-                <button class="w-full btn-jubly rounded-xl py-2.5 font-bold text-sm">Try for Free</button>
+                <button type="button" onclick="showSignupPane()" class="w-full btn-jubly rounded-xl py-2.5 font-bold text-sm">Create account</button>
             </div>
             <div class="pricing-card">
                 <p class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Premium</p>
@@ -817,12 +881,28 @@
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> Priority processing</li>
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> All Pro features</li>
                 </ul>
-                <button class="w-full border-2 border-indigo-200 text-indigo-600 rounded-xl py-2.5 font-bold text-sm hover:bg-indigo-50 transition">Upgrade</button>
+                <button type="button" onclick="showSignupPane()" class="w-full border-2 border-indigo-200 text-indigo-600 rounded-xl py-2.5 font-bold text-sm hover:bg-indigo-50 transition">Create account</button>
             </div>
         </div>
     </div>
 </div>
 
+
+<div id="ownership-modal" class="hidden-section fixed inset-0 bg-slate-900/70 modal-overlay flex items-center justify-center z-[105] p-6" style="display:none;">
+    <div class="bg-white w-full max-w-lg rounded-3xl p-8 relative shadow-2xl">
+        <button type="button" onclick="closeModal('ownership-modal')" class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition">✕</button>
+        <div class="text-center">
+            <div class="w-14 h-14 mx-auto rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl mb-4">🔐</div>
+            <h2 class="text-2xl font-extrabold text-slate-900">Account needed for ownership tools</h2>
+            <p id="ownership-copy" class="text-sm text-slate-500 mt-3">Importing and managing your library belong to your signed-in account. You can still explore the sample book without creating one.</p>
+        </div>
+        <div class="grid gap-3 mt-8">
+            <button type="button" onclick="showSigninPane(); closeModal('ownership-modal');" class="btn-jubly w-full py-3 rounded-xl font-bold text-sm">Login</button>
+            <button type="button" onclick="showSignupPane(); closeModal('ownership-modal');" class="w-full py-3 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Sign Up</button>
+            <button type="button" onclick="continueWithFree(); closeModal('ownership-modal');" class="w-full py-3 rounded-xl font-bold text-sm border-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition">Continue with Free</button>
+        </div>
+    </div>
+</div>
 
 <div id="musicPickerModal" class="modal-overlay hidden-section" style="display:none; z-index:1105;" aria-hidden="true">
     <div class="modal music-picker-modal" role="dialog" aria-modal="true" aria-labelledby="musicPickerTitle">
@@ -857,6 +937,9 @@
 </div>
 
 <script src="js/shell.js"></script>
+<!-- Pass 4: auth core and durable sync seam. Load after shell.js, before app.js. -->
+<script src="js/auth.js"></script>
+<script src="js/sync.js"></script>
 
 <!-- ── App scripts ──────────────────────────────────────────────
      Load order matches original index.html exactly.

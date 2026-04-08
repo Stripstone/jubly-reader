@@ -16,6 +16,8 @@
     // ── Section routing ──────────────────────────────────────────
     const ALL_SECTIONS     = ['landing-page', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
     const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
+    const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
+    let _currentSection = 'landing-page';
 
 
     let SHELL_DEBUG = {
@@ -32,46 +34,174 @@
         return entry;
     }
 
-    function showSection(id) {
-        const readingModeEl = document.getElementById('reading-mode');
-        const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
+    function isAuthedUser() {
+        try { return !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()); } catch (_) { return false; }
+    }
 
-        ALL_SECTIONS.forEach(s => document.getElementById(s).classList.add('hidden-section'));
-        document.getElementById(id).classList.remove('hidden-section');
+    function getAuthUser() {
+        try { return window.rcAuth && typeof window.rcAuth.getUser === 'function' ? window.rcAuth.getUser() : null; } catch (_) { return null; }
+    }
 
-        const isPublic  = id === 'landing-page' || id === 'login-page';
+    function getCurrentVisibleSection() {
+        const active = ALL_SECTIONS.find((s) => {
+            const el = document.getElementById(s);
+            return el && !el.classList.contains('hidden-section');
+        });
+        return active || _currentSection || 'landing-page';
+    }
+
+    function normalizeSection(id) {
+        return ALL_SECTIONS.includes(id) ? id : 'landing-page';
+    }
+
+    function buildShellUrl(sectionId) {
+        const url = new URL(window.location.href);
+        const params = new URLSearchParams(url.search);
+        if (!sectionId || sectionId === 'landing-page') params.delete('view');
+        else params.set('view', sectionId);
+        const query = params.toString();
+        return `${url.pathname}${query ? `?${query}` : ''}`;
+    }
+
+    function syncHistoryForSection(sectionId, mode = 'push') {
+        if (!window.history || sectionId === 'reading-mode') return;
+        const next = buildShellUrl(sectionId);
+        const current = `${window.location.pathname}${window.location.search}`;
+        if (mode === 'replace') {
+            window.history.replaceState({ section: sectionId }, '', next);
+            return;
+        }
+        if (next !== current) window.history.pushState({ section: sectionId }, '', next);
+    }
+
+    function readSectionFromLocation() {
+        try {
+            const params = new URLSearchParams(window.location.search || '');
+            return normalizeSection(params.get('view') || 'landing-page');
+        } catch (_) {
+            return 'landing-page';
+        }
+    }
+
+    function deriveDisplayName(user) {
+        const email = String((user && user.email) || '').trim();
+        if (!email) return 'Account';
+        return email.split('@')[0] || email;
+    }
+
+    function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
+        const id = normalizeSection(sectionId);
+        const authed = isAuthedUser();
+        const user = getAuthUser();
+        const isReading = id === 'reading-mode';
         const isLanding = id === 'landing-page';
+        const dashboardEl = document.getElementById('dashboard');
+        const profileEl = document.getElementById('profile-page');
 
-        document.getElementById('nav-user-controls').classList.toggle('hidden-section', isPublic);
-        const landingControls = document.getElementById('nav-landing-controls');
-        if (landingControls) landingControls.style.display = isLanding ? 'flex' : 'none';
-        const footer = document.getElementById('landing-footer');
-        if (footer) footer.classList.toggle('hidden-section', id !== 'landing-page');
+        const navUserControls = document.getElementById('nav-user-controls');
+        const navLandingControls = document.getElementById('nav-landing-controls');
+        const navSubscribeBtn = document.getElementById('nav-subscribe-btn');
+        const navLoginBtn = document.getElementById('nav-login-btn');
+        const navSignupBtn = document.getElementById('nav-signup-btn');
+        const navUserName = document.getElementById('nav-user-name');
+        const navAvatar = document.getElementById('nav-avatar');
+        const navProfileTrigger = document.getElementById('nav-profile-trigger');
+        const navSignoutBtn = document.getElementById('nav-signout-btn');
+        const navUsagePill = document.getElementById('nav-usage-pill');
 
-        // Sidebar
+        if (navUserControls) navUserControls.classList.toggle('hidden-section', !authed || isReading);
+        if (navLandingControls) navLandingControls.style.display = (!authed && !isReading) ? 'flex' : 'none';
+        if (navSubscribeBtn) navSubscribeBtn.style.display = isLanding ? '' : 'none';
+        if (navLoginBtn) navLoginBtn.style.display = (!authed && id !== 'login-page') ? '' : 'none';
+        if (navSignupBtn) navSignupBtn.style.display = !authed ? '' : 'none';
+        if (navProfileTrigger) navProfileTrigger.style.display = authed ? '' : 'none';
+        if (navSignoutBtn) navSignoutBtn.style.display = authed ? '' : 'none';
+        if (navUsagePill) navUsagePill.classList.add('hidden-section');
+
+        const displayName = deriveDisplayName(user);
+        if (navUserName) {
+            navUserName.textContent = authed ? displayName : '';
+            navUserName.classList.toggle('hidden-section', !authed);
+        }
+        if (navAvatar) navAvatar.src = authed && user && user.email
+            ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.email)}`
+            : 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
+
         const sidebar = document.getElementById('app-sidebar');
-        if (sidebar) sidebar.style.display = SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
+        if (sidebar) sidebar.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
+        if (dashboardEl) dashboardEl.classList.toggle('with-sidebar', authed);
+        if (profileEl) profileEl.classList.toggle('with-sidebar', authed);
+        const supportFooter = document.getElementById('supportFooter');
+        if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'block' : 'none';
         const sbLibrary = document.getElementById('sb-library');
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
 
-        // Support footer: visible on logged-in non-reading pages only
-        const supportFooter = document.getElementById('supportFooter');
-        if (supportFooter) supportFooter.style.display = SIDEBAR_SECTIONS.includes(id) ? 'block' : 'none';
+        const libraryToolbar = document.getElementById('library-toolbar');
+        const librarySample = document.getElementById('library-public-sample');
+        if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !authed);
+        if (librarySample) librarySample.classList.toggle('hidden-section', !(id === 'dashboard' && !authed));
+        const subtitle = document.getElementById('dashboard-subtitle');
+        if (subtitle) {
+            subtitle.style.display = '';
+            subtitle.innerHTML = authed
+                ? "You've completed <strong>2 sessions</strong> this week. Keep the momentum going."
+                : 'Try the sample book now, or create an account when you want ownership tools and saved progress.';
+        }
 
-        // Reading mode: hide nav for focus, restore on exit
+        const profileGuestCard = document.getElementById('profile-guest-card');
+        const profileGuestContent = document.getElementById('profile-guest-content');
+        const profileAuthCard = document.getElementById('profile-auth-card');
+        const profileAuthContent = document.getElementById('profile-auth-content');
+        if (profileGuestCard) profileGuestCard.classList.toggle('hidden-section', authed);
+        if (profileGuestContent) profileGuestContent.classList.toggle('hidden-section', authed);
+        if (profileAuthCard) profileAuthCard.classList.toggle('hidden-section', !authed);
+        if (profileAuthContent) profileAuthContent.classList.toggle('hidden-section', !authed);
+
+        const profileNameMain = document.getElementById('profile-name-main');
+        const profileEmailMain = document.getElementById('profile-email-main');
+        const profileAvatarMain = document.getElementById('profile-avatar-main');
+        const profileNameSettings = document.getElementById('profile-name-settings');
+        const profileEmailSettings = document.getElementById('profile-email-settings');
+        const profileAvatarSettings = document.getElementById('profile-avatar-settings');
+        if (profileNameMain) profileNameMain.textContent = authed ? displayName : 'Your account';
+        if (profileEmailMain) profileEmailMain.textContent = authed && user ? (user.email || '') : 'Sign in to personalize this area.';
+        if (profileNameSettings) profileNameSettings.textContent = authed ? displayName : 'Your account';
+        if (profileEmailSettings) profileEmailSettings.textContent = authed && user ? (user.email || '') : 'Sign in to personalize this area.';
+        const avatarSrc = authed && user && user.email
+            ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.email)}`
+            : 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
+        if (profileAvatarMain) profileAvatarMain.src = avatarSrc;
+        if (profileAvatarSettings) profileAvatarSettings.src = avatarSrc;
+    }
+
+    function showSection(id, options = {}) {
+        const targetId = normalizeSection(id);
+        const readingModeEl = document.getElementById('reading-mode');
+        const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
+
+        ALL_SECTIONS.forEach((s) => {
+            const el = document.getElementById(s);
+            if (el) el.classList.add('hidden-section');
+        });
+        const target = document.getElementById(targetId);
+        if (target) target.classList.remove('hidden-section');
+        _currentSection = targetId;
+
+        const footer = document.getElementById('landing-footer');
+        if (footer) footer.classList.toggle('hidden-section', targetId !== 'landing-page');
+
         const mainNav = document.querySelector('nav');
-        if (mainNav) mainNav.style.display = id === 'reading-mode' ? 'none' : '';
-        if (wasReading && id !== 'reading-mode') {
+        if (mainNav) mainNav.style.display = targetId === 'reading-mode' ? 'none' : '';
+        if (wasReading && targetId !== 'reading-mode') {
             try {
                 let exitResult = null;
                 if (typeof exitReadingSession === 'function') exitResult = exitReadingSession();
                 else cleanupReadingTransientState();
-                // PATCH(diagnostics): record exit result in shell debug so it appears in getShellDiagnosticsSnapshot()
                 shellDebugRemember('lastControlAction', { type: 'exit-reading', exitResult });
             } catch(_) {}
         }
-        document.body.classList.toggle('reading-active', id === 'reading-mode');
-        if (id === 'reading-mode') {
+        document.body.classList.toggle('reading-active', targetId === 'reading-mode');
+        if (targetId === 'reading-mode') {
             initFocusMode();
             updateTierPill();
             updateExplorerSwatchState();
@@ -82,12 +212,14 @@
                 if (window.rcEmbers && typeof window.rcEmbers.syncVisibility === 'function') window.rcEmbers.syncVisibility();
             } catch (_) {}
             try { syncExplorerMusicSource(); } catch (_) {}
-            // (label mutation removed — layout handled purely in CSS)
         } else {
             try { syncExplorerMusicSource(); } catch (_) {}
         }
-        if (id === 'dashboard') refreshLibrary();
+
+        syncShellAuthPresentation(targetId);
+        if (targetId === 'dashboard') refreshLibrary();
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
+        if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
 
         window.scrollTo(0, 0);
     }
@@ -118,13 +250,216 @@
     function openModal(id)  { const el = document.getElementById(id); if (!el) return; el.classList.remove('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'flex'; }
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
-    // ── Auth (SCAFFOLD) ──────────────────────────────────────────
-    // SCAFFOLD: replace login() with real Supabase auth flow
+    // ── Auth — free path (no sign-in required) ───────────────────
+    // login() is the signed-out Library path. It preserves value first:
+    // users can explore the sample Library surface without creating an account.
     function login() {
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
         showSection('dashboard');
         try { refreshLibrary(); } catch(_) {}
     }
 
+    function continueWithFree() {
+        login();
+    }
+
+    function showSigninPane() {
+        if (_authMode !== 'signin') toggleAuthMode();
+        showSection('login-page');
+    }
+
+    function showSignupPane() {
+        if (_authMode !== 'signup') toggleAuthMode();
+        showSection('login-page');
+    }
+
+    function openSampleBookPreview() {
+        try { openPreview(PUBLIC_SAMPLE_BOOK_ID, 'Reading Training'); } catch (_) {}
+    }
+
+    function promptOwnershipAction(kind) {
+        if (isAuthedUser()) return false;
+        const copy = document.getElementById('ownership-copy');
+        if (copy) {
+            copy.textContent = kind === 'manage'
+                ? 'Managing your personal library belongs to your signed-in account. You can still explore the sample book without creating one.'
+                : 'Importing books belongs to your signed-in account. You can still explore the sample book without creating one.';
+        }
+        openModal('ownership-modal');
+        return true;
+    }
+
+    function installOwnershipGuards() {
+        const bind = (id, kind) => {
+            const el = document.getElementById(id);
+            if (!el || el.__jublyOwnershipGuard) return;
+            el.__jublyOwnershipGuard = true;
+            el.addEventListener('click', (event) => {
+                if (!isAuthedUser()) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
+                    promptOwnershipAction(kind);
+                }
+            }, true);
+        };
+        bind('manageLibraryBtn', 'manage');
+        bind('importBookBtn', 'import');
+        bind('empty-drop-zone', 'import');
+    }
+
+    // ── Auth — Pass 4 sign-in / sign-up / sign-out ───────────────
+    // Shell is a thin presenter. It calls rcAuth, reflects state, and routes.
+    // It does not own auth state or Supabase operations.
+
+    let _authMode = 'signin'; // 'signin' | 'signup'
+
+    function toggleAuthMode() {
+        _authMode = _authMode === 'signin' ? 'signup' : 'signin';
+        const heading      = document.getElementById('auth-form-heading');
+        const subheading   = document.getElementById('auth-form-subheading');
+        const submitBtn    = document.getElementById('auth-submit-btn');
+        const toggleBtn    = document.getElementById('auth-toggle-btn');
+        const toggleLabel  = document.getElementById('auth-toggle-label');
+        const confirmWrap  = document.getElementById('auth-confirm-wrap');
+        const errEl        = document.getElementById('auth-error');
+        const okEl         = document.getElementById('auth-success');
+        const pwInput      = document.getElementById('loginPassword');
+        const freeLinkText = document.getElementById('auth-free-link-text');
+        if (errEl) errEl.classList.add('hidden-section');
+        if (okEl)  okEl.classList.add('hidden-section');
+        if (_authMode === 'signup') {
+            if (heading)    heading.textContent    = 'Create account';
+            if (subheading) subheading.textContent = 'Start reading for free — no card required';
+            if (submitBtn)  submitBtn.textContent  = 'Create Account';
+            if (toggleBtn)  toggleBtn.textContent  = 'Sign in instead';
+            if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
+            if (confirmWrap) confirmWrap.classList.remove('hidden-section');
+            if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
+            if (freeLinkText) freeLinkText.textContent = 'Continue without creating an account →';
+        } else {
+            if (heading)    heading.textContent    = 'Welcome back';
+            if (subheading) subheading.textContent = 'Sign in to your account to continue';
+            if (submitBtn)  submitBtn.textContent  = 'Sign In';
+            if (toggleBtn)  toggleBtn.textContent  = 'Create account';
+            if (toggleLabel) toggleLabel.textContent = 'New here?';
+            if (confirmWrap) confirmWrap.classList.add('hidden-section');
+            if (pwInput) pwInput.setAttribute('autocomplete', 'current-password');
+            if (freeLinkText) freeLinkText.textContent = 'Continue without signing in →';
+        }
+    }
+
+    function _authShowError(msg) {
+        const el = document.getElementById('auth-error');
+        const ok = document.getElementById('auth-success');
+        if (ok) ok.classList.add('hidden-section');
+        if (!el) return;
+        el.textContent = msg || 'Something went wrong. Please try again.';
+        el.classList.remove('hidden-section');
+    }
+
+    function _authShowSuccess(msg) {
+        const el = document.getElementById('auth-success');
+        const err = document.getElementById('auth-error');
+        if (err) err.classList.add('hidden-section');
+        if (!el) return;
+        el.textContent = msg || '';
+        el.classList.remove('hidden-section');
+    }
+
+    function _authClearMessages() {
+        const err = document.getElementById('auth-error');
+        const ok  = document.getElementById('auth-success');
+        if (err) err.classList.add('hidden-section');
+        if (ok)  ok.classList.add('hidden-section');
+    }
+
+    async function authFormSubmit() {
+        const email    = (document.getElementById('loginEmail')    || {}).value || '';
+        const password = (document.getElementById('loginPassword') || {}).value || '';
+        const confirm  = (document.getElementById('loginPasswordConfirm') || {}).value || '';
+        const btn      = document.getElementById('auth-submit-btn');
+
+        _authClearMessages();
+
+        if (!email.trim() || !password) {
+            _authShowError('Email and password are required.');
+            return;
+        }
+
+        if (!window.rcAuth || typeof window.rcAuth.signIn !== 'function') {
+            _authShowError('Auth is not available in this environment. You can still use jubly without signing in.');
+            return;
+        }
+
+        if (btn) { btn.disabled = true; btn.textContent = 'Please wait…'; }
+
+        try {
+            if (_authMode === 'signup') {
+                if (password !== confirm) {
+                    _authShowError('Passwords do not match.');
+                    return;
+                }
+                const { error } = await window.rcAuth.signUp(email.trim(), password);
+                if (error) {
+                    _authShowError(error.message || 'Sign-up failed. Please try again.');
+                } else {
+                    _authShowSuccess('Account created — check your email to confirm, then sign in.');
+                    if (_authMode !== 'signin') toggleAuthMode();
+                }
+            } else {
+                const { error } = await window.rcAuth.signIn(email.trim(), password);
+                if (error) {
+                    _authShowError(error.message || 'Sign-in failed. Check your email and password.');
+                }
+            }
+        } catch (_) {
+            _authShowError('Unexpected error. Please try again.');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = _authMode === 'signup' ? 'Create Account' : 'Sign In';
+            }
+        }
+    }
+
+    async function shellSignOut() {
+        if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
+            await window.rcAuth.signOut();
+        }
+    }
+
+    function _handleAuthChanged(e) {
+        const { signedIn, source } = e.detail || {};
+        syncShellAuthPresentation(getCurrentVisibleSection());
+        if (signedIn) {
+            if (source === 'SIGNED_IN') {
+                showSection('dashboard');
+                try { refreshLibrary(); } catch(_) {}
+            }
+        } else {
+            const current = getCurrentVisibleSection();
+            if (current === 'profile-page') showSection('dashboard');
+            else syncShellAuthPresentation(current);
+        }
+    }
+
+    try {
+        document.addEventListener('rc:auth-changed', _handleAuthChanged);
+    } catch(_) {}
+
+    window.addEventListener('popstate', () => {
+        showSection(readSectionFromLocation(), { historyMode: 'none' });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        installOwnershipGuards();
+        syncShellAuthPresentation('landing-page');
+        const initialSection = readSectionFromLocation();
+        if (initialSection && initialSection !== 'landing-page') showSection(initialSection, { historyMode: 'replace' });
+        else syncHistoryForSection('landing-page', 'replace');
+    });
     // ── Profile tabs ─────────────────────────────────────────────
     function switchTab(tabId) {
         document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden-section'));
@@ -725,8 +1060,22 @@
         const rowsEl  = document.getElementById('library-rows');
         const popEl   = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
+        const sampleEl = document.getElementById('library-public-sample');
         const sub     = document.getElementById('dashboard-subtitle');
         if (!rowsEl) return;
+
+        if (!isAuthedUser()) {
+            if (sampleEl) sampleEl.classList.remove('hidden-section');
+            if (popEl) popEl.classList.add('hidden-section');
+            if (emptyEl) emptyEl.classList.add('hidden-section');
+            if (sub) {
+                sub.style.display = '';
+                sub.innerHTML = 'Try the sample book now, or create an account when you want ownership tools and saved progress.';
+            }
+            return;
+        }
+
+        if (sampleEl) sampleEl.classList.add('hidden-section');
 
         // Keep the library surface honest during boot. Until runtime book storage is
         // actually available, do not imply an empty library by showing the empty/import CTA.
