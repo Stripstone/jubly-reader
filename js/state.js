@@ -49,14 +49,17 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   // Tokens do not enforce limits during prototype — this is observational only.
   // Resets when tier changes.
   //
-  // Token costs for currently surfaced backend actions.
-  // The UI must reflect the same costs as the server-owned usage check.
+  // Token costs (must match ExperienceSpec):
+  //   TTS page (cloud)     = 1
+  //   AI Evaluate          = 2
+  //   Generate anchors     = 1
+  //   Research analysis    = 3
+
   const TOKEN_COSTS = {
-    import:   2,
-    tts:      2,
+    tts:      1,
     evaluate: 2,
-    anchors:  2,
-    research: 2,
+    anchors:  1,
+    research: 3,
   };
 
   const SAFE_FALLBACK_POLICY = Object.freeze({
@@ -256,40 +259,21 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
 
   let sessionTokens = {
     remaining: SAFE_FALLBACK_POLICY.usageDailyLimit,
-    spent: { import: 0, tts: 0, evaluate: 0, anchors: 0, research: 0 },
+    spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
   };
-
-  function emitUsageChanged(source) {
-    const detail = { source: source || 'usage', snapshot: getUsageSnapshot() };
-    try { document.dispatchEvent(new CustomEvent('rc:usage-changed', { detail })); } catch (_) {}
-    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail })); } catch (_) {}
-  }
-
-  function getUsageSnapshot() {
-    const spent = Object.assign({ import: 0, tts: 0, evaluate: 0, anchors: 0, research: 0 }, sessionTokens?.spent || {});
-    const totalSpent = Object.values(spent).reduce((a, b) => a + (Number(b) || 0), 0);
-    return {
-      remaining: sessionTokens?.remaining ?? getRuntimeUsageAllowance(),
-      allowance: getRuntimeUsageAllowance(),
-      spent,
-      totalSpent,
-    };
-  }
 
   function tokenSpend(category) {
     const cost = TOKEN_COSTS[category] || 0;
     if (!cost) return;
     sessionTokens.spent[category] = (sessionTokens.spent[category] || 0) + cost;
-    sessionTokens.remaining = Math.max(0, Number(sessionTokens.remaining ?? getRuntimeUsageAllowance()) - cost);
-    emitUsageChanged('spend');
+    sessionTokens.remaining = Math.max(0, sessionTokens.remaining - cost);
   }
 
   function tokenReset() {
     sessionTokens = {
       remaining: getRuntimeUsageAllowance(),
-      spent: { import: 0, tts: 0, evaluate: 0, anchors: 0, research: 0 },
+      spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
     };
-    emitUsageChanged('reset');
   }
 
 // ---- Persistence strip (stabilization mode) ----
@@ -884,12 +868,10 @@ function saveReadingMetrics(payload) {
   return next;
 }
 
-function estimateReadMinutesFromPages(pageCount, sourceKind) {
+function estimateReadMinutesFromPages(pageCount) {
   const pagesCount = Number(pageCount);
   const normalized = Number.isFinite(pagesCount) && pagesCount > 0 ? pagesCount : 0;
-  const kind = String(sourceKind || 'book').toLowerCase();
-  const minutesPerPage = kind === 'text' ? 1 : 2.5;
-  return Math.max(1, Math.round(normalized * minutesPerPage));
+  return Math.max(1, Math.ceil(normalized * 1.5));
 }
 
 function upsertReadingBookSummary(summary) {
@@ -959,14 +941,12 @@ function getReadingProfileMetrics() {
     if (ended >= sevenDaysAgo) weeklyMinutes += mins;
     sessionsCompleted += 1;
   });
-  const roundedDailyMinutes = Math.round(dailyMinutes);
-  const roundedWeeklyMinutes = Math.round(weeklyMinutes);
   const goal = Math.max(5, Number(prefs.dailyGoalMinutes || DEFAULT_PROFILE_PREFS.dailyGoalMinutes));
-  const progressPct = goal > 0 ? Math.max(0, Math.min(100, Math.round((roundedDailyMinutes / goal) * 100))) : 0;
+  const progressPct = goal > 0 ? Math.max(0, Math.min(100, Math.round((dailyMinutes / goal) * 100))) : 0;
   return {
     dailyGoalMinutes: goal,
-    dailyMinutes: roundedDailyMinutes,
-    weeklyMinutes: roundedWeeklyMinutes,
+    dailyMinutes: Math.round(dailyMinutes),
+    weeklyMinutes: Math.round(weeklyMinutes),
     sessionsCompleted,
     progressPct,
     lastGoalCelebratedOn: String(prefs.lastGoalCelebratedOn || ''),
@@ -1292,8 +1272,6 @@ window.rcUsage = {
       );
       if (resp.ok) {
         const data = await resp.json();
-        if (typeof data.remaining !== 'undefined') sessionTokens.remaining = data.remaining;
-        emitUsageChanged('server-check');
         return {
           allowed: !!data.allowed,
           cost: data.cost,
@@ -1324,7 +1302,6 @@ window.rcUsage = {
   spend: function rcUsageSpend(category) {
     try { if (typeof tokenSpend === 'function') tokenSpend(category); } catch (_) {}
   },
-  getSnapshot: getUsageSnapshot,
 };
 
 window.rcEntitlements = {

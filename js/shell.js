@@ -127,7 +127,9 @@
             navUserName.textContent = authed ? displayName : '';
             navUserName.classList.toggle('hidden-section', !authed);
         }
-        if (navAvatar) navAvatar.src = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
+        if (navAvatar) navAvatar.src = authed && user && user.email
+            ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.email)}`
+            : 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
 
         const sidebar = document.getElementById('app-sidebar');
         if (sidebar) sidebar.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
@@ -169,10 +171,11 @@
         if (profileEmailMain) profileEmailMain.textContent = authed && user ? (user.email || '') : 'Sign in to personalize this area.';
         if (profileNameSettings) profileNameSettings.textContent = authed ? displayName : 'Your account';
         if (profileEmailSettings) profileEmailSettings.textContent = authed && user ? (user.email || '') : 'Sign in to personalize this area.';
-        const avatarSrc = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
+        const avatarSrc = authed && user && user.email
+            ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.email)}`
+            : 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
         if (profileAvatarMain) profileAvatarMain.src = avatarSrc;
         if (profileAvatarSettings) profileAvatarSettings.src = avatarSrc;
-        try { renderUsageSurface(); } catch (_) {}
     }
 
     function showSection(id, options = {}) {
@@ -511,7 +514,6 @@
 
         if (!_shellAuthBootstrapped) {
             syncShellAuthPresentation(resolveSectionForAuth(current));
-            try { renderUsageSurface(); } catch (_) {}
             try { if (window.rcHelp && typeof window.rcHelp.syncIdentity === 'function') window.rcHelp.syncIdentity(); } catch (_) {}
             return;
         }
@@ -528,7 +530,6 @@
                 return;
             }
             syncShellAuthPresentation(current);
-            try { renderUsageSurface(); } catch (_) {}
             try { if (window.rcHelp && typeof window.rcHelp.syncIdentity === 'function') window.rcHelp.syncIdentity(); } catch (_) {}
             if (source === 'SIGNED_IN') {
                 try { refreshLibrary(); } catch(_) {}
@@ -1209,8 +1210,8 @@
                 ? window.rcLibraryData.countPagesFromMarkdown(b.markdown || '')
                 : Math.max(1, (String(b.markdown||'').match(/^\s*##\s+/gm)||[]).length || 1);
             const surface = (window.rcLibraryData && typeof window.rcLibraryData.getBookSurfaceData === 'function')
-                ? window.rcLibraryData.getBookSurfaceData(`local:${String(b.id)}`, pages, b.sourceKind || 'book')
-                : { status: 'Unread', timeLabel: `${Math.max(1, Math.round(pages * 2.5))} min left` };
+                ? window.rcLibraryData.getBookSurfaceData(`local:${String(b.id)}`, pages)
+                : { status: 'Unread', timeLabel: `${Math.max(1, Math.ceil(pages * 1.5))} min left` };
             const date = new Date(b.createdAt||Date.now()).toLocaleDateString();
             const id = ('local:' + String(b.id)).replace(/'/g,"\\'");
             const title = escHtml(b.title||'Untitled');
@@ -1330,17 +1331,6 @@
         }
     }
 
-    function renderUsageSurface() {
-        const valueEl = document.getElementById('nav-usage-pill-value');
-        if (!valueEl) return;
-        const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
-            ? window.rcUsage.getSnapshot()
-            : { remaining: 0, allowance: 0 };
-        const remaining = Math.max(0, Number(snapshot?.remaining || 0));
-        const allowance = Math.max(0, Number(snapshot?.allowance || 0));
-        valueEl.textContent = allowance > 0 ? `${remaining} / ${allowance}` : '0 / 0';
-    }
-
     function renderProfileSurface() {
         const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
             ? window.rcReadingMetrics.getReadingProfileMetrics()
@@ -1356,12 +1346,12 @@
         if (goalEl) goalEl.textContent = String(metrics.dailyGoalMinutes || 15);
         if (weeklyEl) weeklyEl.textContent = String(metrics.weeklyMinutes || 0);
         if (sessionsEl) sessionsEl.textContent = String(metrics.sessionsCompleted || 0);
-        if (labelEl) labelEl.textContent = '✦';
+        if (labelEl) labelEl.textContent = `${metrics.progressPct || 0}%`;
         if (ringEl) ringEl.style.setProperty('--goal-progress', `${metrics.progressPct || 0}%`);
         if (copyEl) {
             copyEl.textContent = metrics.progressPct >= 100
                 ? 'Goal complete for today.'
-                : `${Math.max(0, (metrics.dailyGoalMinutes || 15) - (metrics.dailyMinutes || 0))} min to go today`;
+                : `${Math.max(0, (metrics.dailyGoalMinutes || 15) - (metrics.dailyMinutes || 0))} min to go today.`;
         }
         if (metrics.progressPct >= 100 && metrics.lastGoalCelebratedOn !== metrics.todayIso) {
             try {
@@ -1412,7 +1402,7 @@
         const pageCount = (typeof pages !== 'undefined' && Array.isArray(pages)) ? pages.length : 0;
         const mins = (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function')
             ? window.rcReadingMetrics.estimateReadMinutesFromPages(pageCount)
-            : Math.max(1, Math.round(pageCount * 2.5));
+            : Math.max(1, Math.round(pageCount * 1.5));
         document.getElementById('stat-pages').textContent   = pageCount;
         document.getElementById('stat-minutes').textContent = mins;
         signal.classList.remove('hidden-section');
@@ -1455,68 +1445,9 @@
             setGoalEditMode(false);
             renderProfileSurface();
         });
-
-        const nameTrigger = document.getElementById('profile-name-edit-trigger');
-        const nameForm = document.getElementById('profile-name-edit-form');
-        const nameInput = document.getElementById('profile-name-input');
-        const nameCancel = document.getElementById('profile-name-cancel-btn');
-        const passwordToggle = document.getElementById('profile-password-toggle-btn');
-        const passwordForm = document.getElementById('profile-password-form');
-        const passwordInput = document.getElementById('profile-password-input');
-        const passwordCancel = document.getElementById('profile-password-cancel-btn');
-        const settingsStatus = document.getElementById('profile-settings-status');
-
-        function setSettingsStatus(message, kind) {
-            if (!settingsStatus) return;
-            settingsStatus.textContent = message || '';
-            settingsStatus.classList.toggle('hidden-section', !message);
-            settingsStatus.classList.remove('profile-settings-status-error', 'profile-settings-status-success');
-            if (message) settingsStatus.classList.add(kind === 'error' ? 'profile-settings-status-error' : 'profile-settings-status-success');
-        }
-        function setNameEdit(open) {
-            if (nameForm) nameForm.classList.toggle('hidden-section', !open);
-            if (nameTrigger) nameTrigger.classList.toggle('hidden-section', !!open);
-            if (open && nameInput) {
-                nameInput.value = deriveDisplayName(getAuthUser());
-                setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch (_) {} }, 0);
-            }
-        }
-        function setPasswordEdit(open) {
-            if (passwordForm) passwordForm.classList.toggle('hidden-section', !open);
-            if (passwordToggle) passwordToggle.classList.toggle('hidden-section', !!open);
-            if (!open && passwordInput) passwordInput.value = '';
-            if (open && passwordInput) setTimeout(() => { try { passwordInput.focus(); } catch (_) {} }, 0);
-        }
-        nameTrigger?.addEventListener('click', () => { setSettingsStatus('', 'success'); setNameEdit(true); });
-        nameCancel?.addEventListener('click', () => { setNameEdit(false); });
-        nameForm?.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            setSettingsStatus('', 'success');
-            const nextName = String(nameInput?.value || '').trim();
-            if (!nextName) { setSettingsStatus('Username is required.', 'error'); return; }
-            const result = await (window.rcAuth && typeof window.rcAuth.updateDisplayName === 'function'
-                ? window.rcAuth.updateDisplayName(nextName)
-                : Promise.resolve({ error: { message: 'Profile editing is not available.' } }));
-            if (result?.error) { setSettingsStatus(result.error.message || 'Unable to update username.', 'error'); return; }
-            setNameEdit(false);
-            syncShellAuthPresentation();
-            setSettingsStatus('Username updated.', 'success');
-        });
-        passwordToggle?.addEventListener('click', () => { setSettingsStatus('', 'success'); setPasswordEdit(true); });
-        passwordCancel?.addEventListener('click', () => { setPasswordEdit(false); });
-        passwordForm?.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            setSettingsStatus('', 'success');
-            const nextPassword = String(passwordInput?.value || '');
-            const result = await (window.rcAuth && typeof window.rcAuth.changePassword === 'function'
-                ? window.rcAuth.changePassword(nextPassword)
-                : Promise.resolve({ error: { message: 'Password changes are not available.' } }));
-            if (result?.error) { setSettingsStatus(result.error.message || 'Unable to change password.', 'error'); return; }
-            setPasswordEdit(false);
-            setSettingsStatus('Password updated.', 'success');
-        });
-        document.getElementById('profile-help-chat-btn')?.addEventListener('click', async (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openChat === 'function') await window.rcHelp.openChat(); } catch (_) {} });
-        document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') await window.rcHelp.openFeedback(); } catch (_) {} });
+        document.getElementById('profile-help-chat-btn')?.addEventListener('click', (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openChat === 'function') window.rcHelp.openChat(); } catch (_) {} });
+        document.getElementById('profile-help-email-btn')?.addEventListener('click', (e) => { e.preventDefault(); window.location.href = 'mailto:info@summitsvault.info'; });
+        document.getElementById('profile-help-feedback-link')?.addEventListener('click', (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') window.rcHelp.openFeedback(); } catch (_) {} });
         const tierSel = document.getElementById('tierSelect');
         if (tierSel) {
             tierSel.addEventListener('change', () => {
@@ -1537,13 +1468,15 @@
         });
         document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} });
         window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
-        window.addEventListener('rc:deleted-library-changed', () => { try { renderSubscriptionSurface(); } catch (_) {} });
-        window.addEventListener('rc:usage-changed', () => { try { renderUsageSurface(); } catch (_) {} });
         try { switchReadingSettingsTab('general'); } catch (_) {}
         try { syncTierButtonState(); } catch (_) {}
+
+        const importCloseBtn = document.getElementById('importBookClose');
+        if (importCloseBtn) {
+            importCloseBtn.addEventListener('click', () => setTimeout(() => { try { if (typeof resetImporterState === 'function') resetImporterState({ keepModalOpen: false }); } catch(_) {} }, 0));
+        }
         try { renderProfileSurface(); } catch (_) {}
         try { renderSubscriptionSurface(); } catch (_) {}
-        try { renderUsageSurface(); } catch (_) {}
 
         const topSettingsBtn = document.getElementById('openReadingSettings');
         if (topSettingsBtn) {

@@ -17,7 +17,7 @@
 //
 // Usage:
 //   POST /api/usage-check
-//   Body: { action: 'import'|'tts'|'evaluate'|'anchors'|'research', spent: { import, tts, evaluate, anchors, research } }
+//   Body: { action: 'tts'|'evaluate'|'anchors'|'research', spent: { tts, evaluate, anchors, research } }
 //   Response: { ok, allowed, action, cost, totalSpent, remaining, limit, meta }
 //     meta: { resolutionMode, policySource, simulationAllowed }
 //
@@ -31,11 +31,10 @@ import { getResolvedRuntimePolicyForRequest } from "./runtime-policy.js";
 // Token costs are server-owned. Client must not maintain an independent cost
 // matrix — it treats the backend verdict as truth.
 const TOKEN_COSTS = {
-  import:   2,
-  tts:      2,
+  tts:      1,
   evaluate: 2,
-  anchors:  2,
-  research: 2,
+  anchors:  1,
+  research: 3,
 };
 
 const VALID_ACTIONS = new Set(Object.keys(TOKEN_COSTS));
@@ -60,7 +59,6 @@ export default async function handler(req, res) {
   // Validate and floor client-reported spend state.
   const rawSpent = body?.spent && typeof body.spent === 'object' ? body.spent : {};
   const spent = {
-    import:   Math.max(0, Math.floor(Number(rawSpent.import)   || 0)),
     tts:      Math.max(0, Math.floor(Number(rawSpent.tts)      || 0)),
     evaluate: Math.max(0, Math.floor(Number(rawSpent.evaluate) || 0)),
     anchors:  Math.max(0, Math.floor(Number(rawSpent.anchors)  || 0)),
