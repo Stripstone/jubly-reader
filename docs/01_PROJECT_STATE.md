@@ -67,21 +67,26 @@ Current role:
 
 ### Backend
 Located in:
-- `api/anchors`
-- `api/evaluate`
+- `api/app`
+- `api/ai`
+- `api/billing`
 - `api/book-import`
-- `api/health`
-- `api/summary`
+- `api/import-capacity`
+- `api/stripe/webhook`
 - `api/tts`
+- `api/usage-check`
 - `api/_lib`
 - `api/prompts`
 
 Current role:
-- anchors
-- grading/evaluation
+- public bootstrap/runtime config/health dispatch
+- anchors, grading/evaluation, and summary dispatch
+- Stripe checkout and portal dispatch
+- Stripe webhook entitlement writes
 - import conversion
-- summary generation
+- import-capacity enforcement
 - cloud TTS
+- usage enforcement
 - shared helpers and prompt contracts
 
 ## Current architectural reality

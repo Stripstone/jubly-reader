@@ -340,7 +340,7 @@ function quoteChunkMatch(quote, inputNorm) {
       if (!parsed || parsed.anchorVersion !== ANCHOR_VERSION) return null;
       if (!Array.isArray(parsed.anchors)) return null;
     // Back-compat: older cache shape was { anchors: [...] }.
-    // Newer cache may include extra fields produced by /api/anchors.
+    // Newer cache may include extra fields produced by /api/ai?action=anchors.
     return {
       ...parsed,
       // Anchors endpoint no longer emits pageBetterConsolidation (evaluate owns that).
@@ -383,7 +383,7 @@ function writeAnchorsToCache(pageHash, payload) {
     }
 
     const debug = isDebugEnabledFromUrl();
-    const url = apiUrl('/api/anchors');
+    const url = apiUrl('/api/ai?action=anchors');
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -391,7 +391,7 @@ function writeAnchorsToCache(pageHash, payload) {
     });
     const txt = await resp.text();
     let data;
-    try { data = JSON.parse(txt); } catch { data = { error: 'Invalid JSON from /api/anchors', detail: txt }; }
+    try { data = JSON.parse(txt); } catch { data = { error: 'Invalid JSON from /api/ai?action=anchors', detail: txt }; }
     if (!resp.ok) {
       const err = new Error(data?.error || 'Anchors API error');
       err.details = data;
@@ -401,7 +401,7 @@ function writeAnchorsToCache(pageHash, payload) {
     try { if (typeof tokenSpend === 'function') tokenSpend('anchors'); } catch(_) {}
     // Basic schema check
     if (!Array.isArray(data?.anchors) || !data?.meta?.pageHash) {
-      const err = new Error('Invalid /api/anchors response schema');
+      const err = new Error('Invalid /api/ai?action=anchors response schema');
       err.details = data;
       throw err;
     }
@@ -415,7 +415,7 @@ function writeAnchorsToCache(pageHash, payload) {
     // for the on-page anchors debug panel.
     if (debug) {
       try {
-        console.info('[Anchors] /api/anchors response', {
+        console.info('[Anchors] /api/ai?action=anchors response', {
           status: resp.status,
           pageHash: data?.meta?.pageHash,
           anchorVersion: data?.meta?.anchorVersion,

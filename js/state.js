@@ -228,8 +228,8 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     const hasExplicitTier = !(typeof requestedTier === 'undefined' || requestedTier === null || String(requestedTier).trim() === '');
     const tier = normalizeAppTier(hasExplicitTier ? requestedTier : getRuntimeTier());
     const endpoint = hasExplicitTier
-      ? apiUrl(`/api/runtime-config?tier=${encodeURIComponent(tier)}`)
-      : apiUrl('/api/runtime-config');
+      ? apiUrl(`/api/app?kind=runtime-config&tier=${encodeURIComponent(tier)}`)
+      : apiUrl('/api/app?kind=runtime-config');
     try {
       const response = await fetch(endpoint, {
         method: 'GET',
