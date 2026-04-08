@@ -225,8 +225,8 @@ window.rcBilling = (function () {
         secondaryBtn.onclick = function () { if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
     } else {
-      if (statusCopy) statusCopy.textContent = 'Your account is on the free path until Stripe creates an active entitlement. Upgrade when you are ready.';
-      if (billingState) billingState.innerHTML = 'Free <span class="text-slate-300 text-sm font-normal">path</span>';
+      if (statusCopy) statusCopy.textContent = 'Your account is on Free until Stripe creates an active entitlement. Upgrade when you are ready.';
+      if (billingState) billingState.innerHTML = 'Free';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
         primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
