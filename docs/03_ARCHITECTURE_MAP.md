@@ -82,30 +82,10 @@ It stores durable records that runtime interprets.
 - `js/music.js`
 
 ### Backend files
-- `api/app`
-- `api/ai`
-- `api/billing`
-- `api/book-import`
-- `api/import-capacity`
-- `api/stripe/webhook`
-- `api/tts`
-- `api/usage-check`
-- `api/_lib`
-- `api/prompts`
+- `api/*`
 
 ### Documentation files
 - `docs/*.md`
-
-## API family note
-Backend entrypoints may be consolidated by relevance when deployment limits require it, but the owner rules do not change.
-
-That means:
-- app/bootstrap/runtime-policy concerns may share one backend family
-- anchors/evaluate/summary may share one backend family
-- billing checkout and portal may share one backend family
-- webhook stays separate when raw-body handling or external endpoint stability makes that safer
-- consolidation must not move protected logic back into the browser just to save route count
-- consolidation should prefer latency-safe grouping over unrelated monolith endpoints
 
 ## Scaffold discipline
 Folder scaffolding is not a presentation preference.

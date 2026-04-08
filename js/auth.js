@@ -3,7 +3,7 @@
 // Pass 4/5: Supabase auth core.
 //
 // window.rcAuth owns:
-//   - Supabase client bootstrap (via /api/app?kind=public-config)
+//   - Supabase client bootstrap (via /api/public-config)
 //   - auth hydration / ready state
 //   - auth state: session, user
 //   - sign up / sign in / sign out
@@ -15,7 +15,7 @@
 // against the client exposed by getClient().
 //
 // Email/password auth is the active path here. Billing / entitlement truth is
-// resolved server-side in Pass 5 and consumed through /api/app?kind=runtime-config.
+// resolved server-side in Pass 5 and consumed through /api/runtime-config.
 // ─────────────────────────────────────────────────────────────────────────────
 
 window.rcAuth = (function () {
@@ -51,7 +51,7 @@ window.rcAuth = (function () {
 
   async function _fetchConfig() {
     try {
-      const resp = await fetch('/api/app?kind=public-config', { cache: 'no-store' });
+      const resp = await fetch('/api/public-config', { cache: 'no-store' });
       if (!resp.ok) return null;
       const data = await resp.json().catch(() => null);
       return data && typeof data === 'object' ? data : null;
