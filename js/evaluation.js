@@ -253,8 +253,8 @@
     const pageTextForRequest = passageText; // never alter grading input for debugging
 
     // Prefer anchor-owned better consolidation (from page state or cache)
-    // so /api/ai?action=evaluate can focus on grading instead of re-summarizing.
-    // Use the same stable hash as /api/ai?action=anchors so we can pull the anchor pack from memory.
+    // so /api/evaluate can focus on grading instead of re-summarizing.
+    // Use the same stable hash as /api/anchors so we can pull the anchor pack from memory.
     // Anchors compute pageHash via: await sha256HexBrowser(pageText)
     const pageHashForEval = (page && page.pageHash)
       ? page.pageHash
@@ -266,7 +266,7 @@
     const requestPayload = {
       pageText: pageTextForRequest,
       userText,
-      // Optional context coming from /api/ai?action=anchors. This is stable, page-level, and not user-dependent.
+      // Optional context coming from /api/anchors. This is stable, page-level, and not user-dependent.
       // Evaluate generates Better consolidation itself; do not pass any page-level better consolidation from anchors.
       anchors: Array.isArray(page?.anchors) ? page.anchors : undefined,
       betterCharLimit: goalCharCount,
@@ -311,7 +311,7 @@
     }
 
     try {
-      const response = await fetch(apiUrl("/api/ai?action=evaluate"), {
+      const response = await fetch(apiUrl("/api/evaluate"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestPayload)
@@ -372,7 +372,7 @@
         `<div style="color:#8B2500;">
           <div><b>AI Evaluate failed</b>${status ? ` (HTTP ${status})` : ''}.</div>
           <div style="opacity:0.85; font-size:13px; margin-top:6px;">${escapeHtml(msg || 'Unknown error')}</div>
-          <div style="opacity:0.7; font-size:12px; margin-top:6px;">Tip: open DevTools → Network and look for <code>/api/ai?action=evaluate</code>. (If you're on GitHub Pages, set <code>?api=</code> to your Vercel deployment.)</div>
+          <div style="opacity:0.7; font-size:12px; margin-top:6px;">Tip: open DevTools → Network and look for <code>/api/evaluate</code>. (If you're on GitHub Pages, set <code>?api=</code> to your Vercel deployment.)</div>
         </div>`;
       aiBtn.textContent = '▼ AI Evaluate';
       aiBtn.classList.remove('loading');
@@ -824,7 +824,7 @@
     const requestPayload = { title: "", pages: pagesPayload };
 
     try {
-      const response = await fetch(apiUrl("/api/ai?action=summary"), {
+      const response = await fetch(apiUrl("/api/summary"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestPayload)

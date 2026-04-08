@@ -165,14 +165,6 @@ These require explicit justification or removal.
 - leaving prototype shortcuts in place after the runtime owner exists
 - continuing to add bridges without defining their retirement
 
-### Deployment-limit consolidation rule
-When platform limits require fewer backend entrypoints:
-- consolidate backend routes by relevance, not convenience
-- prefer stable backend families such as app/config, AI, and billing
-- keep external webhook paths separate when raw-body handling or third-party configuration stability benefits from it
-- do not push protected logic back into client code just to reduce serverless function count
-- do not merge unrelated responsibilities into a vague monolith endpoint if it makes ownership less clear or increases regression risk
-
 ## Refactor entry checklist
 Before starting a major refactor or redistribution pass, answer all of these:
 1. What is the exact owner layer for the target behavior?

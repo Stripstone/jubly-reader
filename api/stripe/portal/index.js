@@ -1,8 +1,8 @@
-import { json, withCors } from './http.js';
-import { requestOrigin } from './env.js';
-import { getAllowedBrowserOrigins } from './origins.js';
-import { getActiveEntitlement, getUserFromAccessToken } from './supabase.js';
-import { stripeRequest } from './stripe.js';
+import { json, withCors } from '../../_lib/http.js';
+import { requestOrigin } from '../../_lib/env.js';
+import { getAllowedBrowserOrigins } from '../../_lib/origins.js';
+import { getActiveEntitlement, getUserFromAccessToken } from '../../_lib/supabase.js';
+import { stripeRequest } from '../../_lib/stripe.js';
 
 function getBearer(req) {
   const header = String(req?.headers?.authorization || req?.headers?.Authorization || '').trim();
