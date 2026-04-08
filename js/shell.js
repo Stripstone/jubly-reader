@@ -18,6 +18,7 @@
     const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
     const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
     let _currentSection = 'landing-page';
+    let _shellAuthBootstrapped = false;
 
 
     let SHELL_DEBUG = {
@@ -52,6 +53,12 @@
 
     function normalizeSection(id) {
         return ALL_SECTIONS.includes(id) ? id : 'landing-page';
+    }
+
+    function resolveSectionForAuth(id) {
+        const normalized = normalizeSection(id);
+        if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'login-page')) return 'dashboard';
+        return normalized;
     }
 
     function buildShellUrl(sectionId) {
@@ -175,7 +182,7 @@
     }
 
     function showSection(id, options = {}) {
-        const targetId = normalizeSection(id);
+        const targetId = resolveSectionForAuth(id);
         const readingModeEl = document.getElementById('reading-mode');
         const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
 
@@ -432,15 +439,25 @@
 
     function _handleAuthChanged(e) {
         const { signedIn, source } = e.detail || {};
-        syncShellAuthPresentation(getCurrentVisibleSection());
+        const current = getCurrentVisibleSection();
+
+        if (!_shellAuthBootstrapped) {
+            syncShellAuthPresentation(resolveSectionForAuth(current));
+            return;
+        }
+
         if (signedIn) {
+            if (current === 'landing-page' || current === 'login-page') {
+                showSection('dashboard', { historyMode: 'replace' });
+                try { refreshLibrary(); } catch(_) {}
+                return;
+            }
+            syncShellAuthPresentation(current);
             if (source === 'SIGNED_IN') {
-                showSection('dashboard');
                 try { refreshLibrary(); } catch(_) {}
             }
         } else {
-            const current = getCurrentVisibleSection();
-            if (current === 'profile-page') showSection('dashboard');
+            if (current === 'profile-page') showSection('dashboard', { historyMode: 'replace' });
             else syncShellAuthPresentation(current);
         }
     }
@@ -453,12 +470,20 @@
         showSection(readSectionFromLocation(), { historyMode: 'none' });
     });
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
         installOwnershipGuards();
-        syncShellAuthPresentation('landing-page');
-        const initialSection = readSectionFromLocation();
-        if (initialSection && initialSection !== 'landing-page') showSection(initialSection, { historyMode: 'replace' });
-        else syncHistoryForSection('landing-page', 'replace');
+        try { document.body.classList.add('auth-hydrating'); } catch (_) {}
+        try {
+            if (window.rcAuth && typeof window.rcAuth.init === 'function') {
+                await window.rcAuth.init();
+            }
+        } catch (_) {}
+
+        const requestedSection = readSectionFromLocation();
+        const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
+        _shellAuthBootstrapped = true;
+        showSection(settledSection, { historyMode: 'replace' });
+        try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
     });
     // ── Profile tabs ─────────────────────────────────────────────
     function switchTab(tabId) {

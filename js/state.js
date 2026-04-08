@@ -225,10 +225,15 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   }
 
   async function refreshRuntimePolicy(requestedTier) {
-    const tier = normalizeAppTier(requestedTier || getRuntimeTier());
+    const hasExplicitTier = !(typeof requestedTier === 'undefined' || requestedTier === null || String(requestedTier).trim() === '');
+    const tier = normalizeAppTier(hasExplicitTier ? requestedTier : getRuntimeTier());
+    const endpoint = hasExplicitTier
+      ? apiUrl(`/api/runtime-config?tier=${encodeURIComponent(tier)}`)
+      : apiUrl('/api/runtime-config');
     try {
-      const response = await fetch(apiUrl(`/api/runtime-config?tier=${encodeURIComponent(tier)}`), {
+      const response = await fetch(endpoint, {
         method: 'GET',
+        headers: { ...getAuthHeaders() },
         cache: 'no-store'
       });
       if (!response.ok) throw new Error(`runtime-config ${response.status}`);
@@ -238,7 +243,8 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       const policyWithMeta = payload?.policy
         ? { ...payload.policy, resolutionMode: payload?.meta?.resolutionMode }
         : payload;
-      return applyResolvedRuntimePolicy(policyWithMeta, tier);
+      const resolvedTierHint = payload?.meta?.effectiveTier || tier;
+      return applyResolvedRuntimePolicy(policyWithMeta, resolvedTierHint);
     } catch (_) {
       // Server unreachable. Apply minimum safe free-tier fallback only.
       // PASS3: Do not preserve the requested tier (even on localhost) when the
@@ -1047,7 +1053,7 @@ window.rcUsage = {
         (typeof apiUrl === 'function' ? apiUrl('/api/usage-check') : '/api/usage-check'),
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ action: category, spent }),
           cache: 'no-store',
         }

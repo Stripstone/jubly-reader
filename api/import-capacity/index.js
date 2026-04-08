@@ -46,7 +46,7 @@ export default async function handler(req, res) {
     return json(res, 400, { error: 'count must be a non-negative number', received: rawCount });
   }
 
-  const resolved = getResolvedRuntimePolicyForRequest(req);
+  const resolved = await getResolvedRuntimePolicyForRequest(req);
   const { importSlotLimit } = resolved.policy;
 
   // null importSlotLimit = unlimited (premium tier).

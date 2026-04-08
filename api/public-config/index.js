@@ -1,23 +1,17 @@
 // api/public-config/index.js
 // ─────────────────────────────────────────────────────────────────────────────
-// Pass 4: Returns public bootstrap config to the browser client.
+// Public browser bootstrap config.
 //
-// Currently returns the Supabase public URL and anon key so rcAuth can
-// initialize the Supabase client. Both are public by design — Supabase
-// restricts data access via Row Level Security, not by keeping the key secret.
+// Exposes only public values:
+//   - Supabase URL + anon key
+//   - derived app/auth redirect URLs
+//   - Stripe plan availability flags (not secrets, not price IDs)
 //
-// SUPABASE_SECRET_KEY is never returned here. It is backend-only.
-//
-// If env vars are absent (local dev without Supabase configured), returns
-// configured: false so rcAuth degrades gracefully — free-path reading
-// still works; durable sync simply does not run.
-//
-// Interim (Pass 4):
-//   Entitlement resolution from Supabase (Stripe-backed plan) is Pass 5.
-//   This endpoint only gates whether auth is configured at all.
+// Secrets never leave the server.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { json, withCors } from '../_lib/http.js';
+import { requestOrigin } from '../_lib/env.js';
 import { getAllowedBrowserOrigins } from '../_lib/origins.js';
 
 export default async function handler(req, res) {
@@ -28,13 +22,34 @@ export default async function handler(req, res) {
     return json(res, 405, { error: 'Method not allowed. Use GET.' });
   }
 
-  const url     = String(process.env.SUPABASE_URL      || '').trim();
+  const url = String(process.env.SUPABASE_URL || '').trim();
   const anonKey = String(process.env.SUPABASE_ANON_KEY || '').trim();
+  const appBaseUrl = requestOrigin(req);
+  const authRedirectUrl = `${appBaseUrl}/`;
+  const stripe = {
+    plans: {
+      pro: !!(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO),
+      premium: !!(process.env.STRIPE_PRICE_PREMIUM_MONTHLY || process.env.STRIPE_PRICE_PREMIUM),
+    },
+  };
 
   if (!url || !anonKey) {
-    // Not configured — client degrades to signed-out mode gracefully.
-    return json(res, 200, { configured: false, url: '', anonKey: '' });
+    return json(res, 200, {
+      configured: false,
+      url: '',
+      anonKey: '',
+      appBaseUrl,
+      authRedirectUrl,
+      stripe,
+    });
   }
 
-  return json(res, 200, { configured: true, url, anonKey });
+  return json(res, 200, {
+    configured: true,
+    url,
+    anonKey,
+    appBaseUrl,
+    authRedirectUrl,
+    stripe,
+  });
 }

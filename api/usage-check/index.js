@@ -65,7 +65,7 @@ export default async function handler(req, res) {
     research: Math.max(0, Math.floor(Number(rawSpent.research) || 0)),
   };
 
-  const resolved = getResolvedRuntimePolicyForRequest(req);
+  const resolved = await getResolvedRuntimePolicyForRequest(req);
   const { usageDailyLimit } = resolved.policy;
   const cost = TOKEN_COSTS[action];
 

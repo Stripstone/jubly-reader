@@ -314,6 +314,15 @@
       return { count, limit, hasCapacity };
     }
 
+    function getAuthHeaders() {
+      try {
+        const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function'
+          ? window.rcAuth.getAccessToken()
+          : '';
+        return token ? { Authorization: `Bearer ${token}` } : {};
+      } catch (_) { return {}; }
+    }
+
     async function guardImportCapacity() {
       const snapshot = await getImportCapacitySnapshot();
       // Pass 3: back the capacity verdict with a server-owned policy check.
@@ -325,7 +334,7 @@
           (typeof apiUrl === 'function' ? apiUrl('/api/import-capacity') : '/api/import-capacity'),
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
             body: JSON.stringify({ count: snapshot.count }),
             cache: 'no-store',
           }
