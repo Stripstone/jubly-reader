@@ -55,15 +55,32 @@ window.rcBilling = (function () {
   }
 
   function rememberPendingPlan(plan) {
-    try { sessionStorage.setItem('rc_pending_plan', String(plan || '')); } catch (_) {}
+    const normalized = normalizePlan(plan);
+    try { sessionStorage.setItem('rc_pending_plan', normalized); } catch (_) {}
+    try {
+      const url = new URL(window.location.href);
+      if (normalized && normalized !== 'free') url.searchParams.set('plan_id', normalized);
+      else url.searchParams.delete('plan_id');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch (_) {}
   }
 
   function readPendingPlan() {
-    try { return String(sessionStorage.getItem('rc_pending_plan') || '').trim(); } catch (_) { return ''; }
+    try {
+      const url = new URL(window.location.href);
+      const fromUrl = normalizePlan(url.searchParams.get('plan_id') || '');
+      if (fromUrl) return fromUrl;
+    } catch (_) {}
+    try { return normalizePlan(sessionStorage.getItem('rc_pending_plan') || ''); } catch (_) { return ''; }
   }
 
   function clearPendingPlan() {
     try { sessionStorage.removeItem('rc_pending_plan'); } catch (_) {}
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('plan_id');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch (_) {}
   }
 
   function normalizePlan(plan) {
@@ -118,13 +135,13 @@ window.rcBilling = (function () {
     const premiumAmount = document.getElementById('pricing-premium-amount');
     const premiumInterval = document.getElementById('pricing-premium-interval');
 
-    if (proAmount) proAmount.textContent = plans?.pro?.amountLabel || '$9';
-    if (proInterval) proInterval.textContent = plans?.pro?.intervalLabel || '/mo';
-    if (premiumAmount) premiumAmount.textContent = plans?.premium?.amountLabel || '$19';
-    if (premiumInterval) premiumInterval.textContent = plans?.premium?.intervalLabel || '/mo';
+    if (proAmount) proAmount.textContent = plans?.pro?.amountLabel || 'Configured in Stripe';
+    if (proInterval) proInterval.textContent = plans?.pro?.intervalLabel || '';
+    if (premiumAmount) premiumAmount.textContent = plans?.premium?.amountLabel || 'Configured in Stripe';
+    if (premiumInterval) premiumInterval.textContent = plans?.premium?.intervalLabel || '';
 
     if (!signedIn) {
-      applyPlanButtonState(freeBtn, 'Create Free Account', () => rememberPlanAndOpenSignup('free'));
+      applyPlanButtonState(freeBtn, 'Continue with Free', () => rememberPlanAndOpenSignup('free'));
       applyPlanButtonState(proBtn, 'Choose Pro', () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
       applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
       return;
@@ -173,7 +190,7 @@ window.rcBilling = (function () {
     const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
 
     if (!signedIn) {
-      if (statusCopy) statusCopy.textContent = 'Sign in when you want billing ownership. Choose Sign Up to view plans and create an account.';
+      if (statusCopy) statusCopy.textContent = 'Sign in to access your account, or choose View Pricing after you are inside the app when you are ready to upgrade.';
       if (billingState) billingState.innerHTML = 'Guest <span class="text-slate-300 text-sm font-normal">mode</span>';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';

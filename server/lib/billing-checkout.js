@@ -25,7 +25,7 @@ export default async function handler(req, res) {
   const body = await readJsonBody(req);
   let plan;
   try {
-    plan = getPlanConfig(body?.plan);
+    plan = await getPlanConfig(body?.plan);
   } catch (error) {
     return json(res, 400, { error: error.message || 'Invalid plan.' });
   }

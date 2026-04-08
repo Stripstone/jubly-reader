@@ -23,7 +23,7 @@ async function applyEntitlementFromSubscription(subscription, fallback = {}) {
   const metadata = subscription.metadata || {};
   const firstItem = subscription.items?.data?.[0];
   const priceId = firstItem?.price?.id || fallback.priceId || '';
-  const pricePlan = derivePlanFromPriceId(priceId) || null;
+  const pricePlan = await derivePlanFromPriceId(priceId).catch(() => null) || null;
   const customerId = subscription.customer || fallback.customerId || null;
   const subscriptionId = subscription.id || fallback.subscriptionId || null;
   const existing = await getEntitlementByStripeRefs({ customerId, subscriptionId }).catch(() => null);

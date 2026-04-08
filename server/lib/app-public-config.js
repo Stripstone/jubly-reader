@@ -29,8 +29,8 @@ export default async function handler(req, res) {
   const authRedirectUrl = `${appBaseUrl}/`;
   const stripe = {
     plans: await getPublicPlanCatalog().catch(() => ({
-      pro: { available: !!(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO), amountLabel: '$9', intervalLabel: '/mo' },
-      premium: { available: !!(process.env.STRIPE_PRICE_PREMIUM_MONTHLY || process.env.STRIPE_PRICE_PREMIUM), amountLabel: '$19', intervalLabel: '/mo' },
+      pro: { available: !!(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO), amountLabel: 'Configured in Stripe', intervalLabel: '' },
+      premium: { available: !!(process.env.STRIPE_PRICE_PREMIUM_MONTHLY || process.env.STRIPE_PRICE_PREMIUM), amountLabel: 'Configured in Stripe', intervalLabel: '' },
     })),
   };
 

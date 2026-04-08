@@ -364,7 +364,7 @@
 <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-3">
     <div class="max-w-5xl mx-auto flex justify-between items-center">
         <div class="flex items-center gap-8">
-            <div class="flex items-center gap-2 cursor-pointer" onclick="showSection('landing-page')">
+            <div class="flex items-center gap-2 cursor-pointer" onclick="navigateHome()">
                 <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black bg-brand">J</div>
                 <span class="text-2xl font-extrabold tracking-tighter text-slate-900">jubly</span>
             </div>
@@ -413,8 +413,14 @@
             Turn dense reading into manageable pages, listen with high-quality AI voices, and pick up exactly where you left off.
         </p>
         <div class="max-w-xs mx-auto md:mx-0 flex flex-col gap-3">
-            <button onclick="openPricingForSignup()" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Sign Up</button>
-            <button onclick="showSigninPane()" class="btn-ghost w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Login</button>
+            <button onclick="startSampleReading()" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Try for Free</button>
+            <button onclick="showSigninPane()" class="btn-ghost w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Log In</button>
+        </div>
+        <div class="mt-8 max-w-md mx-auto md:mx-0 section-card shadow-sm border border-indigo-100 bg-indigo-50/40">
+            <p class="text-xs font-black uppercase tracking-widest text-indigo-600 mb-2">Sample</p>
+            <h3 class="text-xl font-extrabold text-slate-900">Reading Training</h3>
+            <p class="text-sm text-slate-500 mt-2">Open a sample reading session immediately. Pricing appears later only when you want ownership tools or paid features.</p>
+            <button onclick="startSampleReading()" class="mt-4 inline-flex items-center justify-center btn-jubly px-5 py-3 rounded-xl font-bold text-sm">Read Sample</button>
         </div>
     </div>
 </div>
@@ -478,10 +484,7 @@
             <span id="auth-toggle-label">New here?</span>
             <button id="auth-toggle-btn" onclick="toggleAuthMode()" class="font-bold text-indigo-600 hover:underline ml-1">Create account</button>
         </p>
-        <p class="text-center mt-2">
-            <button onclick="openPricingForSignup()" class="text-xs text-slate-400 hover:text-slate-600 transition"><span id="auth-free-link-text">View plans →</span></button>
-        </p>
-        <p class="text-center mt-2"><button onclick="showSection('landing-page')" class="text-xs text-slate-400 hover:text-slate-600 transition">← Back to home</button></p>
+        <p class="text-center mt-2"><button onclick="navigateHome()" class="text-xs text-slate-400 hover:text-slate-600 transition">← Back to home</button></p>
     </div>
 </div>
 
@@ -504,10 +507,10 @@
                 <div>
                     <p class="text-xs font-black uppercase tracking-widest text-indigo-600 mb-2">Getting started</p>
                     <h3 class="text-2xl font-extrabold text-slate-900">Your library starts after sign up</h3>
-                    <p class="text-sm text-slate-500 mt-2 max-w-2xl">Library ownership, imports, and saved state start after account creation. Use Sign Up to choose a plan and enter the app.</p>
+                    <p class="text-sm text-slate-500 mt-2 max-w-2xl">Pricing appears only when you want ownership tools or paid features. You can try the sample first, then create an account when you want your own library, imports, and saved state.</p>
                 </div>
                 <div class="flex flex-col sm:flex-row gap-3">
-                    <button type="button" onclick="openPricingForSignup()" class="btn-jubly px-6 py-3 rounded-xl font-bold text-sm">Choose a plan</button>
+                    <button type="button" onclick="startSampleReading()" class="btn-jubly px-6 py-3 rounded-xl font-bold text-sm">Read Sample</button>
                 </div>
             </div>
         </div>
@@ -854,7 +857,7 @@
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> Standard AI voices</li>
                     <li class="flex items-center gap-2"><span class="text-slate-300">✕</span> <span class="text-slate-400">RSS feed</span></li>
                 </ul>
-                <button id="pricing-free-btn" type="button" onclick="continueWithFree()" class="w-full border-2 border-slate-200 rounded-xl py-2.5 font-bold text-sm text-slate-600 hover:bg-slate-50 transition">Create Free Account</button>
+                <button id="pricing-free-btn" type="button" onclick="continueWithFree()" class="w-full border-2 border-slate-200 rounded-xl py-2.5 font-bold text-sm text-slate-600 hover:bg-slate-50 transition">Continue with Free</button>
             </div>
             <div class="pricing-card featured">
                 <div class="flex justify-between items-center mb-3">

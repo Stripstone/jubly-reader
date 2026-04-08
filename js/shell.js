@@ -259,6 +259,28 @@
         showSigninPane();
     }
 
+    function navigateHome() {
+        try { if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan(); } catch (_) {}
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        showSection('landing-page');
+    }
+
+    async function startSampleReading() {
+        try { if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan(); } catch (_) {}
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        _previewBookId = 'BOOK_ReadingTraining';
+        const titleEl = document.getElementById('preview-title');
+        if (titleEl) titleEl.innerText = 'Reading Training';
+        try {
+            const signal = document.getElementById('session-complete');
+            if (signal) signal.classList.add('hidden-section');
+            showSection('reading-mode');
+            if (typeof startReadingFromPreview === 'function') await startReadingFromPreview('BOOK_ReadingTraining');
+        } catch (_) {}
+    }
+
     function continueWithFree() {
         if (window.rcBilling && typeof window.rcBilling.continueWithFree === 'function') {
             window.rcBilling.continueWithFree();
@@ -347,7 +369,6 @@
         const errEl        = document.getElementById('auth-error');
         const okEl         = document.getElementById('auth-success');
         const pwInput      = document.getElementById('loginPassword');
-        const freeLinkText = document.getElementById('auth-free-link-text');
         if (errEl) errEl.classList.add('hidden-section');
         if (okEl)  okEl.classList.add('hidden-section');
         const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
@@ -360,7 +381,6 @@
             if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
             if (confirmWrap) confirmWrap.classList.remove('hidden-section');
             if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
-            if (freeLinkText) freeLinkText.textContent = 'Back to plans →';
         } else {
             if (heading)    heading.textContent    = 'Welcome back';
             if (subheading) subheading.textContent = pendingPlan && pendingPlan !== 'free' ? `Sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'}.` : 'Sign in to your account to continue';
@@ -369,7 +389,6 @@
             if (toggleLabel) toggleLabel.textContent = 'Need an account?';
             if (confirmWrap) confirmWrap.classList.add('hidden-section');
             if (pwInput) pwInput.setAttribute('autocomplete', 'current-password');
-            if (freeLinkText) freeLinkText.textContent = 'View plans →';
         }
     }
 
@@ -449,6 +468,7 @@
     }
 
     async function shellSignOut() {
+        try { if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan(); } catch (_) {}
         if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
             await window.rcAuth.signOut();
         }
