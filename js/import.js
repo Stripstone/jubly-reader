@@ -145,6 +145,13 @@
     const fileInput = document.getElementById('importFileInput');
     const scanBtn = document.getElementById('importScanBtn');
     const uploadStatus = document.getElementById('importUploadStatus');
+    const modeFileBtn = document.getElementById('importModeFile');
+    const modeTextBtn = document.getElementById('importModeText');
+    const filePanel = document.getElementById('importFilePanel');
+    const textPanel = document.getElementById('importTextPanel');
+    const textTitleInput = document.getElementById('importTextTitle');
+    const textBodyInput = document.getElementById('importTextBody');
+    const textImportBtn = document.getElementById('importTextImportBtn');
 
     const stageUpload = document.getElementById('importStageUpload');
     const stagePick = document.getElementById('importStagePick');
@@ -184,6 +191,7 @@
     let _bookTitle = '';
 
     let _advancedMode = false;
+    let _inputMode = 'file';
 
     function resetImporterState(opts = {}) {
       const keepModalOpen = !!opts.keepModalOpen;
@@ -210,6 +218,10 @@
       if (doneBtn) doneBtn.style.display = 'none';
       if (scanBtn) scanBtn.disabled = true;
       if (doImportBtn) doImportBtn.disabled = true;
+      if (textTitleInput) textTitleInput.value = '';
+      if (textBodyInput) textBodyInput.value = '';
+      _inputMode = 'file';
+      syncInputMode();
       if (!keepModalOpen) {
         if (modal) modal.style.display = 'none';
         if (modal) modal.setAttribute('aria-hidden', 'true');
@@ -249,7 +261,8 @@
         inputFormat: _inputFormat || '',
         tocCount: Array.isArray(_tocItems) ? _tocItems.length : 0,
         activeId: _activeId || null,
-        modalOpen: modal ? modal.style.display === 'flex' : false
+        modalOpen: modal ? modal.style.display === 'flex' : false,
+        inputMode: _inputMode
       };
     };
 
@@ -266,6 +279,80 @@
       if (advancedToggleBtn) advancedToggleBtn.textContent = _advancedMode ? 'Contents' : 'Advanced';
     }
 
+    function syncInputMode() {
+      const isText = _inputMode === 'text';
+      if (modeFileBtn) {
+        modeFileBtn.classList.toggle('active', !isText);
+        modeFileBtn.setAttribute('aria-pressed', !isText ? 'true' : 'false');
+      }
+      if (modeTextBtn) {
+        modeTextBtn.classList.toggle('active', isText);
+        modeTextBtn.setAttribute('aria-pressed', isText ? 'true' : 'false');
+      }
+      if (filePanel) filePanel.classList.toggle('hidden-section', isText);
+      if (textPanel) textPanel.classList.toggle('hidden-section', !isText);
+      if (scanBtn) scanBtn.classList.toggle('hidden-section', isText);
+      if (textImportBtn) textImportBtn.classList.toggle('hidden-section', !isText);
+      if (isText) syncTextImportState();
+    }
+
+    function syncTextImportState() {
+      if (!textImportBtn) return;
+      const hasText = !!(textBodyInput && String(textBodyInput.value || '').trim());
+      textImportBtn.disabled = !hasText;
+      if (_inputMode === 'text') setStatus(hasText ? 'Text will be split into pages using the normal importer page-breaking behavior.' : 'Paste text to import it as a book.');
+    }
+
+    async function completeImportAndReturn(countLabel) {
+      try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
+      try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: await getLocalBookCount() } })); } catch (_) {}
+      try { syncImportEntryState(await getImportCapacitySnapshot()); } catch (_) {}
+      setStatus(countLabel || 'Import complete');
+      hideModal();
+    }
+
+    async function savePastedTextImport() {
+      const raw = String(textBodyInput && textBodyInput.value || '').trim();
+      if (!raw) return;
+      const pages = splitIntoPages(raw);
+      if (!pages.length) {
+        setStatus('No readable pages were found in the pasted text.');
+        return;
+      }
+
+      const guard = await guardImportCapacity();
+      syncImportEntryState(guard.snapshot);
+      if (!guard.ok) return;
+
+      showStage('progress');
+      doneBtn.style.display = 'none';
+      setProgress(15, 'Preparing text import', `${pages.length} pages detected`);
+
+      const title = String(textTitleInput && textTitleInput.value || '').trim() || `Pasted Text ${new Date().toLocaleDateString()}`;
+      const id = `text-${Date.now()}`;
+      const markdown = pages.map((page, idx) => `## Page ${idx + 1}\n\n${page}`).join('\n\n');
+      const record = {
+        id,
+        title,
+        createdAt: Date.now(),
+        sourceName: 'Pasted Text',
+        byteSize: raw.length,
+        markdown,
+      };
+
+      setProgress(75, 'Saving to device', `${pages.length} pages created`);
+      try {
+        if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
+        else if (typeof localBookPut === 'function') await localBookPut(record);
+        setProgress(100, 'Import complete', `${pages.length} pages created`);
+        await completeImportAndReturn(`${pages.length} pages created`);
+      } catch (e) {
+        console.error('Text import error:', e);
+        setProgress(100, 'Import failed', 'Try again with different text.');
+        doneBtn.style.display = 'inline-block';
+      }
+    }
+
     async function showModal() {
       const guard = await guardImportCapacity();
       syncImportEntryState(guard.snapshot);
@@ -274,6 +361,8 @@
       setStatus(describeCapacity(guard.snapshot));
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
+      syncInputMode();
+      syncTextImportState();
     }
 
     function hideModal() {
@@ -798,12 +887,7 @@
         await localBookPut(record);
 
         setProgress(100, 'Import complete', `${createdPages} pages created`);
-        doneBtn.style.display = 'inline-block';
-
-        // Refresh book dropdown
-        try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
-        try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: await getLocalBookCount() } })); } catch (_) {}
-        try { syncImportEntryState(await getImportCapacitySnapshot()); } catch (_) {}
+        await completeImportAndReturn(`${createdPages} pages created`);
       } catch (e) {
         console.error('EPUB import error:', e);
         setProgress(100, 'Import failed', 'Try again with a different file.');
@@ -827,8 +911,6 @@
 
     // Open/close
     openBtn.addEventListener('click', showModal);
-    closeBtn?.addEventListener('click', hideModal);
-    modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(); });
     try { getImportCapacitySnapshot().then(syncImportEntryState).catch(() => {}); } catch (_) {}
     window.addEventListener('rc:runtime-policy-changed', () => {
       try { getImportCapacitySnapshot().then(syncImportEntryState).catch(() => {}); } catch (_) {}
@@ -869,6 +951,11 @@
       if (f) onFileSelected(f);
     });
 
+    modeFileBtn?.addEventListener('click', () => { _inputMode = 'file'; syncInputMode(); });
+    modeTextBtn?.addEventListener('click', () => { _inputMode = 'text'; syncInputMode(); });
+    textTitleInput?.addEventListener('input', syncTextImportState);
+    textBodyInput?.addEventListener('input', syncTextImportState);
+    textImportBtn?.addEventListener('click', savePastedTextImport);
     scanBtn?.addEventListener('click', scanContents);
     backBtn?.addEventListener('click', () => showStage('upload'));
     filterInput?.addEventListener('input', renderToc);

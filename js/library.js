@@ -98,6 +98,84 @@
     });
   }
 
+
+  window.__rcLocalBookGet = localBookGet;
+  window.__rcLocalBookPut = localBookPut;
+  window.__rcLocalBooksGetAll = localBooksGetAll;
+
+  const _bookPreviewCache = new Map();
+
+  function countPagesFromMarkdown(markdown) {
+    const count = (String(markdown || '').match(/^\s*##\s+/gm) || []).length;
+    return Math.max(1, count || 0);
+  }
+
+  function getBookSurfaceData(bookId, totalPages) {
+    const pageCount = Math.max(1, Number(totalPages) || 1);
+    const summary = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingBookSummary === 'function')
+      ? window.rcReadingMetrics.getReadingBookSummary(bookId, pageCount)
+      : null;
+    const status = !summary ? 'Unread' : (summary.completed ? 'Completed' : 'In Progress');
+    const totalMinutes = (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function')
+      ? window.rcReadingMetrics.estimateReadMinutesFromPages(pageCount)
+      : Math.max(1, Math.ceil(pageCount * 1.5));
+    const lastPage = summary ? Math.max(0, Number(summary.lastPageIndex || 0)) : 0;
+    const remainingPages = summary && !summary.completed ? Math.max(0, pageCount - (lastPage + 1)) : 0;
+    const remainingMinutes = status === 'Unread'
+      ? totalMinutes
+      : (status === 'Completed' ? 0 : Math.max(1, (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function') ? window.rcReadingMetrics.estimateReadMinutesFromPages(remainingPages || 1) : Math.ceil((remainingPages || 1) * 1.5)));
+    const timeLabel = status === 'Completed' ? 'Done' : `${remainingMinutes} min left`;
+    return {
+      status,
+      timeLabel,
+      totalPages: pageCount,
+      totalMinutes,
+      previewTrio: `${pageCount} Pages • ${totalMinutes} min read • ${status}`
+    };
+  }
+
+  async function getBookRecordById(bookId) {
+    if (!bookId) return null;
+    if (isLocalBookId(bookId)) {
+      const rec = await localBookGet(stripLocalPrefix(bookId)).catch(() => null);
+      return rec ? { title: rec.title || 'Untitled', markdown: rec.markdown || '', totalPages: countPagesFromMarkdown(rec.markdown || '') } : null;
+    }
+    const cacheHit = _bookPreviewCache.get(String(bookId));
+    if (cacheHit) return cacheHit;
+    if (!Array.isArray(manifest) || !manifest.length) {
+      try { await loadManifest(); } catch (_) {}
+    }
+    const entry = Array.isArray(manifest) ? manifest.find((b) => b.id === bookId) : null;
+    if (!entry) return null;
+    let raw = '';
+    try {
+      const res = await fetch(entry.path, { cache: 'no-cache' });
+      if (!res.ok) throw new Error('fetch failed');
+      raw = await res.text();
+    } catch (_) {
+      try { if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[bookId] === 'string') raw = window.EMBED_BOOKS[bookId]; } catch (_) {}
+    }
+    if (!raw) return null;
+    const record = { title: entry.title || titleFromBookId(bookId) || 'Untitled', markdown: raw, totalPages: countPagesFromMarkdown(raw) };
+    _bookPreviewCache.set(String(bookId), record);
+    return record;
+  }
+
+  async function getBookPreviewSurface(bookId) {
+    const record = await getBookRecordById(bookId).catch(() => null);
+    if (!record) return { title: 'Book', previewTrio: '0 Pages • 0 min read • Unread', totalPages: 0, status: 'Unread' };
+    return {
+      title: record.title,
+      ...getBookSurfaceData(bookId, record.totalPages)
+    };
+  }
+
+  window.rcLibraryData = {
+    getBookSurfaceData,
+    getBookPreviewSurface,
+    countPagesFromMarkdown,
+  };
+
   async function localBookDelete(id) {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
@@ -2279,6 +2357,7 @@ function _installScrollPageTracker() {
         // Guard: skip if the winning element is in a hidden section (double-check).
         if (bestEl.getBoundingClientRect().height <= 0) return;
         lastFocusedPageIndex = bestIdx;
+        updateReadingMetricsPage(bestIdx);
         // Keep reading target in sync so bottom-bar Play speaks the scrolled-to page.
         try {
           const _ctx = window.getReadingTargetContext();
@@ -2289,6 +2368,93 @@ function _installScrollPageTracker() {
   }, { passive: true });
 }
 
+
+
+let _activeReadingMetricsSession = null;
+
+function beginReadingMetricsSession(bookId, totalPages) {
+  const safeBookId = String(bookId || '');
+  if (!safeBookId) return;
+  const startingPageIndex = Math.max(0, getFocusedOrInferredReadingPageIndex());
+  const now = Date.now();
+  _activeReadingMetricsSession = {
+    bookId: safeBookId,
+    totalPages: Math.max(1, Number(totalPages) || 1),
+    startingPageIndex,
+    lastPageIndex: startingPageIndex,
+    pagesAdvanced: 0,
+    startedAt: new Date(now).toISOString(),
+    lastResumeAt: document.hidden ? 0 : now,
+    accumulatedMs: 0,
+  };
+}
+
+function pauseReadingMetricsSession() {
+  if (!_activeReadingMetricsSession || !_activeReadingMetricsSession.lastResumeAt) return;
+  _activeReadingMetricsSession.accumulatedMs += Math.max(0, Date.now() - _activeReadingMetricsSession.lastResumeAt);
+  _activeReadingMetricsSession.lastResumeAt = 0;
+}
+
+function resumeReadingMetricsSession() {
+  if (!_activeReadingMetricsSession || _activeReadingMetricsSession.lastResumeAt) return;
+  _activeReadingMetricsSession.lastResumeAt = Date.now();
+}
+
+function updateReadingMetricsPage(index) {
+  if (!_activeReadingMetricsSession) return;
+  const idx = Math.max(0, Number(index) || 0);
+  if (idx !== _activeReadingMetricsSession.lastPageIndex) {
+    _activeReadingMetricsSession.pagesAdvanced += 1;
+    _activeReadingMetricsSession.lastPageIndex = idx;
+  }
+}
+
+function finalizeReadingMetricsSession() {
+  if (!_activeReadingMetricsSession) return null;
+  pauseReadingMetricsSession();
+  const session = _activeReadingMetricsSession;
+  _activeReadingMetricsSession = null;
+  const elapsedSeconds = Math.max(0, Math.round(session.accumulatedMs / 1000));
+  const completed = session.totalPages > 0 && session.lastPageIndex >= (session.totalPages - 1);
+  const summary = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingBookSummary === 'function')
+    ? window.rcReadingMetrics.getReadingBookSummary(session.bookId, session.totalPages)
+    : null;
+  const nextTotal = Math.max(0, Number(summary?.totalReadingSeconds || 0)) + elapsedSeconds;
+  try {
+    if (window.rcReadingMetrics && typeof window.rcReadingMetrics.upsertReadingBookSummary === 'function') {
+      window.rcReadingMetrics.upsertReadingBookSummary({
+        bookId: session.bookId,
+        totalPages: session.totalPages,
+        lastPageIndex: session.lastPageIndex,
+        totalReadingSeconds: nextTotal,
+        lastOpenedAt: new Date().toISOString(),
+        completed,
+        completedAt: completed ? new Date().toISOString() : (summary?.completedAt || null)
+      });
+    }
+    if (window.rcReadingMetrics && typeof window.rcReadingMetrics.appendReadingSession === 'function') {
+      if (elapsedSeconds >= 60 || session.pagesAdvanced >= 1) {
+        window.rcReadingMetrics.appendReadingSession({
+          bookId: session.bookId,
+          startedAt: session.startedAt,
+          endedAt: new Date().toISOString(),
+          elapsedSeconds,
+          pagesAdvanced: session.pagesAdvanced,
+          completed,
+        });
+      }
+    }
+  } catch (_) {}
+  return { elapsedSeconds, completed, pagesAdvanced: session.pagesAdvanced, bookId: session.bookId };
+}
+
+try {
+  document.addEventListener('visibilitychange', () => {
+    if (!_activeReadingMetricsSession) return;
+    if (document.hidden) pauseReadingMetricsSession();
+    else resumeReadingMetricsSession();
+  });
+} catch (_) {}
 
 window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   const pageEls = Array.from(document.querySelectorAll('.page'));
@@ -2305,6 +2471,7 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   target.scrollIntoView({ behavior: options.behavior || 'smooth', block: 'start' });
   lastFocusedPageIndex = idx;
   try { currentPageIndex = idx; } catch (_) {}
+  updateReadingMetricsPage(idx);
   // Keep reading target in sync so bottom-bar Play speaks the navigated-to page.
   try {
     const _ctx = window.getReadingTargetContext();
@@ -2402,11 +2569,13 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     }
   } catch (_) {}
 
+  try { beginReadingMetricsSession(String(bookId), Array.isArray(pages) ? pages.length : 0); } catch (_) {}
   return true;
 };
 
 window.exitReadingSession = function exitReadingSession() {
-  const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex() };
+  const metrics = finalizeReadingMetricsSession();
+  const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}
   try { if (typeof ttsAutoplayCancelCountdown === 'function') { ttsAutoplayCancelCountdown(); result.countdownCleared = true; } } catch (_) {}
   try { const signal = document.getElementById('session-complete'); if (signal) signal.classList.add('hidden-section'); } catch (_) {}

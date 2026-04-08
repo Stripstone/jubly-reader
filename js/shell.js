@@ -222,6 +222,7 @@
 
         syncShellAuthPresentation(targetId);
         if (targetId === 'dashboard') refreshLibrary();
+        if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
 
@@ -513,6 +514,7 @@
 
         if (!_shellAuthBootstrapped) {
             syncShellAuthPresentation(resolveSectionForAuth(current));
+            try { if (window.rcHelp && typeof window.rcHelp.syncIdentity === 'function') window.rcHelp.syncIdentity(); } catch (_) {}
             return;
         }
 
@@ -528,6 +530,7 @@
                 return;
             }
             syncShellAuthPresentation(current);
+            try { if (window.rcHelp && typeof window.rcHelp.syncIdentity === 'function') window.rcHelp.syncIdentity(); } catch (_) {}
             if (source === 'SIGNED_IN') {
                 try { refreshLibrary(); } catch(_) {}
             }
@@ -567,6 +570,8 @@
         document.querySelectorAll('.profile-tab-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tab === tabId);
         });
+        if (tabId === 'tab-profile') { try { renderProfileSurface(); } catch (_) {} }
+        if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
     }
 
     // ── Tier — drives #tierSelect so ui.js applyTierAccess() fires ──
@@ -1189,27 +1194,36 @@
             }, 120);
             return;
         }
-
         let books = [];
         try { books = await localBooksGetAll(); } catch(_) { books = []; }
         const has = books.length > 0;
         if (popEl)   popEl.classList.toggle('hidden-section', !has);
         if (emptyEl) emptyEl.classList.toggle('hidden-section', has);
         if (sub) sub.style.display = has ? '' : 'none';
-        if (!has) return;
+        if (!has) {
+            try { renderSubscriptionSurface([]); } catch (_) {}
+            return;
+        }
         books.sort((a, b) => (b.createdAt||0) - (a.createdAt||0));
-        rowsEl.innerHTML = books.map(b => {
-            const pages   = (String(b.markdown||'').match(/^\s*##\s+/gm)||[]).length;
-            const date    = new Date(b.createdAt||Date.now()).toLocaleDateString();
-            const estMins = Math.max(1, Math.round(pages * 1.5));
-            const id      = ('local:' + String(b.id)).replace(/'/g,"\\'");
-            const title   = escHtml(b.title||'Untitled');
+        const rows = books.map(b => {
+            const pages = (window.rcLibraryData && typeof window.rcLibraryData.countPagesFromMarkdown === 'function')
+                ? window.rcLibraryData.countPagesFromMarkdown(b.markdown || '')
+                : Math.max(1, (String(b.markdown||'').match(/^\s*##\s+/gm)||[]).length || 1);
+            const surface = (window.rcLibraryData && typeof window.rcLibraryData.getBookSurfaceData === 'function')
+                ? window.rcLibraryData.getBookSurfaceData(`local:${String(b.id)}`, pages)
+                : { status: 'Unread', timeLabel: `${Math.max(1, Math.ceil(pages * 1.5))} min left` };
+            const date = new Date(b.createdAt||Date.now()).toLocaleDateString();
+            const id = ('local:' + String(b.id)).replace(/'/g,"\\'");
+            const title = escHtml(b.title||'Untitled');
             return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
                 <div class="flex-grow flex items-center gap-3"><div class="w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">Added ${date}</p></div></div>
-                <div class="w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">Unread</span></div>
-                <div class="w-32 hidden md:block text-sm text-slate-500 font-medium">${estMins} min left</div>
+                <div class="w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div>
+                <div class="w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div>
                 <div class="w-8 text-slate-300">→</div></div>`;
-        }).join('');
+        });
+        rowsEl.innerHTML = rows.join('');
+        try { renderSubscriptionSurface(books); } catch (_) {}
+
     }
     // Hook called by library.js after populateBookSelectWithLocal()
     window.__jublyLibraryRefresh = refreshLibrary;
@@ -1256,9 +1270,8 @@
     let _previewBookId = null;
     function openPreview(id, title) {
         _previewBookId = id;
-        const el = document.getElementById('preview-title');
-        if (el) el.innerText = title || 'Book';
         openModal('preview-modal');
+        refreshPreviewSurface(id, title);
     }
 
     async function startReading() {
@@ -1268,6 +1281,102 @@
         showSection('reading-mode');
         if (!_previewBookId) return;
         try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(_previewBookId); } catch (_) {}
+    }
+
+    let _goalCelebrationTimer = null;
+    let _goalEditOpen = false;
+
+    function setGoalEditMode(open) {
+        _goalEditOpen = !!open;
+        const editBtn = document.getElementById('profile-goal-edit-btn');
+        const editForm = document.getElementById('profile-goal-edit-form');
+        const input = document.getElementById('profile-goal-input');
+        if (editBtn) editBtn.classList.toggle('hidden-section', _goalEditOpen);
+        if (editForm) editForm.classList.toggle('hidden-section', !_goalEditOpen);
+        if (_goalEditOpen && input) {
+            const current = (window.rcPrefs && typeof window.rcPrefs.loadProfilePrefs === 'function') ? window.rcPrefs.loadProfilePrefs().dailyGoalMinutes : 15;
+            input.value = String(current || 15);
+            try { input.focus(); input.select(); } catch (_) {}
+        }
+    }
+
+    function triggerGoalCelebration() {
+        const banner = document.getElementById('profile-goal-celebration');
+        if (!banner) return;
+        if (_goalCelebrationTimer) clearTimeout(_goalCelebrationTimer);
+        banner.textContent = '🎉🎊 Goal reached';
+        banner.classList.remove('hidden-section');
+        void banner.offsetWidth;
+        banner.classList.remove('profile-goal-celebration-animate');
+        banner.classList.add('profile-goal-celebration-animate');
+        _goalCelebrationTimer = setTimeout(() => {
+            try { banner.classList.add('hidden-section'); } catch (_) {}
+            try { banner.classList.remove('profile-goal-celebration-animate'); } catch (_) {}
+        }, 1600);
+    }
+
+    async function renderSubscriptionSurface(existingBooks) {
+        const booksValue = document.getElementById('subscription-books-value');
+        const storageValue = document.getElementById('subscription-storage-value');
+        let books = Array.isArray(existingBooks) ? existingBooks : [];
+        if (!books.length && typeof localBooksGetAll === 'function') {
+            try { books = await localBooksGetAll(); } catch (_) { books = []; }
+        }
+        if (booksValue) booksValue.textContent = String(Array.isArray(books) ? books.length : 0);
+        if (storageValue) {
+            const totalBytes = Array.isArray(books) ? books.reduce((sum, book) => sum + Math.max(0, Number(book?.byteSize || 0)), 0) : 0;
+            if (totalBytes >= 1024 * 1024) storageValue.textContent = `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`;
+            else if (totalBytes >= 1024) storageValue.textContent = `${Math.max(1, Math.round(totalBytes / 1024))} KB`;
+            else storageValue.textContent = totalBytes > 0 ? `${totalBytes} B` : '0 B';
+        }
+    }
+
+    function renderProfileSurface() {
+        const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
+            ? window.rcReadingMetrics.getReadingProfileMetrics()
+            : { dailyGoalMinutes: 15, dailyMinutes: 0, weeklyMinutes: 0, sessionsCompleted: 0, progressPct: 0, lastGoalCelebratedOn: '', todayIso: '' };
+        const dailyEl = document.getElementById('profile-daily-minutes');
+        const goalEl = document.getElementById('profile-goal-minutes');
+        const weeklyEl = document.getElementById('profile-weekly-minutes');
+        const sessionsEl = document.getElementById('profile-sessions-completed');
+        const labelEl = document.getElementById('profile-goal-progress-label');
+        const copyEl = document.getElementById('profile-goal-copy');
+        const ringEl = document.getElementById('profile-goal-ring');
+        if (dailyEl) dailyEl.textContent = String(metrics.dailyMinutes || 0);
+        if (goalEl) goalEl.textContent = String(metrics.dailyGoalMinutes || 15);
+        if (weeklyEl) weeklyEl.textContent = String(metrics.weeklyMinutes || 0);
+        if (sessionsEl) sessionsEl.textContent = String(metrics.sessionsCompleted || 0);
+        if (labelEl) labelEl.textContent = `${metrics.progressPct || 0}%`;
+        if (ringEl) ringEl.style.setProperty('--goal-progress', `${metrics.progressPct || 0}%`);
+        if (copyEl) {
+            copyEl.textContent = metrics.progressPct >= 100
+                ? 'Goal complete for today.'
+                : `${Math.max(0, (metrics.dailyGoalMinutes || 15) - (metrics.dailyMinutes || 0))} min to go today.`;
+        }
+        if (metrics.progressPct >= 100 && metrics.lastGoalCelebratedOn !== metrics.todayIso) {
+            try {
+                if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') {
+                    window.rcPrefs.saveProfilePrefs({ lastGoalCelebratedOn: metrics.todayIso });
+                }
+            } catch (_) {}
+            triggerGoalCelebration();
+        }
+    }
+
+    async function refreshPreviewSurface(id, fallbackTitle) {
+        const titleEl = document.getElementById('preview-title');
+        const trioEl = document.getElementById('preview-meta-trio');
+        if (titleEl) titleEl.innerText = fallbackTitle || 'Book';
+        if (trioEl) trioEl.textContent = 'Loading preview…';
+        try {
+            if (window.rcLibraryData && typeof window.rcLibraryData.getBookPreviewSurface === 'function') {
+                const surface = await window.rcLibraryData.getBookPreviewSurface(id);
+                if (titleEl) titleEl.innerText = surface.title || fallbackTitle || 'Book';
+                if (trioEl) trioEl.textContent = surface.previewTrio || '0 Pages • 0 min read • Unread';
+                return;
+            }
+        } catch (_) {}
+        if (trioEl) trioEl.textContent = '0 Pages • 0 min read • Unread';
     }
 
     // Empty state drag/drop
@@ -1286,16 +1395,14 @@
         }
     }
 
-    // ── F7: Reading time tracker (shell-only) ────────────────────
-    let _readingStartTime = null;
-
-    // Session complete signal — uses real pages[] and shell reading timer
+    // Session complete signal — presents current runtime page truth only.
     function showSessionComplete() {
         const signal = document.getElementById('session-complete');
         if (!signal || !hasActiveReadingCards()) return;
         const pageCount = (typeof pages !== 'undefined' && Array.isArray(pages)) ? pages.length : 0;
-        const elapsed   = _readingStartTime ? Date.now() - _readingStartTime : 0;
-        const mins      = elapsed > 0 ? Math.max(1, Math.round(elapsed / 60000)) : Math.max(1, Math.round(pageCount * 1.5));
+        const mins = (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function')
+            ? window.rcReadingMetrics.estimateReadMinutesFromPages(pageCount)
+            : Math.max(1, Math.round(pageCount * 1.5));
         document.getElementById('stat-pages').textContent   = pageCount;
         document.getElementById('stat-minutes').textContent = mins;
         signal.classList.remove('hidden-section');
@@ -1324,6 +1431,23 @@
     window.jublySessionComplete = showSessionComplete;
 
     document.addEventListener('DOMContentLoaded', () => {
+        const goalEditBtn = document.getElementById('profile-goal-edit-btn');
+        const goalEditForm = document.getElementById('profile-goal-edit-form');
+        const goalCancelBtn = document.getElementById('profile-goal-cancel-btn');
+        const goalInput = document.getElementById('profile-goal-input');
+        goalEditBtn?.addEventListener('click', () => { setGoalEditMode(true); });
+        goalCancelBtn?.addEventListener('click', () => { setGoalEditMode(false); });
+        goalEditForm?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const next = Math.max(5, Math.min(300, Math.round(Number(goalInput && goalInput.value || 0) || 0)));
+            if (!Number.isFinite(next) || next <= 0) return;
+            try { if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') window.rcPrefs.saveProfilePrefs({ dailyGoalMinutes: next }); } catch (_) {}
+            setGoalEditMode(false);
+            renderProfileSurface();
+        });
+        document.getElementById('profile-help-chat-btn')?.addEventListener('click', (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openChat === 'function') window.rcHelp.openChat(); } catch (_) {} });
+        document.getElementById('profile-help-email-btn')?.addEventListener('click', (e) => { e.preventDefault(); window.location.href = 'mailto:info@summitsvault.info'; });
+        document.getElementById('profile-help-feedback-link')?.addEventListener('click', (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') window.rcHelp.openFeedback(); } catch (_) {} });
         const tierSel = document.getElementById('tierSelect');
         if (tierSel) {
             tierSel.addEventListener('change', () => {
@@ -1342,21 +1466,17 @@
             try { syncExplorerMusicSource(); } catch (_) {}
             refreshExplorerPanel();
         });
+        document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} });
+        window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
         try { switchReadingSettingsTab('general'); } catch (_) {}
         try { syncTierButtonState(); } catch (_) {}
 
-        // After a successful import the engine fires Done; refresh shell library explicitly.
-        const importDoneBtn = document.getElementById('importDoneBtn');
-        if (importDoneBtn) {
-            importDoneBtn.addEventListener('click', () => {
-                try { refreshLibrary(); } catch(_) {}
-                setTimeout(() => { try { if (typeof resetImporterState === 'function') resetImporterState({ keepModalOpen: false }); } catch(_) {} }, 0)
-            });
-        }
         const importCloseBtn = document.getElementById('importBookClose');
         if (importCloseBtn) {
             importCloseBtn.addEventListener('click', () => setTimeout(() => { try { if (typeof resetImporterState === 'function') resetImporterState({ keepModalOpen: false }); } catch(_) {} }, 0));
         }
+        try { renderProfileSurface(); } catch (_) {}
+        try { renderSubscriptionSurface(); } catch (_) {}
 
         const topSettingsBtn = document.getElementById('openReadingSettings');
         if (topSettingsBtn) {
