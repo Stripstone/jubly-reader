@@ -287,7 +287,6 @@ window.rcBilling = (function () {
         refreshRuntimeFromAccount();
       } else if (checkout === 'cancel') {
         clearPendingPlan();
-        setMessage('pricing-message', 'Checkout was canceled. You can keep using the free path or try again later.', 'info');
       }
       if (portal === 'return') {
         clearPendingPlan();

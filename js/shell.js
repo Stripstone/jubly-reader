@@ -58,7 +58,7 @@
     function resolveSectionForAuth(id) {
         const normalized = normalizeSection(id);
         if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'login-page')) return 'dashboard';
-        if (!isAuthedUser() && (normalized === 'dashboard' || normalized === 'profile-page')) return 'landing-page';
+        if (!isAuthedUser() && normalized === 'profile-page') return 'landing-page';
         return normalized;
     }
 
@@ -273,7 +273,9 @@
     function showSigninPane() {
         closeModal('pricing-modal');
         closeModal('ownership-modal');
-        if (_authMode !== 'signin') toggleAuthMode(true);
+        _authMode = 'signin';
+        _signupStep = 1;
+        toggleAuthMode(true);
         showSection('login-page');
     }
 
@@ -287,7 +289,9 @@
     function showSignupPane(forceDirect = false) {
         closeModal('ownership-modal');
         closeModal('pricing-modal');
-        if (_authMode !== 'signup') toggleAuthMode(true);
+        _authMode = 'signup';
+        _signupStep = 1;
+        toggleAuthMode(true);
         showSection('login-page');
     }
 
@@ -331,42 +335,62 @@
     // It does not own auth state or Supabase operations.
 
     let _authMode = 'signin'; // 'signin' | 'signup'
+    let _signupStep = 1; // 1=email, 2=username+password
+
+    function applyAuthModeUi() {
+        const heading       = document.getElementById('auth-form-heading');
+        const subheading    = document.getElementById('auth-form-subheading');
+        const submitBtn     = document.getElementById('auth-submit-btn');
+        const toggleBtn     = document.getElementById('auth-toggle-btn');
+        const toggleLabel   = document.getElementById('auth-toggle-label');
+        const emailWrap     = document.getElementById('auth-email-wrap');
+        const usernameWrap  = document.getElementById('auth-username-wrap');
+        const passwordWrap  = document.getElementById('auth-password-wrap');
+        const confirmWrap   = document.getElementById('auth-confirm-wrap');
+        const errEl         = document.getElementById('auth-error');
+        const okEl          = document.getElementById('auth-success');
+        const pwInput       = document.getElementById('loginPassword');
+
+        if (errEl) errEl.classList.add('hidden-section');
+        if (okEl) okEl.classList.add('hidden-section');
+
+        if (_authMode === 'signup') {
+            if (heading) heading.textContent = 'Create account';
+            if (toggleBtn) toggleBtn.textContent = 'Sign in instead';
+            if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
+            if (emailWrap) emailWrap.classList.remove('hidden-section');
+            if (_signupStep === 1) {
+                if (subheading) subheading.textContent = 'Enter your email to begin.';
+                if (usernameWrap) usernameWrap.classList.add('hidden-section');
+                if (passwordWrap) passwordWrap.classList.add('hidden-section');
+                if (confirmWrap) confirmWrap.classList.add('hidden-section');
+                if (submitBtn) submitBtn.textContent = 'Submit';
+            } else {
+                if (subheading) subheading.textContent = 'Choose a username and password.';
+                if (usernameWrap) usernameWrap.classList.remove('hidden-section');
+                if (passwordWrap) passwordWrap.classList.remove('hidden-section');
+                if (confirmWrap) confirmWrap.classList.remove('hidden-section');
+                if (submitBtn) submitBtn.textContent = 'Create Account';
+            }
+            if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
+        } else {
+            if (heading) heading.textContent = 'Welcome back';
+            if (subheading) subheading.textContent = 'Sign in to your account to continue';
+            if (toggleBtn) toggleBtn.textContent = 'Create account';
+            if (toggleLabel) toggleLabel.textContent = 'New here?';
+            if (emailWrap) emailWrap.classList.remove('hidden-section');
+            if (usernameWrap) usernameWrap.classList.add('hidden-section');
+            if (passwordWrap) passwordWrap.classList.remove('hidden-section');
+            if (confirmWrap) confirmWrap.classList.add('hidden-section');
+            if (submitBtn) submitBtn.textContent = 'Sign In';
+            if (pwInput) pwInput.setAttribute('autocomplete', 'current-password');
+        }
+    }
 
     function toggleAuthMode(forceApply = false) {
         if (!forceApply) _authMode = _authMode === 'signin' ? 'signup' : 'signin';
-        const heading      = document.getElementById('auth-form-heading');
-        const subheading   = document.getElementById('auth-form-subheading');
-        const submitBtn    = document.getElementById('auth-submit-btn');
-        const toggleBtn    = document.getElementById('auth-toggle-btn');
-        const toggleLabel  = document.getElementById('auth-toggle-label');
-        const confirmWrap  = document.getElementById('auth-confirm-wrap');
-        const errEl        = document.getElementById('auth-error');
-        const okEl         = document.getElementById('auth-success');
-        const pwInput      = document.getElementById('loginPassword');
-        const freeLinkText = document.getElementById('auth-free-link-text');
-        if (errEl) errEl.classList.add('hidden-section');
-        if (okEl)  okEl.classList.add('hidden-section');
-        const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
-        if (_authMode === 'signup') {
-            const planLabel = pendingPlan === 'premium' ? 'Premium' : pendingPlan === 'pro' || pendingPlan === 'paid' ? 'Pro' : 'Free';
-            if (heading)    heading.textContent    = 'Create account';
-            if (subheading) subheading.textContent = planLabel === 'Free' ? 'Start reading for free — no card required' : `Create your account to continue with ${planLabel} checkout.`;
-            if (submitBtn)  submitBtn.textContent  = 'Create Account';
-            if (toggleBtn)  toggleBtn.textContent  = 'Sign in instead';
-            if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
-            if (confirmWrap) confirmWrap.classList.remove('hidden-section');
-            if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
-            if (freeLinkText) freeLinkText.textContent = 'Continue without creating an account →';
-        } else {
-            if (heading)    heading.textContent    = 'Welcome back';
-            if (subheading) subheading.textContent = pendingPlan && pendingPlan !== 'free' ? `Sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'}.` : 'Sign in to your account to continue';
-            if (submitBtn)  submitBtn.textContent  = 'Sign In';
-            if (toggleBtn)  toggleBtn.textContent  = 'Create account';
-            if (toggleLabel) toggleLabel.textContent = 'New here?';
-            if (confirmWrap) confirmWrap.classList.add('hidden-section');
-            if (pwInput) pwInput.setAttribute('autocomplete', 'current-password');
-            if (freeLinkText) freeLinkText.textContent = 'Continue without signing in →';
-        }
+        _signupStep = 1;
+        applyAuthModeUi();
     }
 
     function _authShowError(msg) {
@@ -395,20 +419,43 @@
     }
 
     async function authFormSubmit() {
-        const email    = (document.getElementById('loginEmail')    || {}).value || '';
+        const email    = ((document.getElementById('loginEmail') || {}).value || '').trim();
+        const username = ((document.getElementById('signupUsername') || {}).value || '').trim();
         const password = (document.getElementById('loginPassword') || {}).value || '';
         const confirm  = (document.getElementById('loginPasswordConfirm') || {}).value || '';
         const btn      = document.getElementById('auth-submit-btn');
 
         _authClearMessages();
 
-        if (!email.trim() || !password) {
-            _authShowError('Email and password are required.');
+        if (_authMode === 'signup' && _signupStep === 1) {
+            if (!email) {
+                _authShowError('Email is required.');
+                return;
+            }
+            _signupStep = 2;
+            applyAuthModeUi();
+            try { const nextField = document.getElementById('signupUsername'); if (nextField) nextField.focus(); } catch (_) {}
             return;
         }
 
+        if (_authMode === 'signin') {
+            if (!email || !password) {
+                _authShowError('Email and password are required.');
+                return;
+            }
+        } else {
+            if (!email || !username || !password || !confirm) {
+                _authShowError('Email, username, password, and confirmation are required.');
+                return;
+            }
+            if (password !== confirm) {
+                _authShowError('Passwords do not match.');
+                return;
+            }
+        }
+
         if (!window.rcAuth || typeof window.rcAuth.signIn !== 'function') {
-            _authShowError('Auth is not available in this environment. You can still use jubly without signing in.');
+            _authShowError('Auth is not available in this environment.');
             return;
         }
 
@@ -416,20 +463,15 @@
 
         try {
             if (_authMode === 'signup') {
-                if (password !== confirm) {
-                    _authShowError('Passwords do not match.');
-                    return;
-                }
-                const { error } = await window.rcAuth.signUp(email.trim(), password);
+                const { error } = await window.rcAuth.signUp(email, password, username);
                 if (error) {
-                    _authShowError(error.message || 'Sign-up failed. Please try again.');
+                    _authShowError(error.message || 'Account creation failed. Please try again.');
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
-                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Account created — check your email to confirm, then sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Account created — check your email to confirm, then sign in.');
-                    if (_authMode !== 'signin') toggleAuthMode();
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Account created. Check your email, then sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Account created. Check your email, then sign in.');
                 }
             } else {
-                const { error } = await window.rcAuth.signIn(email.trim(), password);
+                const { error } = await window.rcAuth.signIn(email, password);
                 if (error) {
                     _authShowError(error.message || 'Sign-in failed. Check your email and password.');
                 }
@@ -439,7 +481,7 @@
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = _authMode === 'signup' ? 'Create Account' : 'Sign In';
+                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Submit' : 'Create Account') : 'Sign In';
             }
         }
     }
@@ -475,7 +517,7 @@
                 try { refreshLibrary(); } catch(_) {}
             }
         } else {
-            if (current === 'profile-page' || current === 'dashboard') showSection('landing-page', { historyMode: 'replace' });
+            if (current === 'profile-page') showSection('landing-page', { historyMode: 'replace' });
             else syncShellAuthPresentation(current);
         }
     }
