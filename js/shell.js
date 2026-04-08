@@ -16,8 +16,7 @@
     // ── Section routing ──────────────────────────────────────────
     const ALL_SECTIONS     = ['landing-page', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
     const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
-    const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
-    let _currentSection = 'landing-page';
+        let _currentSection = 'landing-page';
     let _shellAuthBootstrapped = false;
 
 
@@ -58,6 +57,7 @@
     function resolveSectionForAuth(id) {
         const normalized = normalizeSection(id);
         if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'login-page')) return 'dashboard';
+        if (!isAuthedUser() && (normalized === 'dashboard' || normalized === 'profile-page')) return 'landing-page';
         return normalized;
     }
 
@@ -107,23 +107,19 @@
 
         const navUserControls = document.getElementById('nav-user-controls');
         const navLandingControls = document.getElementById('nav-landing-controls');
-        const navSubscribeBtn = document.getElementById('nav-subscribe-btn');
         const navLoginBtn = document.getElementById('nav-login-btn');
         const navSignupBtn = document.getElementById('nav-signup-btn');
         const navUserName = document.getElementById('nav-user-name');
         const navAvatar = document.getElementById('nav-avatar');
         const navProfileTrigger = document.getElementById('nav-profile-trigger');
-        const navSignoutBtn = document.getElementById('nav-signout-btn');
         const navUsagePill = document.getElementById('nav-usage-pill');
 
         if (navUserControls) navUserControls.classList.toggle('hidden-section', !authed || isReading);
         if (navLandingControls) navLandingControls.style.display = (!authed && !isReading) ? 'flex' : 'none';
-        if (navSubscribeBtn) navSubscribeBtn.style.display = isLanding ? '' : 'none';
         if (navLoginBtn) navLoginBtn.style.display = (!authed && id !== 'login-page') ? '' : 'none';
         if (navSignupBtn) navSignupBtn.style.display = !authed ? '' : 'none';
         if (navProfileTrigger) navProfileTrigger.style.display = authed ? '' : 'none';
-        if (navSignoutBtn) navSignoutBtn.style.display = authed ? '' : 'none';
-        if (navUsagePill) navUsagePill.classList.add('hidden-section');
+        if (navUsagePill) navUsagePill.classList.toggle('hidden-section', !authed || isReading);
 
         const displayName = deriveDisplayName(user);
         if (navUserName) {
@@ -146,13 +142,13 @@
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
         if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !authed);
-        if (librarySample) librarySample.classList.toggle('hidden-section', !(id === 'dashboard' && !authed));
+        if (librarySample) librarySample.classList.add('hidden-section');
         const subtitle = document.getElementById('dashboard-subtitle');
         if (subtitle) {
             subtitle.style.display = '';
             subtitle.innerHTML = authed
                 ? "You've completed <strong>2 sessions</strong> this week. Keep the momentum going."
-                : 'Try the sample book now, or create an account when you want ownership tools and saved progress.';
+                : 'Create an account to enter your library and keep your settings, billing, and progress in one place.';
         }
 
         const profileGuestCard = document.getElementById('profile-guest-card');
@@ -254,35 +250,47 @@
 
 
     // ── Modals ───────────────────────────────────────────────────
-    function openModal(id)  { const el = document.getElementById(id); if (!el) return; el.classList.remove('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'flex'; }
+    function openModal(id)  { const el = document.getElementById(id); if (!el) return; el.classList.remove('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'flex'; if (id === 'pricing-modal' && window.rcBilling && typeof window.rcBilling.renderPricingUi === 'function') window.rcBilling.renderPricingUi().catch(() => {}); }
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
-    // ── Auth — free path (no sign-in required) ───────────────────
-    // login() is the signed-out Library path. It preserves value first:
-    // users can explore the sample Library surface without creating an account.
     function login() {
         closeModal('pricing-modal');
         closeModal('ownership-modal');
-        showSection('dashboard');
-        try { refreshLibrary(); } catch(_) {}
+        showSigninPane();
     }
 
     function continueWithFree() {
-        login();
+        if (window.rcBilling && typeof window.rcBilling.continueWithFree === 'function') {
+            window.rcBilling.continueWithFree();
+            return;
+        }
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        if (_authMode !== 'signup') toggleAuthMode(true);
+        showSection('login-page');
     }
 
     function showSigninPane() {
-        if (_authMode !== 'signin') toggleAuthMode();
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        if (_authMode !== 'signin') toggleAuthMode(true);
         showSection('login-page');
     }
 
-    function showSignupPane() {
-        if (_authMode !== 'signup') toggleAuthMode();
+    function showSignupPane(forceDirect = false) {
+        closeModal('ownership-modal');
+        if (!forceDirect) {
+            const pending = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
+                ? String(window.rcBilling.readPendingPlan() || '').trim()
+                : '';
+            if (!pending && window.rcBilling && typeof window.rcBilling.openPricingForSignup === 'function') {
+                window.rcBilling.openPricingForSignup();
+                return;
+            }
+        }
+        closeModal('pricing-modal');
+        if (_authMode !== 'signup') toggleAuthMode(true);
         showSection('login-page');
-    }
-
-    function openSampleBookPreview() {
-        try { openPreview(PUBLIC_SAMPLE_BOOK_ID, 'Reading Training'); } catch (_) {}
     }
 
     function promptOwnershipAction(kind) {
@@ -290,8 +298,8 @@
         const copy = document.getElementById('ownership-copy');
         if (copy) {
             copy.textContent = kind === 'manage'
-                ? 'Managing your personal library belongs to your signed-in account. You can still explore the sample book without creating one.'
-                : 'Importing books belongs to your signed-in account. You can still explore the sample book without creating one.';
+                ? 'Managing your personal library belongs to your signed-in account. Create an account to keep ownership actions tied to your profile.'
+                : 'importing books belongs to your signed-in account. Create an account to keep imported books tied to your library.';
         }
         openModal('ownership-modal');
         return true;
@@ -322,8 +330,14 @@
 
     let _authMode = 'signin'; // 'signin' | 'signup'
 
-    function toggleAuthMode() {
-        _authMode = _authMode === 'signin' ? 'signup' : 'signin';
+    function toggleAuthMode(forceApply = false) {
+        if (!forceApply && _authMode === 'signin') {
+            if (window.rcBilling && typeof window.rcBilling.openPricingForSignup === 'function') {
+                window.rcBilling.openPricingForSignup();
+                return;
+            }
+        }
+        if (!forceApply) _authMode = _authMode === 'signin' ? 'signup' : 'signin';
         const heading      = document.getElementById('auth-form-heading');
         const subheading   = document.getElementById('auth-form-subheading');
         const submitBtn    = document.getElementById('auth-submit-btn');
@@ -336,24 +350,26 @@
         const freeLinkText = document.getElementById('auth-free-link-text');
         if (errEl) errEl.classList.add('hidden-section');
         if (okEl)  okEl.classList.add('hidden-section');
+        const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
         if (_authMode === 'signup') {
-            if (heading)    heading.textContent    = 'Create account';
-            if (subheading) subheading.textContent = 'Start reading for free — no card required';
+            const planLabel = pendingPlan === 'premium' ? 'Premium' : pendingPlan === 'pro' || pendingPlan === 'paid' ? 'Pro' : 'Free';
+            if (heading)    heading.textContent    = planLabel === 'Free' ? 'Create free account' : `Create account for ${planLabel}`;
+            if (subheading) subheading.textContent = planLabel === 'Free' ? 'Create your account and enter the app.' : `Create your account now. ${planLabel} checkout will continue after sign in.`;
             if (submitBtn)  submitBtn.textContent  = 'Create Account';
             if (toggleBtn)  toggleBtn.textContent  = 'Sign in instead';
             if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
             if (confirmWrap) confirmWrap.classList.remove('hidden-section');
             if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
-            if (freeLinkText) freeLinkText.textContent = 'Continue without creating an account →';
+            if (freeLinkText) freeLinkText.textContent = 'Back to plans →';
         } else {
             if (heading)    heading.textContent    = 'Welcome back';
-            if (subheading) subheading.textContent = 'Sign in to your account to continue';
+            if (subheading) subheading.textContent = pendingPlan && pendingPlan !== 'free' ? `Sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'}.` : 'Sign in to your account to continue';
             if (submitBtn)  submitBtn.textContent  = 'Sign In';
             if (toggleBtn)  toggleBtn.textContent  = 'Create account';
-            if (toggleLabel) toggleLabel.textContent = 'New here?';
+            if (toggleLabel) toggleLabel.textContent = 'Need an account?';
             if (confirmWrap) confirmWrap.classList.add('hidden-section');
             if (pwInput) pwInput.setAttribute('autocomplete', 'current-password');
-            if (freeLinkText) freeLinkText.textContent = 'Continue without signing in →';
+            if (freeLinkText) freeLinkText.textContent = 'View plans →';
         }
     }
 
@@ -412,7 +428,8 @@
                 if (error) {
                     _authShowError(error.message || 'Sign-up failed. Please try again.');
                 } else {
-                    _authShowSuccess('Account created — check your email to confirm, then sign in.');
+                    const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Account created — check your email to confirm, then sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Account created — check your email to confirm, then sign in to enter your library.');
                     if (_authMode !== 'signin') toggleAuthMode();
                 }
             } else {
@@ -457,7 +474,7 @@
                 try { refreshLibrary(); } catch(_) {}
             }
         } else {
-            if (current === 'profile-page') showSection('dashboard', { historyMode: 'replace' });
+            if (current === 'profile-page' || current === 'dashboard') showSection('landing-page', { historyMode: 'replace' });
             else syncShellAuthPresentation(current);
         }
     }
@@ -1095,7 +1112,7 @@
             if (emptyEl) emptyEl.classList.add('hidden-section');
             if (sub) {
                 sub.style.display = '';
-                sub.innerHTML = 'Try the sample book now, or create an account when you want ownership tools and saved progress.';
+                sub.innerHTML = 'Create an account to keep ownership tools, billing, and durable progress tied to your profile.';
             }
             return;
         }

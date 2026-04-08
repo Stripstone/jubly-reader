@@ -66,6 +66,79 @@ window.rcBilling = (function () {
     try { sessionStorage.removeItem('rc_pending_plan'); } catch (_) {}
   }
 
+  function normalizePlan(plan) {
+    const normalized = String(plan || '').trim().toLowerCase();
+    if (normalized === 'paid') return 'pro';
+    return normalized;
+  }
+
+  function openPricingForSignup() {
+    clearPendingPlan();
+    if (typeof closeModal === 'function') closeModal('ownership-modal');
+    if (typeof openModal === 'function') openModal('pricing-modal');
+    renderPricingUi().catch(() => {});
+  }
+
+  function rememberPlanAndOpenSignup(plan) {
+    rememberPendingPlan(plan);
+    if (typeof closeModal === 'function') closeModal('pricing-modal');
+    if (typeof closeModal === 'function') closeModal('ownership-modal');
+    if (typeof showSignupPane === 'function') showSignupPane(true);
+    else if (typeof showSection === 'function') showSection('login-page');
+  }
+
+  function planDisplayLabel(plan) {
+    const normalized = normalizePlan(plan);
+    if (normalized === 'premium') return 'Premium';
+    if (normalized === 'pro') return 'Pro';
+    return 'Free';
+  }
+
+  function applyPlanButtonState(button, label, onclick, disabled = false) {
+    if (!button) return;
+    button.textContent = label;
+    button.disabled = !!disabled;
+    button.onclick = onclick;
+    button.classList.toggle('opacity-60', !!disabled);
+    button.classList.toggle('cursor-not-allowed', !!disabled);
+  }
+
+  async function renderPricingUi() {
+    const config = await fetchPublicConfig();
+    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+    const snapshot = await fetchRuntimeSnapshot();
+    const entitlement = snapshot?.meta?.entitlement || null;
+    const currentTier = String(entitlement?.tier || snapshot?.tier || 'free').toLowerCase();
+    const plans = config?.stripe?.plans || {};
+    const freeBtn = document.getElementById('pricing-free-btn');
+    const proBtn = document.getElementById('pricing-pro-btn');
+    const premiumBtn = document.getElementById('pricing-premium-btn');
+    const proAmount = document.getElementById('pricing-pro-amount');
+    const proInterval = document.getElementById('pricing-pro-interval');
+    const premiumAmount = document.getElementById('pricing-premium-amount');
+    const premiumInterval = document.getElementById('pricing-premium-interval');
+
+    if (proAmount) proAmount.textContent = plans?.pro?.amountLabel || '$9';
+    if (proInterval) proInterval.textContent = plans?.pro?.intervalLabel || '/mo';
+    if (premiumAmount) premiumAmount.textContent = plans?.premium?.amountLabel || '$19';
+    if (premiumInterval) premiumInterval.textContent = plans?.premium?.intervalLabel || '/mo';
+
+    if (!signedIn) {
+      applyPlanButtonState(freeBtn, 'Create Free Account', () => rememberPlanAndOpenSignup('free'));
+      applyPlanButtonState(proBtn, 'Choose Pro', () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
+      applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
+      return;
+    }
+
+    applyPlanButtonState(freeBtn, currentTier === 'free' ? 'Current Plan' : 'Free Plan', () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); }, currentTier === 'free');
+    applyPlanButtonState(proBtn, currentTier === 'paid' ? 'Current Plan' : 'Upgrade to Pro', () => startCheckout('pro'), !plans?.pro?.available || currentTier === 'paid');
+    applyPlanButtonState(premiumBtn, currentTier === 'premium' ? 'Current Plan' : 'Upgrade to Premium', () => startCheckout('premium'), !plans?.premium?.available || currentTier === 'premium');
+  }
+
+  function continueWithFree() {
+    rememberPlanAndOpenSignup('free');
+  }
+
   async function refreshRuntimeFromAccount() {
     if (!(window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function')) {
       setTimeout(refreshRuntimeFromAccount, 50);
@@ -100,11 +173,11 @@ window.rcBilling = (function () {
     const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
 
     if (!signedIn) {
-      if (statusCopy) statusCopy.textContent = 'Sign in when you want billing ownership. The free path remains available without an account.';
+      if (statusCopy) statusCopy.textContent = 'Sign in when you want billing ownership. Choose Sign Up to view plans and create an account.';
       if (billingState) billingState.innerHTML = 'Guest <span class="text-slate-300 text-sm font-normal">mode</span>';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
-        primaryBtn.onclick = function () { if (typeof openModal === 'function') openModal('pricing-modal'); };
+        primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
       if (secondaryBtn) {
         secondaryBtn.textContent = 'Sign in first';
@@ -130,10 +203,10 @@ window.rcBilling = (function () {
       if (billingState) billingState.innerHTML = 'Free <span class="text-slate-300 text-sm font-normal">path</span>';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
-        primaryBtn.onclick = function () { if (typeof openModal === 'function') openModal('pricing-modal'); };
+        primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
       if (secondaryBtn) {
-        const stripeReady = !!(config?.stripe?.plans?.pro || config?.stripe?.plans?.premium);
+        const stripeReady = !!(config?.stripe?.plans?.pro?.available || config?.stripe?.plans?.premium?.available);
         secondaryBtn.textContent = stripeReady ? 'Manage Billing' : 'Billing unavailable';
         secondaryBtn.onclick = function () { if (stripeReady) openCustomerPortal(); };
       }
@@ -141,14 +214,16 @@ window.rcBilling = (function () {
   }
 
   async function startCheckout(plan) {
-    const normalized = String(plan || '').trim().toLowerCase();
+    const normalized = normalizePlan(plan);
     if (!normalized) return;
+    if (normalized === 'free') {
+      continueWithFree();
+      return;
+    }
     if (!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn())) {
-      rememberPendingPlan(normalized);
-      setMessage('pricing-message', 'Create an account or sign in to continue to secure checkout.', 'info');
-      setMessage('billing-message', 'Create an account or sign in to continue to secure checkout.', 'info');
-      if (typeof showSignupPane === 'function') showSignupPane();
-      else if (typeof showSection === 'function') showSection('login-page');
+      rememberPlanAndOpenSignup(normalized);
+      setMessage('pricing-message', `Create an account to continue with ${planDisplayLabel(normalized)}.`, 'info');
+      setMessage('billing-message', `Create an account to continue with ${planDisplayLabel(normalized)}.`, 'info');
       return;
     }
     try {
@@ -203,9 +278,12 @@ window.rcBilling = (function () {
     const { signedIn, source } = e.detail || {};
     await refreshRuntimeFromAccount();
     await renderSubscriptionUi();
-    if (signedIn && source === 'SIGNED_IN') {
-      const pending = readPendingPlan();
-      if (pending) {
+    await renderPricingUi();
+    if (signedIn && (source === 'SIGNED_IN' || source === 'INITIAL_SESSION' || source === 'init')) {
+      const pending = normalizePlan(readPendingPlan());
+      if (pending === 'free') {
+        clearPendingPlan();
+      } else if (pending) {
         clearPendingPlan();
         startCheckout(pending);
       }
@@ -216,6 +294,7 @@ window.rcBilling = (function () {
   document.addEventListener('DOMContentLoaded', () => {
     handleQueryFeedback();
     renderSubscriptionUi().catch(() => {});
+    renderPricingUi().catch(() => {});
   });
 
   return {
@@ -223,8 +302,17 @@ window.rcBilling = (function () {
     openCustomerPortal,
     refreshRuntimeFromAccount,
     renderSubscriptionUi,
+    renderPricingUi,
+    rememberPendingPlan,
+    readPendingPlan,
+    clearPendingPlan,
+    openPricingForSignup,
+    continueWithFree,
   };
 })();
 
 window.startCheckout = function startCheckout(plan) { return window.rcBilling.startCheckout(plan); };
 window.openCustomerPortal = function openCustomerPortal() { return window.rcBilling.openCustomerPortal(); };
+
+window.openPricingForSignup = function openPricingForSignup() { return window.rcBilling.openPricingForSignup(); };
+window.continueWithFree = function continueWithFree() { return window.rcBilling.continueWithFree(); };

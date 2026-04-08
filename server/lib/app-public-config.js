@@ -13,6 +13,7 @@
 import { json, withCors } from './http.js';
 import { requestOrigin } from './env.js';
 import { getAllowedBrowserOrigins } from './origins.js';
+import { getPublicPlanCatalog } from './stripe.js';
 
 export default async function handler(req, res) {
   const allowed = getAllowedBrowserOrigins();
@@ -27,10 +28,10 @@ export default async function handler(req, res) {
   const appBaseUrl = requestOrigin(req);
   const authRedirectUrl = `${appBaseUrl}/`;
   const stripe = {
-    plans: {
-      pro: !!(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO),
-      premium: !!(process.env.STRIPE_PRICE_PREMIUM_MONTHLY || process.env.STRIPE_PRICE_PREMIUM),
-    },
+    plans: await getPublicPlanCatalog().catch(() => ({
+      pro: { available: !!(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO), amountLabel: '$9', intervalLabel: '/mo' },
+      premium: { available: !!(process.env.STRIPE_PRICE_PREMIUM_MONTHLY || process.env.STRIPE_PRICE_PREMIUM), amountLabel: '$19', intervalLabel: '/mo' },
+    })),
   };
 
   if (!url || !anonKey) {

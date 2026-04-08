@@ -371,7 +371,7 @@
         </div>
         <div id="nav-user-controls" class="hidden-section flex items-center gap-3">
             <div id="nav-usage-pill" class="hidden-section flex items-center gap-1 font-bold px-3 py-1 rounded-full text-sm text-accent bg-accent-soft">
-                <span>✨</span> <span id="nav-usage-pill-value">100</span>
+                <span>✨</span> <span id="nav-usage-pill-value">Tokens</span>
             </div>
             <button id="nav-profile-trigger" type="button" class="flex items-center gap-2 rounded-full px-1.5 py-1 hover:bg-slate-100 transition" onclick="showSection('profile-page')">
                 <span id="nav-user-name" class="hidden-section text-xs font-semibold text-slate-600 max-w-[120px] truncate"></span>
@@ -379,12 +379,10 @@
                     <img id="nav-avatar" src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves" alt="avatar">
                 </div>
             </button>
-            <button id="nav-signout-btn" type="button" onclick="shellSignOut()" class="text-xs font-bold text-slate-400 hover:text-slate-700 transition px-2 py-1 rounded-lg hover:bg-slate-100" title="Sign out">Sign out</button>
-        </div>
+                    </div>
         <div id="nav-landing-controls" class="flex items-center gap-2 sm:gap-3">
             <button id="nav-login-btn" type="button" onclick="showSigninPane()" class="text-xs font-bold text-slate-600 hover:text-slate-900 px-2 py-1 rounded-lg hover:bg-slate-100 transition">Login</button>
-            <button id="nav-signup-btn" type="button" onclick="showSignupPane()" class="text-xs font-bold text-indigo-600 hover:text-indigo-700 px-2 py-1 rounded-lg hover:bg-indigo-50 transition">Sign Up</button>
-            <button id="nav-subscribe-btn" type="button" onclick="openModal('pricing-modal')" class="btn-subscribe">Subscribe</button>
+            <button id="nav-signup-btn" type="button" onclick="openPricingForSignup()" class="text-xs font-bold text-indigo-600 hover:text-indigo-700 px-2 py-1 rounded-lg hover:bg-indigo-50 transition">Sign Up</button>
         </div>
     </div>
 </nav>
@@ -415,8 +413,8 @@
             Turn dense reading into manageable pages, listen with high-quality AI voices, and pick up exactly where you left off.
         </p>
         <div class="max-w-xs mx-auto md:mx-0 flex flex-col gap-3">
-            <button onclick="openModal('pricing-modal')" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Try it free</button>
-            <button onclick="showSigninPane()" class="btn-ghost w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Sign In</button>
+            <button onclick="openPricingForSignup()" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Sign Up</button>
+            <button onclick="showSigninPane()" class="btn-ghost w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Login</button>
         </div>
     </div>
 </div>
@@ -481,7 +479,7 @@
             <button id="auth-toggle-btn" onclick="toggleAuthMode()" class="font-bold text-indigo-600 hover:underline ml-1">Create account</button>
         </p>
         <p class="text-center mt-2">
-            <button onclick="continueWithFree()" class="text-xs text-slate-400 hover:text-slate-600 transition"><span id="auth-free-link-text">Continue without signing in →</span></button>
+            <button onclick="openPricingForSignup()" class="text-xs text-slate-400 hover:text-slate-600 transition"><span id="auth-free-link-text">View plans →</span></button>
         </p>
         <p class="text-center mt-2"><button onclick="showSection('landing-page')" class="text-xs text-slate-400 hover:text-slate-600 transition">← Back to home</button></p>
     </div>
@@ -504,13 +502,12 @@
         <div class="section-card shadow-sm border border-indigo-100 bg-indigo-50/40">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-5">
                 <div>
-                    <p class="text-xs font-black uppercase tracking-widest text-indigo-600 mb-2">Sample Book</p>
-                    <h3 class="text-2xl font-extrabold text-slate-900">Try Reading Training now</h3>
-                    <p class="text-sm text-slate-500 mt-2 max-w-2xl">Start with the built-in sample before creating an account. Sign in only when you want ownership, saved state, and your personal library.</p>
+                    <p class="text-xs font-black uppercase tracking-widest text-indigo-600 mb-2">Getting started</p>
+                    <h3 class="text-2xl font-extrabold text-slate-900">Your library starts after sign up</h3>
+                    <p class="text-sm text-slate-500 mt-2 max-w-2xl">Library ownership, imports, and saved state start after account creation. Use Sign Up to choose a plan and enter the app.</p>
                 </div>
                 <div class="flex flex-col sm:flex-row gap-3">
-                    <button type="button" onclick="openSampleBookPreview()" class="btn-jubly px-6 py-3 rounded-xl font-bold text-sm">Open sample book</button>
-                    <button type="button" onclick="showSignupPane()" class="px-5 py-3 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Create account</button>
+                    <button type="button" onclick="openPricingForSignup()" class="btn-jubly px-6 py-3 rounded-xl font-bold text-sm">Choose a plan</button>
                 </div>
             </div>
         </div>
@@ -565,7 +562,7 @@
                     <div class="flex flex-col gap-2">
                         <button type="button" onclick="showSigninPane()" class="btn-jubly w-full px-4 py-2.5 rounded-xl font-bold text-sm">Login</button>
                         <button type="button" onclick="showSignupPane()" class="w-full px-4 py-2.5 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Sign Up</button>
-                        <button type="button" onclick="continueWithFree()" class="text-xs text-slate-400 hover:text-slate-600 transition">Continue with Free →</button>
+                        
                     </div>
                 </div>
             </div>
@@ -657,7 +654,7 @@
             <div id="tab-subscription" class="tab-content hidden-section space-y-5">
                 <div class="sub-hero">
                     <h3 class="text-2xl font-extrabold mb-1">Account access</h3>
-                    <p id="subscription-status-copy" class="text-purple-200 text-sm mb-5">Billing and real entitlements now resolve on the server. This panel reflects the resolved account state.</p>
+                    <p id="subscription-status-copy" class="text-purple-200 text-sm mb-5">Billing and real entitlements now resolve on the server. Use View Pricing to compare plans and Manage Billing after checkout is live for your account.</p>
                     <div class="flex gap-3 flex-wrap">
                         <button id="subscription-primary-btn" onclick="openModal('pricing-modal')" class="bg-white text-indigo-700 font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-indigo-50 transition">View Pricing</button>
                         <button id="subscription-secondary-btn" onclick="openCustomerPortal()" class="bg-white/20 text-white font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-white/30 transition border border-white/30">Manage Billing</button>
@@ -734,11 +731,10 @@
             <div class="section-card shadow-sm text-center py-12 px-8">
                 <div class="w-16 h-16 mx-auto rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-3xl mb-5">🔐</div>
                 <h3 class="text-2xl font-extrabold text-slate-900">Sign in for your account details</h3>
-                <p class="text-sm text-slate-500 mt-3 max-w-lg mx-auto">The free path lets you try the sample library without an account. Sign in only when you want profile details, saved preferences, and durable reading progress.</p>
+                <p class="text-sm text-slate-500 mt-3 max-w-lg mx-auto">Create an account when you are ready to keep settings, durable progress, and billing tied to your profile.</p>
                 <div class="flex flex-col sm:flex-row justify-center gap-3 mt-6">
                     <button type="button" onclick="showSigninPane()" class="btn-jubly px-6 py-3 rounded-xl font-bold text-sm">Login</button>
-                    <button type="button" onclick="showSignupPane()" class="px-6 py-3 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Sign Up</button>
-                    <button type="button" onclick="continueWithFree()" class="px-6 py-3 rounded-xl font-bold text-sm border-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition">Continue with Free</button>
+                    <button type="button" onclick="openPricingForSignup()" class="px-6 py-3 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Sign Up</button>
                 </div>
             </div>
         </section>
@@ -845,7 +841,7 @@
         <button onclick="closeModal('pricing-modal')" class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition">✕</button>
         <div class="text-center mb-8">
             <h2 class="text-3xl font-extrabold text-slate-900">Simple Pricing</h2>
-            <p class="text-slate-400 mt-1 text-sm">Start free, upgrade when you're ready.</p>
+            <p class="text-slate-400 mt-1 text-sm">Choose a plan, create your account, then enter the app.</p>
         <div id="pricing-message" class="hidden-section mt-3 text-sm font-semibold"></div>
         </div>
         <div class="flex gap-4 flex-col md:flex-row">
@@ -858,14 +854,14 @@
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> Standard AI voices</li>
                     <li class="flex items-center gap-2"><span class="text-slate-300">✕</span> <span class="text-slate-400">RSS feed</span></li>
                 </ul>
-                <button type="button" onclick="continueWithFree()" class="w-full border-2 border-slate-200 rounded-xl py-2.5 font-bold text-sm text-slate-600 hover:bg-slate-50 transition">Continue with Free</button>
+                <button id="pricing-free-btn" type="button" onclick="continueWithFree()" class="w-full border-2 border-slate-200 rounded-xl py-2.5 font-bold text-sm text-slate-600 hover:bg-slate-50 transition">Create Free Account</button>
             </div>
             <div class="pricing-card featured">
                 <div class="flex justify-between items-center mb-3">
                     <p class="text-xs font-black uppercase tracking-widest text-indigo-600">Pro</p>
                     <span class="text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full font-bold">Popular</span>
                 </div>
-                <p class="text-4xl font-extrabold text-slate-900 mb-0.5">$9<span class="text-lg text-slate-400 font-normal">/mo</span></p>
+                <p class="text-4xl font-extrabold text-slate-900 mb-0.5"><span id="pricing-pro-amount">$9</span><span id="pricing-pro-interval" class="text-lg text-slate-400 font-normal">/mo</span></p>
                 <p class="text-xs text-slate-400 mb-5">Billed monthly</p>
                 <ul class="space-y-2 text-sm text-slate-600 mb-6">
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> 5 active documents</li>
@@ -876,7 +872,7 @@
             </div>
             <div class="pricing-card">
                 <p class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Premium</p>
-                <p class="text-4xl font-extrabold text-slate-900 mb-0.5">$19<span class="text-lg text-slate-400 font-normal">/mo</span></p>
+                <p class="text-4xl font-extrabold text-slate-900 mb-0.5"><span id="pricing-premium-amount">$19</span><span id="pricing-premium-interval" class="text-lg text-slate-400 font-normal">/mo</span></p>
                 <p class="text-xs text-slate-400 mb-5">Billed monthly</p>
                 <ul class="space-y-2 text-sm text-slate-600 mb-6">
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> Unlimited documents</li>
@@ -896,12 +892,12 @@
         <div class="text-center">
             <div class="w-14 h-14 mx-auto rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl mb-4">🔐</div>
             <h2 class="text-2xl font-extrabold text-slate-900">Account needed for ownership tools</h2>
-            <p id="ownership-copy" class="text-sm text-slate-500 mt-3">Importing and managing your library belong to your signed-in account. You can still explore the sample book without creating one.</p>
+            <p id="ownership-copy" class="text-sm text-slate-500 mt-3">Importing and managing your library belong to your signed-in account. Create an account to keep those actions tied to your profile.</p>
         </div>
         <div class="grid gap-3 mt-8">
             <button type="button" onclick="showSigninPane(); closeModal('ownership-modal');" class="btn-jubly w-full py-3 rounded-xl font-bold text-sm">Login</button>
             <button type="button" onclick="showSignupPane(); closeModal('ownership-modal');" class="w-full py-3 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Sign Up</button>
-            <button type="button" onclick="continueWithFree(); closeModal('ownership-modal');" class="w-full py-3 rounded-xl font-bold text-sm border-2 border-slate-200 text-slate-600 hover:bg-slate-50 transition">Continue with Free</button>
+            
         </div>
     </div>
 </div>

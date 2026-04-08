@@ -6,6 +6,9 @@ If earlier documentation, older mockups, or scaffold behavior conflict with this
 
 The goal is to give implementation one clear target before Supabase and Stripe are fully wired.
 
+
+> Current onboarding note: sample-first pre-account reading is removed. Public flow is now Landing → Login or Sign Up → pricing through Sign Up → account creation → billing only for paid plans → library/app. Logged-in top-right stack is Tokens | Profile.
+
 ## Product experience in one paragraph
 The user should see value first, with almost no friction. A new visitor lands in a clean library-style app surface, sees one sample book, and can enter reading to experience the product. Ownership and expansion actions gently require account creation. Plan choice happens early and clearly through pricing. Once a user signs up and pays, the app should stay out of the way: they remain signed in, keep their place, keep their settings, understand what they have access to, and move through upgrades, downgrades, and usage resets without losing progress.
 

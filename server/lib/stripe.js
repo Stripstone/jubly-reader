@@ -26,6 +26,63 @@ export function derivePlanFromPriceId(priceIdRaw) {
   return null;
 }
 
+
+let _publicPlanCatalogCache = null;
+let _publicPlanCatalogAt = 0;
+const PUBLIC_PLAN_CATALOG_TTL_MS = 5 * 60 * 1000;
+
+function normalizePublicPrice(priceId, data, fallbackLabel) {
+  const amountCents = Number.isFinite(Number(data?.unit_amount)) ? Number(data.unit_amount) : null;
+  const currency = String(data?.currency || '').trim().toUpperCase() || 'USD';
+  const interval = String(data?.recurring?.interval || '').trim().toLowerCase() || 'month';
+  const nickname = String(data?.nickname || '').trim();
+  const amount = amountCents == null ? null : amountCents / 100;
+  let amountLabel = fallbackLabel || 'Configured in Stripe';
+  if (amount != null) {
+    try {
+      amountLabel = new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
+    } catch (_) {
+      amountLabel = `${amount.toFixed(2)} ${currency}`;
+    }
+  }
+  return {
+    available: !!priceId,
+    id: priceId,
+    amountCents,
+    amountLabel,
+    currency,
+    interval,
+    intervalLabel: interval === 'month' ? '/mo' : interval ? `/${interval}` : '',
+    nickname,
+  };
+}
+
+export async function getPublicPlanCatalog(force = false) {
+  const now = Date.now();
+  if (!force && _publicPlanCatalogCache && (now - _publicPlanCatalogAt) < PUBLIC_PLAN_CATALOG_TTL_MS) return _publicPlanCatalogCache;
+
+  const proPriceId = process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO || '';
+  const premiumPriceId = process.env.STRIPE_PRICE_PREMIUM_MONTHLY || process.env.STRIPE_PRICE_PREMIUM || '';
+
+  const fetchPrice = async (priceId, fallbackLabel) => {
+    if (!priceId) return normalizePublicPrice('', null, fallbackLabel);
+    try {
+      const data = await stripeRequest(`/prices/${encodeURIComponent(priceId)}`, { method: 'GET' });
+      return normalizePublicPrice(priceId, data, fallbackLabel);
+    } catch (_) {
+      return normalizePublicPrice(priceId, null, fallbackLabel);
+    }
+  };
+
+  const [pro, premium] = await Promise.all([
+    fetchPrice(proPriceId, '$9'),
+    fetchPrice(premiumPriceId, '$19'),
+  ]);
+  _publicPlanCatalogCache = { pro, premium };
+  _publicPlanCatalogAt = now;
+  return _publicPlanCatalogCache;
+}
+
 export async function stripeRequest(path, { method = 'POST', body, headers = {} } = {}) {
   const secret = requiredEnv('STRIPE_SECRET_KEY');
   const response = await fetch(`https://api.stripe.com/v1${path}`, {
