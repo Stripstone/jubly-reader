@@ -15,6 +15,7 @@
 
     // ── Section routing ──────────────────────────────────────────
     const ALL_SECTIONS     = ['landing-page', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
+    const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
     const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
         let _currentSection = 'landing-page';
     let _shellAuthBootstrapped = false;
@@ -254,31 +255,11 @@
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
     function login() {
+        if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
         closeModal('pricing-modal');
         closeModal('ownership-modal');
-        showSigninPane();
-    }
-
-    function navigateHome() {
-        try { if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan(); } catch (_) {}
-        closeModal('pricing-modal');
-        closeModal('ownership-modal');
-        showSection('landing-page');
-    }
-
-    async function startSampleReading() {
-        try { if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan(); } catch (_) {}
-        closeModal('pricing-modal');
-        closeModal('ownership-modal');
-        _previewBookId = 'BOOK_ReadingTraining';
-        const titleEl = document.getElementById('preview-title');
-        if (titleEl) titleEl.innerText = 'Reading Training';
-        try {
-            const signal = document.getElementById('session-complete');
-            if (signal) signal.classList.add('hidden-section');
-            showSection('reading-mode');
-            if (typeof startReadingFromPreview === 'function') await startReadingFromPreview('BOOK_ReadingTraining');
-        } catch (_) {}
+        showSection('dashboard');
+        try { refreshLibrary(); } catch(_) {}
     }
 
     function continueWithFree() {
@@ -286,10 +267,7 @@
             window.rcBilling.continueWithFree();
             return;
         }
-        closeModal('pricing-modal');
-        closeModal('ownership-modal');
-        if (_authMode !== 'signup') toggleAuthMode(true);
-        showSection('login-page');
+        login();
     }
 
     function showSigninPane() {
@@ -299,20 +277,22 @@
         showSection('login-page');
     }
 
+    function returnToLanding() {
+        if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        showSection('landing-page');
+    }
+
     function showSignupPane(forceDirect = false) {
         closeModal('ownership-modal');
-        if (!forceDirect) {
-            const pending = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
-                ? String(window.rcBilling.readPendingPlan() || '').trim()
-                : '';
-            if (!pending && window.rcBilling && typeof window.rcBilling.openPricingForSignup === 'function') {
-                window.rcBilling.openPricingForSignup();
-                return;
-            }
-        }
         closeModal('pricing-modal');
         if (_authMode !== 'signup') toggleAuthMode(true);
         showSection('login-page');
+    }
+
+    function openSampleBookPreview() {
+        try { openPreview(PUBLIC_SAMPLE_BOOK_ID, 'Reading Training'); } catch (_) {}
     }
 
     function promptOwnershipAction(kind) {
@@ -320,8 +300,8 @@
         const copy = document.getElementById('ownership-copy');
         if (copy) {
             copy.textContent = kind === 'manage'
-                ? 'Managing your personal library belongs to your signed-in account. Create an account to keep ownership actions tied to your profile.'
-                : 'importing books belongs to your signed-in account. Create an account to keep imported books tied to your library.';
+                ? 'Managing your personal library belongs to your signed-in account. You can still explore the sample book without creating one.'
+                : 'Importing books belongs to your signed-in account. You can still explore the sample book without creating one.';
         }
         openModal('ownership-modal');
         return true;
@@ -353,12 +333,6 @@
     let _authMode = 'signin'; // 'signin' | 'signup'
 
     function toggleAuthMode(forceApply = false) {
-        if (!forceApply && _authMode === 'signin') {
-            if (window.rcBilling && typeof window.rcBilling.openPricingForSignup === 'function') {
-                window.rcBilling.openPricingForSignup();
-                return;
-            }
-        }
         if (!forceApply) _authMode = _authMode === 'signin' ? 'signup' : 'signin';
         const heading      = document.getElementById('auth-form-heading');
         const subheading   = document.getElementById('auth-form-subheading');
@@ -369,26 +343,29 @@
         const errEl        = document.getElementById('auth-error');
         const okEl         = document.getElementById('auth-success');
         const pwInput      = document.getElementById('loginPassword');
+        const freeLinkText = document.getElementById('auth-free-link-text');
         if (errEl) errEl.classList.add('hidden-section');
         if (okEl)  okEl.classList.add('hidden-section');
         const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
         if (_authMode === 'signup') {
             const planLabel = pendingPlan === 'premium' ? 'Premium' : pendingPlan === 'pro' || pendingPlan === 'paid' ? 'Pro' : 'Free';
-            if (heading)    heading.textContent    = planLabel === 'Free' ? 'Create free account' : `Create account for ${planLabel}`;
-            if (subheading) subheading.textContent = planLabel === 'Free' ? 'Create your account and enter the app.' : `Create your account now. ${planLabel} checkout will continue after sign in.`;
+            if (heading)    heading.textContent    = 'Create account';
+            if (subheading) subheading.textContent = planLabel === 'Free' ? 'Start reading for free — no card required' : `Create your account to continue with ${planLabel} checkout.`;
             if (submitBtn)  submitBtn.textContent  = 'Create Account';
             if (toggleBtn)  toggleBtn.textContent  = 'Sign in instead';
             if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
             if (confirmWrap) confirmWrap.classList.remove('hidden-section');
             if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
+            if (freeLinkText) freeLinkText.textContent = 'Continue without creating an account →';
         } else {
             if (heading)    heading.textContent    = 'Welcome back';
             if (subheading) subheading.textContent = pendingPlan && pendingPlan !== 'free' ? `Sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'}.` : 'Sign in to your account to continue';
             if (submitBtn)  submitBtn.textContent  = 'Sign In';
             if (toggleBtn)  toggleBtn.textContent  = 'Create account';
-            if (toggleLabel) toggleLabel.textContent = 'Need an account?';
+            if (toggleLabel) toggleLabel.textContent = 'New here?';
             if (confirmWrap) confirmWrap.classList.add('hidden-section');
             if (pwInput) pwInput.setAttribute('autocomplete', 'current-password');
+            if (freeLinkText) freeLinkText.textContent = 'Continue without signing in →';
         }
     }
 
@@ -448,7 +425,7 @@
                     _authShowError(error.message || 'Sign-up failed. Please try again.');
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
-                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Account created — check your email to confirm, then sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Account created — check your email to confirm, then sign in to enter your library.');
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Account created — check your email to confirm, then sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Account created — check your email to confirm, then sign in.');
                     if (_authMode !== 'signin') toggleAuthMode();
                 }
             } else {
@@ -468,7 +445,6 @@
     }
 
     async function shellSignOut() {
-        try { if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan(); } catch (_) {}
         if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
             await window.rcAuth.signOut();
         }
@@ -484,6 +460,11 @@
         }
 
         if (signedIn) {
+            const pendingPaid = !!(window.rcBilling && typeof window.rcBilling.hasPendingPaidIntent === 'function' && window.rcBilling.hasPendingPaidIntent());
+            if (pendingPaid && (current === 'landing-page' || current === 'login-page')) {
+                syncShellAuthPresentation(current === 'landing-page' ? 'login-page' : current);
+                return;
+            }
             if (current === 'landing-page' || current === 'login-page') {
                 showSection('dashboard', { historyMode: 'replace' });
                 try { refreshLibrary(); } catch(_) {}
@@ -1132,7 +1113,7 @@
             if (emptyEl) emptyEl.classList.add('hidden-section');
             if (sub) {
                 sub.style.display = '';
-                sub.innerHTML = 'Create an account to keep ownership tools, billing, and durable progress tied to your profile.';
+                sub.innerHTML = 'Try the sample first. Create an account later when you want ownership, saved state, and your personal library.';
             }
             return;
         }

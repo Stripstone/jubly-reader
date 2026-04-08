@@ -54,15 +54,20 @@ window.rcBilling = (function () {
     return data;
   }
 
-  function rememberPendingPlan(plan) {
-    const normalized = normalizePlan(plan);
-    try { sessionStorage.setItem('rc_pending_plan', normalized); } catch (_) {}
+  function syncPlanIdQuery(plan) {
     try {
       const url = new URL(window.location.href);
-      if (normalized && normalized !== 'free') url.searchParams.set('plan_id', normalized);
+      const normalized = normalizePlan(plan);
+      if (normalized === 'pro' || normalized === 'premium') url.searchParams.set('plan_id', normalized);
       else url.searchParams.delete('plan_id');
       window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
     } catch (_) {}
+  }
+
+  function rememberPendingPlan(plan) {
+    const normalized = normalizePlan(plan);
+    try { sessionStorage.setItem('rc_pending_plan', String(normalized || '')); } catch (_) {}
+    syncPlanIdQuery(normalized);
   }
 
   function readPendingPlan() {
@@ -76,11 +81,12 @@ window.rcBilling = (function () {
 
   function clearPendingPlan() {
     try { sessionStorage.removeItem('rc_pending_plan'); } catch (_) {}
-    try {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('plan_id');
-      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-    } catch (_) {}
+    syncPlanIdQuery('');
+  }
+
+  function hasPendingPaidIntent() {
+    const pending = normalizePlan(readPendingPlan());
+    return pending === 'pro' || pending === 'premium';
   }
 
   function normalizePlan(plan) {
@@ -141,7 +147,7 @@ window.rcBilling = (function () {
     if (premiumInterval) premiumInterval.textContent = plans?.premium?.intervalLabel || '';
 
     if (!signedIn) {
-      applyPlanButtonState(freeBtn, 'Continue with Free', () => rememberPlanAndOpenSignup('free'));
+      applyPlanButtonState(freeBtn, 'Create Free Account', () => rememberPlanAndOpenSignup('free'));
       applyPlanButtonState(proBtn, 'Choose Pro', () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
       applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
       return;
@@ -153,7 +159,10 @@ window.rcBilling = (function () {
   }
 
   function continueWithFree() {
-    rememberPlanAndOpenSignup('free');
+    clearPendingPlan();
+    if (typeof closeModal === 'function') closeModal('pricing-modal');
+    if (typeof closeModal === 'function') closeModal('ownership-modal');
+    if (typeof login === 'function') login();
   }
 
   async function refreshRuntimeFromAccount() {
@@ -190,7 +199,7 @@ window.rcBilling = (function () {
     const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
 
     if (!signedIn) {
-      if (statusCopy) statusCopy.textContent = 'Sign in to access your account, or choose View Pricing after you are inside the app when you are ready to upgrade.';
+      if (statusCopy) statusCopy.textContent = 'Sign in when you want billing ownership. Choose Sign Up to view plans and create an account.';
       if (billingState) billingState.innerHTML = 'Guest <span class="text-slate-300 text-sm font-normal">mode</span>';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
@@ -245,7 +254,6 @@ window.rcBilling = (function () {
     }
     try {
       const data = await authenticatedPost('/api/billing?action=checkout', { plan: normalized });
-      clearPendingPlan();
       if (data?.url) window.location.href = data.url;
     } catch (error) {
       setMessage('pricing-message', error.message || 'Unable to start checkout.', 'error');
@@ -273,13 +281,16 @@ window.rcBilling = (function () {
       const checkout = url.searchParams.get('checkout');
       const portal = url.searchParams.get('portal');
       if (checkout === 'success') {
+        clearPendingPlan();
         setMessage('pricing-message', 'Checkout completed. Refreshing your account access…', 'success');
         setMessage('billing-message', 'Checkout completed. Refreshing your account access…', 'success');
         refreshRuntimeFromAccount();
       } else if (checkout === 'cancel') {
+        clearPendingPlan();
         setMessage('pricing-message', 'Checkout was canceled. You can keep using the free path or try again later.', 'info');
       }
       if (portal === 'return') {
+        clearPendingPlan();
         setMessage('billing-message', 'Returned from billing portal. Refreshing your account access…', 'success');
         refreshRuntimeFromAccount();
       }
@@ -293,18 +304,20 @@ window.rcBilling = (function () {
 
   async function handleAuthChanged(e) {
     const { signedIn, source } = e.detail || {};
-    await refreshRuntimeFromAccount();
-    await renderSubscriptionUi();
-    await renderPricingUi();
     if (signedIn && (source === 'SIGNED_IN' || source === 'INITIAL_SESSION' || source === 'init')) {
       const pending = normalizePlan(readPendingPlan());
       if (pending === 'free') {
         clearPendingPlan();
-      } else if (pending) {
-        clearPendingPlan();
+      } else if (pending === 'pro' || pending === 'premium') {
+        setMessage('pricing-message', `Redirecting to ${planDisplayLabel(pending)} checkout…`, 'info');
+        setMessage('billing-message', `Redirecting to ${planDisplayLabel(pending)} checkout…`, 'info');
         startCheckout(pending);
+        return;
       }
     }
+    await refreshRuntimeFromAccount();
+    await renderSubscriptionUi();
+    await renderPricingUi();
   }
 
   document.addEventListener('rc:auth-changed', (e) => { handleAuthChanged(e).catch(() => {}); });
@@ -325,6 +338,7 @@ window.rcBilling = (function () {
     clearPendingPlan,
     openPricingForSignup,
     continueWithFree,
+    hasPendingPaidIntent,
   };
 })();
 

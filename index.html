@@ -364,7 +364,7 @@
 <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-3">
     <div class="max-w-5xl mx-auto flex justify-between items-center">
         <div class="flex items-center gap-8">
-            <div class="flex items-center gap-2 cursor-pointer" onclick="navigateHome()">
+            <div class="flex items-center gap-2 cursor-pointer" onclick="showSection('landing-page')">
                 <div class="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black bg-brand">J</div>
                 <span class="text-2xl font-extrabold tracking-tighter text-slate-900">jubly</span>
             </div>
@@ -381,7 +381,7 @@
             </button>
                     </div>
         <div id="nav-landing-controls" class="flex items-center gap-2 sm:gap-3">
-            <button id="nav-login-btn" type="button" onclick="showSigninPane()" class="text-xs font-bold text-slate-600 hover:text-slate-900 px-2 py-1 rounded-lg hover:bg-slate-100 transition">Login</button>
+            <button id="nav-login-btn" type="button" onclick="showSigninPane()" class="text-xs font-bold text-slate-600 hover:text-slate-900 px-2 py-1 rounded-lg hover:bg-slate-100 transition">Log In</button>
             <button id="nav-signup-btn" type="button" onclick="openPricingForSignup()" class="text-xs font-bold text-indigo-600 hover:text-indigo-700 px-2 py-1 rounded-lg hover:bg-indigo-50 transition">Sign Up</button>
         </div>
     </div>
@@ -413,14 +413,8 @@
             Turn dense reading into manageable pages, listen with high-quality AI voices, and pick up exactly where you left off.
         </p>
         <div class="max-w-xs mx-auto md:mx-0 flex flex-col gap-3">
-            <button onclick="startSampleReading()" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Try for Free</button>
-            <button onclick="showSigninPane()" class="btn-ghost w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Log In</button>
-        </div>
-        <div class="mt-8 max-w-md mx-auto md:mx-0 section-card shadow-sm border border-indigo-100 bg-indigo-50/40">
-            <p class="text-xs font-black uppercase tracking-widest text-indigo-600 mb-2">Sample</p>
-            <h3 class="text-xl font-extrabold text-slate-900">Reading Training</h3>
-            <p class="text-sm text-slate-500 mt-2">Open a sample reading session immediately. Pricing appears later only when you want ownership tools or paid features.</p>
-            <button onclick="startSampleReading()" class="mt-4 inline-flex items-center justify-center btn-jubly px-5 py-3 rounded-xl font-bold text-sm">Read Sample</button>
+            <button onclick="login()" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Try for Free</button>
+            <button onclick="showSigninPane()" class="btn-ghost w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Login</button>
         </div>
     </div>
 </div>
@@ -484,7 +478,10 @@
             <span id="auth-toggle-label">New here?</span>
             <button id="auth-toggle-btn" onclick="toggleAuthMode()" class="font-bold text-indigo-600 hover:underline ml-1">Create account</button>
         </p>
-        <p class="text-center mt-2"><button onclick="navigateHome()" class="text-xs text-slate-400 hover:text-slate-600 transition">← Back to home</button></p>
+        <p class="text-center mt-2">
+            <button onclick="continueWithFree()" class="text-xs text-slate-400 hover:text-slate-600 transition"><span id="auth-free-link-text">Continue without signing in →</span></button>
+        </p>
+        <p class="text-center mt-2"><button onclick="returnToLanding()" class="text-xs text-slate-400 hover:text-slate-600 transition">← Back to home</button></p>
     </div>
 </div>
 
@@ -505,12 +502,13 @@
         <div class="section-card shadow-sm border border-indigo-100 bg-indigo-50/40">
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-5">
                 <div>
-                    <p class="text-xs font-black uppercase tracking-widest text-indigo-600 mb-2">Getting started</p>
-                    <h3 class="text-2xl font-extrabold text-slate-900">Your library starts after sign up</h3>
-                    <p class="text-sm text-slate-500 mt-2 max-w-2xl">Pricing appears only when you want ownership tools or paid features. You can try the sample first, then create an account when you want your own library, imports, and saved state.</p>
+                    <p class="text-xs font-black uppercase tracking-widest text-indigo-600 mb-2">Sample Book</p>
+                    <h3 class="text-2xl font-extrabold text-slate-900">Try Reading Training now</h3>
+                    <p class="text-sm text-slate-500 mt-2 max-w-2xl">Start with the built-in sample before creating an account. Sign in only when you want ownership, saved state, and your personal library.</p>
                 </div>
                 <div class="flex flex-col sm:flex-row gap-3">
-                    <button type="button" onclick="startSampleReading()" class="btn-jubly px-6 py-3 rounded-xl font-bold text-sm">Read Sample</button>
+                    <button type="button" onclick="openSampleBookPreview()" class="btn-jubly px-6 py-3 rounded-xl font-bold text-sm">Open sample book</button>
+                    <button type="button" onclick="showSignupPane(true)" class="px-5 py-3 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Create account</button>
                 </div>
             </div>
         </div>
@@ -857,7 +855,7 @@
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> Standard AI voices</li>
                     <li class="flex items-center gap-2"><span class="text-slate-300">✕</span> <span class="text-slate-400">RSS feed</span></li>
                 </ul>
-                <button id="pricing-free-btn" type="button" onclick="continueWithFree()" class="w-full border-2 border-slate-200 rounded-xl py-2.5 font-bold text-sm text-slate-600 hover:bg-slate-50 transition">Continue with Free</button>
+                <button id="pricing-free-btn" type="button" onclick="continueWithFree()" class="w-full border-2 border-slate-200 rounded-xl py-2.5 font-bold text-sm text-slate-600 hover:bg-slate-50 transition">Create Free Account</button>
             </div>
             <div class="pricing-card featured">
                 <div class="flex justify-between items-center mb-3">
