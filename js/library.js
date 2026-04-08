@@ -2312,6 +2312,13 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   } catch (_) {}
   try { if (window.TTS_STATE) window.TTS_STATE.playbackBlockedReason = ''; } catch (_) {}
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
+  // Pass 4: schedule durable reading progress sync if the user is signed in.
+  try {
+    if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
+      const _t = window.__rcReadingTarget || {};
+      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx);
+    }
+  } catch (_) {}
   return { ok: true, index: idx, total };
 };
 
@@ -2377,6 +2384,24 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   if (typeof window.__rcLoadBook === 'function') {
     try { await window.__rcLoadBook(String(bookId)); } catch (_) {}
   }
+
+  // Pass 4: if the user is signed in, fetch their durable reading position and
+  // apply it. chapterIndex comes from the current reading target set by loadBook.
+  // rcSync.getReadingProgress returns null when not signed in or no record exists,
+  // so this is a safe no-op in the signed-out free path.
+  try {
+    if (window.rcSync && typeof window.rcSync.getReadingProgress === 'function') {
+      const _t = window.__rcReadingTarget || {};
+      const durable = await window.rcSync.getReadingProgress(String(bookId), _t.chapterIndex != null ? _t.chapterIndex : -1);
+      if (durable && typeof durable.pageIndex === 'number' && durable.pageIndex > 0) {
+        const total = Array.isArray(pages) ? pages.length : 0;
+        if (total > 0 && durable.pageIndex < total) {
+          window.focusReadingPage(durable.pageIndex, { behavior: 'auto' });
+        }
+      }
+    }
+  } catch (_) {}
+
   return true;
 };
 

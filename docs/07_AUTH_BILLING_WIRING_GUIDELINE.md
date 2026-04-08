@@ -4,6 +4,9 @@ This document explains how to wire auth, pricing, subscription, billing, usage, 
 
 If earlier documentation, scaffold behavior, or prototype UI conflict with this document for auth/billing implementation, this document wins.
 
+
+> Current onboarding note: sample-first pre-account reading is removed. Public flow is now Landing → Login or Sign Up → pricing through Sign Up → account creation → billing only for paid plans → library/app. Logged-in top-right stack is Tokens | Profile.
+
 ## Purpose
 Build real Supabase and Stripe integration in a way that feels seamless to the user and does not regress the runtime-owned reading experience.
 

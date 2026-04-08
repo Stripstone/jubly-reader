@@ -1,4 +1,4 @@
-// api/usage-check/index.js
+// server/lib/app-usage-check.js
 // ─────────────────────────────────────────────────────────────────────────────
 // Interim server-owned usage capacity seam (Pass 3).
 //
@@ -24,9 +24,9 @@
 //   null limit = unlimited (premium); in that case remaining = null, allowed = true.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { json, withCors, readJsonBody } from "../_lib/http.js";
-import { getAllowedBrowserOrigins } from "../_lib/origins.js";
-import { getResolvedRuntimePolicyForRequest } from "../_lib/runtime-policy.js";
+import { json, withCors, readJsonBody } from "./http.js";
+import { getAllowedBrowserOrigins } from "./origins.js";
+import { getResolvedRuntimePolicyForRequest } from "./runtime-policy.js";
 
 // Token costs are server-owned. Client must not maintain an independent cost
 // matrix — it treats the backend verdict as truth.
@@ -65,7 +65,7 @@ export default async function handler(req, res) {
     research: Math.max(0, Math.floor(Number(rawSpent.research) || 0)),
   };
 
-  const resolved = getResolvedRuntimePolicyForRequest(req);
+  const resolved = await getResolvedRuntimePolicyForRequest(req);
   const { usageDailyLimit } = resolved.policy;
   const cost = TOKEN_COSTS[action];
 

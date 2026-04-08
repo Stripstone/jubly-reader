@@ -1,4 +1,4 @@
-// api/tts/index.js
+// server/lib/ai-tts.js
 // Cloud TTS endpoint with S3 caching.
 // Provider selection and fallback policy live here, not in browser JS.
 // Current provider order:
@@ -23,8 +23,8 @@ import crypto from "node:crypto";
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import { S3Client, HeadObjectCommand, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { json, withCors, readJsonBody } from "../_lib/http.js";
-import { getAllowedBrowserOrigins } from "../_lib/origins.js";
+import { json, withCors, readJsonBody } from "./http.js";
+import { getAllowedBrowserOrigins } from "./origins.js";
 
 function requiredEnv(name) {
   const v = process.env[name];

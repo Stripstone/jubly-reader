@@ -1,4 +1,4 @@
-// api/_lib/grader.js
+// server/lib/grader.js
 
 export function scoreToCompassRating(overallScore) {
   const score = Number.parseFloat(overallScore);

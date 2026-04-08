@@ -1121,3 +1121,14 @@
     --support-footer-flow-height: 84px;
   }
 }
+
+
+/* Auth hydration gate: avoid flashing signed-out landing/profile truth before
+   Supabase session restore resolves on page load. */
+body.auth-hydrating nav,
+body.auth-hydrating #landing-page,
+body.auth-hydrating #login-page,
+body.auth-hydrating #dashboard,
+body.auth-hydrating #profile-page {
+  visibility: hidden;
+}

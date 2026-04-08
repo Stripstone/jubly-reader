@@ -225,10 +225,15 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   }
 
   async function refreshRuntimePolicy(requestedTier) {
-    const tier = normalizeAppTier(requestedTier || getRuntimeTier());
+    const hasExplicitTier = !(typeof requestedTier === 'undefined' || requestedTier === null || String(requestedTier).trim() === '');
+    const tier = normalizeAppTier(hasExplicitTier ? requestedTier : getRuntimeTier());
+    const endpoint = hasExplicitTier
+      ? apiUrl(`/api/app?kind=runtime-config&tier=${encodeURIComponent(tier)}`)
+      : apiUrl('/api/app?kind=runtime-config');
     try {
-      const response = await fetch(apiUrl(`/api/runtime-config?tier=${encodeURIComponent(tier)}`), {
+      const response = await fetch(endpoint, {
         method: 'GET',
+        headers: { ...getAuthHeaders() },
         cache: 'no-store'
       });
       if (!response.ok) throw new Error(`runtime-config ${response.status}`);
@@ -238,7 +243,8 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       const policyWithMeta = payload?.policy
         ? { ...payload.policy, resolutionMode: payload?.meta?.resolutionMode }
         : payload;
-      return applyResolvedRuntimePolicy(policyWithMeta, tier);
+      const resolvedTierHint = payload?.meta?.effectiveTier || tier;
+      return applyResolvedRuntimePolicy(policyWithMeta, resolvedTierHint);
     } catch (_) {
       // Server unreachable. Apply minimum safe free-tier fallback only.
       // PASS3: Do not preserve the requested tier (even on localhost) when the
@@ -723,7 +729,11 @@ function loadThemePrefs() {
 }
 
 function saveThemePrefs(payload) {
-  return getPrefsAdapter().saveThemePrefs(payload);
+  const result = getPrefsAdapter().saveThemePrefs(payload);
+  // Pass 4: notify sync seam so durable settings stay in sync when signed in.
+  // sync.js listens for this event and calls rcSync.syncSettings with the combined snapshot.
+  try { document.dispatchEvent(new CustomEvent('rc:prefs-changed', { detail: { source: 'theme' } })); } catch (_) {}
+  return result;
 }
 
 function loadAppearancePrefs() {
@@ -731,7 +741,10 @@ function loadAppearancePrefs() {
 }
 
 function saveAppearancePrefs(payload) {
-  return getPrefsAdapter().saveAppearancePrefs(payload);
+  const result = getPrefsAdapter().saveAppearancePrefs(payload);
+  // Pass 4: same as saveThemePrefs — notify sync seam.
+  try { document.dispatchEvent(new CustomEvent('rc:prefs-changed', { detail: { source: 'appearance' } })); } catch (_) {}
+  return result;
 }
 
 function loadDiagnosticsPrefs() {
@@ -1037,10 +1050,10 @@ window.rcUsage = {
     const spent = sessionTokens?.spent || {};
     try {
       const resp = await fetch(
-        (typeof apiUrl === 'function' ? apiUrl('/api/usage-check') : '/api/usage-check'),
+        (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=usage-check') : '/api/app?kind=usage-check'),
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ action: category, spent }),
           cache: 'no-store',
         }
@@ -1058,7 +1071,7 @@ window.rcUsage = {
     } catch (_) {}
     // Server unreachable: degrade to client-side check (safe-free behavior only).
     // BRIDGE: client fallback until server is reliably reachable.
-    // Real owner: /api/usage-check + server-resolved policy.
+    // Real owner: /api/app?kind=usage-check + server-resolved policy.
     // This fallback uses the server-resolved limit (from the last successful
     // policy fetch) so it is not a full client-only path.
     const limit = getRuntimeUsageAllowance();

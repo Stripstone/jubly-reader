@@ -1,4 +1,4 @@
-// api/_lib/anchors.js
+// server/lib/anchors.js
 import crypto from "node:crypto";
 
 // Bump when matching/normalization semantics change so cached anchors refresh.

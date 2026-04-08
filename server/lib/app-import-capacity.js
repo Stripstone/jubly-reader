@@ -1,4 +1,4 @@
-// api/import-capacity/index.js
+// server/lib/app-import-capacity.js
 // ─────────────────────────────────────────────────────────────────────────────
 // INTERIM server-owned import capacity seam (Pass 3).
 //
@@ -27,9 +27,9 @@
 //     meta: { resolutionMode, simulationAllowed, policySource }
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { json, withCors, readJsonBody } from "../_lib/http.js";
-import { getAllowedBrowserOrigins } from "../_lib/origins.js";
-import { getResolvedRuntimePolicyForRequest } from "../_lib/runtime-policy.js";
+import { json, withCors, readJsonBody } from "./http.js";
+import { getAllowedBrowserOrigins } from "./origins.js";
+import { getResolvedRuntimePolicyForRequest } from "./runtime-policy.js";
 
 export default async function handler(req, res) {
   const allowed = getAllowedBrowserOrigins();
@@ -46,7 +46,7 @@ export default async function handler(req, res) {
     return json(res, 400, { error: 'count must be a non-negative number', received: rawCount });
   }
 
-  const resolved = getResolvedRuntimePolicyForRequest(req);
+  const resolved = await getResolvedRuntimePolicyForRequest(req);
   const { importSlotLimit } = resolved.policy;
 
   // null importSlotLimit = unlimited (premium tier).
