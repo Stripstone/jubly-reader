@@ -336,7 +336,8 @@
         title,
         createdAt: Date.now(),
         sourceName: 'Pasted Text',
-        byteSize: raw.length,
+        byteSize: (new TextEncoder().encode(raw)).length,
+        sourceKind: 'text',
         markdown,
       };
 
@@ -345,6 +346,7 @@
         if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
         else if (typeof localBookPut === 'function') await localBookPut(record);
         setProgress(100, 'Import complete', `${pages.length} pages created`);
+        try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('import'); } catch (_) {}
         await completeImportAndReturn(`${pages.length} pages created`);
       } catch (e) {
         console.error('Text import error:', e);
@@ -717,6 +719,14 @@
         const endpoint = apiUrl('/api/content?action=book-import');
 
         // ── Step 1: Get a FreeConvert upload URL (API key stays server-side) ──
+        if (window.rcUsage && typeof window.rcUsage.check === 'function') {
+          const verdict = await window.rcUsage.check('import');
+          if (!verdict || verdict.allowed === false) {
+            setStatus('Daily tokens are used up for document parsing.');
+            return;
+          }
+        }
+
         setStatus('Preparing upload…');
         const uploadTaskRes = await fetch(`${endpoint}?step=upload`, { method: 'POST' });
         if (!uploadTaskRes.ok) throw new Error(`Upload task failed (${uploadTaskRes.status})`);
@@ -882,11 +892,13 @@
           createdAt: Date.now(),
           sourceName: _file.name,
           byteSize: _file.size || 0,
-          markdown: md
+          markdown: md,
+          sourceKind: 'book'
         };
         await localBookPut(record);
 
         setProgress(100, 'Import complete', `${createdPages} pages created`);
+        try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('import'); } catch (_) {}
         await completeImportAndReturn(`${createdPages} pages created`);
       } catch (e) {
         console.error('EPUB import error:', e);

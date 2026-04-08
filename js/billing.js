@@ -214,8 +214,12 @@ window.rcBilling = (function () {
 
     if (entitlement && entitlement.status === 'active') {
       const tierLabel = entitlement.tier === 'premium' ? 'Premium' : entitlement.tier === 'paid' ? 'Pro' : 'Free';
-      if (statusCopy) statusCopy.textContent = `Your resolved plan is ${tierLabel}. Billing changes go through the Stripe portal, not the browser.`;
-      if (billingState) billingState.innerHTML = `${tierLabel} <span class="text-slate-300 text-sm font-normal">active</span>`;
+      if (statusCopy) statusCopy.textContent = `Your ${tierLabel} plan is active.`;
+      const renewsAt = entitlement.renews_at || entitlement.ends_at || null;
+      const renewsLabel = renewsAt
+        ? new Date(renewsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+        : '—';
+      if (billingState) billingState.textContent = renewsLabel;
       if (primaryBtn) {
         primaryBtn.textContent = 'Manage Billing';
         primaryBtn.onclick = function () { openCustomerPortal(); };
@@ -225,8 +229,8 @@ window.rcBilling = (function () {
         secondaryBtn.onclick = function () { if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
     } else {
-      if (statusCopy) statusCopy.textContent = 'Your account is on the free path until Stripe creates an active entitlement. Upgrade when you are ready.';
-      if (billingState) billingState.innerHTML = 'Free <span class="text-slate-300 text-sm font-normal">path</span>';
+      if (statusCopy) statusCopy.textContent = 'You\'re on the free plan. Upgrade any time to unlock more.';
+      if (billingState) billingState.textContent = '—';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
         primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };

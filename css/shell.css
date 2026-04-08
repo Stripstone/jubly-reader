@@ -697,6 +697,9 @@
 
 .tier-pill {
   min-width: 52px;
+  width: auto;
+  max-width: max-content;
+  justify-self: start;
   text-align: center;
   flex: 0 0 auto;
 }
@@ -1252,7 +1255,7 @@ body.auth-hydrating #profile-page {
   display: grid;
   place-items: center;
   color: #1e293b;
-  font-size: 0.95rem;
+  font-size: 1.1rem;
 }
 .profile-goal-celebration {
   border-radius: 16px;
@@ -1264,6 +1267,56 @@ body.auth-hydrating #profile-page {
 }
 .profile-goal-celebration-animate {
   animation: profileConfettiSwing 1.6s ease-in-out;
+}
+.profile-inline-trigger {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.profile-inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.profile-inline-input {
+  width: 100%;
+  border: 1px solid #dbe4ef;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #1e293b;
+}
+.profile-inline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.profile-inline-save,
+.profile-inline-cancel {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-weight: 800;
+  font-size: 0.78rem;
+}
+.profile-inline-save {
+  background: var(--jubly-purple);
+  color: #fff;
+}
+.profile-inline-cancel {
+  background: #e2e8f0;
+  color: #475569;
+}
+.profile-settings-status-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+.profile-settings-status-error {
+  background: #fef2f2;
+  color: #b91c1c;
 }
 @keyframes profileConfettiSwing {
   0% { transform: translateY(8px) rotate(-4deg); opacity: 0; }

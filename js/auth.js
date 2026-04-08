@@ -34,8 +34,17 @@ window.rcAuth = (function () {
     try { window.dispatchEvent(new CustomEvent(name, ev)); } catch (_) {}
   }
 
+  function _deriveDisplayName(user) {
+    const meta = user && user.user_metadata && typeof user.user_metadata === 'object' ? user.user_metadata : {};
+    const explicit = String(meta.full_name || meta.name || '').trim();
+    if (explicit) return explicit;
+    const email = String(user && user.email || '').trim();
+    if (!email) return '';
+    return email.split('@')[0] || email;
+  }
+
   function _safeUser(user) {
-    return user ? { id: user.id, email: user.email || '' } : null;
+    return user ? { id: user.id, email: user.email || '', displayName: _deriveDisplayName(user), user_metadata: user.user_metadata || {} } : null;
   }
 
   function _emitAuthChanged(source) {
@@ -143,6 +152,32 @@ window.rcAuth = (function () {
     try { await _client.auth.signOut(); } catch (_) {}
   }
 
+  async function updateDisplayName(displayName) {
+    if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
+    const nextName = String(displayName || '').trim();
+    if (!nextName) return { error: { message: 'Username is required.' } };
+    const result = await _client.auth.updateUser({ data: { full_name: nextName, name: nextName } });
+    if (!result?.error && result?.data?.user) {
+      _user = result.data.user;
+      if (_session && typeof _session === 'object') _session = { ..._session, user: result.data.user };
+      _emitAuthChanged('profile-update');
+    }
+    return result;
+  }
+
+  async function changePassword(nextPassword) {
+    if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
+    const password = String(nextPassword || '');
+    if (password.length < 8) return { error: { message: 'Password must be at least 8 characters.' } };
+    const result = await _client.auth.updateUser({ password });
+    if (!result?.error && result?.data?.user) {
+      _user = result.data.user;
+      if (_session && typeof _session === 'object') _session = { ..._session, user: result.data.user };
+      _emitAuthChanged('password-update');
+    }
+    return result;
+  }
+
   return {
     init,
     isReady,
@@ -156,6 +191,8 @@ window.rcAuth = (function () {
     signUp,
     signIn,
     signOut,
+    updateDisplayName,
+    changePassword,
   };
 })();
 
