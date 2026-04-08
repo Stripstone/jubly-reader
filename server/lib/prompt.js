@@ -1,4 +1,4 @@
-// api/_lib/prompt.js
+// server/lib/prompt.js
 import fs from "node:fs";
 import path from "node:path";
 
@@ -11,7 +11,7 @@ function readPromptTemplate(filename) {
 
   // Prefer .md for system prompts (readability), but keep backward compatibility
   // in case a deployment still has the old .txt filename.
-  const base = path.join(process.cwd(), "api", "prompts");
+  const base = path.join(process.cwd(), "server", "prompts");
   const tryPaths = [path.join(base, key)];
   if (key === "promptGrader.md") {
     tryPaths.push(path.join(base, "promptGrader.txt"));

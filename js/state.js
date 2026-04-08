@@ -228,8 +228,8 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     const hasExplicitTier = !(typeof requestedTier === 'undefined' || requestedTier === null || String(requestedTier).trim() === '');
     const tier = normalizeAppTier(hasExplicitTier ? requestedTier : getRuntimeTier());
     const endpoint = hasExplicitTier
-      ? apiUrl(`/api/runtime-config?tier=${encodeURIComponent(tier)}`)
-      : apiUrl('/api/runtime-config');
+      ? apiUrl(`/api/app?kind=runtime-config&tier=${encodeURIComponent(tier)}`)
+      : apiUrl('/api/app?kind=runtime-config');
     try {
       const response = await fetch(endpoint, {
         method: 'GET',
@@ -1050,7 +1050,7 @@ window.rcUsage = {
     const spent = sessionTokens?.spent || {};
     try {
       const resp = await fetch(
-        (typeof apiUrl === 'function' ? apiUrl('/api/usage-check') : '/api/usage-check'),
+        (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=usage-check') : '/api/app?kind=usage-check'),
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -1071,7 +1071,7 @@ window.rcUsage = {
     } catch (_) {}
     // Server unreachable: degrade to client-side check (safe-free behavior only).
     // BRIDGE: client fallback until server is reliably reachable.
-    // Real owner: /api/usage-check + server-resolved policy.
+    // Real owner: /api/app?kind=usage-check + server-resolved policy.
     // This fallback uses the server-resolved limit (from the last successful
     // policy fetch) so it is not a full client-only path.
     const limit = getRuntimeUsageAllowance();

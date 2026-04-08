@@ -1,4 +1,4 @@
-// api/pdf-to-epub/index.js
+// server/lib/content-book-import.js
 // Proxies PDF → EPUB conversion through the FreeConvert API.
 // The API key stays server-side; the client does all three steps via query param:
 //
@@ -10,8 +10,8 @@
 // bypassing Vercel's body size limit. Polling (step=status) is also client-side
 // so no single function invocation risks a timeout.
 
-import { json, withCors, readJsonBody } from "../_lib/http.js";
-import { getAllowedBrowserOrigins } from "../_lib/origins.js";
+import { json, withCors, readJsonBody } from "./http.js";
+import { getAllowedBrowserOrigins } from "./origins.js";
 
 const FC_API = "https://api.freeconvert.com/v1";
 

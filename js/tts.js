@@ -3,7 +3,7 @@
 // Note: This is still global-script architecture (no bundler/modules required).
 
 //  - Browser SpeechSynthesis remains the baseline local path
-//  - Cloud TTS policy is resolved server-side via /api/tts
+//  - Cloud TTS policy is resolved server-side via /api/ai?action=tts
 // ==============================
 
 // ─── Block-based session model ───────────────────────────────────────────────
@@ -1392,7 +1392,7 @@ async function cloudFetchUrl(text, opts = {}) {
   try { if (String(TTS_STATE.voiceVariant || '').toLowerCase() === 'male') payload.voiceVariant = 'male'; } catch (_) {}
   try { const saved = getStoredSelectedVoice(); if (saved.startsWith('cloud:')) payload.voiceId = saved.slice('cloud:'.length); } catch (_) {}
   try { if (localStorage.getItem('tts_nocache') === '1') payload.nocache = true; } catch (_) {}
-  const endpoint = apiUrl('/api/tts');
+  const endpoint = apiUrl('/api/ai?action=tts');
   const res = await fetch(endpoint, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload), signal: controller.signal,

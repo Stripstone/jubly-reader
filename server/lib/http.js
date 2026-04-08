@@ -1,4 +1,4 @@
-// api/_lib/http.js
+// server/lib/http.js
 
 export function json(res, status, obj) {
   res.statusCode = status;

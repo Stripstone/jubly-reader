@@ -1,7 +1,7 @@
-import { json } from '../../_lib/http.js';
-import { requiredEnv } from '../../_lib/env.js';
-import { getEntitlementByStripeRefs, upsertEntitlement } from '../../_lib/supabase.js';
-import { derivePlanFromPriceId, entitlementFromStripeStatus, stripeRequest, verifyStripeSignature } from '../../_lib/stripe.js';
+import { json } from '../../../server/lib/http.js';
+import { requiredEnv } from '../../../server/lib/env.js';
+import { getEntitlementByStripeRefs, upsertEntitlement } from '../../../server/lib/supabase.js';
+import { derivePlanFromPriceId, entitlementFromStripeStatus, stripeRequest, verifyStripeSignature } from '../../../server/lib/stripe.js';
 
 export const config = { api: { bodyParser: false } };
 

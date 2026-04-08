@@ -21,7 +21,7 @@ window.rcBilling = (function () {
 
   async function fetchPublicConfig() {
     if (_configPromise) return _configPromise;
-    _configPromise = fetch('/api/public-config', { cache: 'no-store' })
+    _configPromise = fetch('/api/app?kind=public-config', { cache: 'no-store' })
       .then((resp) => resp.ok ? resp.json() : null)
       .catch(() => null);
     return _configPromise;
@@ -80,7 +80,7 @@ window.rcBilling = (function () {
     const headers = {};
     const token = getAccessToken();
     if (token) headers.Authorization = `Bearer ${token}`;
-    const resp = await fetch('/api/runtime-config', {
+    const resp = await fetch('/api/app?kind=runtime-config', {
       method: 'GET',
       headers,
       cache: 'no-store',
@@ -152,7 +152,7 @@ window.rcBilling = (function () {
       return;
     }
     try {
-      const data = await authenticatedPost('/api/stripe/checkout', { plan: normalized });
+      const data = await authenticatedPost('/api/billing?action=checkout', { plan: normalized });
       clearPendingPlan();
       if (data?.url) window.location.href = data.url;
     } catch (error) {
@@ -168,7 +168,7 @@ window.rcBilling = (function () {
       return;
     }
     try {
-      const data = await authenticatedPost('/api/stripe/portal', {});
+      const data = await authenticatedPost('/api/billing?action=portal', {});
       if (data?.url) window.location.href = data.url;
     } catch (error) {
       setMessage('billing-message', error.message || 'Unable to open billing portal.', 'error');

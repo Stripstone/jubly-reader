@@ -118,14 +118,14 @@
 
   // ─── Non-EPUB Import Support ────────────────────────────────────────────────
   // Non-EPUB files (PDF, DOCX, MOBI, RTF, ODT, TXT, HTML, FB2, etc.) are converted
-  // to EPUB server-side via the FreeConvert API, proxied through /api/book-import
+  // to EPUB server-side via the FreeConvert API, proxied through /api/content?action=book-import
   // to keep the API key off the client.
   //
   // Flow:
-  //   1. POST /api/book-import?step=upload  → get FreeConvert upload URL + signature
+  //   1. POST /api/content?action=book-import?step=upload  → get FreeConvert upload URL + signature
   //   2. POST directly to FreeConvert upload URL (bypasses Vercel body limits)
-  //   3. POST /api/book-import?step=convert → kick off {format}→EPUB conversion
-  //   4. Poll  /api/book-import?step=status → wait for completion, get EPUB URL
+  //   3. POST /api/content?action=book-import?step=convert → kick off {format}→EPUB conversion
+  //   4. Poll  /api/content?action=book-import?step=status → wait for completion, get EPUB URL
   //   5. Fetch EPUB → load into JSZip → hand off to existing epubParseToc flow
   //
   // After step 5, the conversion path is invisible — the chapter picker and import
@@ -176,7 +176,7 @@
 
     let _file = null;
     let _zip = null;
-    let _needsConversion = false; // true for any non-EPUB format that goes through /api/book-import
+    let _needsConversion = false; // true for any non-EPUB format that goes through /api/content?action=book-import
     let _inputFormat = '';        // the source format string passed to FreeConvert (e.g. 'pdf', 'docx')
     let _tocItems = []; // {id,title,href,selected,tags,type,preview}
     let _activeId = null;
@@ -331,7 +331,7 @@
       let hasCapacity = snapshot.hasCapacity;
       try {
         const resp = await fetch(
-          (typeof apiUrl === 'function' ? apiUrl('/api/import-capacity') : '/api/import-capacity'),
+          (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=import-capacity') : '/api/app?kind=import-capacity'),
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -348,7 +348,7 @@
       } catch (_) {
         // Server unreachable: fall back to client snapshot verdict.
         // BRIDGE: client verdict is the fallback until server is reachable.
-        // Real owner: /api/import-capacity.
+        // Real owner: /api/app?kind=import-capacity.
       }
       if (hasCapacity) return { ok: true, snapshot };
       const msg = snapshot.limit == null
@@ -625,7 +625,7 @@
           return;
         }
 
-        const endpoint = apiUrl('/api/book-import');
+        const endpoint = apiUrl('/api/content?action=book-import');
 
         // ── Step 1: Get a FreeConvert upload URL (API key stays server-side) ──
         setStatus('Preparing upload…');
