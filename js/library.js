@@ -40,9 +40,8 @@
       return false;
     }
   }
-  const LOCAL_DB_VERSION = 2;
+  const LOCAL_DB_VERSION = 1;
   const LOCAL_STORE_BOOKS = 'books';
-  const LOCAL_STORE_DELETED = 'deleted_books';
 
   let _localDbPromise = null;
 
@@ -56,9 +55,6 @@
           if (!db.objectStoreNames.contains(LOCAL_STORE_BOOKS)) {
             db.createObjectStore(LOCAL_STORE_BOOKS, { keyPath: 'id' });
           }
-          if (!db.objectStoreNames.contains(LOCAL_STORE_DELETED)) {
-            db.createObjectStore(LOCAL_STORE_DELETED, { keyPath: 'id' });
-          }
         };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
@@ -69,85 +65,43 @@
     return _localDbPromise;
   }
 
-  async function storeGetAll(storeName) {
+  async function localBooksGetAll() {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
+      const tx = db.transaction(LOCAL_STORE_BOOKS, 'readonly');
+      const store = tx.objectStore(LOCAL_STORE_BOOKS);
       const req = store.getAll();
       req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
       req.onerror = () => reject(req.error || new Error('getAll failed'));
     });
   }
 
-  async function storeGet(storeName, id) {
+  async function localBookGet(id) {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readonly');
-      const store = tx.objectStore(storeName);
+      const tx = db.transaction(LOCAL_STORE_BOOKS, 'readonly');
+      const store = tx.objectStore(LOCAL_STORE_BOOKS);
       const req = store.get(id);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => reject(req.error || new Error('get failed'));
     });
   }
 
-  async function storePut(storeName, record) {
+  async function localBookPut(record) {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
+      const tx = db.transaction(LOCAL_STORE_BOOKS, 'readwrite');
+      const store = tx.objectStore(LOCAL_STORE_BOOKS);
       const req = store.put(record);
       req.onsuccess = () => resolve(true);
       req.onerror = () => reject(req.error || new Error('put failed'));
     });
   }
 
-  async function storeDelete(storeName, id) {
-    const db = await openLocalDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const req = store.delete(id);
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => reject(req.error || new Error('delete failed'));
-    });
-  }
-
-  async function localBooksGetAll() { return storeGetAll(LOCAL_STORE_BOOKS); }
-  async function localDeletedBooksGetAll() { return storeGetAll(LOCAL_STORE_DELETED); }
-  async function localBookGet(id) { return storeGet(LOCAL_STORE_BOOKS, id); }
-  async function localDeletedBookGet(id) { return storeGet(LOCAL_STORE_DELETED, id); }
-  async function localBookPut(record) { return storePut(LOCAL_STORE_BOOKS, record); }
-  async function localDeletedBookPut(record) { return storePut(LOCAL_STORE_DELETED, record); }
-  async function localBookDelete(id) { return storeDelete(LOCAL_STORE_BOOKS, id); }
-  async function localDeletedBookDelete(id) { return storeDelete(LOCAL_STORE_DELETED, id); }
-
-  async function softDeleteLocalBook(id) {
-    const record = await localBookGet(id);
-    if (!record) return false;
-    await localDeletedBookPut({ ...record, deletedAt: Date.now() });
-    await localBookDelete(id);
-    return true;
-  }
-
-  async function restoreDeletedLocalBook(id) {
-    const record = await localDeletedBookGet(id);
-    if (!record) return false;
-    const restored = { ...record };
-    delete restored.deletedAt;
-    await localBookPut(restored);
-    await localDeletedBookDelete(id);
-    return true;
-  }
-
-  async function permanentlyDeleteLocalBook(id) {
-    return localDeletedBookDelete(id);
-  }
 
   window.__rcLocalBookGet = localBookGet;
   window.__rcLocalBookPut = localBookPut;
   window.__rcLocalBooksGetAll = localBooksGetAll;
-  window.__rcLocalDeletedBooksGetAll = localDeletedBooksGetAll;
 
   const _bookPreviewCache = new Map();
 
@@ -156,38 +110,27 @@
     return Math.max(1, count || 0);
   }
 
-  function formatDurationMinutes(totalMinutes) {
-    const minutes = Math.max(1, Math.round(Number(totalMinutes) || 0));
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    if (hours > 0 && mins > 0) return `${hours} hr ${mins} min`;
-    if (hours > 0) return `${hours} hr`;
-    return `${minutes} min`;
-  }
-
-  function getBookSurfaceData(bookId, totalPages, sourceKind) {
+  function getBookSurfaceData(bookId, totalPages) {
     const pageCount = Math.max(1, Number(totalPages) || 1);
-    const kind = String(sourceKind || 'book');
     const summary = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingBookSummary === 'function')
       ? window.rcReadingMetrics.getReadingBookSummary(bookId, pageCount)
       : null;
     const status = !summary ? 'Unread' : (summary.completed ? 'Completed' : 'In Progress');
     const totalMinutes = (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function')
-      ? window.rcReadingMetrics.estimateReadMinutesFromPages(pageCount, kind)
-      : Math.max(1, Math.round(pageCount * (kind === 'text' ? 1 : 2.5)));
+      ? window.rcReadingMetrics.estimateReadMinutesFromPages(pageCount)
+      : Math.max(1, Math.ceil(pageCount * 1.5));
     const lastPage = summary ? Math.max(0, Number(summary.lastPageIndex || 0)) : 0;
     const remainingPages = summary && !summary.completed ? Math.max(0, pageCount - (lastPage + 1)) : 0;
     const remainingMinutes = status === 'Unread'
       ? totalMinutes
-      : (status === 'Completed' ? 0 : Math.max(1, (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function') ? window.rcReadingMetrics.estimateReadMinutesFromPages(remainingPages || 1, kind) : Math.round((remainingPages || 1) * (kind === 'text' ? 1 : 2.5))));
-    const timeLabel = status === 'Completed' ? 'Done' : `${formatDurationMinutes(remainingMinutes)} left`;
+      : (status === 'Completed' ? 0 : Math.max(1, (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function') ? window.rcReadingMetrics.estimateReadMinutesFromPages(remainingPages || 1) : Math.ceil((remainingPages || 1) * 1.5)));
+    const timeLabel = status === 'Completed' ? 'Done' : `${remainingMinutes} min left`;
     return {
       status,
       timeLabel,
       totalPages: pageCount,
       totalMinutes,
-      previewTrio: `${pageCount} Pages • ${formatDurationMinutes(totalMinutes)} read • ${status}`,
-      sourceKind: kind,
+      previewTrio: `${pageCount} Pages • ${totalMinutes} min read • ${status}`
     };
   }
 
@@ -195,7 +138,7 @@
     if (!bookId) return null;
     if (isLocalBookId(bookId)) {
       const rec = await localBookGet(stripLocalPrefix(bookId)).catch(() => null);
-      return rec ? { title: rec.title || 'Untitled', markdown: rec.markdown || '', totalPages: countPagesFromMarkdown(rec.markdown || ''), sourceKind: rec.sourceKind || 'book', byteSize: Number(rec.byteSize || 0) } : null;
+      return rec ? { title: rec.title || 'Untitled', markdown: rec.markdown || '', totalPages: countPagesFromMarkdown(rec.markdown || '') } : null;
     }
     const cacheHit = _bookPreviewCache.get(String(bookId));
     if (cacheHit) return cacheHit;
@@ -213,17 +156,17 @@
       try { if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[bookId] === 'string') raw = window.EMBED_BOOKS[bookId]; } catch (_) {}
     }
     if (!raw) return null;
-    const record = { title: entry.title || titleFromBookId(bookId) || 'Untitled', markdown: raw, totalPages: countPagesFromMarkdown(raw), sourceKind: 'book' };
+    const record = { title: entry.title || titleFromBookId(bookId) || 'Untitled', markdown: raw, totalPages: countPagesFromMarkdown(raw) };
     _bookPreviewCache.set(String(bookId), record);
     return record;
   }
 
   async function getBookPreviewSurface(bookId) {
     const record = await getBookRecordById(bookId).catch(() => null);
-    if (!record) return { title: 'Book', previewTrio: '0 Pages • 0 min read • Unread', totalPages: 0, status: 'Unread', sourceKind: 'book' };
+    if (!record) return { title: 'Book', previewTrio: '0 Pages • 0 min read • Unread', totalPages: 0, status: 'Unread' };
     return {
       title: record.title,
-      ...getBookSurfaceData(bookId, record.totalPages, record.sourceKind)
+      ...getBookSurfaceData(bookId, record.totalPages)
     };
   }
 
@@ -231,12 +174,18 @@
     getBookSurfaceData,
     getBookPreviewSurface,
     countPagesFromMarkdown,
-    formatDurationMinutes,
-    getDeletedBooks: localDeletedBooksGetAll,
-    softDeleteBook: softDeleteLocalBook,
-    restoreDeletedBook: restoreDeletedLocalBook,
-    permanentlyDeleteBook: permanentlyDeleteLocalBook,
   };
+
+  async function localBookDelete(id) {
+    const db = await openLocalDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(LOCAL_STORE_BOOKS, 'readwrite');
+      const store = tx.objectStore(LOCAL_STORE_BOOKS);
+      const req = store.delete(id);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error || new Error('delete failed'));
+    });
+  }
 
   function isLocalBookId(id) {
     return typeof id === 'string' && id.startsWith('local:');
@@ -2303,7 +2252,7 @@
       if (!books.length) {
         const empty = document.createElement('div');
         empty.className = 'import-status';
-        empty.textContent = 'No local books yet. Use Import Book to add one.';
+        empty.textContent = 'No local books yet. Use “Import EPUB” to add one.';
         listEl.appendChild(empty);
         return;
       }
@@ -2321,8 +2270,8 @@
           t.textContent = b.title || 'Untitled';
           const m = document.createElement('div');
           m.className = 'library-row-meta';
-          const kb = Math.max(1, Math.round((Number(b.byteSize || 0) || 0) / 1024));
-          const pages = countPagesFromMarkdown(b.markdown || '');
+          const kb = Math.round((b.byteSize || 0) / 1024);
+          const pages = (String(b.markdown || '').match(/^\s*##\s+/gm) || []).length;
           m.textContent = `${pages} pages • ~${kb} KB • ${new Date(b.createdAt || Date.now()).toLocaleDateString()}`;
           left.appendChild(t);
           left.appendChild(m);
@@ -2334,17 +2283,14 @@
           del.type = 'button';
           del.textContent = 'Delete';
           del.addEventListener('click', async () => {
-            const ok = confirm(`Move “${b.title || 'this book'}” to Deleted Files?
-
-It will leave your Library now, stay on this device, and can be restored later from Profile.`);
+            const ok = confirm(`Delete “${b.title || 'this book'}” from this device?\n\nThis cannot be undone.`);
             if (!ok) return;
             try {
-              await softDeleteLocalBook(b.id);
+              await localBookDelete(b.id);
               try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
-              try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { source: 'soft-delete' } })); } catch (_) {}
-              try { window.dispatchEvent(new CustomEvent('rc:deleted-library-changed', { detail: { source: 'soft-delete' } })); } catch (_) {}
+              try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: Math.max(0, books.length - 1) } })); } catch (_) {}
               render();
-            } catch (_) {
+            } catch (e) {
               alert('Delete failed.');
             }
           });
@@ -2359,107 +2305,6 @@ It will leave your Library now, stay on this device, and can be restored later f
     openBtn.addEventListener('click', show);
     closeBtn?.addEventListener('click', hide);
     modal.addEventListener('click', (e) => { if (e.target === modal) hide(); });
-  })();
-
-  (function initDeletedFilesModal() {
-    const openBtn = document.getElementById('profile-deleted-manage-btn');
-    const modal = document.getElementById('deletedFilesModal');
-    const closeBtn = document.getElementById('deletedFilesClose');
-    const listEl = document.getElementById('deletedFilesList');
-    const countEl = document.getElementById('profile-deleted-count');
-    if (!modal || !listEl) return;
-
-    async function refreshDeletedSummary() {
-      let deleted = [];
-      try { deleted = await localDeletedBooksGetAll(); } catch (_) { deleted = []; }
-      if (countEl) countEl.textContent = `${deleted.length} file${deleted.length === 1 ? '' : 's'} in deleted files`;
-    }
-
-    async function render() {
-      listEl.innerHTML = '';
-      let deleted = [];
-      try { deleted = await localDeletedBooksGetAll(); } catch (_) { deleted = []; }
-      const info = document.createElement('div');
-      info.className = 'import-status';
-      info.textContent = 'Deleted Files use this device storage until you permanently delete them. Restore puts the book back in Library.';
-      listEl.appendChild(info);
-      if (!deleted.length) {
-        const empty = document.createElement('div');
-        empty.className = 'import-status';
-        empty.textContent = 'No deleted files are waiting here.';
-        listEl.appendChild(empty);
-        await refreshDeletedSummary();
-        return;
-      }
-      deleted.slice().sort((a,b)=> (b.deletedAt||0) - (a.deletedAt||0)).forEach((b) => {
-        const row = document.createElement('div');
-        row.className = 'library-row';
-        const left = document.createElement('div');
-        const t = document.createElement('div');
-        t.className = 'library-row-title';
-        t.textContent = b.title || 'Untitled';
-        const m = document.createElement('div');
-        m.className = 'library-row-meta';
-        const pages = countPagesFromMarkdown(b.markdown || '');
-        const deletedOn = new Date(b.deletedAt || Date.now()).toLocaleDateString();
-        m.textContent = `${pages} pages • Deleted ${deletedOn}`;
-        left.appendChild(t); left.appendChild(m);
-        const actions = document.createElement('div');
-        actions.className = 'library-row-actions';
-        const restore = document.createElement('button');
-        restore.className = 'btn-secondary';
-        restore.type = 'button';
-        restore.textContent = 'Restore';
-        restore.addEventListener('click', async () => {
-          try {
-            await restoreDeletedLocalBook(b.id);
-            try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
-            try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { source: 'restore' } })); } catch (_) {}
-            try { window.dispatchEvent(new CustomEvent('rc:deleted-library-changed', { detail: { source: 'restore' } })); } catch (_) {}
-            render();
-          } catch (_) { alert('Restore failed.'); }
-        });
-        const purge = document.createElement('button');
-        purge.className = 'btn-danger';
-        purge.type = 'button';
-        purge.textContent = 'Delete';
-        purge.addEventListener('click', async () => {
-          const ok = confirm(`Permanently delete “${b.title || 'this book'}”?
-
-This removes it from Deleted Files and frees the device storage.`);
-          if (!ok) return;
-          try {
-            await permanentlyDeleteLocalBook(b.id);
-            try { window.dispatchEvent(new CustomEvent('rc:deleted-library-changed', { detail: { source: 'purge' } })); } catch (_) {}
-            render();
-          } catch (_) { alert('Permanent delete failed.'); }
-        });
-        actions.appendChild(restore);
-        actions.appendChild(purge);
-        row.appendChild(left);
-        row.appendChild(actions);
-        listEl.appendChild(row);
-      });
-      await refreshDeletedSummary();
-    }
-
-    function show() {
-      modal.style.display = 'flex';
-      modal.setAttribute('aria-hidden', 'false');
-      render();
-    }
-    function hide() {
-      modal.style.display = 'none';
-      modal.setAttribute('aria-hidden', 'true');
-    }
-
-    window.openDeletedFilesManager = show;
-    openBtn?.addEventListener('click', show);
-    closeBtn?.addEventListener('click', hide);
-    modal.addEventListener('click', (e) => { if (e.target === modal) hide(); });
-    window.addEventListener('rc:local-library-changed', refreshDeletedSummary);
-    window.addEventListener('rc:deleted-library-changed', refreshDeletedSummary);
-    refreshDeletedSummary();
   })();
 
   // ===================================
