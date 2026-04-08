@@ -1,37 +1,40 @@
-# Vercel API (Reading Comprehension Grader)
+# API Routes
 
-## Endpoints
+## GET /api/app?kind=public-config
+Public bootstrap config for browser auth/billing initialization.
 
-### POST /api/evaluate
-Body:
-- pageText (string) OR passageText
-- userText (string) OR consolidation
-- model (optional)
+## GET /api/app?kind=runtime-config
+Resolved runtime policy and entitlement-aware tier state.
 
-Response:
-- { "feedback": "<4 lines>" }
+## GET /api/app?kind=health
+Simple deployment health/status check.
 
-### POST /api/summary
-Final Summary / Full Chapter Consolidation.
+## POST /api/ai?action=anchors
+Generates page anchors for the current reading passage.
 
-Body:
-- title (string, optional)
-- pages (array) where each item may include:
-  - pageText (string, optional)
-  - userText (string, optional)
-  - aiFeedback (string, optional)
+## POST /api/ai?action=evaluate
+Evaluates reader input against the current page.
 
-Response:
-- { "summary": "<markdown-ish text>" }
+## POST /api/ai?action=summary
+Produces a final summary from page history.
 
-### GET /api/health
-Response:
-- { ok, hasOpenAIKey, model }
+## POST /api/book-import
+Import/convert flow for uploaded books.
 
-## Env vars (Vercel Project Settings)
-- GROQ_API_KEY=...
-- GROQ_MODEL=llama-3.3-70b-versatile (optional)
+## POST /api/billing?action=checkout
+Creates a backend-owned Stripe checkout session.
 
-## CORS
-Allowlisted origins live in:
-- api/_lib/http.js
+## POST /api/billing?action=portal
+Creates a backend-owned Stripe billing portal session.
+
+## POST /api/stripe/webhook
+Stripe webhook receiver for entitlement writes.
+
+## POST /api/tts
+Server-owned TTS broker.
+
+## POST /api/usage-check
+Server-owned usage gate.
+
+## POST /api/import-capacity
+Server-owned import capacity gate.

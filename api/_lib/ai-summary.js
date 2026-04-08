@@ -1,7 +1,7 @@
 // api/summary/index.js
-import { buildFinalSummaryMessages } from "../_lib/prompt.js";
-import { json, withCors, readJsonBody } from "../_lib/http.js";
-import { getAllowedBrowserOrigins } from "../_lib/origins.js";
+import { buildFinalSummaryMessages } from "./prompt.js";
+import { json, withCors, readJsonBody } from "./http.js";
+import { getAllowedBrowserOrigins } from "./origins.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";

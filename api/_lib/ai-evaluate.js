@@ -1,14 +1,14 @@
 // api/evaluate/index.js
-import { buildPromptMessages } from "../_lib/prompt.js";
+import { buildPromptMessages } from "./prompt.js";
 import {
   parseMultiCriteriaOutput,
   formatAs4Lines,
   isValid4LineFeedback,
   scoreToCompassRating,
-} from "../_lib/grader.js";
-import { json, withCors, readJsonBody } from "../_lib/http.js";
-import { getAllowedBrowserOrigins } from "../_lib/origins.js";
-import { getResolvedRuntimePolicyForRequest } from "../_lib/runtime-policy.js";
+} from "./grader.js";
+import { json, withCors, readJsonBody } from "./http.js";
+import { getAllowedBrowserOrigins } from "./origins.js";
+import { getResolvedRuntimePolicyForRequest } from "./runtime-policy.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile"; // replacement model per Groq deprecations

@@ -10,9 +10,9 @@
 // Secrets never leave the server.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { json, withCors } from '../_lib/http.js';
-import { requestOrigin } from '../_lib/env.js';
-import { getAllowedBrowserOrigins } from '../_lib/origins.js';
+import { json, withCors } from './http.js';
+import { requestOrigin } from './env.js';
+import { getAllowedBrowserOrigins } from './origins.js';
 
 export default async function handler(req, res) {
   const allowed = getAllowedBrowserOrigins();

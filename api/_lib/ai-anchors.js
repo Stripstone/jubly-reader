@@ -1,9 +1,9 @@
 // api/anchors/index.js
-import { buildAnchorsMessages } from "../_lib/prompt.js";
-import { json, withCors, readJsonBody } from "../_lib/http.js";
-import { getAllowedBrowserOrigins } from "../_lib/origins.js";
-import { normalizeAnchorsWithDebug, sha256Hex, ANCHOR_VERSION } from "../_lib/anchors.js";
-import { getResolvedRuntimePolicyForRequest } from "../_lib/runtime-policy.js";
+import { buildAnchorsMessages } from "./prompt.js";
+import { json, withCors, readJsonBody } from "./http.js";
+import { getAllowedBrowserOrigins } from "./origins.js";
+import { normalizeAnchorsWithDebug, sha256Hex, ANCHOR_VERSION } from "./anchors.js";
+import { getResolvedRuntimePolicyForRequest } from "./runtime-policy.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";

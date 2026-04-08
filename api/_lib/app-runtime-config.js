@@ -1,6 +1,6 @@
-import { json, withCors } from "../_lib/http.js";
-import { getAllowedBrowserOrigins } from "../_lib/origins.js";
-import { getResolvedRuntimePolicyForRequest } from "../_lib/runtime-policy.js";
+import { json, withCors } from "./http.js";
+import { getAllowedBrowserOrigins } from "./origins.js";
+import { getResolvedRuntimePolicyForRequest } from "./runtime-policy.js";
 
 
 export default async function handler(req, res) {
