@@ -586,6 +586,16 @@ window.rcSync = (function () {
     _remoteProfileMetrics = null;
   }
 
+  async function rehydrateDurableData() {
+    if (!_ready()) {
+      _clearRemoteState();
+      _emitHydrated('signout');
+      return;
+    }
+    await _onSignIn();
+  }
+
+
   function _queueSettingsSync() {
     if (!_ready()) return;
     if (_prefsSyncTimer) clearTimeout(_prefsSyncTimer);
@@ -631,5 +641,6 @@ window.rcSync = (function () {
     getRemoteProfileMetrics,
     syncSettings,
     getSettings,
+    rehydrateDurableData,
   };
 })();

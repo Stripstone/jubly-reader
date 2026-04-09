@@ -577,15 +577,11 @@ async function stableHashText(text) {
   // -----------------------------------
   // Debug flag helper
   // -----------------------------------
-  // We support truthy URL forms: ?debug=1, ?debug=true, ?debug (empty), ?debug=on/yes
-  // and treat ?debug=0/false/off/no as disabled.
+  // Diagnostics/debug mode is enabled only when the authenticated user matches
+  // DEV_CREDA on the server. This replaces the old public ?debug=1 path.
   function isDebugEnabledFromUrl() {
     try {
-      const params = new URLSearchParams(location.search);
-      if (!params.has('debug')) return false;
-      const v = (params.get('debug') || '').trim().toLowerCase();
-      if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-      return false;
+      return !!(window.rcDevTools && typeof window.rcDevTools.isDiagnosticsEnabled === 'function' && window.rcDevTools.isDiagnosticsEnabled());
     } catch (_) {
       return false;
     }
@@ -1327,6 +1323,14 @@ window.rcUsage = {
       authoritative: Number.isFinite(Number(sessionTokens?.remaining)),
       spent: { ...(sessionTokens?.spent || {}) },
     };
+  },
+  applySnapshot: function rcUsageApplySnapshot(snapshot) {
+    const remaining = Number(snapshot?.remaining);
+    const allowance = Number(snapshot?.limit ?? snapshot?.allowance);
+    sessionTokens.allowance = Number.isFinite(allowance) ? Math.max(0, allowance) : null;
+    sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: 'dev-tools' } })); } catch (_) {}
+    return this.getSnapshot();
   },
 };
 

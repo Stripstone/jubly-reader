@@ -112,8 +112,8 @@
     let diagClearCacheBtn = null;
     let diagCopyBtn = null;
 
-    // URL flag: show diagnostics when debug is present/truthy.
-    const debugEnabled = isDebugEnabledFromUrl();
+    // Diagnostics are enabled only when the authenticated dev account is active.
+    let debugEnabled = !!isDebugEnabledFromUrl();
 
     // If any legacy diag elements exist in the DOM (from older patches), hide them
     // so they don't consume layout space.
@@ -124,8 +124,7 @@
       }
     });
 
-    // Hide any legacy "debug" dropdown/controls if present.
-    if (debugEnabled) {
+    function hideLegacyDebugControls() {
       const legacySelectors = [
         '#debugControls', '#debugControl', '#debugPanelLegacy', '#debugSelect', '#debugMode',
         '#debugDropdown', '#debugToggle', '#debugMenu', '.debug-controls', '.debug-control',
@@ -137,6 +136,7 @@
         });
       });
     }
+    if (debugEnabled) hideLegacyDebugControls();
 
     function hideAllPanels() {
       if (volumePanel) volumePanel.style.display = 'none';
@@ -573,8 +573,24 @@
       });
     }
 
+    function syncDiagnosticsVisibility() {
+      debugEnabled = !!isDebugEnabledFromUrl();
+      if (debugEnabled) {
+        hideLegacyDebugControls();
+        ensureDiagUI();
+      }
+      if (diagBtn) diagBtn.style.display = debugEnabled ? 'block' : 'none';
+      if (!debugEnabled && diagPanel) diagPanel.style.display = 'none';
+      try {
+        if (window.rcDevTools && typeof window.rcDevTools.attachDiagnosticsHost === 'function') {
+          window.rcDevTools.attachDiagnosticsHost({ button: diagBtn, panel: diagPanel, text: diagText });
+        }
+      } catch (_) {}
+    }
+    window.syncDiagnosticsVisibility = syncDiagnosticsVisibility;
+
     // Build debug UI only when enabled.
-    ensureDiagUI();
+    syncDiagnosticsVisibility();
 
     // Click outside closes panels (lightweight)
     document.addEventListener('click', (e) => {
