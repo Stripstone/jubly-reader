@@ -40,8 +40,9 @@
       return false;
     }
   }
-  const LOCAL_DB_VERSION = 1;
+  const LOCAL_DB_VERSION = 2;
   const LOCAL_STORE_BOOKS = 'books';
+  const LOCAL_STORE_DELETED = 'deleted_books';
 
   let _localDbPromise = null;
 
@@ -54,6 +55,9 @@
           const db = req.result;
           if (!db.objectStoreNames.contains(LOCAL_STORE_BOOKS)) {
             db.createObjectStore(LOCAL_STORE_BOOKS, { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains(LOCAL_STORE_DELETED)) {
+            db.createObjectStore(LOCAL_STORE_DELETED, { keyPath: 'id' });
           }
         };
         req.onsuccess = () => resolve(req.result);
@@ -98,10 +102,89 @@
     });
   }
 
+  async function localDeletedBooksGetAll() {
+    const db = await openLocalDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(LOCAL_STORE_DELETED, 'readonly');
+      const store = tx.objectStore(LOCAL_STORE_DELETED);
+      const req = store.getAll();
+      req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+      req.onerror = () => reject(req.error || new Error('deleted getAll failed'));
+    });
+  }
+
+  async function localDeletedBookPut(record) {
+    const db = await openLocalDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(LOCAL_STORE_DELETED, 'readwrite');
+      const store = tx.objectStore(LOCAL_STORE_DELETED);
+      const req = store.put(record);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error || new Error('deleted put failed'));
+    });
+  }
+
+  async function localDeletedBookDelete(id) {
+    const db = await openLocalDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(LOCAL_STORE_DELETED, 'readwrite');
+      const store = tx.objectStore(LOCAL_STORE_DELETED);
+      const req = store.delete(id);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error || new Error('deleted delete failed'));
+    });
+  }
+
+  async function moveLocalBookToDeleted(id) {
+    const db = await openLocalDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction([LOCAL_STORE_BOOKS, LOCAL_STORE_DELETED], 'readwrite');
+      const books = tx.objectStore(LOCAL_STORE_BOOKS);
+      const deleted = tx.objectStore(LOCAL_STORE_DELETED);
+      const req = books.get(id);
+      req.onsuccess = () => {
+        const record = req.result;
+        if (!record) { reject(new Error('book not found')); return; }
+        deleted.put({ ...record, deletedAt: Date.now() });
+        books.delete(id);
+      };
+      req.onerror = () => reject(req.error || new Error('move failed'));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error || new Error('move failed'));
+      tx.onabort = () => reject(tx.error || new Error('move aborted'));
+    });
+  }
+
+  async function restoreDeletedLocalBook(id) {
+    const db = await openLocalDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction([LOCAL_STORE_BOOKS, LOCAL_STORE_DELETED], 'readwrite');
+      const books = tx.objectStore(LOCAL_STORE_BOOKS);
+      const deleted = tx.objectStore(LOCAL_STORE_DELETED);
+      const req = deleted.get(id);
+      req.onsuccess = () => {
+        const record = req.result;
+        if (!record) { reject(new Error('deleted book not found')); return; }
+        const restored = { ...record };
+        delete restored.deletedAt;
+        books.put(restored);
+        deleted.delete(id);
+      };
+      req.onerror = () => reject(req.error || new Error('restore failed'));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error || new Error('restore failed'));
+      tx.onabort = () => reject(tx.error || new Error('restore aborted'));
+    });
+  }
+
+  async function permanentlyDeleteLocalBook(id) {
+    return localDeletedBookDelete(id);
+  }
 
   window.__rcLocalBookGet = localBookGet;
   window.__rcLocalBookPut = localBookPut;
   window.__rcLocalBooksGetAll = localBooksGetAll;
+  window.__rcLocalDeletedBooksGetAll = localDeletedBooksGetAll;
 
   const _bookPreviewCache = new Map();
 
@@ -2221,7 +2304,30 @@
     const modal = document.getElementById('manageLibraryModal');
     const closeBtn = document.getElementById('manageLibraryClose');
     const listEl = document.getElementById('manageLibraryList');
+    const deletedModal = document.getElementById('deletedFilesModal');
+    const deletedCloseBtn = document.getElementById('deletedFilesClose');
+    const deletedListEl = document.getElementById('deletedFilesList');
+    const deletedManageBtn = document.getElementById('profile-deleted-manage-btn');
+    const deletedCountEl = document.getElementById('profile-deleted-count');
     if (!openBtn || !modal || !listEl) return;
+
+    function emitLibraryChanged() {
+      try { window.dispatchEvent(new CustomEvent('rc:local-library-changed')); } catch (_) {}
+    }
+    function emitDeletedChanged() {
+      try { window.dispatchEvent(new CustomEvent('rc:deleted-library-changed')); } catch (_) {}
+    }
+
+    async function refreshBookSelect() {
+      try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
+    }
+
+    async function renderDeletedCount() {
+      if (!deletedCountEl) return;
+      let deleted = [];
+      try { deleted = await localDeletedBooksGetAll(); } catch (_) { deleted = []; }
+      deletedCountEl.textContent = `${deleted.length} file${deleted.length === 1 ? '' : 's'} in deleted files`;
+    }
 
     function show() {
       modal.style.display = 'flex';
@@ -2231,6 +2337,17 @@
     function hide() {
       modal.style.display = 'none';
       modal.setAttribute('aria-hidden', 'true');
+    }
+    function showDeleted() {
+      if (!deletedModal || !deletedListEl) return;
+      deletedModal.style.display = 'flex';
+      deletedModal.setAttribute('aria-hidden', 'false');
+      renderDeleted();
+    }
+    function hideDeleted() {
+      if (!deletedModal) return;
+      deletedModal.style.display = 'none';
+      deletedModal.setAttribute('aria-hidden', 'true');
     }
 
     async function render() {
@@ -2252,7 +2369,7 @@
       if (!books.length) {
         const empty = document.createElement('div');
         empty.className = 'import-status';
-        empty.textContent = 'No local books yet. Use “Import EPUB” to add one.';
+        empty.textContent = 'No local books yet. Use Import Book to add one.';
         listEl.appendChild(empty);
         return;
       }
@@ -2283,14 +2400,16 @@
           del.type = 'button';
           del.textContent = 'Delete';
           del.addEventListener('click', async () => {
-            const ok = confirm(`Delete “${b.title || 'this book'}” from this device?\n\nThis cannot be undone.`);
+            const ok = confirm(`Move “${b.title || 'this book'}” to Deleted Files?\n\nIt will leave your Library now, stay on this device, and can be restored later from Profile.`);
             if (!ok) return;
             try {
-              await localBookDelete(b.id);
-              try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
-              try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: Math.max(0, books.length - 1) } })); } catch (_) {}
+              await moveLocalBookToDeleted(b.id);
+              await refreshBookSelect();
+              emitLibraryChanged();
+              emitDeletedChanged();
+              await renderDeletedCount();
               render();
-            } catch (e) {
+            } catch (_) {
               alert('Delete failed.');
             }
           });
@@ -2302,9 +2421,91 @@
         });
     }
 
+    async function renderDeleted() {
+      if (!deletedListEl) return;
+      deletedListEl.innerHTML = '';
+      let deleted = [];
+      try { deleted = await localDeletedBooksGetAll(); } catch (_) { deleted = []; }
+      const info = document.createElement('div');
+      info.className = 'import-status';
+      info.textContent = 'Deleted Files use this device storage until you permanently delete them. Restore puts the book back in Library.';
+      deletedListEl.appendChild(info);
+      if (!deleted.length) {
+        const empty = document.createElement('div');
+        empty.className = 'import-status';
+        empty.textContent = 'No deleted files are waiting here.';
+        deletedListEl.appendChild(empty);
+        await renderDeletedCount();
+        return;
+      }
+      deleted
+        .slice()
+        .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0))
+        .forEach((b) => {
+          const row = document.createElement('div');
+          row.className = 'library-row';
+          const left = document.createElement('div');
+          const t = document.createElement('div');
+          t.className = 'library-row-title';
+          t.textContent = b.title || 'Untitled';
+          const m = document.createElement('div');
+          m.className = 'library-row-meta';
+          const kb = Math.round((b.byteSize || 0) / 1024);
+          const deletedOn = new Date(b.deletedAt || Date.now()).toLocaleDateString();
+          m.textContent = `~${kb} KB • deleted ${deletedOn}`;
+          left.appendChild(t);
+          left.appendChild(m);
+          const actions = document.createElement('div');
+          actions.className = 'library-row-actions';
+          const restore = document.createElement('button');
+          restore.className = 'btn-primary';
+          restore.type = 'button';
+          restore.textContent = 'Restore';
+          restore.addEventListener('click', async () => {
+            try {
+              await restoreDeletedLocalBook(b.id);
+              await refreshBookSelect();
+              emitLibraryChanged();
+              emitDeletedChanged();
+              await renderDeletedCount();
+              renderDeleted();
+            } catch (_) {
+              alert('Restore failed.');
+            }
+          });
+          const purge = document.createElement('button');
+          purge.className = 'btn-danger';
+          purge.type = 'button';
+          purge.textContent = 'Delete';
+          purge.addEventListener('click', async () => {
+            const ok = confirm(`Permanently delete “${b.title || 'this book'}”?\n\nThis removes it from Deleted Files and frees the device storage.`);
+            if (!ok) return;
+            try {
+              await permanentlyDeleteLocalBook(b.id);
+              emitDeletedChanged();
+              await renderDeletedCount();
+              renderDeleted();
+            } catch (_) {
+              alert('Delete failed.');
+            }
+          });
+          actions.appendChild(restore);
+          actions.appendChild(purge);
+          row.appendChild(left);
+          row.appendChild(actions);
+          deletedListEl.appendChild(row);
+        });
+      await renderDeletedCount();
+    }
+
     openBtn.addEventListener('click', show);
     closeBtn?.addEventListener('click', hide);
     modal.addEventListener('click', (e) => { if (e.target === modal) hide(); });
+    deletedManageBtn?.addEventListener('click', showDeleted);
+    deletedCloseBtn?.addEventListener('click', hideDeleted);
+    deletedModal?.addEventListener('click', (e) => { if (e.target === deletedModal) hideDeleted(); });
+    window.addEventListener('rc:deleted-library-changed', () => { renderDeletedCount().catch(() => {}); });
+    renderDeletedCount().catch(() => {});
   })();
 
   // ===================================

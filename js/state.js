@@ -49,17 +49,18 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   // Tokens do not enforce limits during prototype — this is observational only.
   // Resets when tier changes.
   //
-  // Token costs (must match ExperienceSpec):
-  //   TTS page (cloud)     = 1
-  //   AI Evaluate          = 2
-  //   Generate anchors     = 1
-  //   Research analysis    = 3
-
+  // Usage cost per protected backend action.
+  // Display/diagnostics only on the client — the server remains the authority.
   const TOKEN_COSTS = {
-    tts:      1,
+    tts: 2,
     evaluate: 2,
-    anchors:  1,
-    research: 3,
+    anchors: 2,
+    research: 2,
+    ai: 2,
+    summary: 2,
+    book_import: 2,
+    import: 2,
+    other_protected_backend_action: 2,
   };
 
   const SAFE_FALLBACK_POLICY = Object.freeze({
@@ -1272,6 +1273,10 @@ window.rcUsage = {
       );
       if (resp.ok) {
         const data = await resp.json();
+        const limit = Number(data.limit);
+        const remaining = Number(data.remaining);
+        if (Number.isFinite(limit) && limit >= 0) sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : sessionTokens.remaining;
+        try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: data.remaining, allowance: data.limit, source: 'server' } })); } catch (_) {}
         return {
           allowed: !!data.allowed,
           cost: data.cost,
@@ -1281,15 +1286,11 @@ window.rcUsage = {
         };
       }
     } catch (_) {}
-    // Server unreachable: degrade to client-side check (safe-free behavior only).
-    // BRIDGE: client fallback until server is reliably reachable.
-    // Real owner: /api/app?kind=usage-check + server-resolved policy.
-    // This fallback uses the server-resolved limit (from the last successful
-    // policy fetch) so it is not a full client-only path.
     const limit = getRuntimeUsageAllowance();
     const totalSpent = Object.values(spent).reduce((a, b) => a + b, 0);
     const cost = TOKEN_COSTS[category] || 0;
     const remaining = Math.max(0, limit - totalSpent);
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining, allowance: limit, source: 'client-fallback' } })); } catch (_) {}
     return {
       allowed: remaining >= cost,
       cost,
@@ -1301,6 +1302,14 @@ window.rcUsage = {
   // Local spend tracking for display/diagnostics. Not enforcement authority.
   spend: function rcUsageSpend(category) {
     try { if (typeof tokenSpend === 'function') tokenSpend(category); } catch (_) {}
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: getRuntimeUsageAllowance(), source: 'local-spend' } })); } catch (_) {}
+  },
+  getSnapshot: function rcUsageGetSnapshot() {
+    return {
+      remaining: Math.max(0, Number(sessionTokens?.remaining || 0)),
+      allowance: Math.max(0, Number(getRuntimeUsageAllowance() || 0)),
+      spent: { ...(sessionTokens?.spent || {}) },
+    };
   },
 };
 

@@ -212,10 +212,14 @@ window.rcBilling = (function () {
       return;
     }
 
-    if (entitlement && entitlement.status === 'active') {
+    if (entitlement && (entitlement.status === 'active' || entitlement.status === 'trialing')) {
       const tierLabel = entitlement.tier === 'premium' ? 'Premium' : entitlement.tier === 'paid' ? 'Pro' : 'Free';
-      if (statusCopy) statusCopy.textContent = `Your resolved plan is ${tierLabel}. Billing changes go through the Stripe portal, not the browser.`;
-      if (billingState) billingState.innerHTML = `${tierLabel} <span class="text-slate-300 text-sm font-normal">active</span>`;
+      const renewsAt = entitlement.renewsAt || entitlement.periodEnd || null;
+      const renewsLabel = renewsAt
+        ? new Date(renewsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+        : `${tierLabel} active`;
+      if (statusCopy) statusCopy.textContent = `Your ${tierLabel} plan is active.`;
+      if (billingState) billingState.textContent = renewsLabel;
       if (primaryBtn) {
         primaryBtn.textContent = 'Manage Billing';
         primaryBtn.onclick = function () { openCustomerPortal(); };
