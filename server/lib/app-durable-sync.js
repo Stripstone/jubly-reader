@@ -1,6 +1,7 @@
 import { json, withCors, readJsonBody } from './http.js';
 import { getAllowedBrowserOrigins } from './origins.js';
-import { supabaseRest } from './supabase.js';
+import { getUsageRow, supabaseRest } from './supabase.js';
+import { getResolvedRuntimePolicyForRequest } from './runtime-policy.js';
 import { getAuthorizedUser } from './dev-tools.js';
 
 function toText(value, fallback = null) {
@@ -11,6 +12,73 @@ function toText(value, fallback = null) {
 function toInt(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? Math.trunc(num) : fallback;
+}
+
+
+async function getUsersRow(userId) {
+  const data = await supabaseRest(`/rest/v1/users?id=eq.${encodeURIComponent(userId)}&select=id,display_name,email,auth_provider,status,created_at,updated_at&limit=1`, {
+    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
+  }).catch(() => null);
+  return Array.isArray(data) && data[0] ? data[0] : null;
+}
+
+async function getSettingsRow(userId) {
+  const data = await supabaseRest(`/rest/v1/user_settings?user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`, {
+    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
+  }).catch(() => null);
+  return Array.isArray(data) && data[0] ? data[0] : null;
+}
+
+async function getProgressRows(userId) {
+  const data = await supabaseRest(`/rest/v1/user_progress?user_id=eq.${encodeURIComponent(userId)}&select=*&order=updated_at.desc&limit=100`, {
+    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
+  }).catch(() => null);
+  return Array.isArray(data) ? data : [];
+}
+
+async function getSessionRows(userId) {
+  const data = await supabaseRest(`/rest/v1/user_sessions?user_id=eq.${encodeURIComponent(userId)}&select=*&order=ended_at.desc.nullslast,updated_at.desc&limit=500`, {
+    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
+  }).catch(() => null);
+  return Array.isArray(data) ? data : [];
+}
+
+function computeUsageSummary(usageRow, limit) {
+  const hasRow = !!(usageRow && typeof usageRow === 'object');
+  const usageDailyLimit = hasRow && Number.isFinite(Number(limit)) ? Math.max(0, Number(limit)) : null;
+  const usedUnits = hasRow ? Math.max(0, toInt(usageRow?.used_units, 0)) : 0;
+  return {
+    row: hasRow ? usageRow : null,
+    remaining: hasRow && usageDailyLimit != null ? Math.max(0, usageDailyLimit - usedUnits) : null,
+    limit: hasRow ? usageDailyLimit : null,
+    usedApiCalls: hasRow ? Math.max(0, toInt(usageRow?.used_api_calls, 0)) : 0,
+  };
+}
+
+async function buildSnapshot(req, user) {
+  const [usersRow, settingsRow, progressRows, sessionRows, usageRow, resolved] = await Promise.all([
+    getUsersRow(user.id),
+    getSettingsRow(user.id),
+    getProgressRows(user.id),
+    getSessionRows(user.id),
+    getUsageRow(user.id).catch(() => null),
+    getResolvedRuntimePolicyForRequest(req).catch(() => null),
+  ]);
+  const activeProgressRows = (Array.isArray(progressRows) ? progressRows : []).filter((row) => row && row.is_active !== false);
+  return {
+    usersRow,
+    settingsRow,
+    progress: {
+      rows: activeProgressRows,
+      latest: activeProgressRows[0] || null,
+    },
+    sessions: {
+      rows: sessionRows || [],
+      latest: Array.isArray(sessionRows) && sessionRows[0] ? sessionRows[0] : null,
+      totalSessions: Array.isArray(sessionRows) ? sessionRows.length : 0,
+    },
+    usage: computeUsageSummary(usageRow, resolved?.policy?.usageDailyLimit),
+  };
 }
 
 async function upsertUsersRow(user, row) {
@@ -123,16 +191,21 @@ export default async function handler(req, res) {
   if (withCors(req, res, allowedOrigins)) return;
   const auth = await getAuthorizedUser(req);
   if (!auth.ok) return json(res, 401, { ok: false, error: auth.reason || 'Unauthorized.' });
+  if (req.method === 'GET') {
+    return json(res, 200, { ok: true, snapshot: await buildSnapshot(req, auth.user) });
+  }
   if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Method not allowed.' });
   const body = await readJsonBody(req);
   const action = String(body?.action || '').trim().toLowerCase();
   const payload = body?.payload || {};
   try {
-    if (action === 'sync_user_row') return json(res, 200, { ok: true, action, row: await upsertUsersRow(auth.user, payload?.row || {}) });
-    if (action === 'sync_settings') return json(res, 200, { ok: true, action, row: await upsertSettingsRow(auth.user, payload?.row || {}) });
-    if (action === 'write_progress') return json(res, 200, { ok: true, action, row: await writeProgressRow(auth.user, payload?.row || {}) });
-    if (action === 'record_session') return json(res, 200, { ok: true, action, row: await insertSessionRow(auth.user, payload?.row || {}) });
-    return json(res, 400, { ok: false, error: 'Unsupported durable sync action.' });
+    let row = null;
+    if (action === 'sync_user_row') row = await upsertUsersRow(auth.user, payload?.row || {});
+    else if (action === 'sync_settings') row = await upsertSettingsRow(auth.user, payload?.row || {});
+    else if (action === 'write_progress') row = await writeProgressRow(auth.user, payload?.row || {});
+    else if (action === 'record_session') row = await insertSessionRow(auth.user, payload?.row || {});
+    else return json(res, 400, { ok: false, error: 'Unsupported durable sync action.' });
+    return json(res, 200, { ok: true, action, row, snapshot: await buildSnapshot(req, auth.user) });
   } catch (error) {
     return json(res, 400, { ok: false, error: String(error?.message || error || 'Durable sync failed.') });
   }
