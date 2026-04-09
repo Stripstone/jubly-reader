@@ -9,7 +9,7 @@ The goal is to keep the package small, current, and reliable during patching and
 2. `02_RUNTIME_CONTRACT.md`
 3. `03_ARCHITECTURE_MAP.md`
 4. `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
-5. `04_EXECUTION_BACKLOG.md`
+5. `04_IMPLEMENTATION_WORKFLOW.md`
 6. `05_LAUNCH_AND_INTEGRATION.md`
 
 ## Core authority docs
@@ -34,10 +34,10 @@ What architectural behavior is forbidden, what scaffold discipline is non-negoti
 
 Use this during refactors, scaffold changes, ownership cleanup, and any pass that risks introducing duplicate truth.
 
-### `04_EXECUTION_BACKLOG.md`
-What still needs repair.
+### `04_IMPLEMENTATION_WORKFLOW.md`
+Current approach to implementing features.
 
-Use this as the working patch list.
+Use this as guidelines.
 
 ### `05_LAUNCH_AND_INTEGRATION.md`
 What must be true before launch and how external integration fits.
