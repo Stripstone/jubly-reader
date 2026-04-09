@@ -344,47 +344,6 @@ window.rcDevTools = (function () {
     el.checked = !!value;
   }
 
-  function getClientContext() {
-    let target = {};
-    let restore = null;
-    let metrics = null;
-    let usage = null;
-    let theme = null;
-    let appearance = null;
-    let profile = null;
-    try { target = Object.assign({}, window.__rcReadingTarget || {}); } catch (_) {}
-    try { restore = typeof window.getReadingRestoreStatus === 'function' ? window.getReadingRestoreStatus() : null; } catch (_) {}
-    try { metrics = window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function' ? window.rcReadingMetrics.getReadingProfileMetrics() : null; } catch (_) {}
-    try { usage = window.rcUsage && typeof window.rcUsage.getSnapshot === 'function' ? window.rcUsage.getSnapshot() : null; } catch (_) {}
-    try { theme = window.rcTheme && typeof window.rcTheme.get === 'function' ? window.rcTheme.get() : null; } catch (_) {}
-    try { appearance = window.rcAppearance && typeof window.rcAppearance.get === 'function' ? window.rcAppearance.get() : null; } catch (_) {}
-    try { profile = window.rcPrefs && typeof window.rcPrefs.loadProfilePrefs === 'function' ? window.rcPrefs.loadProfilePrefs() : null; } catch (_) {}
-    const bookSelect = document.getElementById('bookSelect');
-    const chapterSelect = document.getElementById('chapterSelect');
-    const speedEl = document.getElementById('shell-speed');
-    const autoplayToggle = document.getElementById('autoplayToggle');
-    return {
-      target,
-      restore,
-      metrics,
-      usage,
-      settings: {
-        daily_goal_minutes: profile && profile.dailyGoalMinutes != null ? profile.dailyGoalMinutes : null,
-        appearance_mode: appearance || null,
-        theme_id: theme && theme.themeId ? theme.themeId : null,
-        tts_speed: speedEl && speedEl.value !== '' ? Number(speedEl.value) : null,
-        explorer_accent_swatch: theme && theme.settings ? theme.settings.accentSwatch || null : null,
-        explorer_background_mode: theme && theme.settings ? theme.settings.backgroundMode || null : null,
-        autoplay_enabled: autoplayToggle ? !!autoplayToggle.checked : null,
-        use_source_page_numbers: theme ? !!theme.use_source_page_numbers : null,
-      },
-      selectors: {
-        bookId: bookSelect ? String(bookSelect.value || '').trim() : '',
-        chapterId: chapterSelect && chapterSelect.value !== '' ? String(chapterSelect.value) : '',
-      },
-    };
-  }
-
   function renderPanel() {
     if (!panel) return;
     const snapshot = state.snapshot || {};
@@ -393,52 +352,36 @@ window.rcDevTools = (function () {
     const latestProgress = snapshot.progress && snapshot.progress.latest ? snapshot.progress.latest : {};
     const latestSession = snapshot.sessions && snapshot.sessions.latest ? snapshot.sessions.latest : {};
     const settings = snapshot.settingsRow || {};
-    const client = getClientContext();
-    const clientTarget = client.target || {};
-    const clientRestore = client.restore || {};
-    const clientSettings = client.settings || {};
-    const resolvedProgressBookId = latestProgress.book_id || clientTarget.bookId || client.selectors.bookId || '';
-    const resolvedProgressChapter = latestProgress.chapter_id != null ? latestProgress.chapter_id : (clientTarget.chapterIndex != null && Number(clientTarget.chapterIndex) >= 0 ? clientTarget.chapterIndex : (client.selectors.chapterId || ''));
-    const resolvedProgressPage = latestProgress.last_page_index != null ? latestProgress.last_page_index : (clientTarget.pageIndex != null ? clientTarget.pageIndex : clientRestore.currentPageIndex || 0);
-    const resolvedPageCount = latestProgress.page_count != null ? latestProgress.page_count : (clientRestore.pageCount || 0);
     setValue('devPlanTier', entitlement.tier === 'premium' ? 'premium' : entitlement.tier === 'paid' ? 'paid' : 'free');
     setValue('devPlanStatus', entitlement.status || 'active');
     setValue('devUsageRemaining', usage.remaining == null ? '' : usage.remaining);
     setValue('devUsageUnits', usage.row && usage.row.used_units != null ? usage.row.used_units : 0);
     setValue('devUsageCalls', usage.usedApiCalls == null ? 0 : usage.usedApiCalls);
-    setValue('devProgressBookId', resolvedProgressBookId);
-    setValue('devProgressSourceId', latestProgress.source_id || resolvedProgressBookId || '');
-    setValue('devProgressSourceType', latestProgress.source_type || clientTarget.sourceType || 'book');
-    setValue('devProgressChapter', resolvedProgressChapter == null ? '' : resolvedProgressChapter);
-    setValue('devProgressPage', resolvedProgressPage == null ? 0 : resolvedProgressPage);
-    setValue('devProgressPageCount', resolvedPageCount == null ? 0 : resolvedPageCount);
-    setValue('devSessionBookId', latestSession.book_id || resolvedProgressBookId || '');
-    setValue('devSessionChapter', latestSession.chapter_id == null ? (resolvedProgressChapter == null ? '' : resolvedProgressChapter) : latestSession.chapter_id);
+    setValue('devProgressBookId', latestProgress.book_id || '');
+    setValue('devProgressSourceId', latestProgress.source_id || latestProgress.book_id || '');
+    setValue('devProgressSourceType', latestProgress.source_type || 'book');
+    setValue('devProgressChapter', latestProgress.chapter_id == null ? '' : latestProgress.chapter_id);
+    setValue('devProgressPage', latestProgress.last_page_index == null ? 0 : latestProgress.last_page_index);
+    setValue('devProgressPageCount', latestProgress.page_count == null ? 0 : latestProgress.page_count);
+    setValue('devSessionBookId', latestSession.book_id || latestProgress.book_id || '');
+    setValue('devSessionChapter', latestSession.chapter_id == null ? '' : latestSession.chapter_id);
     setValue('devSessionMinutes', latestSession.minutes_listened == null ? 0 : latestSession.minutes_listened);
     setValue('devSessionPages', latestSession.pages_completed == null ? 0 : latestSession.pages_completed);
     setValue('devSessionMode', latestSession.mode || 'reading');
     setChecked('devSessionCompleted', !!latestSession.completed);
-    setValue('devSettingsGoal', settings.daily_goal_minutes == null ? (clientSettings.daily_goal_minutes == null ? 15 : clientSettings.daily_goal_minutes) : settings.daily_goal_minutes);
-    setValue('devSettingsAppearance', settings.appearance_mode || clientSettings.appearance_mode || 'light');
-    setValue('devSettingsTheme', settings.theme_id || clientSettings.theme_id || 'default');
-    setValue('devSettingsTtsSpeed', settings.tts_speed == null ? (clientSettings.tts_speed == null ? '' : clientSettings.tts_speed) : settings.tts_speed);
-    setValue('devSettingsAccent', settings.explorer_accent_swatch || clientSettings.explorer_accent_swatch || '');
-    setValue('devSettingsBackground', settings.explorer_background_mode || clientSettings.explorer_background_mode || '');
-    setChecked('devSettingsAutoplay', settings.autoplay_enabled == null ? !!clientSettings.autoplay_enabled : !!settings.autoplay_enabled);
-    setChecked('devSettingsSourcePages', settings.use_source_page_numbers == null ? !!clientSettings.use_source_page_numbers : !!settings.use_source_page_numbers);
+    setValue('devSettingsGoal', settings.daily_goal_minutes == null ? 15 : settings.daily_goal_minutes);
+    setValue('devSettingsAppearance', settings.appearance_mode || 'light');
+    setValue('devSettingsTheme', settings.theme_id || 'default');
+    setValue('devSettingsTtsSpeed', settings.tts_speed == null ? '' : settings.tts_speed);
+    setValue('devSettingsAccent', settings.explorer_accent_swatch || '');
+    setValue('devSettingsBackground', settings.explorer_background_mode || '');
+    setChecked('devSettingsAutoplay', !!settings.autoplay_enabled);
+    setChecked('devSettingsSourcePages', !!settings.use_source_page_numbers);
     if (statusEl) {
       const sessionSummary = snapshot.sessions || {};
       const plan = entitlement.tier === 'paid' ? 'Pro' : entitlement.tier === 'premium' ? 'Premium' : 'Free';
       const remaining = usage.remaining == null ? '—' : usage.remaining;
       statusEl.textContent = `${state.email || 'dev'} • ${plan} • ${remaining} left • ${sessionSummary.totalSessions || 0} sessions`;
-    }
-    const summaryEl = panel && panel.querySelector('#devClientSummary');
-    if (summaryEl) {
-      const restoreStatus = clientRestore && clientRestore.gate ? clientRestore.gate.status || 'idle' : 'idle';
-      const clientBook = resolvedProgressBookId || '—';
-      const clientPage = Number.isFinite(Number(resolvedProgressPage)) ? Number(resolvedProgressPage) + 1 : '—';
-      const clientChapter = resolvedProgressChapter == null || resolvedProgressChapter === '' ? '—' : Number(resolvedProgressChapter) + 1;
-      summaryEl.textContent = `Client context • book ${clientBook} • chapter ${clientChapter} • page ${clientPage} • restore ${restoreStatus}`;
     }
   }
 
@@ -495,16 +438,6 @@ window.rcDevTools = (function () {
   try {
     document.addEventListener('rc:auth-changed', () => {
       setTimeout(() => { refresh().catch(() => {}); }, 0);
-    });
-  } catch (_) {}
-  try {
-    document.addEventListener('rc:durable-data-hydrated', () => {
-      if (!state.allowed) return;
-      if (panel && panel.style.display === 'block') {
-        setTimeout(() => { refresh().catch(() => { renderPanel(); }); }, 0);
-      } else {
-        renderPanel();
-      }
     });
   } catch (_) {}
   try {
