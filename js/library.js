@@ -1435,13 +1435,18 @@
       return currentBookRaw;
     }
 
-    function refreshChapterAndPagesUI() {
+    function refreshChapterAndPagesUI(options = {}) {
+      const restore = (options && options.restore && typeof options.restore === 'object') ? options.restore : null;
+      const restorePageIndex = Number.isFinite(Number(restore?.pageIndex)) ? Math.max(0, Number(restore.pageIndex)) : 0;
+      const restoreChapterIndex = Number.isFinite(Number(restore?.chapterIndex)) ? Math.max(0, Number(restore.chapterIndex)) : null;
+
       // Chapters present?
       if (!hasExplicitChapters) {
         chapterControls.style.display = "none";
         currentChapterIndex = null;
         const bookPages = parsePagesWithTitles(currentBookRaw);
         populatePagesSelect(bookPages);
+        try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, bookPages.length - 1)); } catch (_) {}
         // Auto-render all pages as one set — no Load click required.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
         if (allText) applySelectionToBulkInput(allText, { append: false });
@@ -1451,12 +1456,14 @@
       chapterControls.style.display = "flex";
       const chapOpts = chapterList.map((ch, idx) => ({ value: idx, label: ch.title || `Chapter ${idx + 1}` }));
       setSelectOptions(chapterSelect, chapOpts, "Select a chapter…");
-      chapterSelect.value = "0";
-      currentChapterIndex = 0;
+      const nextChapterIndex = Math.max(0, Math.min(Number.isFinite(restoreChapterIndex) ? restoreChapterIndex : 0, Math.max(0, chapterList.length - 1)));
+      chapterSelect.value = String(nextChapterIndex);
+      currentChapterIndex = nextChapterIndex;
 
       const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
       populatePagesSelect(chapterPages);
-      // Auto-render chapter 0 — no Load click required.
+      try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, chapterPages.length - 1)); } catch (_) {}
+      // Auto-render the resolved chapter — no Load click required.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
       if (chapterText) applySelectionToBulkInput(chapterText, { append: false });
     }
@@ -1500,7 +1507,7 @@
       throw lastErr || new Error("manifest fetch failed");
     }
 
-    async function loadBook(id) {
+    async function loadBook(id, options = {}) {
       currentBookRaw = "";
       chapterList = [];
       hasExplicitChapters = false;
@@ -1518,7 +1525,7 @@
           currentBookRaw = rec.markdown;
           hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
           if (hasExplicitChapters) chapterList = parseChaptersFromMarkdown(currentBookRaw);
-          refreshChapterAndPagesUI();
+          refreshChapterAndPagesUI(options);
           return;
         } catch (e) {
           setSelectOptions(chapterSelect, [], "Failed to load local book");
@@ -1547,7 +1554,7 @@
           chapterList = parseChaptersFromMarkdown(currentBookRaw);
         }
 
-        refreshChapterAndPagesUI();
+        refreshChapterAndPagesUI(options);
       } catch (e) {
         // Fallback for local file:// usage: try embedded books
         try {
@@ -1557,7 +1564,7 @@
             if (hasExplicitChapters) {
               chapterList = parseChaptersFromMarkdown(currentBookRaw);
             }
-            refreshChapterAndPagesUI();
+            refreshChapterAndPagesUI(options);
             return;
           }
         } catch (_) {}
@@ -1582,7 +1589,11 @@
     bookSelect.addEventListener("change", async () => {
       const id = bookSelect.value;
       if (!id) return;
-      await loadBook(id);
+      let restore = null;
+      try {
+        if (window.rcSync && typeof window.rcSync.getRestoreProgress === 'function') restore = await window.rcSync.getRestoreProgress(String(id));
+      } catch (_) {}
+      await loadBook(id, { restore });
     });
 
     chapterSelect.addEventListener("change", () => {
@@ -2660,14 +2671,16 @@ function finalizeReadingMetricsSession() {
     }
     if (window.rcReadingMetrics && typeof window.rcReadingMetrics.appendReadingSession === 'function') {
       if (elapsedSeconds >= 60 || session.pagesAdvanced >= 1) {
-        window.rcReadingMetrics.appendReadingSession({
+        const sessionEntry = {
           bookId: session.bookId,
           startedAt: session.startedAt,
           endedAt: new Date().toISOString(),
           elapsedSeconds,
           pagesAdvanced: session.pagesAdvanced,
           completed,
-        });
+        };
+        window.rcReadingMetrics.appendReadingSession(sessionEntry);
+        try { if (window.rcSync && typeof window.rcSync.recordReadingSession === 'function') window.rcSync.recordReadingSession(sessionEntry).catch(() => {}); } catch (_) {}
       }
     }
   } catch (_) {}
@@ -2756,46 +2769,46 @@ window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
   if (!bookId) return false;
 
+  const pagesEl = document.getElementById('pages');
+  const readingModeEl = document.getElementById('reading-mode');
+  try {
+    if (pagesEl) pagesEl.innerHTML = '';
+    if (readingModeEl) readingModeEl.classList.add('reading-restore-pending');
+  } catch (_) {}
+
   // Set source selector to book mode for UI accuracy.
   // setSourceUI() is display-only so no change event dispatch is needed here.
   const sourceSel = document.getElementById('importSource');
   if (sourceSel && sourceSel.value !== 'book') sourceSel.value = 'book';
+
+  let normalizedId = String(bookId);
 
   // Keep bookSelect value in sync for diagnostics and chapter navigation,
   // but do not dispatch a change event — the load path is direct, not event-driven.
   const bookSel = document.getElementById('bookSelect');
   if (bookSel) {
     const opts = Array.from(bookSel.options || []).map(o => String(o.value || ''));
-    const normalizedId = opts.includes(String(bookId)) ? String(bookId)
+    normalizedId = opts.includes(String(bookId)) ? String(bookId)
       : (opts.includes(`local:${bookId}`) ? `local:${bookId}` : String(bookId));
     bookSel.value = normalizedId;
   }
 
-  // Await the runtime-owned book load path directly.
-  // loadBook fetches book data, prepares pages, and calls render() before returning.
-  // Reading is ready when this resolves — no polling or secondary click needed.
-  if (typeof window.__rcLoadBook === 'function') {
-    try { await window.__rcLoadBook(String(bookId)); } catch (_) {}
-  }
-
-  // Pass 4: if the user is signed in, fetch their durable reading position and
-  // apply it. chapterIndex comes from the current reading target set by loadBook.
-  // rcSync.getReadingProgress returns null when not signed in or no record exists,
-  // so this is a safe no-op in the signed-out free path.
+  let restore = null;
   try {
-    if (window.rcSync && typeof window.rcSync.getReadingProgress === 'function') {
-      const _t = window.__rcReadingTarget || {};
-      const durable = await window.rcSync.getReadingProgress(String(bookId), _t.chapterIndex != null ? _t.chapterIndex : -1);
-      if (durable && typeof durable.pageIndex === 'number' && durable.pageIndex > 0) {
-        const total = Array.isArray(pages) ? pages.length : 0;
-        if (total > 0 && durable.pageIndex < total) {
-          window.focusReadingPage(durable.pageIndex, { behavior: 'auto' });
-        }
-      }
+    if (window.rcSync && typeof window.rcSync.getRestoreProgress === 'function') {
+      restore = await window.rcSync.getRestoreProgress(normalizedId);
     }
   } catch (_) {}
 
-  try { beginReadingMetricsSession(String(bookId), Array.isArray(pages) ? pages.length : 0); } catch (_) {}
+  // Await the runtime-owned book load path directly only after restore truth is
+  // known or explicitly absent. This prevents a misleading page-1 flash before
+  // the user is returned to their durable page.
+  if (typeof window.__rcLoadBook === 'function') {
+    try { await window.__rcLoadBook(normalizedId, { restore }); } catch (_) {}
+  }
+
+  try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
+  try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}
   return true;
 };
 

@@ -915,6 +915,13 @@ function appendReadingSession(entry) {
 
 function getReadingBookSummary(bookId, totalPagesHint) {
   const key = String(bookId || '');
+  try {
+    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+    if (signedIn && window.rcSync && typeof window.rcSync.getRemoteReadingBookSummary === 'function') {
+      const remote = window.rcSync.getRemoteReadingBookSummary(key, totalPagesHint);
+      if (remote) return remote;
+    }
+  } catch (_) {}
   const row = loadReadingMetrics().bookSummaries[key] || null;
   if (!row) return null;
   const totalPages = Number.isFinite(Number(totalPagesHint)) && Number(totalPagesHint) > 0 ? Number(totalPagesHint) : row.totalPages;
@@ -928,6 +935,13 @@ function getReadingBookSummary(bookId, totalPagesHint) {
 }
 
 function getReadingProfileMetrics() {
+  try {
+    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+    if (signedIn && window.rcSync && typeof window.rcSync.getRemoteProfileMetrics === 'function') {
+      const remote = window.rcSync.getRemoteProfileMetrics();
+      if (remote) return remote;
+    }
+  } catch (_) {}
   const prefs = loadProfilePrefs();
   const metrics = loadReadingMetrics();
   const today = getTodayIsoDate();

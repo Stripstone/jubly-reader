@@ -1548,6 +1548,7 @@
             refreshExplorerPanel();
         });
         document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} });
+        document.addEventListener('rc:durable-data-hydrated', () => { const section = getCurrentVisibleSection(); try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (section === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} } if (section === 'dashboard') { try { refreshLibrary(); } catch (_) {} } });
         window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} });
         window.addEventListener('rc:deleted-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
         window.addEventListener('rc:usage-changed', () => { try { renderUsageSurface(); } catch (_) {} });
