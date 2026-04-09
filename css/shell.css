@@ -369,7 +369,7 @@
         .reading-select { font-size: 0.75rem; font-weight: 700; color: #475569; background: transparent; border: none; outline: none; cursor: pointer; padding: 4px 2px; white-space: nowrap; }
         .reading-select:hover { color: var(--jubly-purple); }
         .reading-divider { width: 1px; height: 16px; background: #e2e8f0; flex-shrink: 0; }
-        .tier-pill { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; background: #f5f3ff; color: var(--jubly-purple); border: 1px solid #ddd6fe; white-space: nowrap; flex-shrink: 0; }
+        .tier-pill { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; background: #f5f3ff; color: var(--jubly-purple); border: 1px solid #ddd6fe; white-space: nowrap; flex-shrink: 0; display:inline-flex; align-items:center; justify-content:center; justify-self:start; width:auto; max-width:max-content; }
         .pb-icon-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px; padding: 7px 12px; border-radius: 8px; font-size: 0.82rem; font-weight: 700; color: #64748b; background: transparent; border: none; cursor: pointer; transition: background 0.15s, color 0.15s; white-space: nowrap; flex-shrink: 0; }
         #shell-play-btn { min-width: 104px; font-size: 0.94rem; }
         .pb-icon-btn:hover { background: #f1f5f9; color: #1e293b; }
@@ -1192,7 +1192,7 @@ body.auth-hydrating #profile-page {
   flex: 1;
 }
 .profile-goal-inline-row {
-  margin-top: 10px;
+  margin-top: 6px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1254,6 +1254,7 @@ body.auth-hydrating #profile-page {
   color: #1e293b;
   font-size: 0.95rem;
 }
+#profile-goal-progress-label { display:none; }
 .profile-goal-celebration {
   border-radius: 16px;
   padding: 10px 14px;
@@ -1264,6 +1265,57 @@ body.auth-hydrating #profile-page {
 }
 .profile-goal-celebration-animate {
   animation: profileConfettiSwing 1.6s ease-in-out;
+}
+
+.profile-inline-trigger {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.profile-inline-form {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+.profile-inline-input {
+  width: 100%;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  color: #1e293b;
+  background: #fff;
+}
+.profile-inline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.profile-inline-save,
+.profile-inline-cancel {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-weight: 800;
+  font-size: 0.78rem;
+}
+.profile-inline-save {
+  background: var(--jubly-purple);
+  color: #fff;
+}
+.profile-inline-cancel {
+  background: #e2e8f0;
+  color: #475569;
+}
+.profile-settings-status-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+.profile-settings-status-error {
+  background: #fef2f2;
+  color: #b91c1c;
 }
 @keyframes profileConfettiSwing {
   0% { transform: translateY(8px) rotate(-4deg); opacity: 0; }

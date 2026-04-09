@@ -467,7 +467,7 @@
         }
         const totalSpent = Object.values(sessionTokens?.spent || {}).reduce((a, b) => a + b, 0);
         const merged = {
-          tokens: {
+          usage: {
             tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
             remaining: sessionTokens?.remaining ?? '—',
             allowance: (window.rcPolicy && typeof window.rcPolicy.getUsageDailyLimit === 'function') ? window.rcPolicy.getUsageDailyLimit() : '—',

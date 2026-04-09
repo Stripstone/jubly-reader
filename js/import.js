@@ -328,7 +328,8 @@
       doneBtn.style.display = 'none';
       setProgress(15, 'Preparing text import', `${pages.length} pages detected`);
 
-      const title = String(textTitleInput && textTitleInput.value || '').trim() || `Pasted Text ${new Date().toLocaleDateString()}`;
+      const stamp = new Date();
+      const title = String(textTitleInput && textTitleInput.value || '').trim() || `Pasted Text ${stamp.toLocaleDateString()} ${stamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
       const id = `text-${Date.now()}`;
       const markdown = pages.map((page, idx) => `## Page ${idx + 1}\n\n${page}`).join('\n\n');
       const record = {
@@ -336,6 +337,7 @@
         title,
         createdAt: Date.now(),
         sourceName: 'Pasted Text',
+        importKind: 'text',
         byteSize: raw.length,
         markdown,
       };

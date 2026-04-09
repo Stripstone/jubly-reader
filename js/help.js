@@ -32,7 +32,7 @@
     if (typeof Intercom !== 'function') return false;
     const user = (window.rcAuth && typeof window.rcAuth.getUser === 'function') ? window.rcAuth.getUser() : null;
     const session = (window.rcAuth && typeof window.rcAuth.getSession === 'function') ? window.rcAuth.getSession() : null;
-    const payload = { app_id: APP_ID };
+    const payload = { app_id: APP_ID, hide_default_launcher: true };
     if (user && user.id) {
       payload.user_id = user.id;
       payload.email = user.email || '';
@@ -55,9 +55,14 @@
     return true;
   }
 
+  function shutdownMessenger() {
+    try { if (typeof window.Intercom === 'function') window.Intercom('shutdown'); } catch (_) {}
+  }
+
   window.rcHelp = {
     syncIdentity,
     openChat: openMessenger,
     openFeedback: openMessenger,
+    shutdown: shutdownMessenger,
   };
 })();
