@@ -640,11 +640,16 @@ function readingTargetFromKey(key) {
 window.readingTargetFromKey = readingTargetFromKey;
 
 function getReadingRestoreStatus() {
+  const gate = (window.__rcRestoreGateStatus && typeof window.__rcRestoreGateStatus === 'object')
+    ? Object.assign({}, window.__rcRestoreGateStatus)
+    : { status: 'idle' };
   return {
     currentPageIndex: Number.isFinite(currentPageIndex) ? currentPageIndex : 0,
     pendingRestorePageIndex: Number(window.__rcPendingRestorePageIndex ?? -1),
     lastFocusedPageIndex: Number(typeof lastFocusedPageIndex === 'number' ? lastFocusedPageIndex : -1),
-    pageCount: Array.isArray(pages) ? pages.length : 0
+    pageCount: Array.isArray(pages) ? pages.length : 0,
+    target: Object.assign({}, window.__rcReadingTarget || {}),
+    gate,
   };
 }
 

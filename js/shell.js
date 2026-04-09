@@ -1285,12 +1285,23 @@
     }
 
     async function startReading() {
-        closeModal('preview-modal');
         const signal = document.getElementById('session-complete');
         if (signal) signal.classList.add('hidden-section');
+        if (!_previewBookId) {
+            closeModal('preview-modal');
+            showSection('reading-mode');
+            return;
+        }
+        let loaded = false;
+        try { if (typeof startReadingFromPreview === 'function') loaded = await startReadingFromPreview(_previewBookId); } catch (_) {}
+        closeModal('preview-modal');
         showSection('reading-mode');
-        if (!_previewBookId) return;
-        try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(_previewBookId); } catch (_) {}
+        if (!loaded) {
+            try {
+                const readingMode = document.getElementById('reading-mode');
+                if (readingMode) readingMode.classList.remove('reading-restore-pending');
+            } catch (_) {}
+        }
     }
 
     let _goalCelebrationTimer = null;
@@ -1348,7 +1359,8 @@
         const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
             ? window.rcUsage.getSnapshot()
             : { remaining: null, allowance: null, authoritative: false };
-        const remaining = Number(snapshot?.remaining);
+        const rawRemaining = snapshot ? snapshot.remaining : null;
+        const remaining = rawRemaining == null || rawRemaining === '' ? null : Number(rawRemaining);
         valueEl.textContent = Number.isFinite(remaining) ? `${Math.max(0, remaining)} left today` : 'Usage';
     }
 
@@ -1460,11 +1472,12 @@
         const goalInput = document.getElementById('profile-goal-input');
         goalEditBtn?.addEventListener('click', () => { setGoalEditMode(true); });
         goalCancelBtn?.addEventListener('click', () => { setGoalEditMode(false); });
-        goalEditForm?.addEventListener('submit', (e) => {
+        goalEditForm?.addEventListener('submit', async (e) => {
             e.preventDefault();
             const next = Math.max(5, Math.min(300, Math.round(Number(goalInput && goalInput.value || 0) || 0)));
             if (!Number.isFinite(next) || next <= 0) return;
             try { if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') window.rcPrefs.saveProfilePrefs({ dailyGoalMinutes: next }); } catch (_) {}
+            try { if (window.rcSync && typeof window.rcSync.syncSettings === 'function') await window.rcSync.syncSettings('goal-submit'); } catch (_) {}
             setGoalEditMode(false);
             renderProfileSurface();
         });
