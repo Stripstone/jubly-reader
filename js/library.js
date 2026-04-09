@@ -19,6 +19,32 @@
     return 0;
   }
 
+  async function flushCurrentReadingProgress(reason) {
+    try {
+      if (!(window.rcSync && typeof window.rcSync.saveProgressNow === 'function')) return null;
+      const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
+      const bookId = String(ctx.bookId || '').trim();
+      if (!bookId) return null;
+      const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
+      const pageIndex = getFocusedOrInferredReadingPageIndex();
+      return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'flush') });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function queueCurrentReadingProgress(reason) {
+    try {
+      if (!(window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function')) return;
+      const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
+      const bookId = String(ctx.bookId || '').trim();
+      if (!bookId) return;
+      const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
+      const pageIndex = getFocusedOrInferredReadingPageIndex();
+      window.rcSync.scheduleProgressSync(bookId, chapterIndex, pageIndex, { reason: String(reason || 'queue') });
+    } catch (_) {}
+  }
+
   function applyPendingReadingRestore() {
     try {
       const idx = Number(window.__rcPendingRestorePageIndex ?? -1);
@@ -1590,12 +1616,14 @@
       const id = bookSelect.value;
       if (!id) return;
       let restore = null;
+      const readingModeEl = document.getElementById('reading-mode');
+      try { if (readingModeEl) readingModeEl.classList.add('reading-restore-pending'); } catch (_) {}
       try {
         if (window.rcSync && typeof window.rcSync.getRestoreProgress === 'function') restore = await window.rcSync.getRestoreProgress(String(id));
       } catch (_) {}
       await loadBook(id, { restore });
+      try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
     });
-
     chapterSelect.addEventListener("change", () => {
       const idx = parseInt(chapterSelect.value || "", 10);
       if (!Number.isFinite(idx)) return;
@@ -2600,8 +2628,8 @@ function _installScrollPageTracker() {
         try {
           const _ctx = window.getReadingTargetContext();
           if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
-          if (bestIdx !== prevIdx && window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') window.rcSync.scheduleProgressSync(_ctx.bookId || '', _ctx.chapterIndex != null ? _ctx.chapterIndex : -1, bestIdx, { reason: 'scroll-tracker' });
         } catch (_) {}
+        if (bestIdx !== prevIdx) queueCurrentReadingProgress('scroll-tracker');
       } catch (_) {}
     });
   }, { passive: true });
@@ -2768,20 +2796,6 @@ window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 // Resolves the book, prepares all page content, and renders page cards.
 // Returns true when reading is ready; shell awaits this rather than polling.
 // No selector event dispatch — the entire entry path is direct and awaited.
-async function flushCurrentReadingProgress(reason) {
-  try {
-    if (!(window.rcSync && typeof window.rcSync.saveProgressNow === 'function')) return null;
-    const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
-    const pageIndex = getFocusedOrInferredReadingPageIndex();
-    const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
-    const bookId = String(ctx.bookId || (window.__rcReadingTarget || {}).bookId || '').trim();
-    if (!bookId) return null;
-    return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'runtime-immediate') });
-  } catch (_) {
-    return null;
-  }
-}
-
 window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
   if (!bookId) return false;
 
@@ -2829,15 +2843,15 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
 };
 
 window.exitReadingSession = function exitReadingSession() {
-  try { flushCurrentReadingProgress('exit-reading'); } catch (_) {}
   const metrics = finalizeReadingMetricsSession();
-  const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
+  const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, progressFlushed: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}
   try { if (typeof ttsAutoplayCancelCountdown === 'function') { ttsAutoplayCancelCountdown(); result.countdownCleared = true; } } catch (_) {}
   try { const signal = document.getElementById('session-complete'); if (signal) signal.classList.add('hidden-section'); } catch (_) {}
   try { document.querySelectorAll('.page-active').forEach((el) => el.classList.remove('page-active')); } catch (_) {}
   try { const active = document.activeElement; if (active && typeof active.blur === 'function') active.blur(); } catch (_) {}
   try { if (window.music) { window.music.pause(); result.musicStopped = true; } } catch (_) {}
+  try { flushCurrentReadingProgress('exit-reading'); result.progressFlushed = true; } catch (_) {}
   // PATCH(diagnostics): Push a named exit event into the TTS ring buffer so exit
   // cleanup is visible and provable in diagnostics. Previously updateDiagnostics()
   // re-read post-exit state but no event recorded what actually ran during cleanup.

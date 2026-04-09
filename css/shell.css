@@ -1330,3 +1330,27 @@ body.auth-hydrating #profile-page {
     align-items: flex-start;
   }
 }
+
+
+.reading-restore-pending .reading-content {
+  position: relative;
+}
+
+.reading-restore-pending #pages {
+  visibility: hidden;
+}
+
+.reading-restore-pending .reading-content::after {
+  content: 'Returning to your place…';
+  position: absolute;
+  inset: 24px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: #475569;
+  background: rgba(255,255,255,0.9);
+  border: 1px solid rgba(148,163,184,0.18);
+  border-radius: 16px;
+  backdrop-filter: blur(2px);
+  z-index: 2;
+}

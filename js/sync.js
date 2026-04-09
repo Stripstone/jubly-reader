@@ -17,16 +17,14 @@
 window.rcSync = (function () {
   let _progressTimer = null;
   let _prefsSyncTimer = null;
+  let _remoteUsersRow = null;
   let _remoteSettingsRow = null;
   let _remoteProgressRows = [];
   let _remoteSessions = [];
   let _remoteProfileMetrics = null;
-  const _syncDiagnostics = {
-    settings: { status: 'idle', error: null },
-    progress: { status: 'idle', error: null },
-    restore: { status: 'idle', error: null, bookId: '' },
-    sessions: { status: 'idle', error: null },
-  };
+  let _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false };
+  let _lastSyncSnapshotAt = null;
+  let _syncDiagnostics = { users: null, settings: null, progress: null, sessions: null, restore: null, snapshot: null };
 
   const RC_THEME_PREFS_KEY = 'rc_theme_prefs';
   const RC_APPEARANCE_PREFS_KEY = 'rc_appearance_prefs';
@@ -47,14 +45,73 @@ window.rcSync = (function () {
     try { return window.rcAuth && typeof window.rcAuth.getUser === 'function' ? window.rcAuth.getUser() : null; } catch (_) { return null; }
   }
 
+  function _accessToken() {
+    try { return window.rcAuth && typeof window.rcAuth.getAccessToken === 'function' ? String(window.rcAuth.getAccessToken() || '').trim() : ''; } catch (_) { return ''; }
+  }
+
   function _ready() {
-    const c = _client();
     const u = _user();
-    return !!(c && u && u.id);
+    return !!(u && u.id && _accessToken());
   }
 
   function _emitHydrated(kind) {
     try { document.dispatchEvent(new CustomEvent('rc:durable-data-hydrated', { detail: { kind: String(kind || 'sync') } })); } catch (_) {}
+  }
+
+
+  function _recordSync(kind, status, detail = {}) {
+    _syncDiagnostics[kind] = Object.assign({ status: String(status || 'idle'), at: new Date().toISOString() }, detail || {});
+    try { if (typeof window.updateDiagnostics === 'function') window.updateDiagnostics(); } catch (_) {}
+    return _syncDiagnostics[kind];
+  }
+
+  async function _serverSync(scope = 'snapshot', init = {}) {
+    const token = _accessToken();
+    if (!token) throw new Error('Missing auth token.');
+    const method = String(init.method || 'GET').toUpperCase();
+    const url = new URL('/api/app', window.location.origin);
+    url.searchParams.set('kind', 'durable-sync');
+    url.searchParams.set('scope', String(scope || 'snapshot'));
+    if (init.params && typeof init.params === 'object') {
+      Object.entries(init.params).forEach(([key, value]) => {
+        if (value == null || value === '') return;
+        url.searchParams.set(String(key), String(value));
+      });
+    }
+    const resp = await fetch(url.toString(), {
+      method,
+      cache: 'no-store',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        ...(typeof init.body !== 'undefined' ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: typeof init.body !== 'undefined' ? JSON.stringify(init.body) : undefined,
+    });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok || !data || data.ok === false) {
+      throw new Error(String((data && (data.error || data.reason)) || `Durable sync ${resp.status}`));
+    }
+    return data;
+  }
+
+  function _applySnapshot(snapshot) {
+    const snap = snapshot && typeof snapshot === 'object' ? snapshot : {};
+    _remoteUsersRow = snap.usersRow || null;
+    _remoteSettingsRow = snap.settingsRow || null;
+    _remoteProgressRows = Array.isArray(snap.progressRows) ? snap.progressRows.slice() : [];
+    const sessionRows = snap.sessions && Array.isArray(snap.sessions.rows) ? snap.sessions.rows.slice() : [];
+    _remoteSessions = sessionRows;
+    _lastSyncSnapshotAt = new Date().toISOString();
+    _hydrationState = { inFlight: false, users: !!_remoteUsersRow, settings: !!_remoteSettingsRow, progress: true, sessions: true };
+    _deriveRemoteProfileMetrics();
+  }
+
+  async function _fetchSnapshot() {
+    _recordSync('snapshot', 'pending');
+    const data = await _serverSync('snapshot');
+    _applySnapshot(data && data.snapshot ? data.snapshot : null);
+    _recordSync('snapshot', 'success', { hydrated: { ..._hydrationState }, snapshotAt: _lastSyncSnapshotAt });
+    return data && data.snapshot ? data.snapshot : null;
   }
 
   function _readLocalJson(key) {
@@ -66,40 +123,6 @@ window.rcSync = (function () {
     try { localStorage.setItem(key, JSON.stringify(safe)); } catch (_) {}
     return safe;
   }
-
-  function _nowIso() { return new Date().toISOString(); }
-
-  function _serializeError(error) {
-    if (!error) return null;
-    if (typeof error === 'string') return error;
-    return String(error.message || error.code || error.status || error || 'Unknown error');
-  }
-
-  function _updateDiag(kind, patch) {
-    try { _syncDiagnostics[kind] = Object.assign({}, _syncDiagnostics[kind] || {}, patch || {}, { at: _nowIso() }); } catch (_) {}
-  }
-
-  function _authHeaders() {
-    try {
-      const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function' ? String(window.rcAuth.getAccessToken() || '').trim() : '';
-      return token ? { Authorization: `Bearer ${token}` } : {};
-    } catch (_) {
-      return {};
-    }
-  }
-
-  async function _postDurableSync(action, payload) {
-    const response = await fetch('/api/app?kind=durable-sync', {
-      method: 'POST',
-      cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', ..._authHeaders() },
-      body: JSON.stringify({ action, payload: payload || {} }),
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok || !data || !data.ok) throw new Error(String(data && data.error || `Durable sync ${response.status}`));
-    return data;
-  }
-
 
   function _currentThemePrefs() {
     const stored = _readLocalJson(RC_THEME_PREFS_KEY);
@@ -277,56 +300,45 @@ window.rcSync = (function () {
     }
   }
 
-  async function syncSettings(reason = 'prefs-change') {
-    const u = _user();
-    if (!u || !u.id) return null;
-    const payload = Object.assign({ user_id: u.id }, _collectSettingsRow());
-    _updateDiag('settings', { status: 'pending', error: null, reason, payload });
+  async function syncSettings() {
+    if (!_ready()) return null;
+    const payload = _collectSettingsRow();
+    _recordSync('settings', 'pending', { payload });
     try {
-      const result = await _postDurableSync('sync_settings', { row: payload });
-      _remoteSettingsRow = result && result.row ? result.row : payload;
-      _deriveRemoteProfileMetrics();
-      _updateDiag('settings', { status: 'ok', error: null, reason });
+      const data = await _serverSync('snapshot', { method: 'POST', body: { action: 'sync_settings', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot);
+      if (data && data.row) _applyRemoteSettingsRow(data.row);
+      _recordSync('settings', 'success', { row: data && data.row ? data.row : null, snapshotAt: _lastSyncSnapshotAt });
       _emitHydrated('settings');
-      return _remoteSettingsRow;
+      return data && data.row ? data.row : null;
     } catch (error) {
-      _updateDiag('settings', { status: 'error', error: _serializeError(error), reason });
+      _recordSync('settings', 'error', { message: String(error?.message || error || 'settings sync failed') });
       return null;
     }
   }
 
   async function getSettings() {
-    const c = _client();
-    const u = _user();
-    if (!c || !u) return null;
+    if (_remoteSettingsRow) return _remoteSettingsRow;
+    if (!_ready()) return null;
     try {
-      const { data, error } = await c
-        .from('user_settings')
-        .select('user_id,theme_id,font_id,text_size,line_spacing,page_turn_sound_id,tts_speed,tts_voice_id,tts_volume,autoplay_enabled,music_enabled,music_profile_id,particles_enabled,particle_preset_id,use_source_page_numbers,appearance_mode,daily_goal_minutes,last_goal_celebrated_on,explorer_accent_swatch,explorer_background_mode,updated_at')
-        .eq('user_id', u.id)
-        .maybeSingle();
-      if (error || !data) return null;
-      return data;
-    } catch (_) {
+      const snapshot = await _fetchSnapshot();
+      return snapshot && snapshot.settingsRow ? snapshot.settingsRow : _remoteSettingsRow;
+    } catch (error) {
+      _recordSync('settings', 'error', { message: String(error?.message || error || 'settings fetch failed') });
       return null;
     }
   }
 
   async function _syncUserRow() {
-    const u = _user();
-    if (!u || !u.id) return null;
-    const payload = {
-      id: u.id,
-      display_name: _deriveDisplayName(u),
-      email: String(u.email || '').trim() || null,
-      auth_provider: _inferAuthProvider(u),
-      status: 'active',
-      updated_at: _nowIso(),
-    };
+    if (!_ready()) return null;
+    _recordSync('users', 'pending');
     try {
-      const result = await _postDurableSync('sync_user_row', { row: payload });
-      return result && result.row ? result.row : payload;
-    } catch (_) {
+      const data = await _serverSync('snapshot', { method: 'POST', body: { action: 'sync_user', payload: {} } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot);
+      _recordSync('users', 'success', { row: data && data.row ? data.row : null });
+      return data && data.row ? data.row : null;
+    } catch (error) {
+      _recordSync('users', 'error', { message: String(error?.message || error || 'user sync failed') });
       return null;
     }
   }
@@ -375,34 +387,26 @@ window.rcSync = (function () {
   }
 
   async function _loadProgressCache() {
-    const c = _client();
-    const u = _user();
-    if (!c || !u || !u.id) { _applyProgressRows([]); return []; }
+    if (!_ready()) { _applyProgressRows([]); _hydrationState.progress = false; return []; }
     try {
-      const { data, error } = await c
-        .from('user_progress')
-        .select('id,book_id,last_page_index,updated_at,source_type,source_id,chapter_id,page_count,last_read_at,is_active,session_version')
-        .eq('user_id', u.id)
-        .eq('is_active', true)
-        .order('updated_at', { ascending: false });
-      if (error || !Array.isArray(data)) { _applyProgressRows([]); return []; }
-      _applyProgressRows(data);
-      return data;
-    } catch (_) {
+      const snapshot = await _fetchSnapshot();
+      const rows = snapshot && Array.isArray(snapshot.progressRows) ? snapshot.progressRows : [];
+      _applyProgressRows(rows);
+      _hydrationState.progress = true;
+      return rows;
+    } catch (error) {
+      _recordSync('progress', 'error', { phase: 'load-cache', message: String(error?.message || error || 'progress cache failed') });
       _applyProgressRows([]);
+      _hydrationState.progress = false;
       return [];
     }
   }
 
   function _deriveRemoteProfileMetrics() {
     const profile = _currentProfilePrefs();
-    const localGoal = Number(profile.dailyGoalMinutes);
-    const remoteGoal = Number(_remoteSettingsRow && _remoteSettingsRow.daily_goal_minutes);
-    const goal = Number.isFinite(localGoal) && localGoal > 0
-      ? Math.max(5, Math.min(300, Math.round(localGoal)))
-      : (Number.isFinite(remoteGoal) && remoteGoal > 0
-          ? Math.max(5, Math.min(300, Math.round(remoteGoal)))
-          : 15);
+    const goal = _remoteSettingsRow && Number.isFinite(Number(_remoteSettingsRow.daily_goal_minutes))
+      ? Math.max(5, Math.min(300, Math.round(Number(_remoteSettingsRow.daily_goal_minutes))))
+      : Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes || 15))));
     const today = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getTodayIsoDate === 'function')
       ? window.rcReadingMetrics.getTodayIsoDate()
       : new Date().toISOString().slice(0, 10);
@@ -435,107 +439,87 @@ window.rcSync = (function () {
   }
 
   async function _loadSessionCache() {
-    const c = _client();
-    const u = _user();
-    if (!c || !u || !u.id) { _remoteSessions = []; _remoteProfileMetrics = null; return []; }
+    if (!_ready()) { _remoteSessions = []; _remoteProfileMetrics = null; _hydrationState.sessions = false; return []; }
     try {
-      const { data, error } = await c
-        .from('user_sessions')
-        .select('id,book_id,chapter_id,source_type,source_id,pages_completed,minutes_listened,elapsed_seconds,mode,tts_seconds,completed,started_at,ended_at,updated_at')
-        .eq('user_id', u.id)
-        .order('ended_at', { ascending: false })
-        .limit(500);
-      _remoteSessions = (!error && Array.isArray(data)) ? data : [];
+      const snapshot = await _fetchSnapshot();
+      const rows = snapshot && snapshot.sessions && Array.isArray(snapshot.sessions.rows) ? snapshot.sessions.rows : [];
+      _remoteSessions = rows;
       _deriveRemoteProfileMetrics();
-      return _remoteSessions;
-    } catch (_) {
+      _hydrationState.sessions = true;
+      return rows;
+    } catch (error) {
+      _recordSync('sessions', 'error', { phase: 'load-cache', message: String(error?.message || error || 'session cache failed') });
       _remoteSessions = [];
       _remoteProfileMetrics = null;
+      _hydrationState.sessions = false;
       return [];
     }
   }
 
   async function _onSignIn() {
+    _hydrationState = { inFlight: true, users: false, settings: false, progress: false, sessions: false };
+    _recordSync('snapshot', 'pending', { reason: 'signin' });
     await _syncUserRow();
-    const remote = await getSettings();
-    if (remote) {
-      _applyRemoteSettingsRow(remote);
-    } else {
-      const seeded = await syncSettings('signin-seed');
-      if (seeded) _applyRemoteSettingsRow(seeded);
+    try {
+      const snapshot = await _fetchSnapshot();
+      if (snapshot && snapshot.settingsRow) _applyRemoteSettingsRow(snapshot.settingsRow);
+      _emitHydrated('signin');
+    } catch (error) {
+      _recordSync('snapshot', 'error', { reason: 'signin', message: String(error?.message || error || 'signin hydration failed') });
+      _hydrationState.inFlight = false;
     }
-    await _loadProgressCache();
-    await _loadSessionCache();
-    _emitHydrated('signin');
   }
 
-  function scheduleProgressSync(bookId, chapterIndex, pageIndex, meta = {}) {
+  function scheduleProgressSync(bookId, chapterIndex, pageIndex) {
     if (!_ready()) return;
     if (_progressTimer) clearTimeout(_progressTimer);
-    _updateDiag('progress', { status: 'queued', error: null, reason: String(meta.reason || 'schedule'), bookId: String(bookId || '') });
     _progressTimer = setTimeout(() => {
       _progressTimer = null;
-      _writeProgress(bookId, chapterIndex, pageIndex, meta).catch(() => {});
+      _writeProgress(bookId, chapterIndex, pageIndex).catch(() => {});
     }, 500);
   }
 
-  async function saveProgressNow(bookId, chapterIndex, pageIndex, meta = {}) {
-    if (!_ready()) return null;
+  function scheduleCurrentTargetSync() {
+    if (!_ready()) return;
+    const target = window.__rcReadingTarget || {};
+    if (!target || !target.bookId) return;
+    scheduleProgressSync(target.bookId, target.chapterIndex, target.pageIndex);
+  }
+
+  async function flushProgressSync() {
     if (_progressTimer) {
       clearTimeout(_progressTimer);
       _progressTimer = null;
     }
-    return _writeProgress(bookId, chapterIndex, pageIndex, Object.assign({}, meta || {}, { immediate: true }));
+    const target = window.__rcReadingTarget || {};
+    if (!target || !target.bookId) return null;
+    return _writeProgress(target.bookId, target.chapterIndex, target.pageIndex);
   }
 
   async function _findProgressRow(identity) {
-    const c = _client();
-    if (!c || !identity || !identity.user_id || !identity.book_id) return null;
-    try {
-      let query = c
-        .from('user_progress')
-        .select('id,book_id,last_page_index,updated_at,chapter_id,page_count,last_read_at,source_type,source_id,is_active,session_version')
-        .eq('user_id', identity.user_id)
-        .eq('book_id', identity.book_id)
-        .eq('source_type', identity.source_type)
-        .eq('source_id', identity.source_id)
-        .order('updated_at', { ascending: false })
-        .limit(1);
-      if (identity.chapter_id != null) query = query.eq('chapter_id', identity.chapter_id);
-      else query = query.is('chapter_id', null);
-      const { data, error } = await query;
-      if (error || !Array.isArray(data) || !data[0]) return null;
-      return data[0];
-    } catch (_) {
-      return null;
-    }
+    if (!identity || !identity.user_id || !identity.book_id) return null;
+    return _findCachedProgressRow(identity.book_id, identity.chapter_id != null ? identity.chapter_id : null);
   }
 
-  async function _writeProgress(bookId, chapterIndex, pageIndex, meta = {}) {
+  async function _writeProgress(bookId, chapterIndex, pageIndex) {
     const u = _user();
-    if (!u || !u.id) return null;
+    if (!_ready() || !u) return null;
     const identity = _collectProgressIdentity(bookId, chapterIndex);
     const payload = Object.assign({}, identity, {
       last_page_index: Number.isFinite(Number(pageIndex)) && Number(pageIndex) >= 0 ? Number(pageIndex) : 0,
-      last_read_at: _nowIso(),
-      updated_at: _nowIso(),
+      last_read_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     });
-    if (!payload.book_id) {
-      _updateDiag('progress', { status: 'error', error: 'book_id missing', reason: String(meta.reason || 'write-progress') });
-      return null;
-    }
-    _updateDiag('progress', { status: 'pending', error: null, reason: String(meta.reason || 'write-progress'), payload });
+    _recordSync('progress', 'pending', { payload });
     try {
-      const result = await _postDurableSync('write_progress', { row: payload });
-      const row = result && result.row ? result.row : payload;
-      const existing = await _findProgressRow(identity).catch(() => null);
-      _remoteProgressRows = (Array.isArray(_remoteProgressRows) ? _remoteProgressRows : []).filter((item) => String(item.id || '') !== String(existing && existing.id || ''));
-      _remoteProgressRows.unshift(row);
-      _updateDiag('progress', { status: 'ok', error: null, reason: String(meta.reason || 'write-progress') });
+      const data = await _serverSync('snapshot', { method: 'POST', body: { action: 'write_progress', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot);
+      const row = data && data.row ? data.row : payload;
+      _recordSync('progress', 'success', { row });
       _emitHydrated('progress');
       return row;
     } catch (error) {
-      _updateDiag('progress', { status: 'error', error: _serializeError(error), reason: String(meta.reason || 'write-progress'), payload });
+      _recordSync('progress', 'error', { message: String(error?.message || error || 'progress write failed'), payload });
       return null;
     }
   }
@@ -556,77 +540,70 @@ window.rcSync = (function () {
   async function getRestoreProgress(bookId) {
     const normalizedBookId = _normalizeBookId(bookId);
     if (!normalizedBookId || !_ready()) return null;
-    _updateDiag('restore', { status: 'lookup', error: null, bookId: normalizedBookId });
     const cached = _findLatestCachedBookProgress(normalizedBookId);
     if (cached) {
       const idx = Number(cached.last_page_index);
-      const result = Number.isFinite(idx) && idx >= 0 ? {
+      return Number.isFinite(idx) && idx >= 0 ? {
         pageIndex: idx,
         chapterIndex: _normalizeChapterId(cached.chapter_id) != null ? Number(cached.chapter_id) : null,
         updatedAt: cached.updated_at || cached.last_read_at || null,
       } : null;
-      _updateDiag('restore', { status: result ? 'cache-hit' : 'cache-empty', error: null, bookId: normalizedBookId });
-      return result;
     }
-    const c = _client();
-    const u = _user();
-    if (!c || !u || !u.id) return null;
+    _recordSync('restore', 'pending', { bookId: normalizedBookId });
     try {
-      const { data, error } = await c
-        .from('user_progress')
-        .select('book_id,last_page_index,updated_at,chapter_id,last_read_at,is_active')
-        .eq('user_id', u.id)
-        .eq('book_id', normalizedBookId)
-        .eq('is_active', true)
-        .order('updated_at', { ascending: false })
-        .limit(1);
-      if (error || !Array.isArray(data) || !data[0]) { _updateDiag('restore', { status: 'miss', error: error ? _serializeError(error) : null, bookId: normalizedBookId }); return null; }
-      const row = data[0];
+      const data = await _serverSync('restore', { params: { book_id: normalizedBookId } });
+      const row = data && data.row ? data.row : null;
+      if (!row) {
+        _recordSync('restore', 'empty', { bookId: normalizedBookId });
+        return null;
+      }
+      _remoteProgressRows = [row, ...(_remoteProgressRows || []).filter((entry) => String(entry.id || '') !== String(row.id || ''))];
       const idx = Number(row.last_page_index);
-      if (!Number.isFinite(idx) || idx < 0) return null;
-      return {
+      if (!Number.isFinite(idx) || idx < 0) {
+        _recordSync('restore', 'empty', { bookId: normalizedBookId });
+        return null;
+      }
+      const result = {
         pageIndex: idx,
         chapterIndex: _normalizeChapterId(row.chapter_id) != null ? Number(row.chapter_id) : null,
         updatedAt: row.updated_at || row.last_read_at || null,
       };
-    } catch (_) {
+      _recordSync('restore', 'success', { bookId: normalizedBookId, result });
+      return result;
+    } catch (error) {
+      _recordSync('restore', 'error', { bookId: normalizedBookId, message: String(error?.message || error || 'restore lookup failed') });
       return null;
     }
   }
 
   async function recordReadingSession(entry) {
     const u = _user();
+    if (!_ready() || !u || !entry || !entry.bookId) return null;
     const target = window.__rcReadingTarget || {};
-    const effectiveBookId = String((entry && entry.bookId) || target.bookId || '').trim();
-    if (!u || !u.id || !effectiveBookId) return null;
     const elapsedSeconds = Math.max(0, Math.round(Number(entry.elapsedSeconds || 0)));
     const payload = {
-      user_id: u.id,
       pages_completed: Math.max(0, Math.round(Number(entry.pagesAdvanced || 0))),
-      minutes_listened: elapsedSeconds > 0 ? Math.max(1, Math.round(elapsedSeconds / 60)) : 0,
-      elapsed_seconds: elapsedSeconds,
+      minutes_listened: Math.max(0, Math.round(elapsedSeconds / 60)),
       source_type: String(target.sourceType || 'book'),
-      source_id: String(target.bookId || effectiveBookId || ''),
-      book_id: effectiveBookId,
-      chapter_id: target.chapterIndex != null && Number(target.chapterIndex) >= 0 ? String(target.chapterIndex) : null,
+      source_id: String(target.bookId || entry.bookId || ''),
+      book_id: String(entry.bookId || ''),
+      chapter_id: target.chapterIndex != null ? String(target.chapterIndex) : null,
       mode: typeof window.appMode === 'string' ? String(window.appMode) : 'reading',
       tts_seconds: 0,
       completed: !!entry.completed,
-      started_at: entry.startedAt || _nowIso(),
-      ended_at: entry.endedAt || _nowIso(),
-      updated_at: _nowIso(),
+      started_at: entry.startedAt || new Date().toISOString(),
+      ended_at: entry.endedAt || new Date().toISOString(),
+      elapsed_seconds: elapsedSeconds,
     };
-    _updateDiag('sessions', { status: 'pending', error: null, payload });
+    _recordSync('sessions', 'pending', { payload });
     try {
-      const result = await _postDurableSync('record_session', { row: payload });
-      const row = result && result.row ? result.row : payload;
-      _remoteSessions.unshift(row);
-      _deriveRemoteProfileMetrics();
-      _updateDiag('sessions', { status: 'ok', error: null });
+      const data = await _serverSync('snapshot', { method: 'POST', body: { action: 'record_session', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot);
+      _recordSync('sessions', 'success', { row: data && data.row ? data.row : payload });
       _emitHydrated('sessions');
-      return row;
+      return data && data.row ? data.row : payload;
     } catch (error) {
-      _updateDiag('sessions', { status: 'error', error: _serializeError(error), payload });
+      _recordSync('sessions', 'error', { message: String(error?.message || error || 'session write failed'), payload });
       return null;
     }
   }
@@ -661,10 +638,13 @@ window.rcSync = (function () {
   }
 
   function _clearRemoteState() {
+    _remoteUsersRow = null;
     _remoteSettingsRow = null;
     _remoteProgressRows = [];
     _remoteSessions = [];
     _remoteProfileMetrics = null;
+    _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false };
+    _lastSyncSnapshotAt = null;
   }
 
   async function rehydrateDurableData() {
@@ -689,6 +669,7 @@ window.rcSync = (function () {
   function _handleAuthChanged(e) {
     const { signedIn, source } = e.detail || {};
     if (signedIn && source !== 'init-unconfigured' && source !== 'init-client-error') {
+      _hydrationState = { inFlight: true, users: false, settings: false, progress: false, sessions: false };
       setTimeout(() => { _onSignIn().catch(() => {}); }, 0);
       return;
     }
@@ -699,8 +680,6 @@ window.rcSync = (function () {
   }
 
   function _handlePrefsChanged() {
-    _deriveRemoteProfileMetrics();
-    _emitHydrated('profile-prefs');
     _queueSettingsSync();
   }
 
@@ -715,23 +694,8 @@ window.rcSync = (function () {
   try { document.addEventListener('change', _handleSettingsControlEvent, true); } catch (_) {}
   try { document.addEventListener('input', _handleSettingsControlEvent, true); } catch (_) {}
 
-  function getDiagnosticsSnapshot() {
-    return {
-      settings: { ..._syncDiagnostics.settings },
-      progress: { ..._syncDiagnostics.progress },
-      restore: { ..._syncDiagnostics.restore },
-      sessions: { ..._syncDiagnostics.sessions },
-      remote: {
-        settingsUpdatedAt: _remoteSettingsRow && _remoteSettingsRow.updated_at ? _remoteSettingsRow.updated_at : null,
-        progressRows: Array.isArray(_remoteProgressRows) ? _remoteProgressRows.slice(0, 5) : [],
-        sessionRows: Array.isArray(_remoteSessions) ? _remoteSessions.slice(0, 5) : [],
-      }
-    };
-  }
-
   return {
     scheduleProgressSync,
-    saveProgressNow,
     getReadingProgress,
     getRestoreProgress,
     recordReadingSession,
@@ -740,6 +704,10 @@ window.rcSync = (function () {
     syncSettings,
     getSettings,
     rehydrateDurableData,
-    getDiagnosticsSnapshot,
+    flushProgressSync,
+    scheduleCurrentTargetSync,
+    getRemoteUsersRow: () => _remoteUsersRow,
+    getHydrationState: () => ({ ..._hydrationState }),
+    getDiagnosticsSnapshot: () => ({ sync: { ..._syncDiagnostics }, hydrated: { ..._hydrationState }, snapshotAt: _lastSyncSnapshotAt, usersRow: _remoteUsersRow, settingsRow: _remoteSettingsRow, progressCount: (_remoteProgressRows || []).length, sessionCount: (_remoteSessions || []).length }),
   };
 })();

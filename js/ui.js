@@ -465,27 +465,16 @@
           diagPanel.style.display = 'none';
           return;
         }
-        const totalSpent = Object.values(sessionTokens?.spent || {}).reduce((a, b) => a + b, 0);
+        const usageSnapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function') ? window.rcUsage.getSnapshot() : null;
+        const totalSpent = Object.values((usageSnapshot && usageSnapshot.spent) || sessionTokens?.spent || {}).reduce((a, b) => a + b, 0);
         const merged = {
-          usage: (() => {
-            const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function') ? window.rcUsage.getSnapshot() : null;
-            return {
-              tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
-              remaining: snapshot && snapshot.authoritative && snapshot.remaining != null ? snapshot.remaining : '—',
-              allowance: snapshot && snapshot.authoritative && snapshot.allowance != null ? snapshot.allowance : '—',
-              authoritative: !!(snapshot && snapshot.authoritative),
-              totalSpent,
-              breakdown: (snapshot && snapshot.spent) || sessionTokens?.spent || {},
-            };
-          })(),
-          sync: (window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function') ? window.rcSync.getDiagnosticsSnapshot() : null,
-          stored: {
-            persistenceMode: (window.__rcRuntimePersistenceStripped ? 'stripped-for-stabilization' : 'normal'),
-            tier: null,
-            voiceVariant: null,
-            voiceSelection: null,
-            ttsSpeed: null,
-            autoplay: null,
+          usage: {
+            tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
+            remaining: usageSnapshot && usageSnapshot.authoritative && usageSnapshot.remaining != null ? usageSnapshot.remaining : '—',
+            allowance: usageSnapshot && usageSnapshot.authoritative && usageSnapshot.allowance != null ? usageSnapshot.allowance : '—',
+            authoritative: !!(usageSnapshot && usageSnapshot.authoritative),
+            totalSpent,
+            breakdown: (usageSnapshot && usageSnapshot.spent) || sessionTokens?.spent || {},
           },
           tts: {
             variant: TTS_STATE?.voiceVariant || 'female',
@@ -504,6 +493,7 @@
           runtime: (typeof window.getRuntimeUiState === 'function') ? window.getRuntimeUiState() : null,
           restore: (typeof window.getReadingRestoreStatus === 'function') ? window.getReadingRestoreStatus() : null,
           importer: (typeof window.getImporterDiagnosticsSnapshot === 'function') ? window.getImporterDiagnosticsSnapshot() : null,
+          sync: (window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function') ? window.rcSync.getDiagnosticsSnapshot() : null,
           ai: lastAIDiagnostics || null,
           anchors: lastAnchorsDiagnostics || null,
         };

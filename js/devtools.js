@@ -170,8 +170,9 @@ window.rcDevTools = (function () {
           <strong style="font-size:14px; opacity:0.95;">Dev tools</strong>
           <div id="devToolsStatus" style="font-size:12px; opacity:0.72; margin-top:2px;"></div>
         </div>
-        <button type="button" id="devToolsCloseBtn" style="padding:6px 10px;">✕</button>
+        <button type="button" id="devToolsCloseBtn" style="padding:6px 10px; cursor:pointer;">✕</button>
       </div>
+      <div id="devClientSummary" style="font-size:11px; opacity:0.75; margin-bottom:10px;"></div>
 
       <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
         <strong style="display:block; margin-bottom:8px; font-size:13px;">Plan</strong>
@@ -248,25 +249,7 @@ window.rcDevTools = (function () {
     `;
     document.body.appendChild(panel);
     statusEl = panel.querySelector('#devToolsStatus');
-    const dragBar = panel.querySelector('#devToolsDragBar');
-    let dragState = null;
     panel.querySelector('#devToolsCloseBtn').addEventListener('click', closePanel);
-    dragBar?.addEventListener('pointerdown', (ev) => {
-      const t = ev.target;
-      if (t && t.closest && t.closest('#devToolsCloseBtn')) return;
-      const rect = panel.getBoundingClientRect();
-      dragState = { offsetX: ev.clientX - rect.left, offsetY: ev.clientY - rect.top };
-      try { dragBar.setPointerCapture(ev.pointerId); } catch (_) {}
-      ev.preventDefault();
-    });
-    dragBar?.addEventListener('pointermove', (ev) => {
-      if (!dragState) return;
-      panel.style.right = 'auto';
-      panel.style.left = `${Math.max(10, Math.min(window.innerWidth - rectWidth(), ev.clientX - dragState.offsetX))}px`;
-      panel.style.top = `${Math.max(10, Math.min(window.innerHeight - rectHeight(), ev.clientY - dragState.offsetY))}px`;
-    });
-    dragBar?.addEventListener('pointerup', () => { dragState = null; });
-    dragBar?.addEventListener('pointercancel', () => { dragState = null; });
     panel.querySelector('#devPlanSaveBtn').addEventListener('click', async () => {
       await doAction('set_plan', { tier: value('devPlanTier'), status: value('devPlanStatus') });
     });
@@ -328,6 +311,35 @@ window.rcDevTools = (function () {
       await refresh();
       await rehydrate();
     });
+    const dragBar = panel.querySelector('#devToolsDragBar');
+    const closeBtn = panel.querySelector('#devToolsCloseBtn');
+    let dragState = null;
+    dragBar?.addEventListener('pointerdown', (ev) => {
+      if (ev.target === closeBtn) return;
+      dragState = {
+        startX: ev.clientX,
+        startY: ev.clientY,
+        left: parseFloat(panel.style.left || '0') || panel.getBoundingClientRect().left,
+        top: parseFloat(panel.style.top || '0') || panel.getBoundingClientRect().top,
+      };
+      try { dragBar.setPointerCapture(ev.pointerId); } catch (_) {}
+      ev.preventDefault();
+    });
+    dragBar?.addEventListener('pointermove', (ev) => {
+      if (!dragState) return;
+      const nextLeft = Math.max(8, dragState.left + (ev.clientX - dragState.startX));
+      const nextTop = Math.max(8, dragState.top + (ev.clientY - dragState.startY));
+      panel.style.left = `${nextLeft}px`;
+      panel.style.top = `${nextTop}px`;
+      panel.style.right = 'auto';
+    });
+    function endDrag(ev) {
+      if (!dragState) return;
+      dragState = null;
+      try { dragBar.releasePointerCapture(ev.pointerId); } catch (_) {}
+    }
+    dragBar?.addEventListener('pointerup', endDrag);
+    dragBar?.addEventListener('pointercancel', endDrag);
   }
 
   function value(id) {
@@ -342,8 +354,6 @@ window.rcDevTools = (function () {
     const el = panel && panel.querySelector(`#${id}`);
     return !!(el && el.checked);
   }
-  function rectWidth() { return panel ? (panel.offsetWidth || 430) : 430; }
-  function rectHeight() { return panel ? (panel.offsetHeight || 520) : 520; }
   function setValue(id, value) {
     const el = panel && panel.querySelector(`#${id}`);
     if (!el) return;
@@ -355,6 +365,18 @@ window.rcDevTools = (function () {
     el.checked = !!value;
   }
 
+  function getClientContext() {
+    let target = {};
+    let restore = null;
+    let profile = null;
+    let usage = null;
+    try { target = Object.assign({}, window.__rcReadingTarget || {}); } catch (_) {}
+    try { restore = typeof window.getReadingRestoreStatus === 'function' ? window.getReadingRestoreStatus() : null; } catch (_) {}
+    try { profile = window.rcPrefs && typeof window.rcPrefs.loadProfilePrefs === 'function' ? window.rcPrefs.loadProfilePrefs() : null; } catch (_) {}
+    try { usage = window.rcUsage && typeof window.rcUsage.getSnapshot === 'function' ? window.rcUsage.getSnapshot() : null; } catch (_) {}
+    return { target, restore, profile, usage };
+  }
+
   function renderPanel() {
     if (!panel) return;
     const snapshot = state.snapshot || {};
@@ -363,30 +385,36 @@ window.rcDevTools = (function () {
     const latestProgress = snapshot.progress && snapshot.progress.latest ? snapshot.progress.latest : {};
     const latestSession = snapshot.sessions && snapshot.sessions.latest ? snapshot.sessions.latest : {};
     const settings = snapshot.settingsRow || {};
-    const liveTarget = window.__rcReadingTarget || {};
-    const liveRuntime = (typeof window.getReadingRestoreStatus === 'function') ? window.getReadingRestoreStatus() : null;
-    const progressBookId = String(liveTarget.bookId || latestProgress.book_id || '');
-    const progressChapter = liveTarget.chapterIndex != null && Number.isFinite(Number(liveTarget.chapterIndex)) ? String(liveTarget.chapterIndex) : (latestProgress.chapter_id == null ? '' : latestProgress.chapter_id);
-    const progressPageDisplay = liveTarget.pageIndex != null && Number.isFinite(Number(liveTarget.pageIndex)) ? (Number(liveTarget.pageIndex) + 1) : (latestProgress.last_page_index == null ? 1 : Number(latestProgress.last_page_index) + 1);
-    const progressPageCount = liveRuntime && Number.isFinite(Number(liveRuntime.pageCount)) ? Number(liveRuntime.pageCount) : (latestProgress.page_count == null ? 0 : latestProgress.page_count);
+    const client = getClientContext();
+    const clientTarget = client.target || {};
+    const clientRestore = client.restore || {};
+    const clientBookId = String(clientTarget.bookId || '').trim();
+    const clientActive = !!clientBookId;
+    const resolvedBookId = clientActive ? clientBookId : (latestProgress.book_id || '');
+    const resolvedSourceId = clientActive ? (clientBookId || latestProgress.source_id || '') : (latestProgress.source_id || latestProgress.book_id || '');
+    const resolvedSourceType = clientActive ? (clientTarget.sourceType || 'book') : (latestProgress.source_type || 'book');
+    const resolvedChapter = clientActive ? (clientTarget.chapterIndex != null ? clientTarget.chapterIndex : (latestProgress.chapter_id == null ? '' : latestProgress.chapter_id)) : (latestProgress.chapter_id == null ? '' : latestProgress.chapter_id);
+    const resolvedPageIndex = clientActive ? (clientTarget.pageIndex != null ? clientTarget.pageIndex : (clientRestore.currentPageIndex != null ? clientRestore.currentPageIndex : latestProgress.last_page_index)) : latestProgress.last_page_index;
+    const resolvedPageVisible = resolvedPageIndex == null || resolvedPageIndex === '' ? '' : (Math.max(0, Number(resolvedPageIndex)) + 1);
+    const resolvedPageCount = clientRestore && clientRestore.pageCount ? clientRestore.pageCount : (latestProgress.page_count == null ? 0 : latestProgress.page_count);
     setValue('devPlanTier', entitlement.tier === 'premium' ? 'premium' : entitlement.tier === 'paid' ? 'paid' : 'free');
     setValue('devPlanStatus', entitlement.status || 'active');
     setValue('devUsageRemaining', usage.remaining == null ? '' : usage.remaining);
     setValue('devUsageUnits', usage.row && usage.row.used_units != null ? usage.row.used_units : 0);
     setValue('devUsageCalls', usage.usedApiCalls == null ? 0 : usage.usedApiCalls);
-    setValue('devProgressBookId', progressBookId);
-    setValue('devProgressSourceId', String(latestProgress.source_id || progressBookId || ''));
-    setValue('devProgressSourceType', latestProgress.source_type || liveTarget.sourceType || 'book');
-    setValue('devProgressChapter', progressChapter);
-    setValue('devProgressPage', progressPageDisplay);
-    setValue('devProgressPageCount', progressPageCount);
-    setValue('devSessionBookId', latestSession.book_id || progressBookId || '');
-    setValue('devSessionChapter', latestSession.chapter_id == null ? progressChapter : latestSession.chapter_id);
+    setValue('devProgressBookId', resolvedBookId);
+    setValue('devProgressSourceId', resolvedSourceId);
+    setValue('devProgressSourceType', resolvedSourceType);
+    setValue('devProgressChapter', resolvedChapter == null ? '' : resolvedChapter);
+    setValue('devProgressPage', resolvedPageVisible === '' ? '' : resolvedPageVisible);
+    setValue('devProgressPageCount', resolvedPageCount == null ? 0 : resolvedPageCount);
+    setValue('devSessionBookId', latestSession.book_id || resolvedBookId || '');
+    setValue('devSessionChapter', latestSession.chapter_id == null ? (resolvedChapter == null ? '' : resolvedChapter) : latestSession.chapter_id);
     setValue('devSessionMinutes', latestSession.minutes_listened == null ? 0 : latestSession.minutes_listened);
     setValue('devSessionPages', latestSession.pages_completed == null ? 0 : latestSession.pages_completed);
     setValue('devSessionMode', latestSession.mode || 'reading');
     setChecked('devSessionCompleted', !!latestSession.completed);
-    setValue('devSettingsGoal', settings.daily_goal_minutes == null ? 15 : settings.daily_goal_minutes);
+    setValue('devSettingsGoal', settings.daily_goal_minutes == null ? ((client.profile && client.profile.dailyGoalMinutes) || 15) : settings.daily_goal_minutes);
     setValue('devSettingsAppearance', settings.appearance_mode || 'light');
     setValue('devSettingsTheme', settings.theme_id || 'default');
     setValue('devSettingsTtsSpeed', settings.tts_speed == null ? '' : settings.tts_speed);
@@ -397,8 +425,15 @@ window.rcDevTools = (function () {
     if (statusEl) {
       const sessionSummary = snapshot.sessions || {};
       const plan = entitlement.tier === 'paid' ? 'Pro' : entitlement.tier === 'premium' ? 'Premium' : 'Free';
-      const remaining = usage.remaining == null ? 'Usage —' : `${usage.remaining} left`;
-      statusEl.textContent = `${state.email || 'dev'} • ${plan} • ${remaining} • ${sessionSummary.totalSessions || 0} sessions`;
+      const remaining = usage.remaining == null ? '—' : usage.remaining;
+      statusEl.textContent = `${state.email || 'dev'} • ${plan} • ${remaining} left • ${sessionSummary.totalSessions || 0} sessions`;
+    }
+    const summaryEl = panel.querySelector('#devClientSummary');
+    if (summaryEl) {
+      const restoreStatus = clientRestore && clientRestore.gate ? (clientRestore.gate.status || 'idle') : 'idle';
+      const chapterVisible = resolvedChapter === '' || resolvedChapter == null ? '—' : (Number(resolvedChapter) + 1);
+      const pageVisible = resolvedPageVisible === '' ? '—' : resolvedPageVisible;
+      summaryEl.textContent = `Client context • book ${resolvedBookId || '—'} • chapter ${chapterVisible} • page ${pageVisible} • restore ${restoreStatus}`;
     }
   }
 
@@ -455,6 +490,11 @@ window.rcDevTools = (function () {
   try {
     document.addEventListener('rc:auth-changed', () => {
       setTimeout(() => { refresh().catch(() => {}); }, 0);
+    });
+  } catch (_) {}
+  try {
+    document.addEventListener('rc:durable-data-hydrated', () => {
+      if (panel && panel.style.display === 'block') renderPanel();
     });
   } catch (_) {}
   try {

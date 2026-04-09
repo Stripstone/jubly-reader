@@ -107,9 +107,10 @@
             subtitle.innerHTML = 'Create an account to enter your library and keep your settings, billing, and progress in one place.';
             return;
         }
-        const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
+        const metrics = (window.rcSync && typeof window.rcSync.getRemoteProfileMetrics === 'function' && window.rcSync.getRemoteProfileMetrics())
+            || ((window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
             ? window.rcReadingMetrics.getReadingProfileMetrics()
-            : { sessionsCompleted: 0, weeklyMinutes: 0 };
+            : { sessionsCompleted: 0, weeklyMinutes: 0 });
         const sessions = Math.max(0, Number(metrics.sessionsCompleted || 0));
         const weekly = Math.max(0, Number(metrics.weeklyMinutes || 0));
         if (weekly > 0) {
@@ -144,7 +145,8 @@
         if (navProfileTrigger) navProfileTrigger.style.display = authed ? '' : 'none';
         if (navUsagePill) navUsagePill.classList.toggle('hidden-section', !authed || isReading);
 
-        const displayName = deriveDisplayName(user);
+        const remoteUserRow = (window.rcSync && typeof window.rcSync.getRemoteUsersRow === 'function') ? window.rcSync.getRemoteUsersRow() : null;
+        const displayName = String((remoteUserRow && remoteUserRow.display_name) || deriveDisplayName(user) || 'Account');
         if (navUserName) {
             navUserName.textContent = authed ? displayName : '';
             navUserName.classList.toggle('hidden-section', !authed);
@@ -1348,14 +1350,20 @@
         const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
             ? window.rcUsage.getSnapshot()
             : { remaining: null, allowance: null, authoritative: false };
-        const remaining = Number(snapshot?.remaining);
+        const rawRemaining = snapshot ? snapshot.remaining : null;
+        const remaining = rawRemaining == null || rawRemaining === '' ? null : Number(rawRemaining);
         valueEl.textContent = Number.isFinite(remaining) ? `${Math.max(0, remaining)} left today` : 'Usage';
     }
 
     function renderProfileSurface() {
-        const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
+        const hydration = (window.rcSync && typeof window.rcSync.getHydrationState === 'function') ? window.rcSync.getHydrationState() : null;
+        const remoteMetrics = (window.rcSync && typeof window.rcSync.getRemoteProfileMetrics === 'function') ? window.rcSync.getRemoteProfileMetrics() : null;
+        const localMetrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
             ? window.rcReadingMetrics.getReadingProfileMetrics()
             : { dailyGoalMinutes: 15, dailyMinutes: 0, weeklyMinutes: 0, sessionsCompleted: 0, progressPct: 0, lastGoalCelebratedOn: '', todayIso: '' };
+        const authed = isAuthedUser();
+        const waitingForRemote = !!(authed && hydration && hydration.inFlight && !remoteMetrics);
+        const metrics = remoteMetrics || localMetrics;
         const dailyEl = document.getElementById('profile-daily-minutes');
         const goalEl = document.getElementById('profile-goal-minutes');
         const weeklyEl = document.getElementById('profile-weekly-minutes');
@@ -1363,6 +1371,16 @@
         const labelEl = document.getElementById('profile-goal-progress-label');
         const copyEl = document.getElementById('profile-goal-copy');
         const ringEl = document.getElementById('profile-goal-ring');
+        if (waitingForRemote) {
+            if (dailyEl) dailyEl.textContent = '—';
+            if (goalEl) goalEl.textContent = '—';
+            if (weeklyEl) weeklyEl.textContent = '—';
+            if (sessionsEl) sessionsEl.textContent = '—';
+            if (labelEl) labelEl.textContent = '';
+            if (ringEl) ringEl.style.setProperty('--goal-progress', '0%');
+            if (copyEl) copyEl.textContent = 'Loading profile data…';
+            return;
+        }
         if (dailyEl) dailyEl.textContent = String(metrics.dailyMinutes || 0);
         if (goalEl) goalEl.textContent = String(metrics.dailyGoalMinutes || 15);
         if (weeklyEl) weeklyEl.textContent = String(metrics.weeklyMinutes || 0);
@@ -1460,11 +1478,12 @@
         const goalInput = document.getElementById('profile-goal-input');
         goalEditBtn?.addEventListener('click', () => { setGoalEditMode(true); });
         goalCancelBtn?.addEventListener('click', () => { setGoalEditMode(false); });
-        goalEditForm?.addEventListener('submit', (e) => {
+        goalEditForm?.addEventListener('submit', async (e) => {
             e.preventDefault();
             const next = Math.max(5, Math.min(300, Math.round(Number(goalInput && goalInput.value || 0) || 0)));
             if (!Number.isFinite(next) || next <= 0) return;
             try { if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') window.rcPrefs.saveProfilePrefs({ dailyGoalMinutes: next }); } catch (_) {}
+            try { if (window.rcSync && typeof window.rcSync.syncSettings === 'function') await window.rcSync.syncSettings('goal-submit'); } catch (_) {}
             setGoalEditMode(false);
             renderProfileSurface();
         });
