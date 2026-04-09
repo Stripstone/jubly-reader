@@ -165,7 +165,7 @@ window.rcDevTools = (function () {
     panel.style.background = 'var(--secondary-bg)';
     panel.style.boxShadow = '0 14px 32px rgba(0,0,0,0.24)';
     panel.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;">
+      <div id="devToolsDragBar" style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin:-14px -14px 10px -14px; padding:10px 14px; border-bottom:1px solid var(--border); cursor:move; user-select:none;">
         <div>
           <strong style="font-size:14px; opacity:0.95;">Dev tools</strong>
           <div id="devToolsStatus" style="font-size:12px; opacity:0.72; margin-top:2px;"></div>
@@ -202,7 +202,7 @@ window.rcDevTools = (function () {
           <label style="font-size:12px;">Source ID<input id="devProgressSourceId" type="text" style="width:100%; margin-top:4px;" /></label>
           <label style="font-size:12px;">Source type<input id="devProgressSourceType" type="text" value="book" style="width:100%; margin-top:4px;" /></label>
           <label style="font-size:12px;">Chapter<input id="devProgressChapter" type="text" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Current page<input id="devProgressPage" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
+          <label style="font-size:12px;">Current page<input id="devProgressPage" type="number" min="1" style="width:100%; margin-top:4px;" /></label>
           <label style="font-size:12px;">Page count<input id="devProgressPageCount" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
         </div>
         <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
@@ -248,7 +248,25 @@ window.rcDevTools = (function () {
     `;
     document.body.appendChild(panel);
     statusEl = panel.querySelector('#devToolsStatus');
+    const dragBar = panel.querySelector('#devToolsDragBar');
+    let dragState = null;
     panel.querySelector('#devToolsCloseBtn').addEventListener('click', closePanel);
+    dragBar?.addEventListener('pointerdown', (ev) => {
+      const t = ev.target;
+      if (t && t.closest && t.closest('#devToolsCloseBtn')) return;
+      const rect = panel.getBoundingClientRect();
+      dragState = { offsetX: ev.clientX - rect.left, offsetY: ev.clientY - rect.top };
+      try { dragBar.setPointerCapture(ev.pointerId); } catch (_) {}
+      ev.preventDefault();
+    });
+    dragBar?.addEventListener('pointermove', (ev) => {
+      if (!dragState) return;
+      panel.style.right = 'auto';
+      panel.style.left = `${Math.max(10, Math.min(window.innerWidth - rectWidth(), ev.clientX - dragState.offsetX))}px`;
+      panel.style.top = `${Math.max(10, Math.min(window.innerHeight - rectHeight(), ev.clientY - dragState.offsetY))}px`;
+    });
+    dragBar?.addEventListener('pointerup', () => { dragState = null; });
+    dragBar?.addEventListener('pointercancel', () => { dragState = null; });
     panel.querySelector('#devPlanSaveBtn').addEventListener('click', async () => {
       await doAction('set_plan', { tier: value('devPlanTier'), status: value('devPlanStatus') });
     });
@@ -264,7 +282,7 @@ window.rcDevTools = (function () {
         source_id: value('devProgressSourceId') || value('devProgressBookId'),
         source_type: value('devProgressSourceType') || 'book',
         chapter_id: value('devProgressChapter') || null,
-        pageIndex: num('devProgressPage'),
+        pageIndex: Math.max(0, num('devProgressPage') - 1),
         pageCount: num('devProgressPageCount'),
       });
     });
@@ -310,15 +328,6 @@ window.rcDevTools = (function () {
       await refresh();
       await rehydrate();
     });
-    document.addEventListener('click', (ev) => {
-      if (!panel || panel.style.display !== 'block') return;
-      const t = ev.target;
-      const inPanel = panel.contains(t);
-      const inCog = cogBtn && cogBtn.contains(t);
-      const inDiag = host.panel && host.panel.contains(t);
-      if (inPanel || inCog || inDiag) return;
-      closePanel();
-    }, true);
   }
 
   function value(id) {
@@ -333,6 +342,8 @@ window.rcDevTools = (function () {
     const el = panel && panel.querySelector(`#${id}`);
     return !!(el && el.checked);
   }
+  function rectWidth() { return panel ? (panel.offsetWidth || 430) : 430; }
+  function rectHeight() { return panel ? (panel.offsetHeight || 520) : 520; }
   function setValue(id, value) {
     const el = panel && panel.querySelector(`#${id}`);
     if (!el) return;
@@ -352,19 +363,25 @@ window.rcDevTools = (function () {
     const latestProgress = snapshot.progress && snapshot.progress.latest ? snapshot.progress.latest : {};
     const latestSession = snapshot.sessions && snapshot.sessions.latest ? snapshot.sessions.latest : {};
     const settings = snapshot.settingsRow || {};
+    const liveTarget = window.__rcReadingTarget || {};
+    const liveRuntime = (typeof window.getReadingRestoreStatus === 'function') ? window.getReadingRestoreStatus() : null;
+    const progressBookId = String(liveTarget.bookId || latestProgress.book_id || '');
+    const progressChapter = liveTarget.chapterIndex != null && Number.isFinite(Number(liveTarget.chapterIndex)) ? String(liveTarget.chapterIndex) : (latestProgress.chapter_id == null ? '' : latestProgress.chapter_id);
+    const progressPageDisplay = liveTarget.pageIndex != null && Number.isFinite(Number(liveTarget.pageIndex)) ? (Number(liveTarget.pageIndex) + 1) : (latestProgress.last_page_index == null ? 1 : Number(latestProgress.last_page_index) + 1);
+    const progressPageCount = liveRuntime && Number.isFinite(Number(liveRuntime.pageCount)) ? Number(liveRuntime.pageCount) : (latestProgress.page_count == null ? 0 : latestProgress.page_count);
     setValue('devPlanTier', entitlement.tier === 'premium' ? 'premium' : entitlement.tier === 'paid' ? 'paid' : 'free');
     setValue('devPlanStatus', entitlement.status || 'active');
     setValue('devUsageRemaining', usage.remaining == null ? '' : usage.remaining);
     setValue('devUsageUnits', usage.row && usage.row.used_units != null ? usage.row.used_units : 0);
     setValue('devUsageCalls', usage.usedApiCalls == null ? 0 : usage.usedApiCalls);
-    setValue('devProgressBookId', latestProgress.book_id || '');
-    setValue('devProgressSourceId', latestProgress.source_id || latestProgress.book_id || '');
-    setValue('devProgressSourceType', latestProgress.source_type || 'book');
-    setValue('devProgressChapter', latestProgress.chapter_id == null ? '' : latestProgress.chapter_id);
-    setValue('devProgressPage', latestProgress.last_page_index == null ? 0 : latestProgress.last_page_index);
-    setValue('devProgressPageCount', latestProgress.page_count == null ? 0 : latestProgress.page_count);
-    setValue('devSessionBookId', latestSession.book_id || latestProgress.book_id || '');
-    setValue('devSessionChapter', latestSession.chapter_id == null ? '' : latestSession.chapter_id);
+    setValue('devProgressBookId', progressBookId);
+    setValue('devProgressSourceId', String(latestProgress.source_id || progressBookId || ''));
+    setValue('devProgressSourceType', latestProgress.source_type || liveTarget.sourceType || 'book');
+    setValue('devProgressChapter', progressChapter);
+    setValue('devProgressPage', progressPageDisplay);
+    setValue('devProgressPageCount', progressPageCount);
+    setValue('devSessionBookId', latestSession.book_id || progressBookId || '');
+    setValue('devSessionChapter', latestSession.chapter_id == null ? progressChapter : latestSession.chapter_id);
     setValue('devSessionMinutes', latestSession.minutes_listened == null ? 0 : latestSession.minutes_listened);
     setValue('devSessionPages', latestSession.pages_completed == null ? 0 : latestSession.pages_completed);
     setValue('devSessionMode', latestSession.mode || 'reading');
@@ -380,8 +397,8 @@ window.rcDevTools = (function () {
     if (statusEl) {
       const sessionSummary = snapshot.sessions || {};
       const plan = entitlement.tier === 'paid' ? 'Pro' : entitlement.tier === 'premium' ? 'Premium' : 'Free';
-      const remaining = usage.remaining == null ? '—' : usage.remaining;
-      statusEl.textContent = `${state.email || 'dev'} • ${plan} • ${remaining} left • ${sessionSummary.totalSessions || 0} sessions`;
+      const remaining = usage.remaining == null ? 'Usage —' : `${usage.remaining} left`;
+      statusEl.textContent = `${state.email || 'dev'} • ${plan} • ${remaining} • ${sessionSummary.totalSessions || 0} sessions`;
     }
   }
 
