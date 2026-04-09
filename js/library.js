@@ -19,41 +19,6 @@
     return 0;
   }
 
-  function updateRestoreGateStatus(partial) {
-    try {
-      const base = window.__rcRestoreGateStatus && typeof window.__rcRestoreGateStatus === 'object'
-        ? window.__rcRestoreGateStatus
-        : { status: 'idle' };
-      window.__rcRestoreGateStatus = Object.assign({}, base, partial || {}, { updatedAt: new Date().toISOString() });
-    } catch (_) {}
-  }
-
-  function scheduleCurrentReadingProgress(reason) {
-    try {
-      if (!(window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function')) return;
-      const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
-      const pageIndex = getFocusedOrInferredReadingPageIndex();
-      const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
-      const bookId = String(ctx.bookId || (window.__rcReadingTarget || {}).bookId || '').trim();
-      if (!bookId) return;
-      window.rcSync.scheduleProgressSync(bookId, chapterIndex, pageIndex, { reason: String(reason || 'runtime') });
-    } catch (_) {}
-  }
-
-  async function flushCurrentReadingProgress(reason) {
-    try {
-      if (!(window.rcSync && typeof window.rcSync.saveProgressNow === 'function')) return null;
-      const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
-      const pageIndex = getFocusedOrInferredReadingPageIndex();
-      const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
-      const bookId = String(ctx.bookId || (window.__rcReadingTarget || {}).bookId || '').trim();
-      if (!bookId) return null;
-      return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'runtime-immediate') });
-    } catch (_) {
-      return null;
-    }
-  }
-
   function applyPendingReadingRestore() {
     try {
       const idx = Number(window.__rcPendingRestorePageIndex ?? -1);
@@ -70,10 +35,8 @@
         if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _cur.sourceType || '', bookId: _cur.bookId || '', chapterIndex: _cur.chapterIndex != null ? _cur.chapterIndex : -1, pageIndex: idx });
       } catch (_) {}
       window.__rcPendingRestorePageIndex = -1;
-      updateRestoreGateStatus({ status: 'restored', pageIndex: idx, chapterIndex: (window.__rcReadingTarget || {}).chapterIndex != null ? (window.__rcReadingTarget || {}).chapterIndex : -1 });
       return true;
     } catch (_) {
-      updateRestoreGateStatus({ status: 'restore-error' });
       return false;
     }
   }
@@ -1487,7 +1450,6 @@
         // Auto-render all pages as one set — no Load click required.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
         if (allText) applySelectionToBulkInput(allText, { append: false });
-        updateRestoreGateStatus({ status: 'ready', bookId: String((window.__rcReadingTarget || {}).bookId || ''), pageIndex: getFocusedOrInferredReadingPageIndex() });
         return;
       }
 
@@ -1504,7 +1466,6 @@
       // Auto-render the resolved chapter — no Load click required.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
       if (chapterText) applySelectionToBulkInput(chapterText, { append: false });
-      updateRestoreGateStatus({ status: 'ready', bookId: String((window.__rcReadingTarget || {}).bookId || ''), chapterIndex: currentChapterIndex, pageIndex: getFocusedOrInferredReadingPageIndex() });
     }
 
     async function loadManifest() {
@@ -1628,17 +1589,11 @@
     bookSelect.addEventListener("change", async () => {
       const id = bookSelect.value;
       if (!id) return;
-      const readingModeEl = document.getElementById('reading-mode');
-      try { if (readingModeEl) readingModeEl.classList.add('reading-restore-pending'); } catch (_) {}
-      updateRestoreGateStatus({ status: 'lookup', bookId: String(id), source: 'book-select' });
       let restore = null;
       try {
         if (window.rcSync && typeof window.rcSync.getRestoreProgress === 'function') restore = await window.rcSync.getRestoreProgress(String(id));
       } catch (_) {}
-      updateRestoreGateStatus({ status: 'loading-book', bookId: String(id), restore: restore || null, source: 'book-select' });
       await loadBook(id, { restore });
-      try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
-      updateRestoreGateStatus({ status: 'ready', bookId: String(id), source: 'book-select', pageIndex: getFocusedOrInferredReadingPageIndex() });
     });
 
     chapterSelect.addEventListener("change", () => {
@@ -2248,7 +2203,6 @@
     applyModeVisibility();
     if (typeof applyTierAccess === 'function') applyTierAccess();
     try { applyPendingReadingRestore(); } catch (_) {}
-    scheduleCurrentReadingProgress('render-ready');
     try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
     _installScrollPageTracker();
     try { if (typeof window.__jublyAfterRender === 'function') window.__jublyAfterRender(); } catch (_) {}
@@ -2639,7 +2593,6 @@ function _installScrollPageTracker() {
         if (!bestEl || !Number.isFinite(bestIdx) || bestIdx < 0) return;
         // Guard: skip if the winning element is in a hidden section (double-check).
         if (bestEl.getBoundingClientRect().height <= 0) return;
-        const prevIdx = typeof lastFocusedPageIndex === 'number' ? lastFocusedPageIndex : -1;
         lastFocusedPageIndex = bestIdx;
         updateReadingMetricsPage(bestIdx);
         // Keep reading target in sync so bottom-bar Play speaks the scrolled-to page.
@@ -2647,7 +2600,6 @@ function _installScrollPageTracker() {
           const _ctx = window.getReadingTargetContext();
           if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
         } catch (_) {}
-        if (bestIdx !== prevIdx) scheduleCurrentReadingProgress('scroll-tracker');
       } catch (_) {}
     });
   }, { passive: true });
@@ -2718,7 +2670,7 @@ function finalizeReadingMetricsSession() {
       });
     }
     if (window.rcReadingMetrics && typeof window.rcReadingMetrics.appendReadingSession === 'function') {
-      if (elapsedSeconds > 0 || session.pagesAdvanced >= 1) {
+      if (elapsedSeconds >= 60 || session.pagesAdvanced >= 1) {
         const sessionEntry = {
           bookId: session.bookId,
           startedAt: session.startedAt,
@@ -2770,7 +2722,7 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   try {
     if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
       const _t = window.__rcReadingTarget || {};
-      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx, { reason: 'focus-reading-page' });
+      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx);
     }
   } catch (_) {}
   return { ok: true, index: idx, total };
@@ -2842,13 +2794,11 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   }
 
   let restore = null;
-  updateRestoreGateStatus({ status: 'lookup', bookId: normalizedId, source: 'preview-entry' });
   try {
     if (window.rcSync && typeof window.rcSync.getRestoreProgress === 'function') {
       restore = await window.rcSync.getRestoreProgress(normalizedId);
     }
   } catch (_) {}
-  updateRestoreGateStatus({ status: 'loading-book', bookId: normalizedId, restore: restore || null, source: 'preview-entry' });
 
   // Await the runtime-owned book load path directly only after restore truth is
   // known or explicitly absent. This prevents a misleading page-1 flash before
@@ -2858,13 +2808,11 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   }
 
   try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
-  updateRestoreGateStatus({ status: 'ready', bookId: normalizedId, source: 'preview-entry', pageIndex: getFocusedOrInferredReadingPageIndex() });
   try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}
   return true;
 };
 
 window.exitReadingSession = function exitReadingSession() {
-  try { flushCurrentReadingProgress('exit-reading'); } catch (_) {}
   const metrics = finalizeReadingMetricsSession();
   const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}

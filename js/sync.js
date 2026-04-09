@@ -21,14 +21,6 @@ window.rcSync = (function () {
   let _remoteProgressRows = [];
   let _remoteSessions = [];
   let _remoteProfileMetrics = null;
-  const _syncDiagnostics = {
-    lastHydrated: null,
-    settings: { status: 'idle', at: null, error: null, reason: '' },
-    progress: { status: 'idle', at: null, error: null, reason: '', payload: null },
-    restore: { status: 'idle', at: null, error: null, bookId: '', result: null },
-    sessions: { status: 'idle', at: null, error: null, payload: null },
-    cache: { progressRows: 0, sessionRows: 0, settingsUpdatedAt: null },
-  };
 
   const RC_THEME_PREFS_KEY = 'rc_theme_prefs';
   const RC_APPEARANCE_PREFS_KEY = 'rc_appearance_prefs';
@@ -56,8 +48,6 @@ window.rcSync = (function () {
   }
 
   function _emitHydrated(kind) {
-    try { _syncDiagnostics.lastHydrated = { kind: String(kind || 'sync'), at: _nowIso() }; } catch (_) {}
-    _updateCacheDiag();
     try { document.dispatchEvent(new CustomEvent('rc:durable-data-hydrated', { detail: { kind: String(kind || 'sync') } })); } catch (_) {}
   }
 
@@ -70,45 +60,6 @@ window.rcSync = (function () {
     try { localStorage.setItem(key, JSON.stringify(safe)); } catch (_) {}
     return safe;
   }
-
-  function _nowIso() {
-    return new Date().toISOString();
-  }
-
-  function _serializeError(error) {
-    if (!error) return null;
-    if (typeof error === 'string') return error;
-    return String(error.message || error.code || error.status || error || 'Unknown error');
-  }
-
-  function _updateDiag(kind, patch) {
-    try {
-      _syncDiagnostics[kind] = Object.assign({}, _syncDiagnostics[kind] || {}, patch || {}, { at: _nowIso() });
-    } catch (_) {}
-  }
-
-  function _updateCacheDiag() {
-    try {
-      _syncDiagnostics.cache = Object.assign({}, _syncDiagnostics.cache || {}, {
-        progressRows: Array.isArray(_remoteProgressRows) ? _remoteProgressRows.length : 0,
-        sessionRows: Array.isArray(_remoteSessions) ? _remoteSessions.length : 0,
-        settingsUpdatedAt: _remoteSettingsRow && _remoteSettingsRow.updated_at ? _remoteSettingsRow.updated_at : null,
-      });
-    } catch (_) {}
-  }
-
-  function _currentClientContext() {
-    try {
-      return {
-        userId: (_user() || {}).id || '',
-        target: Object.assign({}, window.__rcReadingTarget || {}),
-        restore: (typeof window.getReadingRestoreStatus === 'function') ? window.getReadingRestoreStatus() : null,
-      };
-    } catch (_) {
-      return { userId: '', target: {}, restore: null };
-    }
-  }
-
 
   function _currentThemePrefs() {
     const stored = _readLocalJson(RC_THEME_PREFS_KEY);
@@ -230,7 +181,6 @@ window.rcSync = (function () {
     if (row.explorer_accent_swatch) nextTheme.theme_settings.accentSwatch = String(row.explorer_accent_swatch);
     if (row.explorer_background_mode) nextTheme.theme_settings.backgroundMode = String(row.explorer_background_mode);
     _writeLocalJson(RC_THEME_PREFS_KEY, nextTheme);
-    _updateCacheDiag();
     try { if (window.rcTheme && typeof window.rcTheme.load === 'function') window.rcTheme.load(); } catch (_) {}
 
     if (row.appearance_mode) {
@@ -287,27 +237,15 @@ window.rcSync = (function () {
     }
   }
 
-  async function syncSettings(reason = 'prefs-change') {
+  async function syncSettings() {
     const c = _client();
     const u = _user();
-    if (!c || !u) {
-      _updateDiag('settings', { status: 'skipped', reason, error: 'not-ready' });
-      return null;
-    }
+    if (!c || !u) return;
     const payload = Object.assign({ user_id: u.id }, _collectSettingsRow());
-    _updateDiag('settings', { status: 'pending', reason, error: null, payload });
     try {
-      const { error } = await c.from('user_settings').upsert(payload, { onConflict: 'user_id' });
-      if (error) throw error;
-      _remoteSettingsRow = Object.assign({}, _remoteSettingsRow || {}, payload);
-      _deriveRemoteProfileMetrics();
-      _updateDiag('settings', { status: 'ok', reason, error: null, payload: _remoteSettingsRow });
-      _emitHydrated('settings');
-      return _remoteSettingsRow;
-    } catch (error) {
-      _updateDiag('settings', { status: 'error', reason, error: _serializeError(error), payload });
-      throw error;
-    }
+      await c.from('user_settings').upsert(payload, { onConflict: 'user_id' });
+      _remoteSettingsRow = payload;
+    } catch (_) {}
   }
 
   async function getSettings() {
@@ -320,14 +258,9 @@ window.rcSync = (function () {
         .select('user_id,theme_id,font_id,text_size,line_spacing,page_turn_sound_id,tts_speed,tts_voice_id,tts_volume,autoplay_enabled,music_enabled,music_profile_id,particles_enabled,particle_preset_id,use_source_page_numbers,appearance_mode,daily_goal_minutes,last_goal_celebrated_on,explorer_accent_swatch,explorer_background_mode,updated_at')
         .eq('user_id', u.id)
         .maybeSingle();
-      if (error || !data) {
-        _updateDiag('settings', { status: 'read-miss', reason: 'get-settings', error: error ? _serializeError(error) : null });
-        return null;
-      }
-      _updateDiag('settings', { status: 'read-ok', reason: 'get-settings', error: null, payload: data });
+      if (error || !data) return null;
       return data;
-    } catch (error) {
-      _updateDiag('settings', { status: 'read-error', reason: 'get-settings', error: _serializeError(error) });
+    } catch (_) {
       return null;
     }
   }
@@ -401,24 +334,20 @@ window.rcSync = (function () {
         .eq('user_id', u.id)
         .eq('is_active', true)
         .order('updated_at', { ascending: false });
-      if (error || !Array.isArray(data)) { _applyProgressRows([]); _updateDiag('progress', { status: 'cache-miss', reason: 'load-progress-cache', error: error ? _serializeError(error) : null }); _updateCacheDiag(); return []; }
+      if (error || !Array.isArray(data)) { _applyProgressRows([]); return []; }
       _applyProgressRows(data);
-      _updateCacheDiag();
       return data;
-    } catch (error) {
+    } catch (_) {
       _applyProgressRows([]);
-      _updateDiag('progress', { status: 'cache-error', reason: 'load-progress-cache', error: _serializeError(error) });
-      _updateCacheDiag();
       return [];
     }
   }
 
   function _deriveRemoteProfileMetrics() {
     const profile = _currentProfilePrefs();
-    const localGoal = Number(profile.dailyGoalMinutes);
-    const remoteGoal = Number(_remoteSettingsRow && _remoteSettingsRow.daily_goal_minutes);
-    const goalSource = Number.isFinite(localGoal) && localGoal > 0 ? localGoal : (Number.isFinite(remoteGoal) && remoteGoal > 0 ? remoteGoal : 15);
-    const goal = Math.max(5, Math.min(300, Math.round(goalSource)));
+    const goal = _remoteSettingsRow && Number.isFinite(Number(_remoteSettingsRow.daily_goal_minutes))
+      ? Math.max(5, Math.min(300, Math.round(Number(_remoteSettingsRow.daily_goal_minutes))))
+      : Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes || 15))));
     const today = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getTodayIsoDate === 'function')
       ? window.rcReadingMetrics.getTodayIsoDate()
       : new Date().toISOString().slice(0, 10);
@@ -444,7 +373,7 @@ window.rcSync = (function () {
       weeklyMinutes: Math.round(weeklySeconds / 60),
       sessionsCompleted,
       progressPct: goal > 0 ? Math.max(0, Math.min(100, Math.round((dailySeconds / (goal * 60)) * 100))) : 0,
-      lastGoalCelebratedOn: String(profile.lastGoalCelebratedOn || ((_remoteSettingsRow && _remoteSettingsRow.last_goal_celebrated_on) || '')),
+      lastGoalCelebratedOn: String((_remoteSettingsRow && _remoteSettingsRow.last_goal_celebrated_on) || profile.lastGoalCelebratedOn || ''),
       todayIso: today,
     };
     return _remoteProfileMetrics;
@@ -463,12 +392,10 @@ window.rcSync = (function () {
         .limit(500);
       _remoteSessions = (!error && Array.isArray(data)) ? data : [];
       _deriveRemoteProfileMetrics();
-      _updateCacheDiag();
       return _remoteSessions;
     } catch (_) {
       _remoteSessions = [];
       _remoteProfileMetrics = null;
-      _updateCacheDiag();
       return [];
     }
   }
@@ -479,36 +406,20 @@ window.rcSync = (function () {
     if (remote) {
       _applyRemoteSettingsRow(remote);
     } else {
-      const seeded = await syncSettings('signin-seed').catch(() => null);
-      if (seeded) _applyRemoteSettingsRow(seeded);
+      await syncSettings();
     }
     await _loadProgressCache();
     await _loadSessionCache();
     _emitHydrated('signin');
   }
 
-  function scheduleProgressSync(bookId, chapterIndex, pageIndex, meta = {}) {
+  function scheduleProgressSync(bookId, chapterIndex, pageIndex) {
     if (!_ready()) return;
     if (_progressTimer) clearTimeout(_progressTimer);
-    _updateDiag('progress', {
-      status: 'queued',
-      reason: String(meta && meta.reason || 'schedule'),
-      error: null,
-      payload: { bookId: bookId || '', chapterIndex, pageIndex },
-    });
     _progressTimer = setTimeout(() => {
       _progressTimer = null;
-      _writeProgress(bookId, chapterIndex, pageIndex, meta).catch(() => {});
+      _writeProgress(bookId, chapterIndex, pageIndex).catch(() => {});
     }, 500);
-  }
-
-  async function saveProgressNow(bookId, chapterIndex, pageIndex, meta = {}) {
-    if (!_ready()) return null;
-    if (_progressTimer) {
-      clearTimeout(_progressTimer);
-      _progressTimer = null;
-    }
-    return _writeProgress(bookId, chapterIndex, pageIndex, Object.assign({}, meta || {}, { immediate: true }));
   }
 
   async function _findProgressRow(identity) {
@@ -525,7 +436,6 @@ window.rcSync = (function () {
         .order('updated_at', { ascending: false })
         .limit(1);
       if (identity.chapter_id != null) query = query.eq('chapter_id', identity.chapter_id);
-      else query = query.is('chapter_id', null);
       const { data, error } = await query;
       if (error || !Array.isArray(data) || !data[0]) return null;
       return data[0];
@@ -534,64 +444,28 @@ window.rcSync = (function () {
     }
   }
 
-  async function _writeProgress(bookId, chapterIndex, pageIndex, meta = {}) {
+  async function _writeProgress(bookId, chapterIndex, pageIndex) {
     const c = _client();
     const u = _user();
-    if (!c || !u) {
-      _updateDiag('progress', { status: 'skipped', reason: String(meta && meta.reason || 'write-progress'), error: 'not-ready' });
-      return null;
-    }
+    if (!c || !u) return;
     const identity = _collectProgressIdentity(bookId, chapterIndex);
-    if (!identity.book_id) {
-      _updateDiag('progress', {
-        status: 'error',
-        reason: String(meta && meta.reason || 'write-progress'),
-        error: 'book_id-missing',
-        payload: { identity, bookId, chapterIndex, pageIndex, context: _currentClientContext() },
-      });
-      return null;
-    }
     const payload = Object.assign({}, identity, {
       last_page_index: Number.isFinite(Number(pageIndex)) && Number(pageIndex) >= 0 ? Number(pageIndex) : 0,
-      last_read_at: _nowIso(),
-      updated_at: _nowIso(),
+      last_read_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     });
-    _updateDiag('progress', { status: 'pending', reason: String(meta && meta.reason || 'write-progress'), error: null, payload });
     try {
       const existing = await _findProgressRow(identity);
-      let responseData = null;
       if (existing && existing.id) {
-        const { data, error } = await c.from('user_progress')
-          .update(payload)
-          .eq('id', existing.id)
-          .select('id,book_id,last_page_index,updated_at,chapter_id,page_count,last_read_at,source_type,source_id,is_active,session_version')
-          .limit(1);
-        if (error) throw error;
-        responseData = Array.isArray(data) && data[0] ? data[0] : null;
+        await c.from('user_progress').update(payload).eq('id', existing.id);
       } else {
-        const { data, error } = await c.from('user_progress')
-          .insert(payload)
-          .select('id,book_id,last_page_index,updated_at,chapter_id,page_count,last_read_at,source_type,source_id,is_active,session_version')
-          .limit(1);
-        if (error) throw error;
-        responseData = Array.isArray(data) && data[0] ? data[0] : null;
+        await c.from('user_progress').insert(payload);
       }
-      const merged = Object.assign({}, existing || {}, payload, responseData || {});
-      _remoteProgressRows = (Array.isArray(_remoteProgressRows) ? _remoteProgressRows : []).filter((row) => String(row.id || '') !== String(existing && existing.id || ''));
+      const merged = Object.assign({}, existing || {}, payload);
+      _remoteProgressRows = (_remoteProgressRows || []).filter((row) => String(row.id || '') !== String(existing?.id || ''));
       _remoteProgressRows.unshift(merged);
-      _updateCacheDiag();
-      _updateDiag('progress', { status: 'ok', reason: String(meta && meta.reason || 'write-progress'), error: null, payload: merged });
       _emitHydrated('progress');
-      return merged;
-    } catch (error) {
-      _updateDiag('progress', {
-        status: 'error',
-        reason: String(meta && meta.reason || 'write-progress'),
-        error: _serializeError(error),
-        payload,
-      });
-      return null;
-    }
+    } catch (_) {}
   }
 
   async function getReadingProgress(bookId, chapterIndex) {
@@ -610,17 +484,14 @@ window.rcSync = (function () {
   async function getRestoreProgress(bookId) {
     const normalizedBookId = _normalizeBookId(bookId);
     if (!normalizedBookId || !_ready()) return null;
-    _updateDiag('restore', { status: 'lookup', bookId: normalizedBookId, error: null, result: null });
     const cached = _findLatestCachedBookProgress(normalizedBookId);
     if (cached) {
       const idx = Number(cached.last_page_index);
-      const result = Number.isFinite(idx) && idx >= 0 ? {
+      return Number.isFinite(idx) && idx >= 0 ? {
         pageIndex: idx,
         chapterIndex: _normalizeChapterId(cached.chapter_id) != null ? Number(cached.chapter_id) : null,
         updatedAt: cached.updated_at || cached.last_read_at || null,
       } : null;
-      _updateDiag('restore', { status: result ? 'cache-hit' : 'cache-empty', bookId: normalizedBookId, error: null, result });
-      return result;
     }
     const c = _client();
     const u = _user();
@@ -628,31 +499,21 @@ window.rcSync = (function () {
     try {
       const { data, error } = await c
         .from('user_progress')
-        .select('book_id,last_page_index,updated_at,chapter_id,last_read_at,is_active')
+        .select('book_id,last_page_index,updated_at,chapter_id,last_read_at')
         .eq('user_id', u.id)
         .eq('book_id', normalizedBookId)
-        .eq('is_active', true)
         .order('updated_at', { ascending: false })
         .limit(1);
-      if (error || !Array.isArray(data) || !data[0]) {
-        _updateDiag('restore', { status: 'miss', bookId: normalizedBookId, error: error ? _serializeError(error) : null, result: null });
-        return null;
-      }
+      if (error || !Array.isArray(data) || !data[0]) return null;
       const row = data[0];
       const idx = Number(row.last_page_index);
-      if (!Number.isFinite(idx) || idx < 0) {
-        _updateDiag('restore', { status: 'empty', bookId: normalizedBookId, error: null, result: null });
-        return null;
-      }
-      const result = {
+      if (!Number.isFinite(idx) || idx < 0) return null;
+      return {
         pageIndex: idx,
         chapterIndex: _normalizeChapterId(row.chapter_id) != null ? Number(row.chapter_id) : null,
         updatedAt: row.updated_at || row.last_read_at || null,
       };
-      _updateDiag('restore', { status: 'server-hit', bookId: normalizedBookId, error: null, result });
-      return result;
-    } catch (error) {
-      _updateDiag('restore', { status: 'error', bookId: normalizedBookId, error: _serializeError(error), result: null });
+    } catch (_) {
       return null;
     }
   }
@@ -660,47 +521,33 @@ window.rcSync = (function () {
   async function recordReadingSession(entry) {
     const c = _client();
     const u = _user();
+    if (!c || !u || !u.id || !entry || !entry.bookId) return;
     const target = window.__rcReadingTarget || {};
-    const effectiveBookId = String((entry && entry.bookId) || target.bookId || '').trim();
-    if (!c || !u || !u.id || !effectiveBookId) {
-      _updateDiag('sessions', { status: 'skipped', error: 'missing-session-context', payload: { entry, target } });
-      return null;
-    }
     const elapsedSeconds = Math.max(0, Math.round(Number(entry.elapsedSeconds || 0)));
     const payload = {
       user_id: u.id,
       pages_completed: Math.max(0, Math.round(Number(entry.pagesAdvanced || 0))),
-      minutes_listened: elapsedSeconds > 0 ? Math.max(1, Math.round(elapsedSeconds / 60)) : 0,
+      minutes_listened: Math.max(0, Math.round(elapsedSeconds / 60)),
       source_type: String(target.sourceType || 'book'),
-      source_id: String(target.bookId || effectiveBookId || ''),
-      book_id: effectiveBookId,
-      chapter_id: target.chapterIndex != null && Number(target.chapterIndex) >= 0 ? String(target.chapterIndex) : null,
+      source_id: String(target.bookId || entry.bookId || ''),
+      book_id: String(entry.bookId || ''),
+      chapter_id: target.chapterIndex != null ? String(target.chapterIndex) : null,
       mode: typeof window.appMode === 'string' ? String(window.appMode) : 'reading',
       tts_seconds: 0,
       completed: !!entry.completed,
-      started_at: entry.startedAt || _nowIso(),
-      ended_at: entry.endedAt || _nowIso(),
-      updated_at: _nowIso(),
-      elapsed_seconds: elapsedSeconds,
+      started_at: entry.startedAt || new Date().toISOString(),
+      ended_at: entry.endedAt || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
-    _updateDiag('sessions', { status: 'pending', error: null, payload });
     try {
-      const { data, error } = await c.from('user_sessions')
-        .insert(payload)
-        .select('id,book_id,chapter_id,source_type,source_id,pages_completed,minutes_listened,elapsed_seconds,mode,tts_seconds,completed,started_at,ended_at,updated_at')
-        .limit(1);
-      if (error) throw error;
-      if (Array.isArray(data) && data[0]) _remoteSessions.unshift(data[0]);
-      else _remoteSessions.unshift(payload);
-      _deriveRemoteProfileMetrics();
-      _updateCacheDiag();
-      _updateDiag('sessions', { status: 'ok', error: null, payload: (Array.isArray(data) && data[0]) ? data[0] : payload });
-      _emitHydrated('sessions');
-      return (Array.isArray(data) && data[0]) ? data[0] : payload;
-    } catch (error) {
-      _updateDiag('sessions', { status: 'error', error: _serializeError(error), payload });
-      return null;
-    }
+      const { data, error } = await c.from('user_sessions').insert(payload).select('id,book_id,chapter_id,source_type,source_id,pages_completed,minutes_listened,elapsed_seconds,mode,tts_seconds,completed,started_at,ended_at,updated_at').limit(1);
+      if (!error) {
+        if (Array.isArray(data) && data[0]) _remoteSessions.unshift(data[0]);
+        else _remoteSessions.unshift(payload);
+        _deriveRemoteProfileMetrics();
+        _emitHydrated('sessions');
+      }
+    } catch (_) {}
   }
 
   function getRemoteReadingBookSummary(bookId, totalPagesHint) {
@@ -771,8 +618,6 @@ window.rcSync = (function () {
   }
 
   function _handlePrefsChanged() {
-    _deriveRemoteProfileMetrics();
-    _emitHydrated('profile-prefs');
     _queueSettingsSync();
   }
 
@@ -787,23 +632,8 @@ window.rcSync = (function () {
   try { document.addEventListener('change', _handleSettingsControlEvent, true); } catch (_) {}
   try { document.addEventListener('input', _handleSettingsControlEvent, true); } catch (_) {}
 
-  function getDiagnosticsSnapshot() {
-    return {
-      ready: _ready(),
-      clientContext: _currentClientContext(),
-      remote: {
-        settings: _remoteSettingsRow,
-        progressRows: Array.isArray(_remoteProgressRows) ? _remoteProgressRows.slice(0, 5) : [],
-        sessions: Array.isArray(_remoteSessions) ? _remoteSessions.slice(0, 5) : [],
-        profileMetrics: _remoteProfileMetrics,
-      },
-      sync: JSON.parse(JSON.stringify(_syncDiagnostics)),
-    };
-  }
-
   return {
     scheduleProgressSync,
-    saveProgressNow,
     getReadingProgress,
     getRestoreProgress,
     recordReadingSession,
@@ -812,6 +642,5 @@ window.rcSync = (function () {
     syncSettings,
     getSettings,
     rehydrateDurableData,
-    getDiagnosticsSnapshot,
   };
 })();
