@@ -92,31 +92,9 @@
     }
 
     function deriveDisplayName(user) {
-        const explicit = String((user && (user.displayName || user?.user_metadata?.full_name || user?.user_metadata?.name)) || '').trim();
-        if (explicit) return explicit;
         const email = String((user && user.email) || '').trim();
         if (!email) return 'Account';
         return email.split('@')[0] || email;
-    }
-
-    function renderLibrarySubtitle(authed) {
-        const subtitle = document.getElementById('dashboard-subtitle');
-        if (!subtitle) return;
-        subtitle.style.display = '';
-        if (!authed) {
-            subtitle.innerHTML = 'Create an account to enter your library and keep your settings, billing, and progress in one place.';
-            return;
-        }
-        const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
-            ? window.rcReadingMetrics.getReadingProfileMetrics()
-            : { sessionsCompleted: 0, weeklyMinutes: 0 };
-        const sessions = Math.max(0, Number(metrics.sessionsCompleted || 0));
-        const weekly = Math.max(0, Number(metrics.weeklyMinutes || 0));
-        if (weekly > 0) {
-            subtitle.innerHTML = `You've completed <strong>${sessions} session${sessions === 1 ? '' : 's'}</strong> all time and read <strong>${weekly} min</strong> this week.`;
-        } else {
-            subtitle.innerHTML = `You've completed <strong>${sessions} session${sessions === 1 ? '' : 's'}</strong> all time. Keep the momentum going.`;
-        }
     }
 
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
@@ -166,7 +144,13 @@
         const librarySample = document.getElementById('library-public-sample');
         if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !authed);
         if (librarySample) librarySample.classList.add('hidden-section');
-        renderLibrarySubtitle(authed);
+        const subtitle = document.getElementById('dashboard-subtitle');
+        if (subtitle) {
+            subtitle.style.display = '';
+            subtitle.innerHTML = authed
+                ? "You've completed <strong>2 sessions</strong> this week. Keep the momentum going."
+                : 'Create an account to enter your library and keep your settings, billing, and progress in one place.';
+        }
 
         const profileGuestCard = document.getElementById('profile-guest-card');
         const profileGuestContent = document.getElementById('profile-guest-content');
@@ -1347,18 +1331,6 @@
         }
     }
 
-
-    function renderUsageSurface() {
-        const valueEl = document.getElementById('nav-usage-pill-value');
-        if (!valueEl) return;
-        const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
-            ? window.rcUsage.getSnapshot()
-            : { remaining: 0, allowance: 0 };
-        const remaining = Math.max(0, Number(snapshot?.remaining || 0));
-        const allowance = Math.max(0, Number(snapshot?.allowance || 0));
-        valueEl.textContent = allowance > 0 ? `${remaining}` : '0';
-    }
-
     function renderProfileSurface() {
         const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
             ? window.rcReadingMetrics.getReadingProfileMetrics()
@@ -1473,67 +1445,9 @@
             setGoalEditMode(false);
             renderProfileSurface();
         });
-        const nameTrigger = document.getElementById('profile-name-edit-trigger');
-        const nameForm = document.getElementById('profile-name-edit-form');
-        const nameInput = document.getElementById('profile-name-input');
-        const nameCancel = document.getElementById('profile-name-cancel-btn');
-        const passwordToggle = document.getElementById('profile-password-toggle-btn');
-        const passwordForm = document.getElementById('profile-password-form');
-        const passwordInput = document.getElementById('profile-password-input');
-        const passwordCancel = document.getElementById('profile-password-cancel-btn');
-        const settingsStatus = document.getElementById('profile-settings-status');
-
-        function setSettingsStatus(message, kind) {
-            if (!settingsStatus) return;
-            settingsStatus.textContent = message || '';
-            settingsStatus.classList.toggle('hidden-section', !message);
-            settingsStatus.classList.remove('profile-settings-status-error', 'profile-settings-status-success');
-            if (message) settingsStatus.classList.add(kind === 'error' ? 'profile-settings-status-error' : 'profile-settings-status-success');
-        }
-        function setNameEdit(open) {
-            if (nameForm) nameForm.classList.toggle('hidden-section', !open);
-            if (nameTrigger) nameTrigger.classList.toggle('hidden-section', !!open);
-            if (open && nameInput) {
-                nameInput.value = deriveDisplayName(getAuthUser());
-                setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch (_) {} }, 0);
-            }
-        }
-        function setPasswordEdit(open) {
-            if (passwordForm) passwordForm.classList.toggle('hidden-section', !open);
-            if (passwordToggle) passwordToggle.classList.toggle('hidden-section', !!open);
-            if (!open && passwordInput) passwordInput.value = '';
-            if (open && passwordInput) setTimeout(() => { try { passwordInput.focus(); } catch (_) {} }, 0);
-        }
-        nameTrigger?.addEventListener('click', () => { setSettingsStatus('', 'success'); setNameEdit(true); });
-        nameCancel?.addEventListener('click', () => { setNameEdit(false); });
-        nameForm?.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            setSettingsStatus('', 'success');
-            const nextName = String(nameInput?.value || '').trim();
-            if (!nextName) { setSettingsStatus('Username is required.', 'error'); return; }
-            const result = await (window.rcAuth && typeof window.rcAuth.updateDisplayName === 'function'
-                ? window.rcAuth.updateDisplayName(nextName)
-                : Promise.resolve({ error: { message: 'Profile editing is not available.' } }));
-            if (result?.error) { setSettingsStatus(result.error.message || 'Unable to update username.', 'error'); return; }
-            setNameEdit(false);
-            syncShellAuthPresentation();
-            setSettingsStatus('Username updated.', 'success');
-        });
-        passwordToggle?.addEventListener('click', () => { setSettingsStatus('', 'success'); setPasswordEdit(true); });
-        passwordCancel?.addEventListener('click', () => { setPasswordEdit(false); });
-        passwordForm?.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            setSettingsStatus('', 'success');
-            const nextPassword = String(passwordInput?.value || '');
-            const result = await (window.rcAuth && typeof window.rcAuth.changePassword === 'function'
-                ? window.rcAuth.changePassword(nextPassword)
-                : Promise.resolve({ error: { message: 'Password changes are not available.' } }));
-            if (result?.error) { setSettingsStatus(result.error.message || 'Unable to change password.', 'error'); return; }
-            setPasswordEdit(false);
-            setSettingsStatus('Password updated.', 'success');
-        });
-        document.getElementById('profile-help-chat-btn')?.addEventListener('click', async (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openChat === 'function') await window.rcHelp.openChat(); } catch (_) {} });
-        document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') await window.rcHelp.openFeedback(); } catch (_) {} });
+        document.getElementById('profile-help-chat-btn')?.addEventListener('click', (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openChat === 'function') window.rcHelp.openChat(); } catch (_) {} });
+        document.getElementById('profile-help-email-btn')?.addEventListener('click', (e) => { e.preventDefault(); window.location.href = 'mailto:info@summitsvault.info'; });
+        document.getElementById('profile-help-feedback-link')?.addEventListener('click', (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') window.rcHelp.openFeedback(); } catch (_) {} });
         const tierSel = document.getElementById('tierSelect');
         if (tierSel) {
             tierSel.addEventListener('change', () => {
@@ -1552,10 +1466,8 @@
             try { syncExplorerMusicSource(); } catch (_) {}
             refreshExplorerPanel();
         });
-        document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} });
-        window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} });
-        window.addEventListener('rc:deleted-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
-        window.addEventListener('rc:usage-changed', () => { try { renderUsageSurface(); } catch (_) {} });
+        document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} });
+        window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
         try { switchReadingSettingsTab('general'); } catch (_) {}
         try { syncTierButtonState(); } catch (_) {}
 
@@ -1565,8 +1477,6 @@
         }
         try { renderProfileSurface(); } catch (_) {}
         try { renderSubscriptionSurface(); } catch (_) {}
-        try { renderUsageSurface(); } catch (_) {}
-        try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {}
 
         const topSettingsBtn = document.getElementById('openReadingSettings');
         if (topSettingsBtn) {

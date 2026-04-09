@@ -1,7 +1,6 @@
 import { getActiveEntitlement, getUserFromAccessToken } from './supabase.js';
 
 const VALID_TIERS = new Set(['free', 'paid', 'premium']);
-const ACTIVE_ENTITLEMENT_STATUSES = new Set(['active', 'trialing']);
 const CANONICAL_PRODUCTION_HOSTS = new Set(['jubly-reader.vercel.app']);
 
 function normalizeHost(value) {
@@ -36,28 +35,22 @@ function getAuthorizationBearer(req) {
 
 function normalizeEntitlementSnapshot(row) {
   if (!row || typeof row !== 'object') return null;
-  const planId = String(row.plan_id || '').trim().toLowerCase();
-  const rawTier = String(row.tier || planId || 'free').trim().toLowerCase();
-  const status = String(row.status || '').trim().toLowerCase() || null;
   return {
     userId: row.user_id || null,
     provider: row.provider || null,
-    planId: planId || null,
-    tier: resolveRuntimeTier(rawTier || 'free'),
-    status,
+    planId: row.plan_id || null,
+    tier: resolveRuntimeTier(row.tier || 'free'),
+    status: row.status || null,
     stripeCustomerId: row.stripe_customer_id || null,
     stripeSubscriptionId: row.stripe_subscription_id || null,
     periodStart: row.period_start || null,
     periodEnd: row.period_end || null,
-    renewsAt: row.renews_at || row.period_end || null,
-    endsAt: row.ends_at || row.period_end || null,
-    updatedAt: row.updated_at || row.updatedAt || null,
+    updatedAt: row.updated_at || null,
   };
 }
 
 export function resolveRuntimeTier(value) {
   const tier = String(value || '').trim().toLowerCase();
-  if (tier === 'pro') return 'paid';
   return VALID_TIERS.has(tier) ? tier : 'free';
 }
 
@@ -172,8 +165,8 @@ export async function getResolvedRuntimePolicyForRequest(req) {
     effectiveTier = developerOverrideTier;
     resolutionMode = 'developer-override';
     tierSource = 'developer-override';
-  } else if (entitlementSnapshot && ACTIVE_ENTITLEMENT_STATUSES.has(String(entitlementSnapshot.status || '').toLowerCase())) {
-    effectiveTier = resolveRuntimeTier(entitlementSnapshot.tier || entitlementSnapshot.planId);
+  } else if (entitlementSnapshot && entitlementSnapshot.status === 'active') {
+    effectiveTier = resolveRuntimeTier(entitlementSnapshot.tier);
     resolutionMode = 'entitlement';
     tierSource = 'entitlement';
   } else if (simulationAllowed && requestedTierPresent) {

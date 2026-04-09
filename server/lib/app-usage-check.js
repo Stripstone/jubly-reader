@@ -1,111 +1,47 @@
 // server/lib/app-usage-check.js
-// Server-owned usage capacity gate.
+// ─────────────────────────────────────────────────────────────────────────────
+// Interim server-owned usage capacity seam (Pass 3).
 //
-// Authenticated users resolve usage against durable user_usage records.
-// Guests fall back to server-owned limits with client-reported spend for the
-// current session only. The browser is never the authority for durable spend.
+// Ownership model:
+//   usageDailyLimit and per-action TOKEN_COSTS are server-owned.
+//   The client cannot inflate the limit by claiming a higher tier — tier is
+//   always resolved server-side from RUNTIME_DEFAULT_TIER (production) or
+//   ?tier= (preview/local simulation).
+//
+// Interim status:
+//   `spent` is client-reported (self-reported session token state).
+//   The server validates against server-owned limits; the count itself is not
+//   yet verified against durable storage. Pass 4 (Supabase) will replace
+//   client-reported spend with durable server-side records, at which point
+//   the `spent` request field becomes redundant.
+//
+// Usage:
+//   POST /api/usage-check
+//   Body: { action: 'tts'|'evaluate'|'anchors'|'research', spent: { tts, evaluate, anchors, research } }
+//   Response: { ok, allowed, action, cost, totalSpent, remaining, limit, meta }
+//     meta: { resolutionMode, policySource, simulationAllowed }
+//
+//   null limit = unlimited (premium); in that case remaining = null, allowed = true.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { json, withCors, readJsonBody } from "./http.js";
 import { getAllowedBrowserOrigins } from "./origins.js";
 import { getResolvedRuntimePolicyForRequest } from "./runtime-policy.js";
-import { getUserFromAccessToken, getUsageRow, supabaseRest, upsertUsageRow } from "./supabase.js";
 
-const COST_PER_ACTION = 2;
-const VALID_ACTIONS = new Set([
-  'book_import', 'tts', 'ai', 'summary', 'anchors', 'evaluate',
-  'import', 'research', 'other_protected_backend_action',
-]);
+// Token costs are server-owned. Client must not maintain an independent cost
+// matrix — it treats the backend verdict as truth.
+const TOKEN_COSTS = {
+  tts:      1,
+  evaluate: 2,
+  anchors:  1,
+  research: 3,
+};
 
-function getBearer(req) {
-  const header = String(req?.headers?.authorization || req?.headers?.Authorization || '').trim();
-  const match = /^Bearer\s+(.+)$/i.exec(header);
-  return match ? match[1].trim() : '';
-}
-
-function getUtcWindow(now = new Date()) {
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { start, end };
-}
-
-function toNumber(value, fallback = 0) {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : fallback;
-}
-
-async function consumeDurableUsage(userId, cost, usageDailyLimit) {
-  try {
-    const rpc = await supabaseRest('/rest/v1/rpc/consume_user_usage', {
-      method: 'POST',
-      asService: true,
-      body: { user_id: userId, cost, reset_tz: 'UTC' },
-    }).catch(() => null);
-    if (rpc && typeof rpc.allowed === 'boolean') {
-      return {
-        allowed: rpc.allowed,
-        reason: rpc.reason || (rpc.allowed ? 'ok' : 'daily_limit_reached'),
-        used_units: toNumber(rpc.used_units),
-        remaining_units: toNumber(rpc.remaining_units),
-        usage_daily_limit: toNumber(rpc.usage_daily_limit, usageDailyLimit),
-        used_api_calls: toNumber(rpc.used_api_calls),
-        window_start: rpc.window_start || null,
-        window_end: rpc.window_end || null,
-      };
-    }
-  } catch (_) {}
-
-  const now = new Date();
-  const { start, end } = getUtcWindow(now);
-  const current = await getUsageRow(userId).catch(() => null);
-  const currentEnd = current?.window_end ? new Date(current.window_end) : null;
-  const expired = !current || !(currentEnd instanceof Date) || Number.isNaN(currentEnd.getTime()) || now >= currentEnd;
-  const base = expired
-    ? {
-        user_id: userId,
-        window_start: start.toISOString(),
-        window_end: end.toISOString(),
-        used_units: 0,
-        used_api_calls: 0,
-        last_consumed_at: null,
-        created_at: current?.created_at || now.toISOString(),
-      }
-    : {
-        ...current,
-        user_id: userId,
-        used_units: Math.max(0, toNumber(current?.used_units)),
-        used_api_calls: Math.max(0, toNumber(current?.used_api_calls)),
-      };
-
-  const nextUsedUnits = base.used_units + cost;
-  const allowed = nextUsedUnits <= usageDailyLimit;
-  const payload = {
-    ...base,
-    updated_at: now.toISOString(),
-  };
-  if (allowed) {
-    payload.used_units = nextUsedUnits;
-    payload.used_api_calls = base.used_api_calls + 1;
-    payload.last_consumed_at = now.toISOString();
-  }
-  if (expired || allowed) {
-    await upsertUsageRow(payload).catch(() => null);
-  }
-
-  return {
-    allowed,
-    reason: allowed ? 'ok' : 'daily_limit_reached',
-    used_units: allowed ? nextUsedUnits : base.used_units,
-    remaining_units: Math.max(0, usageDailyLimit - (allowed ? nextUsedUnits : base.used_units)),
-    usage_daily_limit: usageDailyLimit,
-    used_api_calls: allowed ? base.used_api_calls + 1 : base.used_api_calls,
-    window_start: payload.window_start,
-    window_end: payload.window_end,
-  };
-}
+const VALID_ACTIONS = new Set(Object.keys(TOKEN_COSTS));
 
 export default async function handler(req, res) {
-  const allowedOrigins = getAllowedBrowserOrigins();
-  if (withCors(req, res, allowedOrigins)) return;
+  const allowed = getAllowedBrowserOrigins();
+  if (withCors(req, res, allowed)) return;
 
   if (req.method !== 'POST') {
     return json(res, 405, { error: 'Method not allowed. Use POST.' });
@@ -120,58 +56,44 @@ export default async function handler(req, res) {
     });
   }
 
+  // Validate and floor client-reported spend state.
+  const rawSpent = body?.spent && typeof body.spent === 'object' ? body.spent : {};
+  const spent = {
+    tts:      Math.max(0, Math.floor(Number(rawSpent.tts)      || 0)),
+    evaluate: Math.max(0, Math.floor(Number(rawSpent.evaluate) || 0)),
+    anchors:  Math.max(0, Math.floor(Number(rawSpent.anchors)  || 0)),
+    research: Math.max(0, Math.floor(Number(rawSpent.research) || 0)),
+  };
+
   const resolved = await getResolvedRuntimePolicyForRequest(req);
   const { usageDailyLimit } = resolved.policy;
-  const cost = COST_PER_ACTION;
+  const cost = TOKEN_COSTS[action];
 
+  const totalSpent = Object.values(spent).reduce((a, b) => a + b, 0);
+
+  // null usageDailyLimit = unlimited. Guard for future unlimited tiers.
+  let remaining, allowed_verdict;
   if (usageDailyLimit == null) {
-    return json(res, 200, {
-      ok: true, allowed: true, action, cost,
-      totalSpent: null, remaining: null, limit: null,
-      meta: { resolutionMode: resolved.resolutionMode, policySource: 'server-unlimited' },
-    });
+    remaining = null;
+    allowed_verdict = true;
+  } else {
+    remaining = Math.max(0, usageDailyLimit - totalSpent);
+    allowed_verdict = remaining >= cost;
   }
-
-  const token = getBearer(req);
-  if (token) {
-    const user = await getUserFromAccessToken(token).catch(() => null);
-    if (user?.id) {
-      const verdict = await consumeDurableUsage(user.id, cost, usageDailyLimit).catch(() => null);
-      if (verdict) {
-        return json(res, 200, {
-          ok: true,
-          allowed: verdict.allowed,
-          action,
-          cost,
-          totalSpent: verdict.used_units,
-          remaining: verdict.remaining_units,
-          limit: verdict.usage_daily_limit,
-          meta: {
-            resolutionMode: resolved.resolutionMode,
-            policySource: 'server-durable',
-            reason: verdict.reason,
-            window_start: verdict.window_start,
-            window_end: verdict.window_end,
-            used_api_calls: verdict.used_api_calls,
-          },
-        });
-      }
-    }
-  }
-
-  const rawSpent = body?.spent && typeof body.spent === 'object' ? body.spent : {};
-  const totalSpent = Math.max(0, Math.floor(Object.values(rawSpent).reduce((a, b) => a + (Number(b) || 0), 0)));
-  const remaining = Math.max(0, usageDailyLimit - totalSpent);
-  const allowedVerdict = remaining >= cost;
 
   return json(res, 200, {
     ok: true,
-    allowed: allowedVerdict,
+    allowed: allowed_verdict,
     action,
     cost,
     totalSpent,
     remaining,
     limit: usageDailyLimit,
-    meta: { resolutionMode: resolved.resolutionMode, policySource: 'server-guest' },
+    meta: {
+      resolutionMode: resolved.resolutionMode,
+      simulationAllowed: resolved.simulationAllowed,
+      // INTERIM: policySource confirms limit is server-owned; spend is client-reported.
+      policySource: 'server-interim',
+    },
   });
 }

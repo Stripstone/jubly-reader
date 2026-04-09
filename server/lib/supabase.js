@@ -99,32 +99,3 @@ export async function upsertEntitlement(row) {
   }).catch(() => null);
   return Array.isArray(data) && data[0] ? data[0] : data;
 }
-
-
-export async function getUsageRow(userId) {
-  const id = String(userId || '').trim();
-  if (!id) return null;
-  const data = await supabaseRest(
-    `/rest/v1/user_usage?user_id=eq.${encodeURIComponent(id)}&select=user_id,window_start,window_end,used_units,used_api_calls,last_consumed_at,created_at,updated_at&limit=1`,
-    {
-      method: 'GET',
-      asService: true,
-      headers: { Prefer: 'count=exact' },
-    }
-  ).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : null;
-}
-
-export async function upsertUsageRow(row) {
-  const payload = { ...row, updated_at: row?.updated_at || new Date().toISOString() };
-  if (!payload.created_at) payload.created_at = payload.updated_at;
-  const data = await supabaseRest('/rest/v1/user_usage?on_conflict=user_id', {
-    method: 'POST',
-    asService: true,
-    headers: {
-      Prefer: 'resolution=merge-duplicates,return=representation',
-    },
-    body: payload,
-  }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : data;
-}
