@@ -128,27 +128,14 @@ async function buildSnapshot(req, user) {
   };
 }
 
-// Fields removed from user_settings schema — must never be sent to Supabase.
-const SETTINGS_DROPPED_FIELDS = new Set([
-  'explorer_accent_swatch', 'explorer_background_mode',
-  'particle_preset_id', 'music_profile_id', 'last_goal_celebrated_on',
-]);
-
-function stripDroppedSettingsFields(obj) {
-  if (!obj || typeof obj !== 'object') return obj;
-  const out = { ...obj };
-  SETTINGS_DROPPED_FIELDS.forEach((k) => { delete out[k]; });
-  return out;
-}
-
 async function upsertSettings(userId, patch) {
   const existing = await getSettingsRow(userId).catch(() => null);
-  const payload = stripDroppedSettingsFields({
+  const payload = {
     ...(existing || {}),
     user_id: userId,
     ...patch,
     updated_at: new Date().toISOString(),
-  });
+  };
   const data = await supabaseRest('/rest/v1/user_settings?on_conflict=user_id', {
     method: 'POST',
     asService: true,
