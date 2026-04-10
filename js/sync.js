@@ -198,12 +198,15 @@ window.rcSync = (function () {
       if (statDate && statDate >= weekStartIso) weeklyMinutes += minutes;
       sessionsCompleted += count;
     });
+    const displayDailyMinutes = Math.max(0, Math.min(dailyMinutes, goal));
     _remoteProfileMetrics = {
       dailyGoalMinutes: goal,
       dailyMinutes,
+      displayDailyMinutes,
       weeklyMinutes,
       sessionsCompleted,
       progressPct: goal > 0 ? Math.max(0, Math.min(100, Math.round((dailyMinutes / goal) * 100))) : 0,
+      remainingGoalMinutes: Math.max(0, goal - dailyMinutes),
       lastGoalCelebratedOn: String(profile.lastGoalCelebratedOn || ''),
       todayIso: today,
     };

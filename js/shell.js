@@ -1366,8 +1366,11 @@
         const labelEl = document.getElementById('profile-goal-progress-label');
         const copyEl = document.getElementById('profile-goal-copy');
         const ringEl = document.getElementById('profile-goal-ring');
-        if (dailyEl) dailyEl.textContent = String(metrics.dailyMinutes || 0);
-        if (goalEl) goalEl.textContent = String(metrics.dailyGoalMinutes || 15);
+        const goalMinutes = Math.max(5, Number(metrics.dailyGoalMinutes || 15));
+        const displayDailyMinutes = Math.max(0, Number(metrics.displayDailyMinutes != null ? metrics.displayDailyMinutes : Math.min(Number(metrics.dailyMinutes || 0), goalMinutes)));
+        const remainingGoalMinutes = Math.max(0, Number(metrics.remainingGoalMinutes != null ? metrics.remainingGoalMinutes : Math.max(0, goalMinutes - Number(metrics.dailyMinutes || 0))));
+        if (dailyEl) dailyEl.textContent = String(Math.round(displayDailyMinutes));
+        if (goalEl) goalEl.textContent = String(goalMinutes);
         if (weeklyEl) weeklyEl.textContent = String(metrics.weeklyMinutes || 0);
         if (sessionsEl) sessionsEl.textContent = String(metrics.sessionsCompleted || 0);
         if (labelEl) labelEl.textContent = '';
@@ -1375,7 +1378,7 @@
         if (copyEl) {
             copyEl.textContent = metrics.progressPct >= 100
                 ? 'Goal complete for today.'
-                : `${Math.max(0, (metrics.dailyGoalMinutes || 15) - (metrics.dailyMinutes || 0))} min to go today.`;
+                : `${remainingGoalMinutes} min to go today.`;
         }
         if (metrics.progressPct >= 100 && metrics.lastGoalCelebratedOn !== metrics.todayIso) {
             try {

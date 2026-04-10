@@ -162,6 +162,40 @@
     return null;
   }
 
+  function queueRemoteLibraryItemState(bookId, options = {}) {
+    const normalized = String(bookId || '').trim();
+    if (!normalized) return Promise.resolve(null);
+    const task = (async () => {
+      const row = await syncRemoteLibraryItemState(normalized, options);
+      try {
+        if (window.rcSync && typeof window.rcSync.rehydrateDurableData === 'function') {
+          await window.rcSync.rehydrateDurableData();
+        }
+      } catch (_) {}
+      return row;
+    })();
+    task.catch((error) => {
+      try { console.warn('Remote library sync failed:', error); } catch (_) {}
+    });
+    return task;
+  }
+
+  function waitForNextPaint(count = 2) {
+    const frames = Math.max(1, Number(count) || 1);
+    return new Promise((resolve) => {
+      let remaining = frames;
+      const step = () => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          resolve(true);
+          return;
+        }
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
   async function localDeletedBookDelete(id) {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
@@ -191,7 +225,7 @@
       tx.onerror = () => reject(tx.error || new Error('move failed'));
       tx.onabort = () => reject(tx.error || new Error('move aborted'));
     });
-    await syncRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: false });
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: false });
     return true;
   }
 
@@ -215,13 +249,13 @@
       tx.onerror = () => reject(tx.error || new Error('restore failed'));
       tx.onabort = () => reject(tx.error || new Error('restore aborted'));
     });
-    await syncRemoteLibraryItemState(`local:${String(id || '').trim()}`, { restore: true });
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { restore: true });
     return true;
   }
 
   async function permanentlyDeleteLocalBook(id) {
     await localDeletedBookDelete(id);
-    await syncRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: true });
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: true });
     return true;
   }
 
@@ -2867,6 +2901,7 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   if (typeof window.__rcLoadBook === 'function') {
     try { await window.__rcLoadBook(normalizedId, { restore }); } catch (_) {}
   }
+  try { await waitForNextPaint(2); } catch (_) {}
 
   try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
   try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}

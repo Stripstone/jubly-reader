@@ -392,6 +392,15 @@ async function deleteProgressForLibraryItem(libraryItemId) {
   }).catch(() => null);
 }
 
+
+async function deleteBookMetricsForLibraryItem(libraryItemId) {
+  const id = String(libraryItemId || '').trim();
+  if (!id) return;
+  await supabaseRest(`/rest/v1/user_book_metrics?library_item_id=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE', asService: true,
+  }).catch(() => null);
+}
+
 async function getRestoreRow(userId, storageRef) {
   const item = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: false }).catch(() => null);
   if (!item || String(item.status || '') !== 'active') return null;
@@ -478,6 +487,10 @@ async function setLibraryItemStatus(userId, storageRef, nextStatus, options = {}
     await deleteProgressForLibraryItem(item.id).catch(() => null);
   }
   if (nextStatus === 'purge') {
+    await Promise.all([
+      deleteProgressForLibraryItem(item.id).catch(() => null),
+      deleteBookMetricsForLibraryItem(item.id).catch(() => null),
+    ]);
     await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(item.id)}&user_id=eq.${encodeURIComponent(userId)}`, {
       method: 'DELETE', asService: true,
     }).catch(() => null);

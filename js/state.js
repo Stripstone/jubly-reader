@@ -961,12 +961,15 @@ function getReadingProfileMetrics() {
   });
   const goal = Math.max(5, Number(prefs.dailyGoalMinutes || DEFAULT_PROFILE_PREFS.dailyGoalMinutes));
   const progressPct = goal > 0 ? Math.max(0, Math.min(100, Math.round((dailySeconds / (goal * 60)) * 100))) : 0;
+  const dailyMinutes = Math.round(dailySeconds / 60);
   return {
     dailyGoalMinutes: goal,
-    dailyMinutes: Math.round(dailySeconds / 60),
+    dailyMinutes,
+    displayDailyMinutes: Math.max(0, Math.min(dailyMinutes, goal)),
     weeklyMinutes: Math.round(weeklySeconds / 60),
     sessionsCompleted,
     progressPct,
+    remainingGoalMinutes: Math.max(0, goal - dailyMinutes),
     lastGoalCelebratedOn: String(prefs.lastGoalCelebratedOn || ''),
     todayIso: today
   };
