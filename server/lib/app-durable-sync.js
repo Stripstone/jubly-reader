@@ -108,9 +108,24 @@ async function getSettingsRow(userId) {
   return Array.isArray(data) && data[0] ? data[0] : null;
 }
 
+// Fields removed from user_settings schema — must never be sent to Supabase.
+const SETTINGS_DROPPED_FIELDS = new Set([
+  'explorer_accent_swatch', 'explorer_background_mode',
+  'particle_preset_id', 'music_profile_id', 'last_goal_celebrated_on',
+]);
+
+function stripDroppedSettingsFields(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const out = { ...obj };
+  SETTINGS_DROPPED_FIELDS.forEach((k) => { delete out[k]; });
+  return out;
+}
+
 async function upsertSettings(userId, patch) {
   const existing = await getSettingsRow(userId).catch(() => null);
-  const payload = { ...(existing || {}), user_id: userId, ...(patch || {}), updated_at: new Date().toISOString() };
+  const payload = stripDroppedSettingsFields({
+    ...(existing || {}), user_id: userId, ...(patch || {}), updated_at: new Date().toISOString(),
+  });
   const data = await supabaseRest('/rest/v1/user_settings?on_conflict=user_id', {
     method: 'POST', asService: true,
     headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
@@ -166,8 +181,10 @@ async function upsertProgress(userId, patch) {
     session_version: Math.max(1, toInt(patch?.session_version ?? patch?.sessionVersion, existing?.session_version || 1)),
   };
   if (existing?.id) {
+    // Strip primary key and immutable columns — PostgREST returns 400 if `id` appears in a PATCH body.
+    const { id: _id, user_id: _uid, created_at: _ca, ...patchBody } = payload;
     const data = await supabaseRest(`/rest/v1/user_progress?id=eq.${encodeURIComponent(existing.id)}&select=*`, {
-      method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
+      method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: patchBody,
     }).catch(() => null);
     return Array.isArray(data) && data[0] ? data[0] : { ...existing, ...payload };
   }
