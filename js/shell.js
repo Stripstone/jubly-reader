@@ -578,9 +578,16 @@
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
         // Await the section's async work (e.g. refreshLibrary on dashboard) before
-        // removing auth-hydrating. This ensures the correct library state is already
-        // rendered when the section becomes visible — preventing the 3-state flash.
-        try { await showSection(settledSection, { historyMode: 'replace' }); } catch (_) {}
+        // removing auth-hydrating, so the correct state is rendered before the
+        // section becomes visible — preventing flash of intermediate states.
+        // Race against a hard 500ms cap: auth-hydrating must never permanently
+        // block the page regardless of what happens in library init.
+        try {
+            await Promise.race([
+                showSection(settledSection, { historyMode: 'replace' }),
+                new Promise(resolve => setTimeout(resolve, 500))
+            ]);
+        } catch (_) {}
         try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
     });
     // ── Profile tabs ─────────────────────────────────────────────
@@ -1209,14 +1216,16 @@
 
         // Keep the library surface honest during boot. Until runtime book storage is
         // actually available, do not imply an empty library by showing the empty/import CTA.
-        // Return a promise that resolves only after the retry completes — this ensures
-        // DOMContentLoaded does not remove auth-hydrating before the final state is rendered.
+        // Return a promise that resolves after one retry tick so DOMContentLoaded's
+        // auth-hydrating removal is delayed until the retry has had a chance to render.
+        // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
+        // or successive unavailability creates an infinite chain that hangs the page.
         if (typeof localBooksGetAll !== 'function') {
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
             return new Promise(resolve => {
-                libraryRefreshRetryTimer = setTimeout(async () => {
+                libraryRefreshRetryTimer = setTimeout(() => {
                     libraryRefreshRetryTimer = null;
-                    try { await refreshLibrary(); } catch (_) {}
+                    try { refreshLibrary(); } catch (_) {}
                     resolve();
                 }, 120);
             });
