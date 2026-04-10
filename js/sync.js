@@ -24,7 +24,10 @@ window.rcSync = (function () {
   let _prefsSyncTimer = null;
   let _remoteUsersRow = null;
   let _remoteSettingsRow = null;
+  let _remoteLibraryItems = [];
   let _remoteProgressRows = [];
+  let _remoteBookMetricsRows = [];
+  let _remoteDailyStatsRows = [];
   let _remoteSessions = [];
   let _remoteProfileMetrics = null;
   let _remoteUsageSummary = null;
@@ -159,11 +162,11 @@ window.rcSync = (function () {
       tts_voice_id: selectedVoice || null,
       tts_volume: voiceVolumeEl && voiceVolumeEl.value !== '' ? Number(voiceVolumeEl.value) : null,
       autoplay_enabled: autoplayToggle ? !!autoplayToggle.checked : null,
-      music_enabled: typeof themeSettings.music === 'string' ? themeSettings.music !== 'off' : null,
-      particles_enabled: typeof themeSettings.embersOn === 'boolean' ? !!themeSettings.embersOn : null,
-      use_source_page_numbers: typeof theme.use_source_page_numbers === 'boolean' ? !!theme.use_source_page_numbers : null,
-      appearance_mode: appearance && appearance.appearance ? String(appearance.appearance) : null,
-      daily_goal_minutes: Number.isFinite(Number(profile.dailyGoalMinutes)) ? Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes)))) : null,
+      music_enabled: typeof themeSettings.music === 'string' ? themeSettings.music !== 'off' : (_remoteSettingsRow && typeof _remoteSettingsRow.music_enabled === 'boolean' ? !!_remoteSettingsRow.music_enabled : true),
+      particles_enabled: typeof themeSettings.embersOn === 'boolean' ? !!themeSettings.embersOn : (_remoteSettingsRow && typeof _remoteSettingsRow.particles_enabled === 'boolean' ? !!_remoteSettingsRow.particles_enabled : true),
+      use_source_page_numbers: typeof theme.use_source_page_numbers === 'boolean' ? !!theme.use_source_page_numbers : (_remoteSettingsRow && typeof _remoteSettingsRow.use_source_page_numbers === 'boolean' ? !!_remoteSettingsRow.use_source_page_numbers : false),
+      appearance_mode: appearance && appearance.appearance ? String(appearance.appearance) : (_remoteSettingsRow && _remoteSettingsRow.appearance_mode ? String(_remoteSettingsRow.appearance_mode) : 'light'),
+      daily_goal_minutes: Number.isFinite(Number(profile.dailyGoalMinutes)) ? Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes)))) : (_remoteSettingsRow && Number.isFinite(Number(_remoteSettingsRow.daily_goal_minutes)) ? Math.max(5, Math.min(300, Math.round(Number(_remoteSettingsRow.daily_goal_minutes)))) : 15),
       updated_at: new Date().toISOString(),
     };
 
@@ -183,26 +186,24 @@ window.rcSync = (function () {
       : new Date().toISOString().slice(0, 10);
     const now = new Date();
     const sevenDaysAgo = new Date(now.getTime() - (6 * 24 * 60 * 60 * 1000));
-    let dailySeconds = 0;
-    let weeklySeconds = 0;
+    const weekStartIso = sevenDaysAgo.toISOString().slice(0, 10);
+    let dailyMinutes = 0;
+    let weeklyMinutes = 0;
     let sessionsCompleted = 0;
-    (_remoteSessions || []).forEach((entry) => {
-      if (!entry?.ended_at) return;
-      const ended = new Date(entry.ended_at);
-      if (Number.isNaN(ended.getTime())) return;
-      const seconds = Number.isFinite(Number(entry.elapsed_seconds))
-        ? Math.max(0, Math.round(Number(entry.elapsed_seconds)))
-        : Math.max(0, Math.round((Number(entry.minutes_listened || 0) * 60) + Number(entry.tts_seconds || 0)));
-      if (ended.toISOString().slice(0, 10) === today) dailySeconds += seconds;
-      if (ended >= sevenDaysAgo) weeklySeconds += seconds;
-      sessionsCompleted += 1;
+    (_remoteDailyStatsRows || []).forEach((entry) => {
+      const statDate = String(entry?.stat_date || '');
+      const minutes = Math.max(0, Math.round(Number(entry?.minutes_read || 0)));
+      const count = Math.max(0, Math.round(Number(entry?.sessions_count || 0)));
+      if (statDate === today) dailyMinutes += minutes;
+      if (statDate && statDate >= weekStartIso) weeklyMinutes += minutes;
+      sessionsCompleted += count;
     });
     _remoteProfileMetrics = {
       dailyGoalMinutes: goal,
-      dailyMinutes: Math.round(dailySeconds / 60),
-      weeklyMinutes: Math.round(weeklySeconds / 60),
+      dailyMinutes,
+      weeklyMinutes,
       sessionsCompleted,
-      progressPct: goal > 0 ? Math.max(0, Math.min(100, Math.round((dailySeconds / (goal * 60)) * 100))) : 0,
+      progressPct: goal > 0 ? Math.max(0, Math.min(100, Math.round((dailyMinutes / goal) * 100))) : 0,
       lastGoalCelebratedOn: String(profile.lastGoalCelebratedOn || ''),
       todayIso: today,
     };
@@ -289,7 +290,10 @@ window.rcSync = (function () {
     const snap = snapshot && typeof snapshot === 'object' ? snapshot : {};
     _remoteUsersRow = snap.usersRow || null;
     _remoteSettingsRow = snap.settingsRow || null;
+    _remoteLibraryItems = Array.isArray(snap.libraryItems) ? snap.libraryItems.slice() : [];
     _remoteProgressRows = Array.isArray(snap.progressRows) ? snap.progressRows.slice() : [];
+    _remoteBookMetricsRows = Array.isArray(snap.bookMetricsRows) ? snap.bookMetricsRows.slice() : [];
+    _remoteDailyStatsRows = Array.isArray(snap.dailyStatsRows) ? snap.dailyStatsRows.slice() : [];
     const sessionRows = snap.sessions && Array.isArray(snap.sessions.rows) ? snap.sessions.rows.slice() : [];
     _remoteSessions = sessionRows;
     _remoteUsageSummary = snap.usage || null;
@@ -482,6 +486,51 @@ window.rcSync = (function () {
     }
   }
 
+  function _inferLibrarySourceKind(bookId) {
+    const raw = String(bookId || '').trim();
+    if (/^local:text-/i.test(raw)) return 'pasted_text';
+    if (/^local:/i.test(raw)) return 'upload_file';
+    return 'embedded_book';
+  }
+
+  function _inferLibraryStorageKind(bookId) {
+    return /^local:/i.test(String(bookId || '').trim()) ? 'device_local' : 'embedded';
+  }
+
+  async function _collectLibraryItemMeta(bookId, pageCountHint) {
+    const normalizedBookId = _normalizeBookId(bookId);
+    if (!normalizedBookId) return null;
+    const meta = {
+      storage_ref: normalizedBookId,
+      source_kind: _inferLibrarySourceKind(normalizedBookId),
+      storage_kind: _inferLibraryStorageKind(normalizedBookId),
+      import_kind: /^local:text-/i.test(normalizedBookId) ? 'text' : (/^local:/i.test(normalizedBookId) ? 'epub' : 'embedded'),
+      page_count: Math.max(0, Number(pageCountHint) || 0),
+    };
+    if (!/^local:/i.test(normalizedBookId)) return meta;
+    try {
+      if (typeof window.__rcLocalBookGet !== 'function') return meta;
+      const localId = normalizedBookId.replace(/^local:/i, '');
+      const record = await window.__rcLocalBookGet(localId);
+      if (!record) return meta;
+      meta.title = String(record.title || '').trim() || meta.title || 'Book';
+      meta.source_name = String(record.sourceName || '').trim() || null;
+      meta.content_fingerprint = String(record.contentFingerprint || '').trim() || null;
+      meta.import_kind = String(record.importKind || meta.import_kind || '').trim() || meta.import_kind;
+      meta.byte_size = Math.max(0, Number(record.byteSize) || 0);
+      const storedPageCount = Math.max(0, Number(record.pageCount) || 0);
+      if (storedPageCount > 0) meta.page_count = storedPageCount;
+      else if (!(meta.page_count > 0)) {
+        if (window.rcLibraryData && typeof window.rcLibraryData.countPagesFromMarkdown === 'function') {
+          meta.page_count = Math.max(0, Number(window.rcLibraryData.countPagesFromMarkdown(record.markdown || '')) || 0);
+        }
+      }
+      return meta;
+    } catch (_) {
+      return meta;
+    }
+  }
+
   // ── Progress identity ─────────────────────────────────────────────────────
   function _collectProgressIdentity(bookId, chapterIndex) {
     const target = window.__rcReadingTarget || {};
@@ -535,7 +584,8 @@ window.rcSync = (function () {
     const u = _user();
     if (!_ready() || !u) return null;
     const identity = _collectProgressIdentity(bookId, chapterIndex);
-    const payload = Object.assign({}, identity, {
+    const itemMeta = await _collectLibraryItemMeta(identity.book_id, identity.page_count);
+    const payload = Object.assign({}, identity, itemMeta || {}, {
       last_page_index: Number.isFinite(Number(pageIndex)) && Number(pageIndex) >= 0 ? Number(pageIndex) : 0,
       last_read_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -629,7 +679,10 @@ window.rcSync = (function () {
           _writeDurableCache(u.id, {
             usersRow: _remoteUsersRow,
             settingsRow: _remoteSettingsRow,
+            libraryItems: _remoteLibraryItems,
             progressRows: _remoteProgressRows,
+            bookMetricsRows: _remoteBookMetricsRows,
+            dailyStatsRows: _remoteDailyStatsRows,
             sessions: { rows: _remoteSessions, latest: _remoteSessions[0] || null, totalSessions: (_remoteSessions || []).length },
             usage: _remoteUsageSummary,
             entitlement: _remoteEntitlement,
@@ -660,7 +713,8 @@ window.rcSync = (function () {
     if (!_ready() || !u || !entry || !entry.bookId) return null;
     const target = window.__rcReadingTarget || {};
     const elapsedSeconds = Math.max(0, Math.round(Number(entry.elapsedSeconds || 0)));
-    const payload = {
+    const itemMeta = await _collectLibraryItemMeta(String(entry.bookId || ''), target.pageCount || 0);
+    const payload = Object.assign({}, itemMeta || {}, {
       pages_completed: Math.max(0, Math.round(Number(entry.pagesAdvanced || 0))),
       minutes_listened: Math.max(0, Math.round(elapsedSeconds / 60)),
       source_type: String(target.sourceType || 'book'),
@@ -673,7 +727,7 @@ window.rcSync = (function () {
       started_at: entry.startedAt || new Date().toISOString(),
       ended_at: entry.endedAt || new Date().toISOString(),
       elapsed_seconds: elapsedSeconds,
-    };
+    });
     _recordSync('sessions', 'pending', { payload });
     try {
       const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'record_session', payload } });
@@ -691,25 +745,23 @@ window.rcSync = (function () {
   function getRemoteReadingBookSummary(bookId, totalPagesHint) {
     if (!_ready()) return null;
     const row = _findLatestCachedBookProgress(bookId);
-    if (!row) return null;
     const key = _normalizeBookId(bookId);
+    const metric = (_remoteBookMetricsRows || []).find((entry) => _normalizeBookId(entry.book_id) === key) || null;
+    if (!row && !metric) return null;
     const totalPages = Number.isFinite(Number(totalPagesHint)) && Number(totalPagesHint) > 0
       ? Number(totalPagesHint)
-      : Math.max(0, Number(row.page_count || 0));
-    const lastPageIndex = Math.max(0, Number(row.last_page_index || 0));
-    const totalReadingSeconds = (_remoteSessions || []).reduce((sum, entry) => {
-      if (_normalizeBookId(entry.book_id) !== key) return sum;
-      return sum + (Number.isFinite(Number(entry.elapsed_seconds)) ? Math.max(0, Math.round(Number(entry.elapsed_seconds))) : Math.max(0, Math.round((Number(entry.minutes_listened || 0) * 60) + Number(entry.tts_seconds || 0))));
-    }, 0);
-    const completed = !!((_remoteSessions || []).find((entry) => _normalizeBookId(entry.book_id) === key && entry.completed));
+      : Math.max(0, Number((row && row.page_count) || (metric && metric.page_count) || 0));
+    const lastPageIndex = Math.max(0, Number((row && row.last_page_index) || 0));
+    const totalReadingSeconds = metric ? Math.max(0, Number(metric.minutes_read_total || 0) * 60) : 0;
+    const completed = !!(metric && metric.completed_at) || (totalPages > 0 && lastPageIndex >= Math.max(0, totalPages - 1));
     return {
       bookId: key,
       totalPages,
       lastPageIndex,
       totalReadingSeconds,
-      lastOpenedAt: row.last_read_at || row.updated_at || null,
-      completed: completed || (totalPages > 0 && lastPageIndex >= Math.max(0, totalPages - 1)),
-      completedAt: null,
+      lastOpenedAt: (metric && metric.last_opened_at) || (row && (row.last_read_at || row.updated_at)) || null,
+      completed,
+      completedAt: metric ? (metric.completed_at || null) : null,
     };
   }
 
@@ -721,7 +773,10 @@ window.rcSync = (function () {
   function _clearRemoteState() {
     _remoteUsersRow = null;
     _remoteSettingsRow = null;
+    _remoteLibraryItems = [];
     _remoteProgressRows = [];
+    _remoteBookMetricsRows = [];
+    _remoteDailyStatsRows = [];
     _remoteSessions = [];
     _remoteProfileMetrics = null;
     _remoteUsageSummary = null;
@@ -817,8 +872,25 @@ window.rcSync = (function () {
       usersRow: _remoteUsersRow,
       settingsRow: _remoteSettingsRow,
       usage: _remoteUsageSummary,
+      libraryItemCount: (_remoteLibraryItems || []).length,
       progressCount: (_remoteProgressRows || []).length,
+      bookMetricsCount: (_remoteBookMetricsRows || []).length,
+      dailyStatCount: (_remoteDailyStatsRows || []).length,
       sessionCount: (_remoteSessions || []).length,
     }),
+    deleteLibraryItem: async (bookId, options = {}) => {
+      if (!_ready()) return null;
+      const payload = { book_id: _normalizeBookId(bookId), purge: !!options.purge };
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'delete_library_item', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      return data && data.row ? data.row : null;
+    },
+    restoreLibraryItem: async (bookId) => {
+      if (!_ready()) return null;
+      const payload = { book_id: _normalizeBookId(bookId) };
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'restore_library_item', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      return data && data.row ? data.row : null;
+    },
   };
 })();
