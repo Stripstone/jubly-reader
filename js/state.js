@@ -933,22 +933,9 @@ function getReadingBookSummary(bookId, totalPagesHint) {
 function getReadingProfileMetrics() {
   try {
     const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
-    if (signedIn && window.rcSync) {
-      const remote = typeof window.rcSync.getRemoteProfileMetrics === 'function' ? window.rcSync.getRemoteProfileMetrics() : null;
-      if (remote) return { ...remote, authoritative: true };
-      const hydration = typeof window.rcSync.getHydrationState === 'function' ? window.rcSync.getHydrationState() : null;
-      if (!hydration || hydration.status !== 'ready') {
-        return {
-          dailyGoalMinutes: null,
-          dailyMinutes: null,
-          weeklyMinutes: null,
-          sessionsCompleted: null,
-          progressPct: 0,
-          lastGoalCelebratedOn: '',
-          todayIso: getTodayIsoDate(),
-          authoritative: false,
-        };
-      }
+    if (signedIn && window.rcSync && typeof window.rcSync.getRemoteProfileMetrics === 'function') {
+      const remote = window.rcSync.getRemoteProfileMetrics();
+      if (remote) return remote;
     }
   } catch (_) {}
   const prefs = loadProfilePrefs();
@@ -977,8 +964,7 @@ function getReadingProfileMetrics() {
     sessionsCompleted,
     progressPct,
     lastGoalCelebratedOn: String(prefs.lastGoalCelebratedOn || ''),
-    todayIso: today,
-    authoritative: true,
+    todayIso: today
   };
 }
 
@@ -1339,13 +1325,11 @@ window.rcUsage = {
     };
   },
   applySnapshot: function rcUsageApplySnapshot(snapshot) {
-    const rawRemaining = snapshot && Object.prototype.hasOwnProperty.call(snapshot, 'remaining') ? snapshot.remaining : null;
-    const rawAllowance = snapshot && Object.prototype.hasOwnProperty.call(snapshot, 'limit') ? snapshot.limit : (snapshot && Object.prototype.hasOwnProperty.call(snapshot, 'allowance') ? snapshot.allowance : null);
-    const remaining = rawRemaining == null || rawRemaining === '' ? null : Number(rawRemaining);
-    const allowance = rawAllowance == null || rawAllowance === '' ? null : Number(rawAllowance);
+    const remaining = Number(snapshot?.remaining);
+    const allowance = Number(snapshot?.limit ?? snapshot?.allowance);
     sessionTokens.allowance = Number.isFinite(allowance) ? Math.max(0, allowance) : null;
     sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
-    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: 'server-state' } })); } catch (_) {}
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: 'dev-tools' } })); } catch (_) {}
     return this.getSnapshot();
   },
 };

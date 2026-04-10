@@ -144,8 +144,7 @@
         if (navProfileTrigger) navProfileTrigger.style.display = authed ? '' : 'none';
         if (navUsagePill) navUsagePill.classList.toggle('hidden-section', !authed || isReading);
 
-        const resolvedUser = authed && window.rcSync && typeof window.rcSync.getResolvedUserRow === 'function' ? window.rcSync.getResolvedUserRow() : null;
-        const displayName = authed ? String((resolvedUser && resolvedUser.display_name) || deriveDisplayName(user) || 'Account') : '';
+        const displayName = deriveDisplayName(user);
         if (navUserName) {
             navUserName.textContent = authed ? displayName : '';
             navUserName.classList.toggle('hidden-section', !authed);
@@ -183,10 +182,9 @@
         const profileEmailSettings = document.getElementById('profile-email-settings');
         const profileAvatarSettings = document.getElementById('profile-avatar-settings');
         if (profileNameMain) profileNameMain.textContent = authed ? displayName : 'Your account';
-        const accountEmail = authed ? String((window.rcSync && typeof window.rcSync.getResolvedUserRow === 'function' && window.rcSync.getResolvedUserRow() && window.rcSync.getResolvedUserRow().email) || (user && user.email) || 'Signed-in account') : 'Account settings';
-        if (profileEmailMain) profileEmailMain.textContent = accountEmail;
+        if (profileEmailMain) profileEmailMain.textContent = authed ? 'Signed-in account' : 'Account settings';
         if (profileNameSettings) profileNameSettings.textContent = authed ? displayName : 'Your account';
-        if (profileEmailSettings) profileEmailSettings.textContent = accountEmail;
+        if (profileEmailSettings) profileEmailSettings.textContent = authed ? 'Signed-in account' : 'Account settings';
         const avatarSrc = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
         if (profileAvatarMain) profileAvatarMain.src = avatarSrc;
         if (profileAvatarSettings) profileAvatarSettings.src = avatarSrc;
@@ -1357,8 +1355,7 @@
     function renderProfileSurface() {
         const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
             ? window.rcReadingMetrics.getReadingProfileMetrics()
-            : { dailyGoalMinutes: 15, dailyMinutes: 0, weeklyMinutes: 0, sessionsCompleted: 0, progressPct: 0, lastGoalCelebratedOn: '', todayIso: '', authoritative: true };
-        const signedIn = isAuthedUser();
+            : { dailyGoalMinutes: 15, dailyMinutes: 0, weeklyMinutes: 0, sessionsCompleted: 0, progressPct: 0, lastGoalCelebratedOn: '', todayIso: '' };
         const dailyEl = document.getElementById('profile-daily-minutes');
         const goalEl = document.getElementById('profile-goal-minutes');
         const weeklyEl = document.getElementById('profile-weekly-minutes');
@@ -1366,16 +1363,6 @@
         const labelEl = document.getElementById('profile-goal-progress-label');
         const copyEl = document.getElementById('profile-goal-copy');
         const ringEl = document.getElementById('profile-goal-ring');
-        if (signedIn && metrics && metrics.authoritative === false) {
-            if (dailyEl) dailyEl.textContent = '—';
-            if (goalEl) goalEl.textContent = '—';
-            if (weeklyEl) weeklyEl.textContent = '—';
-            if (sessionsEl) sessionsEl.textContent = '—';
-            if (labelEl) labelEl.textContent = '';
-            if (ringEl) ringEl.style.setProperty('--goal-progress', '0%');
-            if (copyEl) copyEl.textContent = 'Syncing profile…';
-            return;
-        }
         if (dailyEl) dailyEl.textContent = String(metrics.dailyMinutes || 0);
         if (goalEl) goalEl.textContent = String(metrics.dailyGoalMinutes || 15);
         if (weeklyEl) weeklyEl.textContent = String(metrics.weeklyMinutes || 0);
@@ -1473,7 +1460,7 @@
         const goalInput = document.getElementById('profile-goal-input');
         goalEditBtn?.addEventListener('click', () => { setGoalEditMode(true); });
         goalCancelBtn?.addEventListener('click', () => { setGoalEditMode(false); });
-        goalEditForm?.addEventListener('submit', async (e) => {
+        goalEditForm?.addEventListener('submit', (e) => {
             e.preventDefault();
             const next = Math.max(5, Math.min(300, Math.round(Number(goalInput && goalInput.value || 0) || 0)));
             if (!Number.isFinite(next) || next <= 0) return;
