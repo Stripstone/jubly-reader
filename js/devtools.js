@@ -257,6 +257,40 @@ window.rcDevTools = (function () {
       await refresh();
       renderPanel();
     });
+
+    // Drag-to-reposition via top bar.
+    // mousedown on the bar starts a drag; clicks on the buttons inside the bar
+    // are excluded because their own listeners fire first and stop propagation
+    // isn't needed — we simply ignore moves under 4px so accidental micro-drags
+    // on the buttons don't shift the panel.
+    const topBar = panel.querySelector('#devToolsTopBar');
+    let drag = null;
+    topBar.style.cursor = 'grab';
+    topBar.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 0) return;
+      // Don't initiate drag if the target is a button.
+      if (ev.target.closest('button')) return;
+      const rect = panel.getBoundingClientRect();
+      drag = { startX: ev.clientX, startY: ev.clientY, originLeft: rect.left, originTop: rect.top };
+      topBar.style.cursor = 'grabbing';
+      ev.preventDefault();
+    });
+    document.addEventListener('mousemove', (ev) => {
+      if (!drag) return;
+      const dx = ev.clientX - drag.startX;
+      const dy = ev.clientY - drag.startY;
+      if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      const newLeft = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, drag.originLeft + dx));
+      const newTop = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, drag.originTop + dy));
+      panel.style.left = `${newLeft}px`;
+      panel.style.top = `${newTop}px`;
+      panel.style.right = 'auto';
+    });
+    document.addEventListener('mouseup', () => {
+      if (!drag) return;
+      drag = null;
+      topBar.style.cursor = 'grab';
+    });
     panel.querySelector('#devPlanSaveBtn').addEventListener('click', async () => {
       await doAction('set_plan', { tier: value('devPlanTier'), status: value('devPlanStatus') });
     });
@@ -316,15 +350,7 @@ window.rcDevTools = (function () {
       await refresh();
       await rehydrate();
     });
-    document.addEventListener('click', (ev) => {
-      if (!panel || panel.style.display !== 'flex') return;
-      const t = ev.target;
-      const inPanel = panel.contains(t);
-      const inCog = cogBtn && cogBtn.contains(t);
-      const inDiag = host.panel && host.panel.contains(t);
-      if (inPanel || inCog || inDiag) return;
-      closePanel();
-    }, true);
+    // Panel closes only via the explicit ✕ button — not on outside click.
   }
 
   function value(id) {
