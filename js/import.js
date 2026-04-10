@@ -303,6 +303,14 @@
       if (_inputMode === 'text') setStatus(hasText ? 'Text will be split into pages using the normal importer page-breaking behavior.' : 'Paste text to import it as a book.');
     }
 
+    function generateLocalImportId(prefix = 'upl') {
+      const safePrefix = String(prefix || 'upl').replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'upl';
+      try {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') return `${safePrefix}-${window.crypto.randomUUID()}`;
+      } catch (_) {}
+      return `${safePrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
     async function completeImportAndReturn(countLabel) {
       try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
       try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: await getLocalBookCount() } })); } catch (_) {}
@@ -330,7 +338,7 @@
 
       const stamp = new Date();
       const title = String(textTitleInput && textTitleInput.value || '').trim() || `Pasted Text ${stamp.toLocaleDateString()} ${stamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
-      const id = `text-${Date.now()}`;
+      const id = generateLocalImportId('text');
       const markdown = pages.map((page, idx) => `## Page ${idx + 1}\n\n${page}`).join('\n\n');
       const record = {
         id,
@@ -339,6 +347,7 @@
         sourceName: 'Pasted Text',
         importKind: 'text',
         byteSize: raw.length,
+        pageCount: pages.length,
         markdown,
       };
 
@@ -848,8 +857,7 @@
         const buf = await _file.arrayBuffer();
         const bookHash = await hashArrayBufferSha256(buf);
 
-        // Create a stable record id per file hash
-        const id = bookHash;
+        const id = generateLocalImportId('upl');
         const title = _file.name.replace(/\.[^.]+$/, '').trim();
 
         const total = selectedIds.size;
@@ -883,7 +891,10 @@
           title,
           createdAt: Date.now(),
           sourceName: _file.name,
+          contentFingerprint: bookHash,
+          importKind: (_inputFormat || 'epub').toLowerCase(),
           byteSize: _file.size || 0,
+          pageCount: createdPages,
           markdown: md
         };
         await localBookPut(record);

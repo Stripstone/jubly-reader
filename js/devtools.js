@@ -376,6 +376,13 @@ window.rcDevTools = (function () {
     el.checked = !!value;
   }
 
+  function shortBookId(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '—';
+    if (raw.length <= 18) return raw;
+    return `${raw.slice(0, 8)}…${raw.slice(-6)}`;
+  }
+
   function getClientContext() {
     let target = {};
     let restore = null;
@@ -442,7 +449,7 @@ window.rcDevTools = (function () {
       const restoreStatus = client.sync && client.sync.sync && client.sync.sync.restore ? (client.sync.sync.restore.status || 'idle') : 'idle';
       const chapterVisible = resolvedChapter === '' || resolvedChapter == null ? '—' : (Number(resolvedChapter) + 1);
       const pageVisible = resolvedPageVisible === '' ? '—' : resolvedPageVisible;
-      summaryEl.textContent = `Client: book ${resolvedBookId || '—'} • ch ${chapterVisible} • pg ${pageVisible} • restore ${restoreStatus}`;
+      summaryEl.textContent = `Client: book ${shortBookId(resolvedBookId)} • ch ${chapterVisible} • pg ${pageVisible} • restore ${restoreStatus}`;
     }
   }
 

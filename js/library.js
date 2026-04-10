@@ -150,6 +150,18 @@
     });
   }
 
+  async function syncRemoteLibraryItemState(bookId, options = {}) {
+    try {
+      if (!(window.rcSync && typeof bookId === 'string' && bookId.trim())) return null;
+      if (options.restore) {
+        if (typeof window.rcSync.restoreLibraryItem === 'function') return await window.rcSync.restoreLibraryItem(bookId);
+        return null;
+      }
+      if (typeof window.rcSync.deleteLibraryItem === 'function') return await window.rcSync.deleteLibraryItem(bookId, options);
+    } catch (_) {}
+    return null;
+  }
+
   async function localDeletedBookDelete(id) {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
@@ -163,7 +175,7 @@
 
   async function moveLocalBookToDeleted(id) {
     const db = await openLocalDb();
-    return new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
       const tx = db.transaction([LOCAL_STORE_BOOKS, LOCAL_STORE_DELETED], 'readwrite');
       const books = tx.objectStore(LOCAL_STORE_BOOKS);
       const deleted = tx.objectStore(LOCAL_STORE_DELETED);
@@ -179,11 +191,13 @@
       tx.onerror = () => reject(tx.error || new Error('move failed'));
       tx.onabort = () => reject(tx.error || new Error('move aborted'));
     });
+    await syncRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: false });
+    return true;
   }
 
   async function restoreDeletedLocalBook(id) {
     const db = await openLocalDb();
-    return new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
       const tx = db.transaction([LOCAL_STORE_BOOKS, LOCAL_STORE_DELETED], 'readwrite');
       const books = tx.objectStore(LOCAL_STORE_BOOKS);
       const deleted = tx.objectStore(LOCAL_STORE_DELETED);
@@ -201,10 +215,14 @@
       tx.onerror = () => reject(tx.error || new Error('restore failed'));
       tx.onabort = () => reject(tx.error || new Error('restore aborted'));
     });
+    await syncRemoteLibraryItemState(`local:${String(id || '').trim()}`, { restore: true });
+    return true;
   }
 
   async function permanentlyDeleteLocalBook(id) {
-    return localDeletedBookDelete(id);
+    await localDeletedBookDelete(id);
+    await syncRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: true });
+    return true;
   }
 
   window.__rcLocalBookGet = localBookGet;
