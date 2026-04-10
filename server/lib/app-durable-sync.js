@@ -76,53 +76,6 @@ function getUtcWindow(now = new Date()) {
   return { start, end };
 }
 
-function inferSourceKindFromStorageRef(storageRef, patch = {}) {
-  const explicit = toText(patch?.source_kind || patch?.sourceKind, null);
-  if (explicit) return explicit;
-  const importKind = toText(patch?.import_kind || patch?.importKind, '').toLowerCase();
-  const ref = String(storageRef || '');
-  if (/^local:text-/i.test(ref) || importKind === 'text') return 'pasted_text';
-  if (/^local:/i.test(ref)) return 'upload_file';
-  return 'embedded_book';
-}
-
-function inferStorageKindFromStorageRef(storageRef, patch = {}) {
-  const explicit = toText(patch?.storage_kind || patch?.storageKind, null);
-  if (explicit) return explicit;
-  const ref = String(storageRef || '');
-  if (/^local:/i.test(ref)) return 'device_local';
-  return 'embedded';
-}
-
-function inferImportKind(storageRef, patch = {}) {
-  const explicit = toText(patch?.import_kind || patch?.importKind, null);
-  if (explicit) return explicit;
-  const ref = String(storageRef || '');
-  if (/^local:text-/i.test(ref)) return 'text';
-  if (/^local:/i.test(ref)) return 'epub';
-  return 'embedded';
-}
-
-function canonicalizeSettingsRow(existing = {}, patch = {}) {
-  const next = {
-    user_id: String(existing.user_id || patch.user_id || '').trim(),
-    theme_id: toText(patch.theme_id, toText(existing.theme_id, 'default')),
-    font_id: toText(patch.font_id, toText(existing.font_id, 'Lora')),
-    tts_speed: Number.isFinite(Number(patch.tts_speed)) ? Number(patch.tts_speed) : (Number.isFinite(Number(existing.tts_speed)) ? Number(existing.tts_speed) : 1.00),
-    tts_voice_id: toText(patch.tts_voice_id, toText(existing.tts_voice_id, null)),
-    tts_volume: Number.isFinite(Number(patch.tts_volume)) ? Number(patch.tts_volume) : (Number.isFinite(Number(existing.tts_volume)) ? Number(existing.tts_volume) : 0.50),
-    autoplay_enabled: patch.autoplay_enabled == null ? toBool(existing.autoplay_enabled, false) : toBool(patch.autoplay_enabled, false),
-    music_enabled: patch.music_enabled == null ? toBool(existing.music_enabled, true) : toBool(patch.music_enabled, true),
-    particles_enabled: patch.particles_enabled == null ? toBool(existing.particles_enabled, true) : toBool(patch.particles_enabled, true),
-    use_source_page_numbers: patch.use_source_page_numbers == null ? toBool(existing.use_source_page_numbers, false) : toBool(patch.use_source_page_numbers, false),
-    appearance_mode: toText(patch.appearance_mode, toText(existing.appearance_mode, 'light')),
-    daily_goal_minutes: Math.max(5, Math.min(300, toInt(patch.daily_goal_minutes, toInt(existing.daily_goal_minutes, 15)))),
-    updated_at: new Date().toISOString(),
-  };
-  if (!next.user_id) delete next.user_id;
-  return next;
-}
-
 async function getUsersRow(userId) {
   const data = await supabaseRest(`/rest/v1/users?id=eq.${encodeURIComponent(userId)}&select=id,display_name,email,auth_provider,status,created_at,updated_at&limit=1`, {
     method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
@@ -155,9 +108,24 @@ async function getSettingsRow(userId) {
   return Array.isArray(data) && data[0] ? data[0] : null;
 }
 
+// Fields removed from user_settings schema — must never be sent to Supabase.
+const SETTINGS_DROPPED_FIELDS = new Set([
+  'explorer_accent_swatch', 'explorer_background_mode',
+  'particle_preset_id', 'music_profile_id', 'last_goal_celebrated_on',
+]);
+
+function stripDroppedSettingsFields(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const out = { ...obj };
+  SETTINGS_DROPPED_FIELDS.forEach((k) => { delete out[k]; });
+  return out;
+}
+
 async function upsertSettings(userId, patch) {
   const existing = await getSettingsRow(userId).catch(() => null);
-  const payload = canonicalizeSettingsRow(existing || {}, Object.assign({}, patch || {}, { user_id: userId }));
+  const payload = stripDroppedSettingsFields({
+    ...(existing || {}), user_id: userId, ...(patch || {}), updated_at: new Date().toISOString(),
+  });
   const data = await supabaseRest('/rest/v1/user_settings?on_conflict=user_id', {
     method: 'POST', asService: true,
     headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
@@ -166,333 +134,124 @@ async function upsertSettings(userId, patch) {
   return Array.isArray(data) && data[0] ? data[0] : payload;
 }
 
-async function getLibraryItemsRows(userId, { includeDeleted = true, limit = 500 } = {}) {
-  const filters = [`user_id=eq.${encodeURIComponent(userId)}`];
-  if (!includeDeleted) filters.push('status=eq.active');
-  const data = await supabaseRest(`/rest/v1/user_library_items?${filters.join('&')}&select=*&order=updated_at.desc&limit=${Math.max(1, toInt(limit, 500))}`, {
+async function getProgressRows(userId) {
+  const data = await supabaseRest(`/rest/v1/user_progress?user_id=eq.${encodeURIComponent(userId)}&select=*&order=updated_at.desc&limit=200`, {
     method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
   }).catch(() => null);
   return Array.isArray(data) ? data : [];
 }
 
-async function findLibraryItemByStorageRef(userId, storageRef, { includeDeleted = true } = {}) {
-  const ref = normalizeBookId(storageRef);
-  if (!ref) return null;
-  const filters = [`user_id=eq.${encodeURIComponent(userId)}`, `storage_ref=eq.${encodeURIComponent(ref)}`];
-  if (!includeDeleted) filters.push('status=eq.active');
-  const data = await supabaseRest(`/rest/v1/user_library_items?${filters.join('&')}&select=*&order=updated_at.desc&limit=20`, {
-    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
-  }).catch(() => null);
-  const rows = Array.isArray(data) ? data : [];
-  const active = rows.find((row) => String(row?.status || '') === 'active');
-  return active || rows[0] || null;
-}
-
-async function findLibraryItemById(userId, libraryItemId) {
-  const id = String(libraryItemId || '').trim();
-  if (!id) return null;
-  const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`, {
+async function getRestoreRow(userId, bookId) {
+  const normalizedBookId = normalizeBookId(bookId);
+  if (!normalizedBookId) return null;
+  const data = await supabaseRest(`/rest/v1/user_progress?user_id=eq.${encodeURIComponent(userId)}&book_id=eq.${encodeURIComponent(normalizedBookId)}&is_active=eq.true&select=*&order=updated_at.desc&limit=1`, {
     method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
   }).catch(() => null);
   return Array.isArray(data) && data[0] ? data[0] : null;
 }
 
-async function ensureLibraryItem(userId, patch = {}) {
-  const storageRef = normalizeBookId(patch?.storage_ref || patch?.storageRef || patch?.book_id || patch?.bookId);
-  if (!storageRef) throw new Error('storage_ref is required');
-  const existing = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: true }).catch(() => null);
-  const status = 'active';
-  const titleFallback = inferSourceKindFromStorageRef(storageRef, patch) === 'embedded_book' ? (storageRef || 'Book') : (patch?.source_name || storageRef || 'Book');
-  const payload = {
+async function findProgressRow(userId, identity) {
+  const rows = await getProgressRows(userId).catch(() => []);
+  return (rows || []).find((row) => (
+    normalizeBookId(row.book_id) === normalizeBookId(identity.book_id)
+    && String(row.source_type || '') === String(identity.source_type || '')
+    && String(row.source_id || '') === String(identity.source_id || '')
+    && String(normalizeChapterId(row.chapter_id) ?? '') === String(normalizeChapterId(identity.chapter_id) ?? '')
+  )) || null;
+}
+
+async function upsertProgress(userId, patch) {
+  const identity = {
     user_id: userId,
-    title: toText(patch?.title, toText(existing?.title, titleFallback)),
-    source_kind: inferSourceKindFromStorageRef(storageRef, patch),
-    source_name: toText(patch?.source_name || patch?.sourceName, toText(existing?.source_name, null)),
-    content_fingerprint: toText(patch?.content_fingerprint || patch?.contentFingerprint, toText(existing?.content_fingerprint, null)),
-    storage_kind: inferStorageKindFromStorageRef(storageRef, patch),
-    storage_ref: storageRef,
-    import_kind: inferImportKind(storageRef, patch),
-    byte_size: Math.max(0, toInt(patch?.byte_size ?? patch?.byteSize, toInt(existing?.byte_size, 0))),
-    page_count: Math.max(0, toInt(patch?.page_count ?? patch?.pageCount, toInt(existing?.page_count, 0))),
-    status,
-    deleted_at: null,
-    purge_after: null,
+    book_id: normalizeBookId(patch?.book_id || patch?.bookId),
+    source_type: toText(patch?.source_type || patch?.sourceType, 'book'),
+    source_id: toText(patch?.source_id || patch?.sourceId, normalizeBookId(patch?.book_id || patch?.bookId)),
+    chapter_id: normalizeChapterId(patch?.chapter_id ?? patch?.chapterId),
+  };
+  if (!identity.book_id) throw new Error('book_id is required');
+  const existing = await findProgressRow(userId, identity).catch(() => null);
+  const payload = {
+    ...(existing || {}),
+    ...identity,
+    page_count: Math.max(0, toInt(patch?.page_count ?? patch?.pageCount, existing?.page_count || 0)),
+    last_page_index: Math.max(0, toInt(patch?.last_page_index ?? patch?.pageIndex, existing?.last_page_index || 0)),
+    last_read_at: toText(patch?.last_read_at || patch?.lastReadAt, new Date().toISOString()),
     updated_at: new Date().toISOString(),
+    is_active: patch?.is_active == null && patch?.isActive == null ? true : toBool(patch?.is_active ?? patch?.isActive, true),
+    session_version: Math.max(1, toInt(patch?.session_version ?? patch?.sessionVersion, existing?.session_version || 1)),
   };
   if (existing?.id) {
-    const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(existing.id)}&select=*`, {
-      method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
+    // Strip primary key and immutable columns — PostgREST returns 400 if `id` appears in a PATCH body.
+    const { id: _id, user_id: _uid, created_at: _ca, ...patchBody } = payload;
+    const data = await supabaseRest(`/rest/v1/user_progress?id=eq.${encodeURIComponent(existing.id)}&select=*`, {
+      method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: patchBody,
     }).catch(() => null);
     return Array.isArray(data) && data[0] ? data[0] : { ...existing, ...payload };
-  }
-  const data = await supabaseRest('/rest/v1/user_library_items', {
-    method: 'POST', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
-  }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : payload;
-}
-
-async function getProgressRowsRaw(userId) {
-  const data = await supabaseRest(`/rest/v1/user_progress?user_id=eq.${encodeURIComponent(userId)}&select=*&order=updated_at.desc,last_read_at.desc.nullslast&limit=500`, {
-    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
-  }).catch(() => null);
-  return Array.isArray(data) ? data : [];
-}
-
-async function getProgressRowByLibraryItemId(libraryItemId) {
-  const id = String(libraryItemId || '').trim();
-  if (!id) return null;
-  const data = await supabaseRest(`/rest/v1/user_progress?library_item_id=eq.${encodeURIComponent(id)}&select=*&limit=1`, {
-    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
-  }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : null;
-}
-
-function serializeLibraryItemRow(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    user_id: row.user_id,
-    title: row.title || 'Book',
-    source_kind: row.source_kind || null,
-    source_name: row.source_name || null,
-    content_fingerprint: row.content_fingerprint || null,
-    storage_kind: row.storage_kind || null,
-    storage_ref: row.storage_ref || null,
-    import_kind: row.import_kind || null,
-    byte_size: Math.max(0, toInt(row.byte_size, 0)),
-    page_count: Math.max(0, toInt(row.page_count, 0)),
-    status: row.status || 'active',
-    deleted_at: row.deleted_at || null,
-    purge_after: row.purge_after || null,
-    created_at: row.created_at || null,
-    updated_at: row.updated_at || null,
-  };
-}
-
-function serializeProgressRow(row, libraryItemsMap) {
-  if (!row) return null;
-  const item = libraryItemsMap && row.library_item_id ? libraryItemsMap.get(String(row.library_item_id)) : null;
-  return {
-    library_item_id: row.library_item_id,
-    user_id: row.user_id,
-    book_id: item?.storage_ref || null,
-    source_id: item?.storage_ref || null,
-    source_type: 'book',
-    source_kind: item?.source_kind || null,
-    chapter_id: row.current_chapter_id || null,
-    page_count: Math.max(0, toInt(row.page_count, 0)),
-    last_page_index: Math.max(0, toInt(row.current_page_index, 0)),
-    last_read_at: row.last_read_at || null,
-    session_version: Math.max(0, toInt(row.session_version, 1)),
-    updated_at: row.updated_at || row.last_read_at || null,
-    title: item?.title || null,
-    source_name: item?.source_name || null,
-    content_fingerprint: item?.content_fingerprint || null,
-    storage_kind: item?.storage_kind || null,
-    import_kind: item?.import_kind || null,
-    item_status: item?.status || 'active',
-    item_deleted_at: item?.deleted_at || null,
-  };
-}
-
-async function getBookMetricsRowsRaw(userId) {
-  const data = await supabaseRest(`/rest/v1/user_book_metrics?user_id=eq.${encodeURIComponent(userId)}&select=*&order=updated_at.desc,last_opened_at.desc.nullslast&limit=500`, {
-    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
-  }).catch(() => null);
-  return Array.isArray(data) ? data : [];
-}
-
-async function getBookMetricByLibraryItemId(libraryItemId) {
-  const id = String(libraryItemId || '').trim();
-  if (!id) return null;
-  const data = await supabaseRest(`/rest/v1/user_book_metrics?library_item_id=eq.${encodeURIComponent(id)}&select=*&limit=1`, {
-    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
-  }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : null;
-}
-
-function serializeBookMetricRow(row, libraryItemsMap) {
-  if (!row) return null;
-  const item = libraryItemsMap && row.library_item_id ? libraryItemsMap.get(String(row.library_item_id)) : null;
-  return {
-    library_item_id: row.library_item_id,
-    user_id: row.user_id,
-    book_id: item?.storage_ref || null,
-    source_type: item?.source_kind || 'book',
-    title: item?.title || null,
-    minutes_read_total: Math.max(0, toInt(row.minutes_read_total, 0)),
-    pages_completed_total: Math.max(0, toInt(row.pages_completed_total, 0)),
-    first_opened_at: row.first_opened_at || null,
-    last_opened_at: row.last_opened_at || null,
-    completed_at: row.completed_at || null,
-    completion_count: Math.max(0, toInt(row.completion_count, 0)),
-    updated_at: row.updated_at || null,
-  };
-}
-
-async function getDailyStatsRows(userId, { limit = 120 } = {}) {
-  const data = await supabaseRest(`/rest/v1/user_daily_stats?user_id=eq.${encodeURIComponent(userId)}&select=*&order=stat_date.desc&limit=${Math.max(1, toInt(limit, 120))}`, {
-    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
-  }).catch(() => null);
-  return Array.isArray(data) ? data : [];
-}
-
-async function getDailyStatRow(userId, statDate) {
-  const dateText = toText(statDate, null);
-  if (!dateText) return null;
-  const data = await supabaseRest(`/rest/v1/user_daily_stats?user_id=eq.${encodeURIComponent(userId)}&stat_date=eq.${encodeURIComponent(dateText)}&select=*&limit=1`, {
-    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
-  }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : null;
-}
-
-function serializeDailyStatRow(row) {
-  if (!row) return null;
-  return {
-    user_id: row.user_id,
-    stat_date: row.stat_date,
-    minutes_read: Math.max(0, toInt(row.minutes_read, 0)),
-    pages_read: Math.max(0, toInt(row.pages_read, 0)),
-    sessions_count: Math.max(0, toInt(row.sessions_count, 0)),
-    updated_at: row.updated_at || null,
-  };
-}
-
-async function upsertProgress(userId, patch = {}) {
-  const libraryItem = await ensureLibraryItem(userId, patch);
-  const existing = await getProgressRowByLibraryItemId(libraryItem.id).catch(() => null);
-  const payload = {
-    library_item_id: libraryItem.id,
-    user_id: userId,
-    current_chapter_id: normalizeChapterId(patch?.chapter_id ?? patch?.chapterId),
-    current_page_index: Math.max(0, toInt(patch?.last_page_index ?? patch?.pageIndex, toInt(existing?.current_page_index, 0))),
-    page_count: Math.max(0, toInt(patch?.page_count ?? patch?.pageCount, toInt(existing?.page_count, libraryItem.page_count || 0))),
-    last_read_at: toText(patch?.last_read_at || patch?.lastReadAt, new Date().toISOString()),
-    session_version: Math.max(1, toInt(patch?.session_version ?? patch?.sessionVersion, toInt(existing?.session_version, 1))),
-    updated_at: new Date().toISOString(),
-  };
-  if (existing?.library_item_id) {
-    const data = await supabaseRest(`/rest/v1/user_progress?library_item_id=eq.${encodeURIComponent(existing.library_item_id)}&select=*`, {
-      method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
-    }).catch(() => null);
-    return Array.isArray(data) && data[0] ? serializeProgressRow(data[0], new Map([[String(libraryItem.id), libraryItem]])) : serializeProgressRow({ ...existing, ...payload }, new Map([[String(libraryItem.id), libraryItem]]));
   }
   const data = await supabaseRest('/rest/v1/user_progress', {
-    method: 'POST', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
+    method: 'POST', asService: true, headers: { Prefer: 'return=representation' }, body: { user_id: userId, ...payload },
   }).catch(() => null);
-  const row = Array.isArray(data) && data[0] ? data[0] : payload;
-  return serializeProgressRow(row, new Map([[String(libraryItem.id), libraryItem]]));
+  return Array.isArray(data) && data[0] ? data[0] : { user_id: userId, ...payload };
 }
 
-async function deleteProgressForLibraryItem(libraryItemId) {
-  const id = String(libraryItemId || '').trim();
-  if (!id) return;
-  await supabaseRest(`/rest/v1/user_progress?library_item_id=eq.${encodeURIComponent(id)}`, {
-    method: 'DELETE', asService: true,
+async function getSessionRows(userId) {
+  const data = await supabaseRest(`/rest/v1/user_sessions?user_id=eq.${encodeURIComponent(userId)}&select=*&order=ended_at.desc.nullslast,updated_at.desc&limit=500`, {
+    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
   }).catch(() => null);
+  return Array.isArray(data) ? data : [];
 }
 
-async function getRestoreRow(userId, storageRef) {
-  const item = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: false }).catch(() => null);
-  if (!item || String(item.status || '') !== 'active') return null;
-  const row = await getProgressRowByLibraryItemId(item.id).catch(() => null);
-  if (!row) return null;
-  return serializeProgressRow(row, new Map([[String(item.id), item]]));
-}
-
-async function upsertBookMetricsForSession(userId, libraryItem, patch = {}) {
-  const existing = await getBookMetricByLibraryItemId(libraryItem.id).catch(() => null);
-  const nowIso = toText(patch?.ended_at || patch?.endedAt, new Date().toISOString());
-  const startedAt = toText(patch?.started_at || patch?.startedAt, nowIso);
-  const completed = toBool(patch?.completed, false);
-  const payload = {
-    library_item_id: libraryItem.id,
-    user_id: userId,
-    minutes_read_total: Math.max(0, toInt(existing?.minutes_read_total, 0) + Math.max(0, toInt(patch?.minutes_listened ?? patch?.minutesListened, 0))),
-    pages_completed_total: Math.max(0, toInt(existing?.pages_completed_total, 0) + Math.max(0, toInt(patch?.pages_completed ?? patch?.pagesCompleted, 0))),
-    first_opened_at: toText(existing?.first_opened_at, startedAt),
-    last_opened_at: nowIso,
-    completed_at: completed ? toText(existing?.completed_at, nowIso) : (existing?.completed_at || null),
-    completion_count: Math.max(0, toInt(existing?.completion_count, 0) + (completed ? 1 : 0)),
-    updated_at: new Date().toISOString(),
-  };
-  if (existing?.library_item_id) {
-    const data = await supabaseRest(`/rest/v1/user_book_metrics?library_item_id=eq.${encodeURIComponent(existing.library_item_id)}&select=*`, {
-      method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
-    }).catch(() => null);
-    return Array.isArray(data) && data[0] ? data[0] : { ...existing, ...payload };
-  }
-  const data = await supabaseRest('/rest/v1/user_book_metrics', {
-    method: 'POST', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
-  }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : payload;
-}
-
-async function upsertDailyStatsForSession(userId, patch = {}) {
-  const endedAtIso = toText(patch?.ended_at || patch?.endedAt, new Date().toISOString());
-  const endedAt = new Date(endedAtIso);
-  const statDate = Number.isNaN(endedAt.getTime()) ? new Date().toISOString().slice(0, 10) : endedAt.toISOString().slice(0, 10);
-  const existing = await getDailyStatRow(userId, statDate).catch(() => null);
-  const payload = {
-    user_id: userId,
-    stat_date: statDate,
-    minutes_read: Math.max(0, toInt(existing?.minutes_read, 0) + Math.max(0, toInt(patch?.minutes_listened ?? patch?.minutesListened, 0))),
-    pages_read: Math.max(0, toInt(existing?.pages_read, 0) + Math.max(0, toInt(patch?.pages_completed ?? patch?.pagesCompleted, 0))),
-    sessions_count: Math.max(0, toInt(existing?.sessions_count, 0) + 1),
-    updated_at: new Date().toISOString(),
-  };
-  if (existing?.user_id) {
-    const data = await supabaseRest(`/rest/v1/user_daily_stats?user_id=eq.${encodeURIComponent(userId)}&stat_date=eq.${encodeURIComponent(statDate)}&select=*`, {
-      method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
-    }).catch(() => null);
-    return Array.isArray(data) && data[0] ? data[0] : { ...existing, ...payload };
-  }
-  const data = await supabaseRest('/rest/v1/user_daily_stats', {
-    method: 'POST', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
-  }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : payload;
-}
-
-async function addSession(userId, patch = {}) {
-  const libraryItem = await ensureLibraryItem(userId, patch);
-  await Promise.all([
-    upsertBookMetricsForSession(userId, libraryItem, patch),
-    upsertDailyStatsForSession(userId, patch),
-  ]);
-  return {
-    library_item_id: libraryItem.id,
-    book_id: libraryItem.storage_ref,
-    title: libraryItem.title,
-    minutes_listened: Math.max(0, toInt(patch?.minutes_listened ?? patch?.minutesListened, 0)),
-    pages_completed: Math.max(0, toInt(patch?.pages_completed ?? patch?.pagesCompleted, 0)),
-    completed: toBool(patch?.completed, false),
-    ended_at: toText(patch?.ended_at || patch?.endedAt, new Date().toISOString()),
-  };
-}
-
-async function setLibraryItemStatus(userId, storageRef, nextStatus, options = {}) {
-  const item = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: true }).catch(() => null);
-  if (!item) return null;
+async function addSession(userId, patch) {
   const now = new Date();
-  if (nextStatus === 'deleted') {
-    await deleteProgressForLibraryItem(item.id).catch(() => null);
-  }
-  if (nextStatus === 'purge') {
-    await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(item.id)}&user_id=eq.${encodeURIComponent(userId)}`, {
-      method: 'DELETE', asService: true,
-    }).catch(() => null);
-    return { id: item.id, storage_ref: item.storage_ref, status: 'purged' };
-  }
-  const payload = {
-    status: nextStatus === 'active' ? 'active' : 'deleted',
-    deleted_at: nextStatus === 'active' ? null : now.toISOString(),
-    purge_after: nextStatus === 'active' ? null : new Date(now.getTime() + Math.max(1, toInt(options.purgeAfterDays, 30)) * 24 * 60 * 60 * 1000).toISOString(),
+  const minutesListened = Math.max(0, toInt(patch?.minutes_listened ?? patch?.minutesListened, 0));
+  const elapsedSeconds = Math.max(0, toInt(patch?.elapsed_seconds ?? patch?.elapsedSeconds, minutesListened * 60));
+  const row = {
+    user_id: userId,
+    pages_completed: Math.max(0, toInt(patch?.pages_completed ?? patch?.pagesCompleted, 0)),
+    minutes_listened: minutesListened,
+    source_type: toText(patch?.source_type || patch?.sourceType, 'book'),
+    source_id: toText(patch?.source_id || patch?.sourceId, toText(patch?.book_id || patch?.bookId, '')),
+    book_id: toText(patch?.book_id || patch?.bookId, ''),
+    chapter_id: patch?.chapter_id == null && patch?.chapterId == null ? null : String(patch?.chapter_id ?? patch?.chapterId),
+    mode: toText(patch?.mode, 'reading'),
+    tts_seconds: Math.max(0, toInt(patch?.tts_seconds ?? patch?.ttsSeconds, 0)),
+    completed: toBool(patch?.completed, false),
+    started_at: toText(patch?.started_at || patch?.startedAt, new Date(now.getTime() - elapsedSeconds * 1000).toISOString()),
+    ended_at: toText(patch?.ended_at || patch?.endedAt, now.toISOString()),
     updated_at: now.toISOString(),
+    elapsed_seconds: elapsedSeconds,
   };
-  const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(item.id)}&select=*`, {
-    method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
+  if (!row.book_id) throw new Error('book_id is required');
+  const data = await supabaseRest('/rest/v1/user_sessions', {
+    method: 'POST', asService: true, headers: { Prefer: 'return=representation' }, body: row,
   }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : { ...item, ...payload };
+  return Array.isArray(data) && data[0] ? data[0] : row;
+}
+
+function summarizeSessions(rows = []) {
+  const list = Array.isArray(rows) ? rows : [];
+  let dailySeconds = 0;
+  let weeklySeconds = 0;
+  let sessionsCompleted = 0;
+  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - (6 * 24 * 60 * 60 * 1000));
+  for (const row of list) {
+    const endedAt = row?.ended_at ? new Date(row.ended_at) : null;
+    if (!endedAt || Number.isNaN(endedAt.getTime())) continue;
+    const seconds = Math.max(0, toInt(row?.elapsed_seconds, Math.max(0, toInt(row?.minutes_listened, 0) * 60)));
+    if (endedAt.toISOString().slice(0, 10) === today) dailySeconds += seconds;
+    if (endedAt >= sevenDaysAgo) weeklySeconds += seconds;
+    sessionsCompleted += 1;
+  }
+  return {
+    rows: list,
+    totalSessions: list.length,
+    dailyMinutes: Math.round(dailySeconds / 60),
+    weeklyMinutes: Math.round(weeklySeconds / 60),
+    sessionsCompleted,
+    latest: list[0] || null,
+  };
 }
 
 function summarizeUsage(usageRow, usageDailyLimit) {
@@ -536,53 +295,21 @@ function summarizeUsage(usageRow, usageDailyLimit) {
   };
 }
 
-function summarizeSessionsFromDailyStats(rows = []) {
-  const list = Array.isArray(rows) ? rows : [];
-  const today = new Date().toISOString().slice(0, 10);
-  const weekStart = new Date();
-  weekStart.setUTCDate(weekStart.getUTCDate() - 6);
-  const weekStartIso = weekStart.toISOString().slice(0, 10);
-  let dailyMinutes = 0;
-  let weeklyMinutes = 0;
-  let totalSessions = 0;
-  let sessionsCompleted = 0;
-  for (const row of list) {
-    const statDate = String(row?.stat_date || '');
-    const minutes = Math.max(0, toInt(row?.minutes_read, 0));
-    const count = Math.max(0, toInt(row?.sessions_count, 0));
-    if (statDate === today) dailyMinutes += minutes;
-    if (statDate >= weekStartIso) weeklyMinutes += minutes;
-    totalSessions += count;
-    sessionsCompleted += count;
-  }
-  return { rows: [], totalSessions, dailyMinutes, weeklyMinutes, sessionsCompleted, latest: null };
-}
-
 async function buildSnapshot(req, user) {
   const resolved = await getResolvedRuntimePolicyForRequest(req).catch(() => null);
   const usageDailyLimit = resolved?.policy?.usageDailyLimit ?? null;
-  const [usersRow, settingsRow, libraryItemsRaw, progressRowsRaw, bookMetricsRaw, dailyStatsRows, usageRow] = await Promise.all([
+  const [usersRow, settingsRow, progressRows, sessionRows, usageRow] = await Promise.all([
     getUsersRow(user.id),
     getSettingsRow(user.id),
-    getLibraryItemsRows(user.id, { includeDeleted: true, limit: 500 }),
-    getProgressRowsRaw(user.id),
-    getBookMetricsRowsRaw(user.id),
-    getDailyStatsRows(user.id, { limit: 120 }),
+    getProgressRows(user.id),
+    getSessionRows(user.id),
     getUsageRow(user.id).catch(() => null),
   ]);
-  const libraryItems = (libraryItemsRaw || []).map(serializeLibraryItemRow).filter(Boolean);
-  const libraryItemMap = new Map(libraryItemsRaw.map((row) => [String(row.id), row]));
-  const progressRows = (progressRowsRaw || []).map((row) => serializeProgressRow(row, libraryItemMap)).filter(Boolean);
-  const bookMetricsRows = (bookMetricsRaw || []).map((row) => serializeBookMetricRow(row, libraryItemMap)).filter(Boolean);
-  const serializedDailyStatsRows = (dailyStatsRows || []).map(serializeDailyStatRow).filter(Boolean);
   return {
     usersRow,
     settingsRow,
-    libraryItems,
     progressRows,
-    bookMetricsRows,
-    dailyStatsRows: serializedDailyStatsRows,
-    sessions: summarizeSessionsFromDailyStats(serializedDailyStatsRows),
+    sessions: summarizeSessions(sessionRows),
     usage: summarizeUsage(usageRow, usageDailyLimit),
     entitlement: resolved?.entitlementSnapshot || null,
     runtimePolicy: resolved?.policy || null,
@@ -648,17 +375,6 @@ export default async function handler(req, res) {
         case 'record_session':
           row = await addSession(auth.user.id, body?.payload || {});
           break;
-        case 'delete_library_item': {
-          const storageRef = body?.payload?.storage_ref || body?.payload?.storageRef || body?.payload?.book_id || body?.payload?.bookId;
-          const purge = toBool(body?.payload?.purge, false);
-          row = await setLibraryItemStatus(auth.user.id, storageRef, purge ? 'purge' : 'deleted', body?.payload || {});
-          break;
-        }
-        case 'restore_library_item': {
-          const storageRef = body?.payload?.storage_ref || body?.payload?.storageRef || body?.payload?.book_id || body?.payload?.bookId;
-          row = await setLibraryItemStatus(auth.user.id, storageRef, 'active', body?.payload || {});
-          break;
-        }
         case 'reset_usage_window': {
           const now = new Date();
           const { start, end } = getUtcWindow(now);
