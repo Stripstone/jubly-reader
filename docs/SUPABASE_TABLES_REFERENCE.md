@@ -93,21 +93,17 @@ Server-authoritative settings sync.
 - `tts_volume`
 - `autoplay_enabled`
 - `music_enabled`
+- `music_profile_id`
 - `particles_enabled`
+- `particle_preset_id`
 - `use_source_page_numbers`
 - `appearance_mode`
 - `daily_goal_minutes`
+- `last_goal_celebrated_on`
+- `explorer_accent_swatch`
+- `explorer_background_mode`
 - `created_at`
 - `updated_at`
-
-## Dropped columns (removed — theme-definition fields re-homed to runtime/local)
-The following columns were removed from `user_settings` as part of the theme ownership correction pass.
-They are now owned by runtime/local theme prefs (`rc_theme_prefs` localStorage) and must not be recreated here.
-- `explorer_accent_swatch` → `rcTheme` runtime, `rc_theme_prefs` local
-- `explorer_background_mode` → `rcTheme` runtime, `rc_theme_prefs` local
-- `particle_preset_id` → `rcTheme.settings.emberPreset`, `rc_theme_prefs` local
-- `music_profile_id` → `rcTheme.settings.music`, device-local track selection
-- `last_goal_celebrated_on` → `rc_profile_prefs` localStorage, `normalizeProfilePrefs()` in `state.js`
 
 ## Key rules
 - One row per user.
@@ -115,7 +111,6 @@ They are now owned by runtime/local theme prefs (`rc_theme_prefs` localStorage) 
 - Server upserts should merge/coerce before write.
 - `daily_goal_minutes` is constrained to the current launch contract range.
 - `use_source_page_numbers` is `NOT NULL` with a DB default so settings writes do not fail on partial payloads.
-- Dropped columns listed above must never be re-added as Explorer-specific DB fields. Cross-device theme persistence, if needed later, goes through a generic theme-overrides model.
 
 ## Must never be used for
 - active playback state

@@ -160,10 +160,15 @@ window.rcSync = (function () {
       tts_volume: voiceVolumeEl && voiceVolumeEl.value !== '' ? Number(voiceVolumeEl.value) : null,
       autoplay_enabled: autoplayToggle ? !!autoplayToggle.checked : null,
       music_enabled: typeof themeSettings.music === 'string' ? themeSettings.music !== 'off' : null,
+      music_profile_id: typeof themeSettings.music === 'string' ? themeSettings.music : null,
       particles_enabled: typeof themeSettings.embersOn === 'boolean' ? !!themeSettings.embersOn : null,
+      particle_preset_id: themeSettings.emberPreset ? String(themeSettings.emberPreset) : null,
       use_source_page_numbers: typeof theme.use_source_page_numbers === 'boolean' ? !!theme.use_source_page_numbers : null,
       appearance_mode: appearance && appearance.appearance ? String(appearance.appearance) : null,
       daily_goal_minutes: Number.isFinite(Number(profile.dailyGoalMinutes)) ? Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes)))) : null,
+      last_goal_celebrated_on: typeof profile.lastGoalCelebratedOn === 'string' && profile.lastGoalCelebratedOn ? profile.lastGoalCelebratedOn : null,
+      explorer_accent_swatch: themeSettings.accentSwatch ? String(themeSettings.accentSwatch) : null,
+      explorer_background_mode: themeSettings.backgroundMode ? String(themeSettings.backgroundMode) : null,
       updated_at: new Date().toISOString(),
     };
 
@@ -203,7 +208,7 @@ window.rcSync = (function () {
       weeklyMinutes: Math.round(weeklySeconds / 60),
       sessionsCompleted,
       progressPct: goal > 0 ? Math.max(0, Math.min(100, Math.round((dailySeconds / (goal * 60)) * 100))) : 0,
-      lastGoalCelebratedOn: String(profile.lastGoalCelebratedOn || ''),
+      lastGoalCelebratedOn: String((_remoteSettingsRow && _remoteSettingsRow.last_goal_celebrated_on) || profile.lastGoalCelebratedOn || ''),
       todayIso: today,
     };
     return _remoteProfileMetrics;
@@ -220,8 +225,12 @@ window.rcSync = (function () {
       nextTheme.theme_settings = Object.assign({}, nextTheme.theme_settings || {});
       if (row.font_id) nextTheme.theme_settings.font = String(row.font_id);
       if (typeof row.music_enabled === 'boolean' && !row.music_enabled) nextTheme.theme_settings.music = 'off';
+      if (typeof row.music_profile_id === 'string' && row.music_profile_id) nextTheme.theme_settings.music = row.music_profile_id;
       if (typeof row.particles_enabled === 'boolean') nextTheme.theme_settings.embersOn = !!row.particles_enabled;
+      if (row.particle_preset_id) nextTheme.theme_settings.emberPreset = String(row.particle_preset_id);
       if (typeof row.use_source_page_numbers === 'boolean') nextTheme.use_source_page_numbers = !!row.use_source_page_numbers;
+      if (row.explorer_accent_swatch) nextTheme.theme_settings.accentSwatch = String(row.explorer_accent_swatch);
+      if (row.explorer_background_mode) nextTheme.theme_settings.backgroundMode = String(row.explorer_background_mode);
       _writeLocalJson(RC_THEME_PREFS_KEY, nextTheme);
       try { if (window.rcTheme && typeof window.rcTheme.load === 'function') window.rcTheme.load(); } catch (_) {}
 
@@ -236,10 +245,13 @@ window.rcSync = (function () {
         try { if (window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load(); } catch (_) {}
       }
 
-      if (row.daily_goal_minutes != null) {
+      if (row.daily_goal_minutes != null || row.last_goal_celebrated_on != null) {
         try {
           if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') {
-            window.rcPrefs.saveProfilePrefs({ dailyGoalMinutes: Number(row.daily_goal_minutes) });
+            window.rcPrefs.saveProfilePrefs({
+              dailyGoalMinutes: row.daily_goal_minutes != null ? Number(row.daily_goal_minutes) : undefined,
+              lastGoalCelebratedOn: row.last_goal_celebrated_on != null ? String(row.last_goal_celebrated_on) : undefined,
+            });
           }
         } catch (_) {}
       }
@@ -405,8 +417,6 @@ window.rcSync = (function () {
   // ── Settings sync ─────────────────────────────────────────────────────────
   async function syncSettings() {
     if (!_ready()) return null;
-    // Capture last confirmed row before optimistic projection so we can snap back on failure.
-    const _prevSettingsRow = _remoteSettingsRow;
     const payload = _collectSettingsRow();
     _projectCurrentSettingsLocal();
     _recordSync('settings', 'pending', { payload });
@@ -418,24 +428,6 @@ window.rcSync = (function () {
       return data && data.row ? data.row : null;
     } catch (error) {
       _recordSync('settings', 'error', { message: String(error?.message || error || 'settings sync failed') });
-      // Snap-back: revert to last confirmed state.
-      // Non-null _prevSettingsRow: revert _remoteSettingsRow AND re-apply confirmed state
-      // to local/runtime prefs (theme prefs, DOM controls, appearance).
-      // _applyRemoteSettingsRow uses _applyingRemoteSettings guard to prevent the re-apply
-      // from retriggering another sync cycle.
-      // Null _prevSettingsRow (first-write failure): revert _remoteSettingsRow to null
-      // and re-derive metrics. Local prefs remain correct because _projectCurrentSettingsLocal
-      // never writes to localStorage — only _remoteSettingsRow (in-memory) was projected.
-      // Leaving _remoteSettingsRow at the projected value would be "doing nothing" —
-      // this branch ensures the projected value is cleared even when there is no prior row.
-      if (_prevSettingsRow) {
-        _remoteSettingsRow = _prevSettingsRow;
-        _applyRemoteSettingsRow(_prevSettingsRow);
-      } else {
-        _remoteSettingsRow = null;
-        _deriveRemoteProfileMetrics();
-        _emitHydrated('settings-snapback');
-      }
       return null;
     }
   }

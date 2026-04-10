@@ -235,6 +235,8 @@ window.rcDevTools = (function () {
           <label style="font-size:12px;">Appearance<select id="devSettingsAppearance" style="width:100%; margin-top:4px;"><option value="light">light</option><option value="dark">dark</option></select></label>
           <label style="font-size:12px;">Theme<input id="devSettingsTheme" type="text" style="width:100%; margin-top:4px;" /></label>
           <label style="font-size:12px;">TTS speed<input id="devSettingsTtsSpeed" type="number" min="0.5" max="3" step="0.1" style="width:100%; margin-top:4px;" /></label>
+          <label style="font-size:12px;">Explorer accent<input id="devSettingsAccent" type="text" style="width:100%; margin-top:4px;" /></label>
+          <label style="font-size:12px;">Explorer background<input id="devSettingsBackground" type="text" style="width:100%; margin-top:4px;" /></label>
           <label style="font-size:12px; display:flex; align-items:end; gap:8px;"><input id="devSettingsAutoplay" type="checkbox" /> autoplay</label>
           <label style="font-size:12px; display:flex; align-items:end; gap:8px;"><input id="devSettingsSourcePages" type="checkbox" /> source page numbers</label>
         </div>
@@ -296,6 +298,8 @@ window.rcDevTools = (function () {
         appearance_mode: value('devSettingsAppearance'),
         theme_id: value('devSettingsTheme') || null,
         tts_speed: num('devSettingsTtsSpeed'),
+        explorer_accent_swatch: value('devSettingsAccent') || null,
+        explorer_background_mode: value('devSettingsBackground') || null,
         autoplay_enabled: checked('devSettingsAutoplay'),
         use_source_page_numbers: checked('devSettingsSourcePages'),
       });
@@ -394,6 +398,8 @@ window.rcDevTools = (function () {
     setValue('devSettingsAppearance', settings.appearance_mode || 'light');
     setValue('devSettingsTheme', settings.theme_id || 'default');
     setValue('devSettingsTtsSpeed', settings.tts_speed == null ? '' : settings.tts_speed);
+    setValue('devSettingsAccent', settings.explorer_accent_swatch || '');
+    setValue('devSettingsBackground', settings.explorer_background_mode || '');
     setChecked('devSettingsAutoplay', !!settings.autoplay_enabled);
     setChecked('devSettingsSourcePages', !!settings.use_source_page_numbers);
     if (statusEl) {
