@@ -107,9 +107,11 @@
             subtitle.innerHTML = 'Create an account to enter your library and keep your settings, billing, and progress in one place.';
             return;
         }
-        const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
+        const remoteMetrics = (window.rcSync && typeof window.rcSync.getRemoteProfileMetrics === 'function') ? window.rcSync.getRemoteProfileMetrics() : null;
+        const localMetrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
             ? window.rcReadingMetrics.getReadingProfileMetrics()
             : { sessionsCompleted: 0, weeklyMinutes: 0 };
+        const metrics = remoteMetrics || localMetrics;
         const sessions = Math.max(0, Number(metrics.sessionsCompleted || 0));
         const weekly = Math.max(0, Number(metrics.weeklyMinutes || 0));
         if (weekly > 0) {
@@ -144,7 +146,8 @@
         if (navProfileTrigger) navProfileTrigger.style.display = authed ? '' : 'none';
         if (navUsagePill) navUsagePill.classList.toggle('hidden-section', !authed || isReading);
 
-        const displayName = deriveDisplayName(user);
+        const remoteDisplayName = (window.rcSync && typeof window.rcSync.getRemoteUsersRow === 'function') ? (window.rcSync.getRemoteUsersRow()?.display_name || '') : '';
+        const displayName = remoteDisplayName || deriveDisplayName(user);
         if (navUserName) {
             navUserName.textContent = authed ? displayName : '';
             navUserName.classList.toggle('hidden-section', !authed);
@@ -1464,6 +1467,9 @@
             e.preventDefault();
             const next = Math.max(5, Math.min(300, Math.round(Number(goalInput && goalInput.value || 0) || 0)));
             if (!Number.isFinite(next) || next <= 0) return;
+            // saveProfilePrefs fires rc:prefs-changed, which queues rcSync.syncSettings
+            // via _handlePrefsChanged. Shell does not call syncSettings directly to
+            // avoid a competing parallel durable write for the same mutation.
             try { if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') window.rcPrefs.saveProfilePrefs({ dailyGoalMinutes: next }); } catch (_) {}
             setGoalEditMode(false);
             renderProfileSurface();

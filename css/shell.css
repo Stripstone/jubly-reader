@@ -1330,3 +1330,19 @@ body.auth-hydrating #profile-page {
     align-items: flex-start;
   }
 }
+
+/* Restore-pending overlay: hide pages until restore position is known */
+#reading-mode.reading-restore-pending #pages {
+  visibility: hidden;
+}
+#reading-mode.reading-restore-pending .reading-content::after {
+  content: 'Returning to your place\2026';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  opacity: 0.6;
+  pointer-events: none;
+}

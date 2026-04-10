@@ -169,6 +169,7 @@ window.rcDevTools = (function () {
         <div>
           <strong style="font-size:14px; opacity:0.95;">Dev tools</strong>
           <div id="devToolsStatus" style="font-size:12px; opacity:0.72; margin-top:2px;"></div>
+          <div id="devClientSummary" style="font-size:11px; opacity:0.68; margin-top:2px;"></div>
         </div>
         <button type="button" id="devToolsCloseBtn" style="padding:6px 10px;">✕</button>
       </div>
@@ -202,7 +203,7 @@ window.rcDevTools = (function () {
           <label style="font-size:12px;">Source ID<input id="devProgressSourceId" type="text" style="width:100%; margin-top:4px;" /></label>
           <label style="font-size:12px;">Source type<input id="devProgressSourceType" type="text" value="book" style="width:100%; margin-top:4px;" /></label>
           <label style="font-size:12px;">Chapter<input id="devProgressChapter" type="text" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Current page<input id="devProgressPage" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
+          <label style="font-size:12px;">Current page<input id="devProgressPage" type="number" min="1" style="width:100%; margin-top:4px;" /></label>
           <label style="font-size:12px;">Page count<input id="devProgressPageCount" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
         </div>
         <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
@@ -264,7 +265,7 @@ window.rcDevTools = (function () {
         source_id: value('devProgressSourceId') || value('devProgressBookId'),
         source_type: value('devProgressSourceType') || 'book',
         chapter_id: value('devProgressChapter') || null,
-        pageIndex: num('devProgressPage'),
+        pageIndex: Math.max(0, num('devProgressPage') - 1),
         pageCount: num('devProgressPageCount'),
       });
     });
@@ -344,32 +345,56 @@ window.rcDevTools = (function () {
     el.checked = !!value;
   }
 
+  function getClientContext() {
+    let target = {};
+    let restore = null;
+    let profile = null;
+    let sync = null;
+    try { target = Object.assign({}, window.__rcReadingTarget || {}); } catch (_) {}
+    try { restore = typeof window.getReadingRestoreStatus === 'function' ? window.getReadingRestoreStatus() : null; } catch (_) {}
+    try { profile = window.rcPrefs && typeof window.rcPrefs.loadProfilePrefs === 'function' ? window.rcPrefs.loadProfilePrefs() : null; } catch (_) {}
+    try { sync = window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function' ? window.rcSync.getDiagnosticsSnapshot() : null; } catch (_) {}
+    return { target, restore, profile, sync };
+  }
+
   function renderPanel() {
     if (!panel) return;
     const snapshot = state.snapshot || {};
-    const entitlement = snapshot.entitlementRow || {};
+    const entitlement = snapshot.entitlementRow || snapshot.entitlement || {};
     const usage = snapshot.usage || {};
-    const latestProgress = snapshot.progress && snapshot.progress.latest ? snapshot.progress.latest : {};
+    const latestProgress = snapshot.progress && snapshot.progress.latest ? snapshot.progress.latest : ((Array.isArray(snapshot.progressRows) && snapshot.progressRows[0]) ? snapshot.progressRows[0] : {});
     const latestSession = snapshot.sessions && snapshot.sessions.latest ? snapshot.sessions.latest : {};
     const settings = snapshot.settingsRow || {};
+    const client = getClientContext();
+    const clientTarget = client.target || {};
+    const clientRestore = client.restore || {};
+    const clientBookId = String(clientTarget.bookId || '').trim();
+    const clientActive = !!clientBookId;
+    const resolvedBookId = clientActive ? clientBookId : (latestProgress.book_id || '');
+    const resolvedSourceId = clientActive ? (clientBookId || latestProgress.source_id || '') : (latestProgress.source_id || latestProgress.book_id || '');
+    const resolvedSourceType = clientActive ? (clientTarget.sourceType || 'book') : (latestProgress.source_type || 'book');
+    const resolvedChapter = clientActive ? (clientTarget.chapterIndex != null ? clientTarget.chapterIndex : (latestProgress.chapter_id == null ? '' : latestProgress.chapter_id)) : (latestProgress.chapter_id == null ? '' : latestProgress.chapter_id);
+    const resolvedPageIndex = clientActive ? (clientTarget.pageIndex != null ? clientTarget.pageIndex : (clientRestore.currentPageIndex != null ? clientRestore.currentPageIndex : latestProgress.last_page_index)) : latestProgress.last_page_index;
+    const resolvedPageVisible = resolvedPageIndex == null || resolvedPageIndex === '' ? '' : (Math.max(0, Number(resolvedPageIndex)) + 1);
+    const resolvedPageCount = clientRestore && clientRestore.pageCount ? clientRestore.pageCount : (latestProgress.page_count == null ? 0 : latestProgress.page_count);
     setValue('devPlanTier', entitlement.tier === 'premium' ? 'premium' : entitlement.tier === 'paid' ? 'paid' : 'free');
     setValue('devPlanStatus', entitlement.status || 'active');
     setValue('devUsageRemaining', usage.remaining == null ? '' : usage.remaining);
-    setValue('devUsageUnits', usage.row && usage.row.used_units != null ? usage.row.used_units : 0);
-    setValue('devUsageCalls', usage.usedApiCalls == null ? 0 : usage.usedApiCalls);
-    setValue('devProgressBookId', latestProgress.book_id || '');
-    setValue('devProgressSourceId', latestProgress.source_id || latestProgress.book_id || '');
-    setValue('devProgressSourceType', latestProgress.source_type || 'book');
-    setValue('devProgressChapter', latestProgress.chapter_id == null ? '' : latestProgress.chapter_id);
-    setValue('devProgressPage', latestProgress.last_page_index == null ? 0 : latestProgress.last_page_index);
-    setValue('devProgressPageCount', latestProgress.page_count == null ? 0 : latestProgress.page_count);
-    setValue('devSessionBookId', latestSession.book_id || latestProgress.book_id || '');
-    setValue('devSessionChapter', latestSession.chapter_id == null ? '' : latestSession.chapter_id);
+    setValue('devUsageUnits', usage.row && usage.row.used_units != null ? usage.row.used_units : (usage.used_units == null ? 0 : usage.used_units));
+    setValue('devUsageCalls', usage.usedApiCalls == null ? (usage.used_api_calls == null ? 0 : usage.used_api_calls) : usage.usedApiCalls);
+    setValue('devProgressBookId', resolvedBookId);
+    setValue('devProgressSourceId', resolvedSourceId);
+    setValue('devProgressSourceType', resolvedSourceType);
+    setValue('devProgressChapter', resolvedChapter == null ? '' : resolvedChapter);
+    setValue('devProgressPage', resolvedPageVisible === '' ? '' : resolvedPageVisible);
+    setValue('devProgressPageCount', resolvedPageCount == null ? 0 : resolvedPageCount);
+    setValue('devSessionBookId', latestSession.book_id || resolvedBookId || '');
+    setValue('devSessionChapter', latestSession.chapter_id == null ? (resolvedChapter == null ? '' : resolvedChapter) : latestSession.chapter_id);
     setValue('devSessionMinutes', latestSession.minutes_listened == null ? 0 : latestSession.minutes_listened);
     setValue('devSessionPages', latestSession.pages_completed == null ? 0 : latestSession.pages_completed);
     setValue('devSessionMode', latestSession.mode || 'reading');
     setChecked('devSessionCompleted', !!latestSession.completed);
-    setValue('devSettingsGoal', settings.daily_goal_minutes == null ? 15 : settings.daily_goal_minutes);
+    setValue('devSettingsGoal', settings.daily_goal_minutes == null ? ((client.profile && client.profile.dailyGoalMinutes) || 15) : settings.daily_goal_minutes);
     setValue('devSettingsAppearance', settings.appearance_mode || 'light');
     setValue('devSettingsTheme', settings.theme_id || 'default');
     setValue('devSettingsTtsSpeed', settings.tts_speed == null ? '' : settings.tts_speed);
@@ -382,6 +407,13 @@ window.rcDevTools = (function () {
       const plan = entitlement.tier === 'paid' ? 'Pro' : entitlement.tier === 'premium' ? 'Premium' : 'Free';
       const remaining = usage.remaining == null ? '—' : usage.remaining;
       statusEl.textContent = `${state.email || 'dev'} • ${plan} • ${remaining} left • ${sessionSummary.totalSessions || 0} sessions`;
+    }
+    const summaryEl = panel.querySelector('#devClientSummary');
+    if (summaryEl) {
+      const restoreStatus = client.sync && client.sync.sync && client.sync.sync.restore ? (client.sync.sync.restore.status || 'idle') : 'idle';
+      const chapterVisible = resolvedChapter === '' || resolvedChapter == null ? '—' : (Number(resolvedChapter) + 1);
+      const pageVisible = resolvedPageVisible === '' ? '—' : resolvedPageVisible;
+      summaryEl.textContent = `Client: book ${resolvedBookId || '—'} • ch ${chapterVisible} • pg ${pageVisible} • restore ${restoreStatus}`;
     }
   }
 
@@ -438,6 +470,11 @@ window.rcDevTools = (function () {
   try {
     document.addEventListener('rc:auth-changed', () => {
       setTimeout(() => { refresh().catch(() => {}); }, 0);
+    });
+  } catch (_) {}
+  try {
+    document.addEventListener('rc:durable-data-hydrated', () => {
+      if (panel && panel.style.display === 'block') renderPanel();
     });
   } catch (_) {}
   try {

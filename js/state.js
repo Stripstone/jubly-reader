@@ -261,6 +261,8 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   let sessionTokens = {
     remaining: null,
     allowance: null,
+    authoritative: false,
+    source: 'unknown',
     spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
   };
 
@@ -274,6 +276,8 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     sessionTokens = {
       remaining: null,
       allowance: null,
+      authoritative: false,
+      source: 'reset',
       spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
     };
   }
@@ -1291,6 +1295,8 @@ window.rcUsage = {
         const remaining = Number(data.remaining);
         if (Number.isFinite(limit) && limit >= 0) sessionTokens.allowance = limit;
         sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
+        sessionTokens.authoritative = Number.isFinite(remaining);
+        sessionTokens.source = 'server';
         try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: data.remaining, allowance: data.limit, source: 'server' } })); } catch (_) {}
         return {
           allowed: !!data.allowed,
@@ -1302,6 +1308,8 @@ window.rcUsage = {
       }
     } catch (_) {}
     const cost = TOKEN_COSTS[category] || 0;
+    sessionTokens.authoritative = false;
+    sessionTokens.source = 'server-unavailable';
     try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: null, allowance: sessionTokens.allowance, source: 'server-unavailable' } })); } catch (_) {}
     return {
       allowed: false,
@@ -1320,7 +1328,8 @@ window.rcUsage = {
     return {
       remaining: Number.isFinite(Number(sessionTokens?.remaining)) ? Math.max(0, Number(sessionTokens.remaining)) : null,
       allowance: Number.isFinite(Number(sessionTokens?.allowance)) ? Math.max(0, Number(sessionTokens.allowance)) : null,
-      authoritative: Number.isFinite(Number(sessionTokens?.remaining)),
+      authoritative: typeof sessionTokens?.authoritative === 'boolean' ? sessionTokens.authoritative : Number.isFinite(Number(sessionTokens?.remaining)),
+      source: sessionTokens?.source || null,
       spent: { ...(sessionTokens?.spent || {}) },
     };
   },
@@ -1329,7 +1338,9 @@ window.rcUsage = {
     const allowance = Number(snapshot?.limit ?? snapshot?.allowance);
     sessionTokens.allowance = Number.isFinite(allowance) ? Math.max(0, allowance) : null;
     sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
-    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: 'dev-tools' } })); } catch (_) {}
+    sessionTokens.authoritative = typeof snapshot?.authoritative === 'boolean' ? !!snapshot.authoritative : Number.isFinite(remaining);
+    sessionTokens.source = snapshot?.source || 'server-sync';
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: sessionTokens.source } })); } catch (_) {}
     return this.getSnapshot();
   },
 };

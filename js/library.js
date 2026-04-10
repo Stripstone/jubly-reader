@@ -19,6 +19,32 @@
     return 0;
   }
 
+  async function flushCurrentReadingProgress(reason) {
+    try {
+      if (!(window.rcSync && typeof window.rcSync.saveProgressNow === 'function')) return null;
+      const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
+      const bookId = String(ctx.bookId || '').trim();
+      if (!bookId) return null;
+      const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
+      const pageIndex = getFocusedOrInferredReadingPageIndex();
+      return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'flush') });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function queueCurrentReadingProgress(reason) {
+    try {
+      if (!(window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function')) return;
+      const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
+      const bookId = String(ctx.bookId || '').trim();
+      if (!bookId) return;
+      const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
+      const pageIndex = getFocusedOrInferredReadingPageIndex();
+      window.rcSync.scheduleProgressSync(bookId, chapterIndex, pageIndex, { reason: String(reason || 'queue') });
+    } catch (_) {}
+  }
+
   function applyPendingReadingRestore() {
     try {
       const idx = Number(window.__rcPendingRestorePageIndex ?? -1);
@@ -1449,7 +1475,7 @@
         try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, bookPages.length - 1)); } catch (_) {}
         // Auto-render all pages as one set — no Load click required.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
-        if (allText) applySelectionToBulkInput(allText, { append: false });
+        if (allText) applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true });
         return;
       }
 
@@ -1465,7 +1491,7 @@
       try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, chapterPages.length - 1)); } catch (_) {}
       // Auto-render the resolved chapter — no Load click required.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      if (chapterText) applySelectionToBulkInput(chapterText, { append: false });
+      if (chapterText) applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true });
     }
 
     async function loadManifest() {
@@ -1576,10 +1602,10 @@
       }
     }
 
-    function applySelectionToBulkInput(text, { append = false } = {}) {
+    function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false } = {}) {
       bulkInput.value = String(text || "").trim();
       if (append) appendPages();
-      else addPages();
+      else addPages({ preservePendingRestore });
     }
 
     // Events
@@ -1744,14 +1770,14 @@
 
 
 
-  async function addPages() {
+  async function addPages(options = {}) {
     const input = document.getElementById("bulkInput").value;
     goalTime = parseInt(document.getElementById("goalTimeInput").value);
     goalCharCount = parseInt(document.getElementById("goalCharInput").value);
     if (!input || !input.trim()) return;
 
     // UX rule: whenever user generates new pages, start fresh (no leftover pages)
-    if (pages.length > 0) resetSession({ confirm: false });
+    if (pages.length > 0) resetSession({ confirm: false, preservePendingRestore: !!options.preservePendingRestore });
 
     // Split pasted text into pages using paragraph breaks (blank lines).
     // Still supports legacy delimiters (--- / "## Page X") if present.
@@ -1864,7 +1890,7 @@
     checkSubmitButton();
   }
 
-  function resetSession({ confirm = true, clearPersistedWork = false, clearAnchors = false } = {}) {
+  function resetSession({ confirm = true, clearPersistedWork = false, clearAnchors = false, preservePendingRestore = false } = {}) {
     if (confirm && !window.confirm("Clear loaded pages and remove your consolidations and feedback?")) return false;
 
     if (clearPersistedWork) {
@@ -1886,7 +1912,7 @@
     // session's page index. Without this clear, applyPendingReadingRestore() —
     // called at the end of render() — can scroll to that stale index in the new
     // source, placing TTS and lastFocusedPageIndex at the wrong page.
-    window.__rcPendingRestorePageIndex = -1;
+    if (!preservePendingRestore) window.__rcPendingRestorePageIndex = -1;
     evaluationPhase = false;
     // Clear reading target — no source is active after a reset.
     try { if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: '', bookId: '', chapterIndex: -1, pageIndex: 0 }); } catch (_) {}
@@ -2567,6 +2593,7 @@ function _installScrollPageTracker() {
   if (window.__rcScrollPageTrackerInstalled) return;
   window.__rcScrollPageTrackerInstalled = true;
   var raf = 0;
+  var prevIdx = -1;
   window.addEventListener('scroll', function () {
     if (raf) return;
     raf = requestAnimationFrame(function () {
@@ -2600,6 +2627,11 @@ function _installScrollPageTracker() {
           const _ctx = window.getReadingTargetContext();
           if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
         } catch (_) {}
+        // Queue progress sync only when the page actually changed.
+        if (bestIdx !== prevIdx) {
+          prevIdx = bestIdx;
+          try { queueCurrentReadingProgress('scroll-tracker'); } catch (_) {}
+        }
       } catch (_) {}
     });
   }, { passive: true });
@@ -2722,7 +2754,7 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   try {
     if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
       const _t = window.__rcReadingTarget || {};
-      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx);
+      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx, { reason: 'focus-reading-page' });
     }
   } catch (_) {}
   return { ok: true, index: idx, total };
@@ -2769,6 +2801,8 @@ window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
   if (!bookId) return false;
 
+  try { if (window.rcSync && typeof window.rcSync.flushProgressSync === 'function') await window.rcSync.flushProgressSync(); } catch (_) {}
+
   const pagesEl = document.getElementById('pages');
   const readingModeEl = document.getElementById('reading-mode');
   try {
@@ -2813,6 +2847,7 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
 };
 
 window.exitReadingSession = function exitReadingSession() {
+  try { flushCurrentReadingProgress('reading-exit').catch(() => {}); } catch (_) {}
   const metrics = finalizeReadingMetricsSession();
   const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}

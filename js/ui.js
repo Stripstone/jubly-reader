@@ -466,21 +466,24 @@
           return;
         }
         const totalSpent = Object.values(sessionTokens?.spent || {}).reduce((a, b) => a + b, 0);
+        const usageSnapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function') ? window.rcUsage.getSnapshot() : null;
+        const remoteUsageSummary = (window.rcSync && typeof window.rcSync.getRemoteUsageSummary === 'function') ? window.rcSync.getRemoteUsageSummary() : null;
         const merged = {
-          usage: {
-            tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
-            remaining: sessionTokens?.remaining ?? '—',
-            allowance: (window.rcPolicy && typeof window.rcPolicy.getUsageDailyLimit === 'function') ? window.rcPolicy.getUsageDailyLimit() : '—',
-            totalSpent,
-            breakdown: sessionTokens?.spent || {},
-          },
+          usage: (() => {
+            const remaining = usageSnapshot && usageSnapshot.remaining != null ? usageSnapshot.remaining : (remoteUsageSummary && remoteUsageSummary.remaining != null ? remoteUsageSummary.remaining : '—');
+            const allowance = usageSnapshot && usageSnapshot.allowance != null ? usageSnapshot.allowance : (remoteUsageSummary && remoteUsageSummary.limit != null ? remoteUsageSummary.limit : null);
+            return {
+              tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
+              remaining,
+              allowance,
+              authoritative: !!(usageSnapshot && usageSnapshot.authoritative),
+              totalSpent,
+              breakdown: sessionTokens?.spent || {},
+              remote: remoteUsageSummary,
+            };
+          })(),
           stored: {
             persistenceMode: (window.__rcRuntimePersistenceStripped ? 'stripped-for-stabilization' : 'normal'),
-            tier: null,
-            voiceVariant: null,
-            voiceSelection: null,
-            ttsSpeed: null,
-            autoplay: null,
           },
           tts: {
             variant: TTS_STATE?.voiceVariant || 'female',
@@ -498,6 +501,7 @@
           shell: (typeof window.getShellDiagnosticsSnapshot === 'function') ? window.getShellDiagnosticsSnapshot() : null,
           runtime: (typeof window.getRuntimeUiState === 'function') ? window.getRuntimeUiState() : null,
           restore: (typeof window.getReadingRestoreStatus === 'function') ? window.getReadingRestoreStatus() : null,
+          sync: (window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function') ? window.rcSync.getDiagnosticsSnapshot() : null,
           importer: (typeof window.getImporterDiagnosticsSnapshot === 'function') ? window.getImporterDiagnosticsSnapshot() : null,
           ai: lastAIDiagnostics || null,
           anchors: lastAnchorsDiagnostics || null,
