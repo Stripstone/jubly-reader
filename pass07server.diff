@@ -1,0 +1,647 @@
+diff --git a/api/app/index.js b/api/app/index.js
+index a9db9b5..cb3bac4 100644
+--- a/api/app/index.js
++++ b/api/app/index.js
+@@ -17,13 +17,14 @@ const HANDLERS = {
+   'usage-check': () => import('../../server/lib/app-usage-check.js'),
+   'import-capacity': () => import('../../server/lib/app-import-capacity.js'),
+   'dev-tools': () => import('../../server/lib/app-dev-tools.js'),
++  'durable-sync': () => import('../../server/lib/app-durable-sync.js'),
+ };
+ 
+ export default async function handler(req, res) {
+   const kind = getKind(req) || 'health';
+   const loader = HANDLERS[kind];
+   if (!loader) {
+-    return json(res, 400, { error: 'Unknown app endpoint kind.', expected: ['public-config','runtime-config','health','usage-check','import-capacity','dev-tools'] });
++    return json(res, 400, { error: 'Unknown app endpoint kind.', expected: ['public-config','runtime-config','health','usage-check','import-capacity','dev-tools','durable-sync'] });
+   }
+   const mod = await loader();
+   return mod.default(req, res);
+diff --git a/js/devtools.js b/js/devtools.js
+index c732a50..9db0145 100644
+--- a/js/devtools.js
++++ b/js/devtools.js
+@@ -165,7 +165,7 @@ window.rcDevTools = (function () {
+     panel.style.background = 'var(--secondary-bg)';
+     panel.style.boxShadow = '0 14px 32px rgba(0,0,0,0.24)';
+     panel.innerHTML = `
+-      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;">
++      <div id="devToolsDragBar" style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin:-14px -14px 10px -14px; padding:10px 14px; border-bottom:1px solid var(--border); cursor:move; user-select:none;">
+         <div>
+           <strong style="font-size:14px; opacity:0.95;">Dev tools</strong>
+           <div id="devToolsStatus" style="font-size:12px; opacity:0.72; margin-top:2px;"></div>
+@@ -202,7 +202,7 @@ window.rcDevTools = (function () {
+           <label style="font-size:12px;">Source ID<input id="devProgressSourceId" type="text" style="width:100%; margin-top:4px;" /></label>
+           <label style="font-size:12px;">Source type<input id="devProgressSourceType" type="text" value="book" style="width:100%; margin-top:4px;" /></label>
+           <label style="font-size:12px;">Chapter<input id="devProgressChapter" type="text" style="width:100%; margin-top:4px;" /></label>
+-          <label style="font-size:12px;">Current page<input id="devProgressPage" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
++          <label style="font-size:12px;">Current page<input id="devProgressPage" type="number" min="1" style="width:100%; margin-top:4px;" /></label>
+           <label style="font-size:12px;">Page count<input id="devProgressPageCount" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
+         </div>
+         <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
+@@ -248,7 +248,25 @@ window.rcDevTools = (function () {
+     `;
+     document.body.appendChild(panel);
+     statusEl = panel.querySelector('#devToolsStatus');
++    const dragBar = panel.querySelector('#devToolsDragBar');
++    let dragState = null;
+     panel.querySelector('#devToolsCloseBtn').addEventListener('click', closePanel);
++    dragBar?.addEventListener('pointerdown', (ev) => {
++      const t = ev.target;
++      if (t && t.closest && t.closest('#devToolsCloseBtn')) return;
++      const rect = panel.getBoundingClientRect();
++      dragState = { offsetX: ev.clientX - rect.left, offsetY: ev.clientY - rect.top };
++      try { dragBar.setPointerCapture(ev.pointerId); } catch (_) {}
++      ev.preventDefault();
++    });
++    dragBar?.addEventListener('pointermove', (ev) => {
++      if (!dragState) return;
++      panel.style.right = 'auto';
++      panel.style.left = `${Math.max(10, Math.min(window.innerWidth - rectWidth(), ev.clientX - dragState.offsetX))}px`;
++      panel.style.top = `${Math.max(10, Math.min(window.innerHeight - rectHeight(), ev.clientY - dragState.offsetY))}px`;
++    });
++    dragBar?.addEventListener('pointerup', () => { dragState = null; });
++    dragBar?.addEventListener('pointercancel', () => { dragState = null; });
+     panel.querySelector('#devPlanSaveBtn').addEventListener('click', async () => {
+       await doAction('set_plan', { tier: value('devPlanTier'), status: value('devPlanStatus') });
+     });
+@@ -264,7 +282,7 @@ window.rcDevTools = (function () {
+         source_id: value('devProgressSourceId') || value('devProgressBookId'),
+         source_type: value('devProgressSourceType') || 'book',
+         chapter_id: value('devProgressChapter') || null,
+-        pageIndex: num('devProgressPage'),
++        pageIndex: Math.max(0, num('devProgressPage') - 1),
+         pageCount: num('devProgressPageCount'),
+       });
+     });
+@@ -310,15 +328,6 @@ window.rcDevTools = (function () {
+       await refresh();
+       await rehydrate();
+     });
+-    document.addEventListener('click', (ev) => {
+-      if (!panel || panel.style.display !== 'block') return;
+-      const t = ev.target;
+-      const inPanel = panel.contains(t);
+-      const inCog = cogBtn && cogBtn.contains(t);
+-      const inDiag = host.panel && host.panel.contains(t);
+-      if (inPanel || inCog || inDiag) return;
+-      closePanel();
+-    }, true);
+   }
+ 
+   function value(id) {
+@@ -333,6 +342,8 @@ window.rcDevTools = (function () {
+     const el = panel && panel.querySelector(`#${id}`);
+     return !!(el && el.checked);
+   }
++  function rectWidth() { return panel ? (panel.offsetWidth || 430) : 430; }
++  function rectHeight() { return panel ? (panel.offsetHeight || 520) : 520; }
+   function setValue(id, value) {
+     const el = panel && panel.querySelector(`#${id}`);
+     if (!el) return;
+@@ -352,19 +363,25 @@ window.rcDevTools = (function () {
+     const latestProgress = snapshot.progress && snapshot.progress.latest ? snapshot.progress.latest : {};
+     const latestSession = snapshot.sessions && snapshot.sessions.latest ? snapshot.sessions.latest : {};
+     const settings = snapshot.settingsRow || {};
++    const liveTarget = window.__rcReadingTarget || {};
++    const liveRuntime = (typeof window.getReadingRestoreStatus === 'function') ? window.getReadingRestoreStatus() : null;
++    const progressBookId = String(liveTarget.bookId || latestProgress.book_id || '');
++    const progressChapter = liveTarget.chapterIndex != null && Number.isFinite(Number(liveTarget.chapterIndex)) ? String(liveTarget.chapterIndex) : (latestProgress.chapter_id == null ? '' : latestProgress.chapter_id);
++    const progressPageDisplay = liveTarget.pageIndex != null && Number.isFinite(Number(liveTarget.pageIndex)) ? (Number(liveTarget.pageIndex) + 1) : (latestProgress.last_page_index == null ? 1 : Number(latestProgress.last_page_index) + 1);
++    const progressPageCount = liveRuntime && Number.isFinite(Number(liveRuntime.pageCount)) ? Number(liveRuntime.pageCount) : (latestProgress.page_count == null ? 0 : latestProgress.page_count);
+     setValue('devPlanTier', entitlement.tier === 'premium' ? 'premium' : entitlement.tier === 'paid' ? 'paid' : 'free');
+     setValue('devPlanStatus', entitlement.status || 'active');
+     setValue('devUsageRemaining', usage.remaining == null ? '' : usage.remaining);
+     setValue('devUsageUnits', usage.row && usage.row.used_units != null ? usage.row.used_units : 0);
+     setValue('devUsageCalls', usage.usedApiCalls == null ? 0 : usage.usedApiCalls);
+-    setValue('devProgressBookId', latestProgress.book_id || '');
+-    setValue('devProgressSourceId', latestProgress.source_id || latestProgress.book_id || '');
+-    setValue('devProgressSourceType', latestProgress.source_type || 'book');
+-    setValue('devProgressChapter', latestProgress.chapter_id == null ? '' : latestProgress.chapter_id);
+-    setValue('devProgressPage', latestProgress.last_page_index == null ? 0 : latestProgress.last_page_index);
+-    setValue('devProgressPageCount', latestProgress.page_count == null ? 0 : latestProgress.page_count);
+-    setValue('devSessionBookId', latestSession.book_id || latestProgress.book_id || '');
+-    setValue('devSessionChapter', latestSession.chapter_id == null ? '' : latestSession.chapter_id);
++    setValue('devProgressBookId', progressBookId);
++    setValue('devProgressSourceId', String(latestProgress.source_id || progressBookId || ''));
++    setValue('devProgressSourceType', latestProgress.source_type || liveTarget.sourceType || 'book');
++    setValue('devProgressChapter', progressChapter);
++    setValue('devProgressPage', progressPageDisplay);
++    setValue('devProgressPageCount', progressPageCount);
++    setValue('devSessionBookId', latestSession.book_id || progressBookId || '');
++    setValue('devSessionChapter', latestSession.chapter_id == null ? progressChapter : latestSession.chapter_id);
+     setValue('devSessionMinutes', latestSession.minutes_listened == null ? 0 : latestSession.minutes_listened);
+     setValue('devSessionPages', latestSession.pages_completed == null ? 0 : latestSession.pages_completed);
+     setValue('devSessionMode', latestSession.mode || 'reading');
+@@ -380,8 +397,8 @@ window.rcDevTools = (function () {
+     if (statusEl) {
+       const sessionSummary = snapshot.sessions || {};
+       const plan = entitlement.tier === 'paid' ? 'Pro' : entitlement.tier === 'premium' ? 'Premium' : 'Free';
+-      const remaining = usage.remaining == null ? '—' : usage.remaining;
+-      statusEl.textContent = `${state.email || 'dev'} • ${plan} • ${remaining} left • ${sessionSummary.totalSessions || 0} sessions`;
++      const remaining = usage.remaining == null ? 'Usage —' : `${usage.remaining} left`;
++      statusEl.textContent = `${state.email || 'dev'} • ${plan} • ${remaining} • ${sessionSummary.totalSessions || 0} sessions`;
+     }
+   }
+ 
+diff --git a/js/library.js b/js/library.js
+index a055d04..4e2a2cd 100644
+--- a/js/library.js
++++ b/js/library.js
+@@ -2593,12 +2593,14 @@ function _installScrollPageTracker() {
+         if (!bestEl || !Number.isFinite(bestIdx) || bestIdx < 0) return;
+         // Guard: skip if the winning element is in a hidden section (double-check).
+         if (bestEl.getBoundingClientRect().height <= 0) return;
++        const prevIdx = typeof lastFocusedPageIndex === 'number' ? lastFocusedPageIndex : -1;
+         lastFocusedPageIndex = bestIdx;
+         updateReadingMetricsPage(bestIdx);
+         // Keep reading target in sync so bottom-bar Play speaks the scrolled-to page.
+         try {
+           const _ctx = window.getReadingTargetContext();
+           if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
++          if (bestIdx !== prevIdx && window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') window.rcSync.scheduleProgressSync(_ctx.bookId || '', _ctx.chapterIndex != null ? _ctx.chapterIndex : -1, bestIdx, { reason: 'scroll-tracker' });
+         } catch (_) {}
+       } catch (_) {}
+     });
+@@ -2722,7 +2724,7 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
+   try {
+     if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
+       const _t = window.__rcReadingTarget || {};
+-      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx);
++      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx, { reason: 'focus-reading-page' });
+     }
+   } catch (_) {}
+   return { ok: true, index: idx, total };
+@@ -2766,6 +2768,20 @@ window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
+ // Resolves the book, prepares all page content, and renders page cards.
+ // Returns true when reading is ready; shell awaits this rather than polling.
+ // No selector event dispatch — the entire entry path is direct and awaited.
++async function flushCurrentReadingProgress(reason) {
++  try {
++    if (!(window.rcSync && typeof window.rcSync.saveProgressNow === 'function')) return null;
++    const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
++    const pageIndex = getFocusedOrInferredReadingPageIndex();
++    const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
++    const bookId = String(ctx.bookId || (window.__rcReadingTarget || {}).bookId || '').trim();
++    if (!bookId) return null;
++    return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'runtime-immediate') });
++  } catch (_) {
++    return null;
++  }
++}
++
+ window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
+   if (!bookId) return false;
+ 
+@@ -2813,6 +2829,7 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId)
+ };
+ 
+ window.exitReadingSession = function exitReadingSession() {
++  try { flushCurrentReadingProgress('exit-reading'); } catch (_) {}
+   const metrics = finalizeReadingMetricsSession();
+   const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
+   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}
+diff --git a/js/sync.js b/js/sync.js
+index 81819ee..78cd156 100644
+--- a/js/sync.js
++++ b/js/sync.js
+@@ -21,6 +21,12 @@ window.rcSync = (function () {
+   let _remoteProgressRows = [];
+   let _remoteSessions = [];
+   let _remoteProfileMetrics = null;
++  const _syncDiagnostics = {
++    settings: { status: 'idle', error: null },
++    progress: { status: 'idle', error: null },
++    restore: { status: 'idle', error: null, bookId: '' },
++    sessions: { status: 'idle', error: null },
++  };
+ 
+   const RC_THEME_PREFS_KEY = 'rc_theme_prefs';
+   const RC_APPEARANCE_PREFS_KEY = 'rc_appearance_prefs';
+@@ -61,6 +67,40 @@ window.rcSync = (function () {
+     return safe;
+   }
+ 
++  function _nowIso() { return new Date().toISOString(); }
++
++  function _serializeError(error) {
++    if (!error) return null;
++    if (typeof error === 'string') return error;
++    return String(error.message || error.code || error.status || error || 'Unknown error');
++  }
++
++  function _updateDiag(kind, patch) {
++    try { _syncDiagnostics[kind] = Object.assign({}, _syncDiagnostics[kind] || {}, patch || {}, { at: _nowIso() }); } catch (_) {}
++  }
++
++  function _authHeaders() {
++    try {
++      const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function' ? String(window.rcAuth.getAccessToken() || '').trim() : '';
++      return token ? { Authorization: `Bearer ${token}` } : {};
++    } catch (_) {
++      return {};
++    }
++  }
++
++  async function _postDurableSync(action, payload) {
++    const response = await fetch('/api/app?kind=durable-sync', {
++      method: 'POST',
++      cache: 'no-store',
++      headers: { 'Content-Type': 'application/json', ..._authHeaders() },
++      body: JSON.stringify({ action, payload: payload || {} }),
++    });
++    const data = await response.json().catch(() => null);
++    if (!response.ok || !data || !data.ok) throw new Error(String(data && data.error || `Durable sync ${response.status}`));
++    return data;
++  }
++
++
+   function _currentThemePrefs() {
+     const stored = _readLocalJson(RC_THEME_PREFS_KEY);
+     try {
+@@ -237,15 +277,22 @@ window.rcSync = (function () {
+     }
+   }
+ 
+-  async function syncSettings() {
+-    const c = _client();
++  async function syncSettings(reason = 'prefs-change') {
+     const u = _user();
+-    if (!c || !u) return;
++    if (!u || !u.id) return null;
+     const payload = Object.assign({ user_id: u.id }, _collectSettingsRow());
++    _updateDiag('settings', { status: 'pending', error: null, reason, payload });
+     try {
+-      await c.from('user_settings').upsert(payload, { onConflict: 'user_id' });
+-      _remoteSettingsRow = payload;
+-    } catch (_) {}
++      const result = await _postDurableSync('sync_settings', { row: payload });
++      _remoteSettingsRow = result && result.row ? result.row : payload;
++      _deriveRemoteProfileMetrics();
++      _updateDiag('settings', { status: 'ok', error: null, reason });
++      _emitHydrated('settings');
++      return _remoteSettingsRow;
++    } catch (error) {
++      _updateDiag('settings', { status: 'error', error: _serializeError(error), reason });
++      return null;
++    }
+   }
+ 
+   async function getSettings() {
+@@ -266,18 +313,22 @@ window.rcSync = (function () {
+   }
+ 
+   async function _syncUserRow() {
+-    const c = _client();
+     const u = _user();
+-    if (!c || !u || !u.id) return;
++    if (!u || !u.id) return null;
+     const payload = {
+       id: u.id,
+       display_name: _deriveDisplayName(u),
+       email: String(u.email || '').trim() || null,
+       auth_provider: _inferAuthProvider(u),
+       status: 'active',
+-      updated_at: new Date().toISOString(),
++      updated_at: _nowIso(),
+     };
+-    try { await c.from('users').upsert(payload, { onConflict: 'id' }); } catch (_) {}
++    try {
++      const result = await _postDurableSync('sync_user_row', { row: payload });
++      return result && result.row ? result.row : payload;
++    } catch (_) {
++      return null;
++    }
+   }
+ 
+   function _collectProgressIdentity(bookId, chapterIndex) {
+@@ -345,9 +396,13 @@ window.rcSync = (function () {
+ 
+   function _deriveRemoteProfileMetrics() {
+     const profile = _currentProfilePrefs();
+-    const goal = _remoteSettingsRow && Number.isFinite(Number(_remoteSettingsRow.daily_goal_minutes))
+-      ? Math.max(5, Math.min(300, Math.round(Number(_remoteSettingsRow.daily_goal_minutes))))
+-      : Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes || 15))));
++    const localGoal = Number(profile.dailyGoalMinutes);
++    const remoteGoal = Number(_remoteSettingsRow && _remoteSettingsRow.daily_goal_minutes);
++    const goal = Number.isFinite(localGoal) && localGoal > 0
++      ? Math.max(5, Math.min(300, Math.round(localGoal)))
++      : (Number.isFinite(remoteGoal) && remoteGoal > 0
++          ? Math.max(5, Math.min(300, Math.round(remoteGoal)))
++          : 15);
+     const today = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getTodayIsoDate === 'function')
+       ? window.rcReadingMetrics.getTodayIsoDate()
+       : new Date().toISOString().slice(0, 10);
+@@ -406,22 +461,33 @@ window.rcSync = (function () {
+     if (remote) {
+       _applyRemoteSettingsRow(remote);
+     } else {
+-      await syncSettings();
++      const seeded = await syncSettings('signin-seed');
++      if (seeded) _applyRemoteSettingsRow(seeded);
+     }
+     await _loadProgressCache();
+     await _loadSessionCache();
+     _emitHydrated('signin');
+   }
+ 
+-  function scheduleProgressSync(bookId, chapterIndex, pageIndex) {
++  function scheduleProgressSync(bookId, chapterIndex, pageIndex, meta = {}) {
+     if (!_ready()) return;
+     if (_progressTimer) clearTimeout(_progressTimer);
++    _updateDiag('progress', { status: 'queued', error: null, reason: String(meta.reason || 'schedule'), bookId: String(bookId || '') });
+     _progressTimer = setTimeout(() => {
+       _progressTimer = null;
+-      _writeProgress(bookId, chapterIndex, pageIndex).catch(() => {});
++      _writeProgress(bookId, chapterIndex, pageIndex, meta).catch(() => {});
+     }, 500);
+   }
+ 
++  async function saveProgressNow(bookId, chapterIndex, pageIndex, meta = {}) {
++    if (!_ready()) return null;
++    if (_progressTimer) {
++      clearTimeout(_progressTimer);
++      _progressTimer = null;
++    }
++    return _writeProgress(bookId, chapterIndex, pageIndex, Object.assign({}, meta || {}, { immediate: true }));
++  }
++
+   async function _findProgressRow(identity) {
+     const c = _client();
+     if (!c || !identity || !identity.user_id || !identity.book_id) return null;
+@@ -436,6 +502,7 @@ window.rcSync = (function () {
+         .order('updated_at', { ascending: false })
+         .limit(1);
+       if (identity.chapter_id != null) query = query.eq('chapter_id', identity.chapter_id);
++      else query = query.is('chapter_id', null);
+       const { data, error } = await query;
+       if (error || !Array.isArray(data) || !data[0]) return null;
+       return data[0];
+@@ -444,28 +511,33 @@ window.rcSync = (function () {
+     }
+   }
+ 
+-  async function _writeProgress(bookId, chapterIndex, pageIndex) {
+-    const c = _client();
++  async function _writeProgress(bookId, chapterIndex, pageIndex, meta = {}) {
+     const u = _user();
+-    if (!c || !u) return;
++    if (!u || !u.id) return null;
+     const identity = _collectProgressIdentity(bookId, chapterIndex);
+     const payload = Object.assign({}, identity, {
+       last_page_index: Number.isFinite(Number(pageIndex)) && Number(pageIndex) >= 0 ? Number(pageIndex) : 0,
+-      last_read_at: new Date().toISOString(),
+-      updated_at: new Date().toISOString(),
++      last_read_at: _nowIso(),
++      updated_at: _nowIso(),
+     });
++    if (!payload.book_id) {
++      _updateDiag('progress', { status: 'error', error: 'book_id missing', reason: String(meta.reason || 'write-progress') });
++      return null;
++    }
++    _updateDiag('progress', { status: 'pending', error: null, reason: String(meta.reason || 'write-progress'), payload });
+     try {
+-      const existing = await _findProgressRow(identity);
+-      if (existing && existing.id) {
+-        await c.from('user_progress').update(payload).eq('id', existing.id);
+-      } else {
+-        await c.from('user_progress').insert(payload);
+-      }
+-      const merged = Object.assign({}, existing || {}, payload);
+-      _remoteProgressRows = (_remoteProgressRows || []).filter((row) => String(row.id || '') !== String(existing?.id || ''));
+-      _remoteProgressRows.unshift(merged);
++      const result = await _postDurableSync('write_progress', { row: payload });
++      const row = result && result.row ? result.row : payload;
++      const existing = await _findProgressRow(identity).catch(() => null);
++      _remoteProgressRows = (Array.isArray(_remoteProgressRows) ? _remoteProgressRows : []).filter((item) => String(item.id || '') !== String(existing && existing.id || ''));
++      _remoteProgressRows.unshift(row);
++      _updateDiag('progress', { status: 'ok', error: null, reason: String(meta.reason || 'write-progress') });
+       _emitHydrated('progress');
+-    } catch (_) {}
++      return row;
++    } catch (error) {
++      _updateDiag('progress', { status: 'error', error: _serializeError(error), reason: String(meta.reason || 'write-progress'), payload });
++      return null;
++    }
+   }
+ 
+   async function getReadingProgress(bookId, chapterIndex) {
+@@ -484,14 +556,17 @@ window.rcSync = (function () {
+   async function getRestoreProgress(bookId) {
+     const normalizedBookId = _normalizeBookId(bookId);
+     if (!normalizedBookId || !_ready()) return null;
++    _updateDiag('restore', { status: 'lookup', error: null, bookId: normalizedBookId });
+     const cached = _findLatestCachedBookProgress(normalizedBookId);
+     if (cached) {
+       const idx = Number(cached.last_page_index);
+-      return Number.isFinite(idx) && idx >= 0 ? {
++      const result = Number.isFinite(idx) && idx >= 0 ? {
+         pageIndex: idx,
+         chapterIndex: _normalizeChapterId(cached.chapter_id) != null ? Number(cached.chapter_id) : null,
+         updatedAt: cached.updated_at || cached.last_read_at || null,
+       } : null;
++      _updateDiag('restore', { status: result ? 'cache-hit' : 'cache-empty', error: null, bookId: normalizedBookId });
++      return result;
+     }
+     const c = _client();
+     const u = _user();
+@@ -499,12 +574,13 @@ window.rcSync = (function () {
+     try {
+       const { data, error } = await c
+         .from('user_progress')
+-        .select('book_id,last_page_index,updated_at,chapter_id,last_read_at')
++        .select('book_id,last_page_index,updated_at,chapter_id,last_read_at,is_active')
+         .eq('user_id', u.id)
+         .eq('book_id', normalizedBookId)
++        .eq('is_active', true)
+         .order('updated_at', { ascending: false })
+         .limit(1);
+-      if (error || !Array.isArray(data) || !data[0]) return null;
++      if (error || !Array.isArray(data) || !data[0]) { _updateDiag('restore', { status: 'miss', error: error ? _serializeError(error) : null, bookId: normalizedBookId }); return null; }
+       const row = data[0];
+       const idx = Number(row.last_page_index);
+       if (!Number.isFinite(idx) || idx < 0) return null;
+@@ -519,35 +595,40 @@ window.rcSync = (function () {
+   }
+ 
+   async function recordReadingSession(entry) {
+-    const c = _client();
+     const u = _user();
+-    if (!c || !u || !u.id || !entry || !entry.bookId) return;
+     const target = window.__rcReadingTarget || {};
++    const effectiveBookId = String((entry && entry.bookId) || target.bookId || '').trim();
++    if (!u || !u.id || !effectiveBookId) return null;
+     const elapsedSeconds = Math.max(0, Math.round(Number(entry.elapsedSeconds || 0)));
+     const payload = {
+       user_id: u.id,
+       pages_completed: Math.max(0, Math.round(Number(entry.pagesAdvanced || 0))),
+-      minutes_listened: Math.max(0, Math.round(elapsedSeconds / 60)),
++      minutes_listened: elapsedSeconds > 0 ? Math.max(1, Math.round(elapsedSeconds / 60)) : 0,
++      elapsed_seconds: elapsedSeconds,
+       source_type: String(target.sourceType || 'book'),
+-      source_id: String(target.bookId || entry.bookId || ''),
+-      book_id: String(entry.bookId || ''),
+-      chapter_id: target.chapterIndex != null ? String(target.chapterIndex) : null,
++      source_id: String(target.bookId || effectiveBookId || ''),
++      book_id: effectiveBookId,
++      chapter_id: target.chapterIndex != null && Number(target.chapterIndex) >= 0 ? String(target.chapterIndex) : null,
+       mode: typeof window.appMode === 'string' ? String(window.appMode) : 'reading',
+       tts_seconds: 0,
+       completed: !!entry.completed,
+-      started_at: entry.startedAt || new Date().toISOString(),
+-      ended_at: entry.endedAt || new Date().toISOString(),
+-      updated_at: new Date().toISOString(),
++      started_at: entry.startedAt || _nowIso(),
++      ended_at: entry.endedAt || _nowIso(),
++      updated_at: _nowIso(),
+     };
++    _updateDiag('sessions', { status: 'pending', error: null, payload });
+     try {
+-      const { data, error } = await c.from('user_sessions').insert(payload).select('id,book_id,chapter_id,source_type,source_id,pages_completed,minutes_listened,elapsed_seconds,mode,tts_seconds,completed,started_at,ended_at,updated_at').limit(1);
+-      if (!error) {
+-        if (Array.isArray(data) && data[0]) _remoteSessions.unshift(data[0]);
+-        else _remoteSessions.unshift(payload);
+-        _deriveRemoteProfileMetrics();
+-        _emitHydrated('sessions');
+-      }
+-    } catch (_) {}
++      const result = await _postDurableSync('record_session', { row: payload });
++      const row = result && result.row ? result.row : payload;
++      _remoteSessions.unshift(row);
++      _deriveRemoteProfileMetrics();
++      _updateDiag('sessions', { status: 'ok', error: null });
++      _emitHydrated('sessions');
++      return row;
++    } catch (error) {
++      _updateDiag('sessions', { status: 'error', error: _serializeError(error), payload });
++      return null;
++    }
+   }
+ 
+   function getRemoteReadingBookSummary(bookId, totalPagesHint) {
+@@ -618,6 +699,8 @@ window.rcSync = (function () {
+   }
+ 
+   function _handlePrefsChanged() {
++    _deriveRemoteProfileMetrics();
++    _emitHydrated('profile-prefs');
+     _queueSettingsSync();
+   }
+ 
+@@ -632,8 +715,23 @@ window.rcSync = (function () {
+   try { document.addEventListener('change', _handleSettingsControlEvent, true); } catch (_) {}
+   try { document.addEventListener('input', _handleSettingsControlEvent, true); } catch (_) {}
+ 
++  function getDiagnosticsSnapshot() {
++    return {
++      settings: { ..._syncDiagnostics.settings },
++      progress: { ..._syncDiagnostics.progress },
++      restore: { ..._syncDiagnostics.restore },
++      sessions: { ..._syncDiagnostics.sessions },
++      remote: {
++        settingsUpdatedAt: _remoteSettingsRow && _remoteSettingsRow.updated_at ? _remoteSettingsRow.updated_at : null,
++        progressRows: Array.isArray(_remoteProgressRows) ? _remoteProgressRows.slice(0, 5) : [],
++        sessionRows: Array.isArray(_remoteSessions) ? _remoteSessions.slice(0, 5) : [],
++      }
++    };
++  }
++
+   return {
+     scheduleProgressSync,
++    saveProgressNow,
+     getReadingProgress,
+     getRestoreProgress,
+     recordReadingSession,
+@@ -642,5 +740,6 @@ window.rcSync = (function () {
+     syncSettings,
+     getSettings,
+     rehydrateDurableData,
++    getDiagnosticsSnapshot,
+   };
+ })();
+diff --git a/js/ui.js b/js/ui.js
+index 1d42d72..2b04116 100644
+--- a/js/ui.js
++++ b/js/ui.js
+@@ -467,13 +467,18 @@
+         }
+         const totalSpent = Object.values(sessionTokens?.spent || {}).reduce((a, b) => a + b, 0);
+         const merged = {
+-          usage: {
+-            tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
+-            remaining: sessionTokens?.remaining ?? '—',
+-            allowance: (window.rcPolicy && typeof window.rcPolicy.getUsageDailyLimit === 'function') ? window.rcPolicy.getUsageDailyLimit() : '—',
+-            totalSpent,
+-            breakdown: sessionTokens?.spent || {},
+-          },
++          usage: (() => {
++            const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function') ? window.rcUsage.getSnapshot() : null;
++            return {
++              tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
++              remaining: snapshot && snapshot.authoritative && snapshot.remaining != null ? snapshot.remaining : '—',
++              allowance: snapshot && snapshot.authoritative && snapshot.allowance != null ? snapshot.allowance : '—',
++              authoritative: !!(snapshot && snapshot.authoritative),
++              totalSpent,
++              breakdown: (snapshot && snapshot.spent) || sessionTokens?.spent || {},
++            };
++          })(),
++          sync: (window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function') ? window.rcSync.getDiagnosticsSnapshot() : null,
+           stored: {
+             persistenceMode: (window.__rcRuntimePersistenceStripped ? 'stripped-for-stabilization' : 'normal'),
+             tier: null,
+diff --git a/server/lib/app-dev-tools.js b/server/lib/app-dev-tools.js
+index e89a76b..74e6c24 100644
+--- a/server/lib/app-dev-tools.js
++++ b/server/lib/app-dev-tools.js
+@@ -85,13 +85,14 @@ function summarizeSessions(rows = []) {
+ }
+ 
+ function computeUsageSummary(usageRow, limit) {
+-  const usageDailyLimit = Number.isFinite(Number(limit)) ? Math.max(0, Number(limit)) : null;
+-  const usedUnits = Math.max(0, toInt(usageRow?.used_units, 0));
++  const hasRow = !!(usageRow && typeof usageRow === 'object');
++  const usageDailyLimit = hasRow && Number.isFinite(Number(limit)) ? Math.max(0, Number(limit)) : null;
++  const usedUnits = hasRow ? Math.max(0, toInt(usageRow?.used_units, 0)) : 0;
+   return {
+-    row: usageRow || null,
+-    remaining: usageDailyLimit == null ? null : Math.max(0, usageDailyLimit - usedUnits),
+-    limit: usageDailyLimit,
+-    usedApiCalls: Math.max(0, toInt(usageRow?.used_api_calls, 0)),
++    row: hasRow ? usageRow : null,
++    remaining: hasRow && usageDailyLimit != null ? Math.max(0, usageDailyLimit - usedUnits) : null,
++    limit: hasRow ? usageDailyLimit : null,
++    usedApiCalls: hasRow ? Math.max(0, toInt(usageRow?.used_api_calls, 0)) : 0,
+   };
+ }
+ 
+diff --git a/server/lib/dev-tools.js b/server/lib/dev-tools.js
+index 7a3154f..d39aee7 100644
+--- a/server/lib/dev-tools.js
++++ b/server/lib/dev-tools.js
+@@ -11,14 +11,20 @@ export function getDevEmail() {
+   return String(optionalEnv('DEV_CREDA', '') || '').trim().toLowerCase();
+ }
+ 
+-export async function getAuthorizedDevUser(req) {
++export async function getAuthorizedUser(req) {
+   const token = getBearer(req);
+   if (!token) return { ok: false, reason: 'missing_auth', user: null, token: '' };
+   const user = await getUserFromAccessToken(token).catch(() => null);
+   if (!user?.id) return { ok: false, reason: 'invalid_auth', user: null, token };
++  return { ok: true, reason: 'ok', user, token };
++}
++
++export async function getAuthorizedDevUser(req) {
++  const auth = await getAuthorizedUser(req);
++  if (!auth.ok) return auth;
+   const devEmail = getDevEmail();
+-  const email = String(user.email || '').trim().toLowerCase();
+-  if (!devEmail) return { ok: false, reason: 'dev_email_unconfigured', user, token };
+-  if (email !== devEmail) return { ok: false, reason: 'not_dev_account', user, token };
+-  return { ok: true, reason: 'ok', user, token, devEmail };
++  const email = String(auth.user.email || '').trim().toLowerCase();
++  if (!devEmail) return { ok: false, reason: 'dev_email_unconfigured', user: auth.user, token: auth.token };
++  if (email !== devEmail) return { ok: false, reason: 'not_dev_account', user: auth.user, token: auth.token };
++  return { ok: true, reason: 'ok', user: auth.user, token: auth.token, devEmail };
+ }

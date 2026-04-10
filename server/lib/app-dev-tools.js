@@ -85,13 +85,14 @@ function summarizeSessions(rows = []) {
 }
 
 function computeUsageSummary(usageRow, limit) {
-  const usageDailyLimit = Number.isFinite(Number(limit)) ? Math.max(0, Number(limit)) : null;
-  const usedUnits = Math.max(0, toInt(usageRow?.used_units, 0));
+  const hasRow = !!(usageRow && typeof usageRow === 'object');
+  const usageDailyLimit = hasRow && Number.isFinite(Number(limit)) ? Math.max(0, Number(limit)) : null;
+  const usedUnits = hasRow ? Math.max(0, toInt(usageRow?.used_units, 0)) : 0;
   return {
-    row: usageRow || null,
-    remaining: usageDailyLimit == null ? null : Math.max(0, usageDailyLimit - usedUnits),
-    limit: usageDailyLimit,
-    usedApiCalls: Math.max(0, toInt(usageRow?.used_api_calls, 0)),
+    row: hasRow ? usageRow : null,
+    remaining: hasRow && usageDailyLimit != null ? Math.max(0, usageDailyLimit - usedUnits) : null,
+    limit: hasRow ? usageDailyLimit : null,
+    usedApiCalls: hasRow ? Math.max(0, toInt(usageRow?.used_api_calls, 0)) : 0,
   };
 }
 

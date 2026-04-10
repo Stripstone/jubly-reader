@@ -467,13 +467,18 @@
         }
         const totalSpent = Object.values(sessionTokens?.spent || {}).reduce((a, b) => a + b, 0);
         const merged = {
-          usage: {
-            tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
-            remaining: sessionTokens?.remaining ?? '—',
-            allowance: (window.rcPolicy && typeof window.rcPolicy.getUsageDailyLimit === 'function') ? window.rcPolicy.getUsageDailyLimit() : '—',
-            totalSpent,
-            breakdown: sessionTokens?.spent || {},
-          },
+          usage: (() => {
+            const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function') ? window.rcUsage.getSnapshot() : null;
+            return {
+              tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
+              remaining: snapshot && snapshot.authoritative && snapshot.remaining != null ? snapshot.remaining : '—',
+              allowance: snapshot && snapshot.authoritative && snapshot.allowance != null ? snapshot.allowance : '—',
+              authoritative: !!(snapshot && snapshot.authoritative),
+              totalSpent,
+              breakdown: (snapshot && snapshot.spent) || sessionTokens?.spent || {},
+            };
+          })(),
+          sync: (window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function') ? window.rcSync.getDiagnosticsSnapshot() : null,
           stored: {
             persistenceMode: (window.__rcRuntimePersistenceStripped ? 'stripped-for-stabilization' : 'normal'),
             tier: null,
