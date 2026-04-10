@@ -21,12 +21,6 @@ window.rcSync = (function () {
   let _remoteProgressRows = [];
   let _remoteSessions = [];
   let _remoteProfileMetrics = null;
-  const _syncDiagnostics = {
-    settings: { status: 'idle', error: null },
-    progress: { status: 'idle', error: null },
-    restore: { status: 'idle', error: null, bookId: '' },
-    sessions: { status: 'idle', error: null },
-  };
 
   const RC_THEME_PREFS_KEY = 'rc_theme_prefs';
   const RC_APPEARANCE_PREFS_KEY = 'rc_appearance_prefs';
@@ -66,40 +60,6 @@ window.rcSync = (function () {
     try { localStorage.setItem(key, JSON.stringify(safe)); } catch (_) {}
     return safe;
   }
-
-  function _nowIso() { return new Date().toISOString(); }
-
-  function _serializeError(error) {
-    if (!error) return null;
-    if (typeof error === 'string') return error;
-    return String(error.message || error.code || error.status || error || 'Unknown error');
-  }
-
-  function _updateDiag(kind, patch) {
-    try { _syncDiagnostics[kind] = Object.assign({}, _syncDiagnostics[kind] || {}, patch || {}, { at: _nowIso() }); } catch (_) {}
-  }
-
-  function _authHeaders() {
-    try {
-      const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function' ? String(window.rcAuth.getAccessToken() || '').trim() : '';
-      return token ? { Authorization: `Bearer ${token}` } : {};
-    } catch (_) {
-      return {};
-    }
-  }
-
-  async function _postDurableSync(action, payload) {
-    const response = await fetch('/api/app?kind=durable-sync', {
-      method: 'POST',
-      cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', ..._authHeaders() },
-      body: JSON.stringify({ action, payload: payload || {} }),
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok || !data || !data.ok) throw new Error(String(data && data.error || `Durable sync ${response.status}`));
-    return data;
-  }
-
 
   function _currentThemePrefs() {
     const stored = _readLocalJson(RC_THEME_PREFS_KEY);
@@ -277,22 +237,15 @@ window.rcSync = (function () {
     }
   }
 
-  async function syncSettings(reason = 'prefs-change') {
+  async function syncSettings() {
+    const c = _client();
     const u = _user();
-    if (!u || !u.id) return null;
+    if (!c || !u) return;
     const payload = Object.assign({ user_id: u.id }, _collectSettingsRow());
-    _updateDiag('settings', { status: 'pending', error: null, reason, payload });
     try {
-      const result = await _postDurableSync('sync_settings', { row: payload });
-      _remoteSettingsRow = result && result.row ? result.row : payload;
-      _deriveRemoteProfileMetrics();
-      _updateDiag('settings', { status: 'ok', error: null, reason });
-      _emitHydrated('settings');
-      return _remoteSettingsRow;
-    } catch (error) {
-      _updateDiag('settings', { status: 'error', error: _serializeError(error), reason });
-      return null;
-    }
+      await c.from('user_settings').upsert(payload, { onConflict: 'user_id' });
+      _remoteSettingsRow = payload;
+    } catch (_) {}
   }
 
   async function getSettings() {
@@ -313,22 +266,18 @@ window.rcSync = (function () {
   }
 
   async function _syncUserRow() {
+    const c = _client();
     const u = _user();
-    if (!u || !u.id) return null;
+    if (!c || !u || !u.id) return;
     const payload = {
       id: u.id,
       display_name: _deriveDisplayName(u),
       email: String(u.email || '').trim() || null,
       auth_provider: _inferAuthProvider(u),
       status: 'active',
-      updated_at: _nowIso(),
+      updated_at: new Date().toISOString(),
     };
-    try {
-      const result = await _postDurableSync('sync_user_row', { row: payload });
-      return result && result.row ? result.row : payload;
-    } catch (_) {
-      return null;
-    }
+    try { await c.from('users').upsert(payload, { onConflict: 'id' }); } catch (_) {}
   }
 
   function _collectProgressIdentity(bookId, chapterIndex) {
@@ -396,13 +345,9 @@ window.rcSync = (function () {
 
   function _deriveRemoteProfileMetrics() {
     const profile = _currentProfilePrefs();
-    const localGoal = Number(profile.dailyGoalMinutes);
-    const remoteGoal = Number(_remoteSettingsRow && _remoteSettingsRow.daily_goal_minutes);
-    const goal = Number.isFinite(localGoal) && localGoal > 0
-      ? Math.max(5, Math.min(300, Math.round(localGoal)))
-      : (Number.isFinite(remoteGoal) && remoteGoal > 0
-          ? Math.max(5, Math.min(300, Math.round(remoteGoal)))
-          : 15);
+    const goal = _remoteSettingsRow && Number.isFinite(Number(_remoteSettingsRow.daily_goal_minutes))
+      ? Math.max(5, Math.min(300, Math.round(Number(_remoteSettingsRow.daily_goal_minutes))))
+      : Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes || 15))));
     const today = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getTodayIsoDate === 'function')
       ? window.rcReadingMetrics.getTodayIsoDate()
       : new Date().toISOString().slice(0, 10);
@@ -461,31 +406,20 @@ window.rcSync = (function () {
     if (remote) {
       _applyRemoteSettingsRow(remote);
     } else {
-      const seeded = await syncSettings('signin-seed');
-      if (seeded) _applyRemoteSettingsRow(seeded);
+      await syncSettings();
     }
     await _loadProgressCache();
     await _loadSessionCache();
     _emitHydrated('signin');
   }
 
-  function scheduleProgressSync(bookId, chapterIndex, pageIndex, meta = {}) {
+  function scheduleProgressSync(bookId, chapterIndex, pageIndex) {
     if (!_ready()) return;
     if (_progressTimer) clearTimeout(_progressTimer);
-    _updateDiag('progress', { status: 'queued', error: null, reason: String(meta.reason || 'schedule'), bookId: String(bookId || '') });
     _progressTimer = setTimeout(() => {
       _progressTimer = null;
-      _writeProgress(bookId, chapterIndex, pageIndex, meta).catch(() => {});
+      _writeProgress(bookId, chapterIndex, pageIndex).catch(() => {});
     }, 500);
-  }
-
-  async function saveProgressNow(bookId, chapterIndex, pageIndex, meta = {}) {
-    if (!_ready()) return null;
-    if (_progressTimer) {
-      clearTimeout(_progressTimer);
-      _progressTimer = null;
-    }
-    return _writeProgress(bookId, chapterIndex, pageIndex, Object.assign({}, meta || {}, { immediate: true }));
   }
 
   async function _findProgressRow(identity) {
@@ -502,7 +436,6 @@ window.rcSync = (function () {
         .order('updated_at', { ascending: false })
         .limit(1);
       if (identity.chapter_id != null) query = query.eq('chapter_id', identity.chapter_id);
-      else query = query.is('chapter_id', null);
       const { data, error } = await query;
       if (error || !Array.isArray(data) || !data[0]) return null;
       return data[0];
@@ -511,33 +444,28 @@ window.rcSync = (function () {
     }
   }
 
-  async function _writeProgress(bookId, chapterIndex, pageIndex, meta = {}) {
+  async function _writeProgress(bookId, chapterIndex, pageIndex) {
+    const c = _client();
     const u = _user();
-    if (!u || !u.id) return null;
+    if (!c || !u) return;
     const identity = _collectProgressIdentity(bookId, chapterIndex);
     const payload = Object.assign({}, identity, {
       last_page_index: Number.isFinite(Number(pageIndex)) && Number(pageIndex) >= 0 ? Number(pageIndex) : 0,
-      last_read_at: _nowIso(),
-      updated_at: _nowIso(),
+      last_read_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     });
-    if (!payload.book_id) {
-      _updateDiag('progress', { status: 'error', error: 'book_id missing', reason: String(meta.reason || 'write-progress') });
-      return null;
-    }
-    _updateDiag('progress', { status: 'pending', error: null, reason: String(meta.reason || 'write-progress'), payload });
     try {
-      const result = await _postDurableSync('write_progress', { row: payload });
-      const row = result && result.row ? result.row : payload;
-      const existing = await _findProgressRow(identity).catch(() => null);
-      _remoteProgressRows = (Array.isArray(_remoteProgressRows) ? _remoteProgressRows : []).filter((item) => String(item.id || '') !== String(existing && existing.id || ''));
-      _remoteProgressRows.unshift(row);
-      _updateDiag('progress', { status: 'ok', error: null, reason: String(meta.reason || 'write-progress') });
+      const existing = await _findProgressRow(identity);
+      if (existing && existing.id) {
+        await c.from('user_progress').update(payload).eq('id', existing.id);
+      } else {
+        await c.from('user_progress').insert(payload);
+      }
+      const merged = Object.assign({}, existing || {}, payload);
+      _remoteProgressRows = (_remoteProgressRows || []).filter((row) => String(row.id || '') !== String(existing?.id || ''));
+      _remoteProgressRows.unshift(merged);
       _emitHydrated('progress');
-      return row;
-    } catch (error) {
-      _updateDiag('progress', { status: 'error', error: _serializeError(error), reason: String(meta.reason || 'write-progress'), payload });
-      return null;
-    }
+    } catch (_) {}
   }
 
   async function getReadingProgress(bookId, chapterIndex) {
@@ -556,17 +484,14 @@ window.rcSync = (function () {
   async function getRestoreProgress(bookId) {
     const normalizedBookId = _normalizeBookId(bookId);
     if (!normalizedBookId || !_ready()) return null;
-    _updateDiag('restore', { status: 'lookup', error: null, bookId: normalizedBookId });
     const cached = _findLatestCachedBookProgress(normalizedBookId);
     if (cached) {
       const idx = Number(cached.last_page_index);
-      const result = Number.isFinite(idx) && idx >= 0 ? {
+      return Number.isFinite(idx) && idx >= 0 ? {
         pageIndex: idx,
         chapterIndex: _normalizeChapterId(cached.chapter_id) != null ? Number(cached.chapter_id) : null,
         updatedAt: cached.updated_at || cached.last_read_at || null,
       } : null;
-      _updateDiag('restore', { status: result ? 'cache-hit' : 'cache-empty', error: null, bookId: normalizedBookId });
-      return result;
     }
     const c = _client();
     const u = _user();
@@ -574,13 +499,12 @@ window.rcSync = (function () {
     try {
       const { data, error } = await c
         .from('user_progress')
-        .select('book_id,last_page_index,updated_at,chapter_id,last_read_at,is_active')
+        .select('book_id,last_page_index,updated_at,chapter_id,last_read_at')
         .eq('user_id', u.id)
         .eq('book_id', normalizedBookId)
-        .eq('is_active', true)
         .order('updated_at', { ascending: false })
         .limit(1);
-      if (error || !Array.isArray(data) || !data[0]) { _updateDiag('restore', { status: 'miss', error: error ? _serializeError(error) : null, bookId: normalizedBookId }); return null; }
+      if (error || !Array.isArray(data) || !data[0]) return null;
       const row = data[0];
       const idx = Number(row.last_page_index);
       if (!Number.isFinite(idx) || idx < 0) return null;
@@ -595,40 +519,35 @@ window.rcSync = (function () {
   }
 
   async function recordReadingSession(entry) {
+    const c = _client();
     const u = _user();
+    if (!c || !u || !u.id || !entry || !entry.bookId) return;
     const target = window.__rcReadingTarget || {};
-    const effectiveBookId = String((entry && entry.bookId) || target.bookId || '').trim();
-    if (!u || !u.id || !effectiveBookId) return null;
     const elapsedSeconds = Math.max(0, Math.round(Number(entry.elapsedSeconds || 0)));
     const payload = {
       user_id: u.id,
       pages_completed: Math.max(0, Math.round(Number(entry.pagesAdvanced || 0))),
-      minutes_listened: elapsedSeconds > 0 ? Math.max(1, Math.round(elapsedSeconds / 60)) : 0,
-      elapsed_seconds: elapsedSeconds,
+      minutes_listened: Math.max(0, Math.round(elapsedSeconds / 60)),
       source_type: String(target.sourceType || 'book'),
-      source_id: String(target.bookId || effectiveBookId || ''),
-      book_id: effectiveBookId,
-      chapter_id: target.chapterIndex != null && Number(target.chapterIndex) >= 0 ? String(target.chapterIndex) : null,
+      source_id: String(target.bookId || entry.bookId || ''),
+      book_id: String(entry.bookId || ''),
+      chapter_id: target.chapterIndex != null ? String(target.chapterIndex) : null,
       mode: typeof window.appMode === 'string' ? String(window.appMode) : 'reading',
       tts_seconds: 0,
       completed: !!entry.completed,
-      started_at: entry.startedAt || _nowIso(),
-      ended_at: entry.endedAt || _nowIso(),
-      updated_at: _nowIso(),
+      started_at: entry.startedAt || new Date().toISOString(),
+      ended_at: entry.endedAt || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
-    _updateDiag('sessions', { status: 'pending', error: null, payload });
     try {
-      const result = await _postDurableSync('record_session', { row: payload });
-      const row = result && result.row ? result.row : payload;
-      _remoteSessions.unshift(row);
-      _deriveRemoteProfileMetrics();
-      _updateDiag('sessions', { status: 'ok', error: null });
-      _emitHydrated('sessions');
-      return row;
-    } catch (error) {
-      _updateDiag('sessions', { status: 'error', error: _serializeError(error), payload });
-      return null;
-    }
+      const { data, error } = await c.from('user_sessions').insert(payload).select('id,book_id,chapter_id,source_type,source_id,pages_completed,minutes_listened,elapsed_seconds,mode,tts_seconds,completed,started_at,ended_at,updated_at').limit(1);
+      if (!error) {
+        if (Array.isArray(data) && data[0]) _remoteSessions.unshift(data[0]);
+        else _remoteSessions.unshift(payload);
+        _deriveRemoteProfileMetrics();
+        _emitHydrated('sessions');
+      }
+    } catch (_) {}
   }
 
   function getRemoteReadingBookSummary(bookId, totalPagesHint) {
@@ -699,8 +618,6 @@ window.rcSync = (function () {
   }
 
   function _handlePrefsChanged() {
-    _deriveRemoteProfileMetrics();
-    _emitHydrated('profile-prefs');
     _queueSettingsSync();
   }
 
@@ -715,23 +632,8 @@ window.rcSync = (function () {
   try { document.addEventListener('change', _handleSettingsControlEvent, true); } catch (_) {}
   try { document.addEventListener('input', _handleSettingsControlEvent, true); } catch (_) {}
 
-  function getDiagnosticsSnapshot() {
-    return {
-      settings: { ..._syncDiagnostics.settings },
-      progress: { ..._syncDiagnostics.progress },
-      restore: { ..._syncDiagnostics.restore },
-      sessions: { ..._syncDiagnostics.sessions },
-      remote: {
-        settingsUpdatedAt: _remoteSettingsRow && _remoteSettingsRow.updated_at ? _remoteSettingsRow.updated_at : null,
-        progressRows: Array.isArray(_remoteProgressRows) ? _remoteProgressRows.slice(0, 5) : [],
-        sessionRows: Array.isArray(_remoteSessions) ? _remoteSessions.slice(0, 5) : [],
-      }
-    };
-  }
-
   return {
     scheduleProgressSync,
-    saveProgressNow,
     getReadingProgress,
     getRestoreProgress,
     recordReadingSession,
@@ -740,6 +642,5 @@ window.rcSync = (function () {
     syncSettings,
     getSettings,
     rehydrateDurableData,
-    getDiagnosticsSnapshot,
   };
 })();
