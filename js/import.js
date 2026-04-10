@@ -365,15 +365,33 @@
     }
 
     async function showModal() {
-      const guard = await guardImportCapacity();
-      syncImportEntryState(guard.snapshot);
-      if (!guard.ok) return;
+      // Open the modal immediately using the local capacity snapshot so there
+      // is no perceptible lag. Server verification runs in the background and
+      // closes the modal (or updates the status) if the server disagrees.
+      const localSnapshot = await getImportCapacitySnapshot();
+      syncImportEntryState(localSnapshot);
       resetImporterState({ keepModalOpen: true });
-      setStatus(describeCapacity(guard.snapshot));
+      setStatus(describeCapacity(localSnapshot));
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
       syncInputMode();
       syncTextImportState();
+
+      // Background: confirm with server. If server rejects capacity, close modal
+      // and show the appropriate message / upgrade prompt.
+      guardImportCapacity().then(guard => {
+        // If the modal was closed while the server was responding, do nothing.
+        if (modal.style.display === 'none') return;
+        // Update status with server-confirmed description (may have refined limit).
+        setStatus(describeCapacity(guard.snapshot));
+        if (!guard.ok) {
+          // Server says no capacity — hide modal (guardImportCapacity already
+          // set a status message and may have opened the pricing modal).
+          resetImporterState({ keepModalOpen: false });
+        }
+      }).catch(() => {
+        // Server unreachable — local snapshot already shown, leave modal open.
+      });
     }
 
     function hideModal() {

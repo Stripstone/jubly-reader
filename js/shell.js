@@ -236,12 +236,16 @@
         }
 
         syncShellAuthPresentation(targetId);
-        if (targetId === 'dashboard') refreshLibrary();
+        let _sectionRefreshPromise = null;
+        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary();
         if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
 
         window.scrollTo(0, 0);
+        // Return the async library refresh promise so callers that need to wait
+        // (e.g. DOMContentLoaded before removing auth-hydrating) can await it.
+        return _sectionRefreshPromise || Promise.resolve();
     }
 
     // ── Focus mode fade ──────────────────────────────────────────
@@ -573,7 +577,10 @@
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
-        showSection(settledSection, { historyMode: 'replace' });
+        // Await the section's async work (e.g. refreshLibrary on dashboard) before
+        // removing auth-hydrating. This ensures the correct library state is already
+        // rendered when the section becomes visible — preventing the 3-state flash.
+        try { await showSection(settledSection, { historyMode: 'replace' }); } catch (_) {}
         try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
     });
     // ── Profile tabs ─────────────────────────────────────────────
@@ -1738,4 +1745,8 @@
         };
     };
     // Engine scripts load dynamically after window.load; refresh shell library once boot settles.
-    window.addEventListener('load', () => setTimeout(() => { refreshLibrary(); patchRefreshHook(); }, 350));
+    // refreshLibrary() removed from this timer — it was a timing workaround that
+    // raced against auth and could show the unauthenticated sample state after
+    // auth had resolved. DOMContentLoaded now awaits refreshLibrary() before
+    // removing auth-hydrating, so this stale call is no longer needed.
+    window.addEventListener('load', () => setTimeout(() => { patchRefreshHook(); }, 350));

@@ -2862,17 +2862,16 @@ window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
   if (!bookId) return false;
 
-  try { if (window.rcSync && typeof window.rcSync.flushProgressSync === 'function') await window.rcSync.flushProgressSync(); } catch (_) {}
-
+  // MUST be synchronous — before any await — so reading mode never shows stale
+  // page content during the flushProgressSync network roundtrip that follows.
   const pagesEl = document.getElementById('pages');
   const readingModeEl = document.getElementById('reading-mode');
-  // Clear pages and add pending class immediately so the empty #pages div is
-  // never briefly visible. No overlay text yet — we don't know if there is a
-  // saved place until the restore fetch below resolves.
   try {
     if (pagesEl) pagesEl.innerHTML = '';
     if (readingModeEl) readingModeEl.classList.add('reading-restore-pending');
   } catch (_) {}
+
+  try { if (window.rcSync && typeof window.rcSync.flushProgressSync === 'function') await window.rcSync.flushProgressSync(); } catch (_) {}
 
   // Set source selector to book mode for UI accuracy.
   // setSourceUI() is display-only so no change event dispatch is needed here.
