@@ -158,96 +158,105 @@ window.rcDevTools = (function () {
     panel.style.width = '430px';
     panel.style.maxWidth = '94vw';
     panel.style.maxHeight = '82vh';
-    panel.style.overflow = 'auto';
-    panel.style.padding = '14px';
+    panel.style.overflow = 'hidden';
+    panel.style.flexDirection = 'column';
     panel.style.border = '2px solid var(--border)';
     panel.style.borderRadius = '12px';
     panel.style.background = 'var(--secondary-bg)';
     panel.style.boxShadow = '0 14px 32px rgba(0,0,0,0.24)';
     panel.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;">
-        <div>
+      <div id="devToolsTopBar" style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--border); flex-shrink:0;">
+        <div style="min-width:0; flex:1;">
           <strong style="font-size:14px; opacity:0.95;">Dev tools</strong>
           <div id="devToolsStatus" style="font-size:12px; opacity:0.72; margin-top:2px;"></div>
           <div id="devClientSummary" style="font-size:11px; opacity:0.68; margin-top:2px;"></div>
         </div>
-        <button type="button" id="devToolsCloseBtn" style="padding:6px 10px;">✕</button>
+        <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+          <button type="button" id="devToolsRefreshBtn" title="Refresh dev tools" style="padding:6px 10px;">↺</button>
+          <button type="button" id="devToolsCloseBtn" style="padding:6px 10px;">✕</button>
+        </div>
       </div>
 
-      <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
-        <strong style="display:block; margin-bottom:8px; font-size:13px;">Plan</strong>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-          <label style="font-size:12px;">Tier<select id="devPlanTier" style="width:100%; margin-top:4px;"><option value="free">Free</option><option value="paid">Pro</option><option value="premium">Premium</option></select></label>
-          <label style="font-size:12px;">Status<select id="devPlanStatus" style="width:100%; margin-top:4px;"><option value="active">active</option><option value="trialing">trialing</option><option value="canceled">canceled</option><option value="past_due">past_due</option></select></label>
-        </div>
-        <div style="display:flex; justify-content:flex-end; margin-top:8px;"><button type="button" id="devPlanSaveBtn">Save plan</button></div>
-      </section>
+      <div id="devToolsContent" style="overflow-y:auto; flex:1; padding:14px;">
+        <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
+          <strong style="display:block; margin-bottom:8px; font-size:13px;">Plan</strong>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <label style="font-size:12px;">Tier<select id="devPlanTier" style="width:100%; margin-top:4px;"><option value="free">Free</option><option value="paid">Pro</option><option value="premium">Premium</option></select></label>
+            <label style="font-size:12px;">Status<select id="devPlanStatus" style="width:100%; margin-top:4px;"><option value="active">active</option><option value="trialing">trialing</option><option value="canceled">canceled</option><option value="past_due">past_due</option></select></label>
+          </div>
+          <div style="display:flex; justify-content:flex-end; margin-top:8px;"><button type="button" id="devPlanSaveBtn">Save plan</button></div>
+        </section>
 
-      <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
-        <strong style="display:block; margin-bottom:8px; font-size:13px;">Usage</strong>
-        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
-          <label style="font-size:12px;">Left today<input id="devUsageRemaining" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Used units<input id="devUsageUnits" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">API calls<input id="devUsageCalls" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
-        </div>
-        <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
-          <button type="button" id="devUsageResetBtn">Reset today</button>
-          <button type="button" id="devUsageSaveBtn">Save usage</button>
-        </div>
-      </section>
+        <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
+          <strong style="display:block; margin-bottom:8px; font-size:13px;">Usage</strong>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+            <label style="font-size:12px;">Left today<input id="devUsageRemaining" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Used units<input id="devUsageUnits" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">API calls<input id="devUsageCalls" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
+            <button type="button" id="devUsageResetBtn">Reset today</button>
+            <button type="button" id="devUsageSaveBtn">Save usage</button>
+          </div>
+        </section>
 
-      <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
-        <strong style="display:block; margin-bottom:8px; font-size:13px;">Restore / progress</strong>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-          <label style="font-size:12px;">Book ID<input id="devProgressBookId" type="text" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Source ID<input id="devProgressSourceId" type="text" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Source type<input id="devProgressSourceType" type="text" value="book" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Chapter<input id="devProgressChapter" type="text" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Current page<input id="devProgressPage" type="number" min="1" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Page count<input id="devProgressPageCount" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
-        </div>
-        <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
-          <button type="button" id="devProgressClearBtn">Clear restore</button>
-          <button type="button" id="devProgressSaveBtn">Set restore spot</button>
-        </div>
-      </section>
+        <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
+          <strong style="display:block; margin-bottom:8px; font-size:13px;">Restore / progress</strong>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <label style="font-size:12px;">Book ID<input id="devProgressBookId" type="text" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Source ID<input id="devProgressSourceId" type="text" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Source type<input id="devProgressSourceType" type="text" value="book" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Chapter<input id="devProgressChapter" type="text" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Current page<input id="devProgressPage" type="number" min="1" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Page count<input id="devProgressPageCount" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
+            <button type="button" id="devProgressClearBtn">Clear restore</button>
+            <button type="button" id="devProgressSaveBtn">Set restore spot</button>
+          </div>
+        </section>
 
-      <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
-        <strong style="display:block; margin-bottom:8px; font-size:13px;">Analytics / sessions</strong>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-          <label style="font-size:12px;">Book ID<input id="devSessionBookId" type="text" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Chapter<input id="devSessionChapter" type="text" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Minutes listened<input id="devSessionMinutes" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Pages completed<input id="devSessionPages" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Mode<input id="devSessionMode" type="text" value="reading" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px; display:flex; align-items:end; gap:8px;"><input id="devSessionCompleted" type="checkbox" /> completed</label>
-        </div>
-        <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
-          <button type="button" id="devSessionsResetBtn">Reset session history</button>
-          <button type="button" id="devSessionAddBtn">Add session</button>
-        </div>
-      </section>
+        <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
+          <strong style="display:block; margin-bottom:8px; font-size:13px;">Analytics / sessions</strong>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <label style="font-size:12px;">Book ID<input id="devSessionBookId" type="text" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Chapter<input id="devSessionChapter" type="text" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Minutes listened<input id="devSessionMinutes" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Pages completed<input id="devSessionPages" type="number" min="0" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Mode<input id="devSessionMode" type="text" value="reading" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px; display:flex; align-items:end; gap:8px;"><input id="devSessionCompleted" type="checkbox" /> completed</label>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
+            <button type="button" id="devSessionsResetBtn">Reset session history</button>
+            <button type="button" id="devSessionAddBtn">Add session</button>
+          </div>
+        </section>
 
-      <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
-        <strong style="display:block; margin-bottom:8px; font-size:13px;">Settings</strong>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-          <label style="font-size:12px;">Daily goal<input id="devSettingsGoal" type="number" min="5" max="300" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">Appearance<select id="devSettingsAppearance" style="width:100%; margin-top:4px;"><option value="light">light</option><option value="dark">dark</option></select></label>
-          <label style="font-size:12px;">Theme<input id="devSettingsTheme" type="text" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px;">TTS speed<input id="devSettingsTtsSpeed" type="number" min="0.5" max="3" step="0.1" style="width:100%; margin-top:4px;" /></label>
-          <label style="font-size:12px; display:flex; align-items:end; gap:8px;"><input id="devSettingsAutoplay" type="checkbox" /> autoplay</label>
-          <label style="font-size:12px; display:flex; align-items:end; gap:8px;"><input id="devSettingsSourcePages" type="checkbox" /> source page numbers</label>
-        </div>
-        <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
-          <button type="button" id="devSettingsClearBtn">Clear settings</button>
-          <button type="button" id="devSettingsRehydrateBtn">Rehydrate</button>
-          <button type="button" id="devSettingsSaveBtn">Save settings</button>
-        </div>
-      </section>
+        <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
+          <strong style="display:block; margin-bottom:8px; font-size:13px;">Settings</strong>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <label style="font-size:12px;">Daily goal<input id="devSettingsGoal" type="number" min="5" max="300" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">Appearance<select id="devSettingsAppearance" style="width:100%; margin-top:4px;"><option value="light">light</option><option value="dark">dark</option></select></label>
+            <label style="font-size:12px;">Theme<input id="devSettingsTheme" type="text" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px;">TTS speed<input id="devSettingsTtsSpeed" type="number" min="0.5" max="3" step="0.1" style="width:100%; margin-top:4px;" /></label>
+            <label style="font-size:12px; display:flex; align-items:end; gap:8px;"><input id="devSettingsAutoplay" type="checkbox" /> autoplay</label>
+            <label style="font-size:12px; display:flex; align-items:end; gap:8px;"><input id="devSettingsSourcePages" type="checkbox" /> source page numbers</label>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
+            <button type="button" id="devSettingsClearBtn">Clear settings</button>
+            <button type="button" id="devSettingsRehydrateBtn">Rehydrate</button>
+            <button type="button" id="devSettingsSaveBtn">Save settings</button>
+          </div>
+        </section>
+      </div>
     `;
     document.body.appendChild(panel);
     statusEl = panel.querySelector('#devToolsStatus');
     panel.querySelector('#devToolsCloseBtn').addEventListener('click', closePanel);
+    panel.querySelector('#devToolsRefreshBtn').addEventListener('click', async () => {
+      await refresh();
+      renderPanel();
+    });
     panel.querySelector('#devPlanSaveBtn').addEventListener('click', async () => {
       await doAction('set_plan', { tier: value('devPlanTier'), status: value('devPlanStatus') });
     });
@@ -308,7 +317,7 @@ window.rcDevTools = (function () {
       await rehydrate();
     });
     document.addEventListener('click', (ev) => {
-      if (!panel || panel.style.display !== 'block') return;
+      if (!panel || panel.style.display !== 'flex') return;
       const t = ev.target;
       const inPanel = panel.contains(t);
       const inCog = cogBtn && cogBtn.contains(t);
@@ -415,7 +424,7 @@ window.rcDevTools = (function () {
     if (!state.allowed) return;
     ensurePanel();
     renderPanel();
-    panel.style.display = 'block';
+    panel.style.display = 'flex';
     positionPanel();
   }
 

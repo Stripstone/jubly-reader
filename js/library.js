@@ -1461,7 +1461,10 @@
       return currentBookRaw;
     }
 
-    function refreshChapterAndPagesUI(options = {}) {
+    // Async so that loadBook can await full render + restore before resolving.
+    // This closes the race where reading-restore-pending was removed before
+    // render() and applyPendingReadingRestore() had actually run.
+    async function refreshChapterAndPagesUI(options = {}) {
       const restore = (options && options.restore && typeof options.restore === 'object') ? options.restore : null;
       const restorePageIndex = Number.isFinite(Number(restore?.pageIndex)) ? Math.max(0, Number(restore.pageIndex)) : 0;
       const restoreChapterIndex = Number.isFinite(Number(restore?.chapterIndex)) ? Math.max(0, Number(restore.chapterIndex)) : null;
@@ -1473,9 +1476,10 @@
         const bookPages = parsePagesWithTitles(currentBookRaw);
         populatePagesSelect(bookPages);
         try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, bookPages.length - 1)); } catch (_) {}
-        // Auto-render all pages as one set — no Load click required.
+        // Await render completion so the restore scroll finishes before the caller
+        // removes reading-restore-pending and reveals pages to the user.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
-        if (allText) applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true });
+        if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true });
         return;
       }
 
@@ -1489,9 +1493,9 @@
       const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
       populatePagesSelect(chapterPages);
       try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, chapterPages.length - 1)); } catch (_) {}
-      // Auto-render the resolved chapter — no Load click required.
+      // Await render completion before resolving.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      if (chapterText) applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true });
+      if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true });
     }
 
     async function loadManifest() {
@@ -1551,7 +1555,8 @@
           currentBookRaw = rec.markdown;
           hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
           if (hasExplicitChapters) chapterList = parseChaptersFromMarkdown(currentBookRaw);
-          refreshChapterAndPagesUI(options);
+          // Await so loadBook only resolves after render() + applyPendingReadingRestore().
+          await refreshChapterAndPagesUI(options);
           return;
         } catch (e) {
           setSelectOptions(chapterSelect, [], "Failed to load local book");
@@ -1580,7 +1585,7 @@
           chapterList = parseChaptersFromMarkdown(currentBookRaw);
         }
 
-        refreshChapterAndPagesUI(options);
+        await refreshChapterAndPagesUI(options);
       } catch (e) {
         // Fallback for local file:// usage: try embedded books
         try {
@@ -1590,7 +1595,7 @@
             if (hasExplicitChapters) {
               chapterList = parseChaptersFromMarkdown(currentBookRaw);
             }
-            refreshChapterAndPagesUI(options);
+            await refreshChapterAndPagesUI(options);
             return;
           }
         } catch (_) {}
@@ -1602,10 +1607,14 @@
       }
     }
 
+    // Returns the addPages / appendPages promise so that callers on the
+    // reading-entry path can await full render completion before revealing pages.
+    // Fire-and-forget callers (chapter select, page slice controls) simply ignore
+    // the returned promise, which is safe — they don't use the restore path.
     function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false } = {}) {
       bulkInput.value = String(text || "").trim();
-      if (append) appendPages();
-      else addPages({ preservePendingRestore });
+      if (append) return appendPages();
+      return addPages({ preservePendingRestore });
     }
 
     // Events

@@ -308,6 +308,20 @@ window.rcSync = (function () {
         });
       }
     } catch (_) {}
+    // Apply server-resolved runtime policy from snapshot.
+    // buildSnapshot() on the server already resolves the correct policy for this user.
+    // Applying it here keeps tier/entitlement state current after every durable sync —
+    // not only on auth events (which refresh policy via billing.js separately).
+    // Guard: skip cached snapshots to avoid applying a potentially stale tier from storage.
+    // The rc:runtime-policy-changed event dispatched by applyResolvedRuntimePolicy()
+    // triggers shell UI updates (tier pill, explorer gating, etc.) automatically.
+    if (!options.fromCache && snap.runtimePolicy && typeof snap.runtimePolicy === 'object') {
+      try {
+        if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
+          window.rcPolicy.apply(snap.runtimePolicy);
+        }
+      } catch (_) {}
+    }
     // Persist as last-confirmed display projection (not restore authority).
     try {
       const u = _user();
@@ -716,6 +730,15 @@ window.rcSync = (function () {
     _lastSyncSnapshotAt = null;
     _requestSeq = 0;
     _appliedSeq = 0;
+    // Clear session tokens so a stale usage count from the previous session does not
+    // leak into the next user's projection window. The usage pill is hidden when not
+    // authed, so this does not create a visible blank state for the current user.
+    // When the next user signs in, their cached or server-confirmed usage replaces this.
+    try {
+      if (window.rcUsage && typeof window.rcUsage.applySnapshot === 'function') {
+        window.rcUsage.applySnapshot({ remaining: null, limit: null, authoritative: false, source: 'signout' });
+      }
+    } catch (_) {}
   }
 
   async function rehydrateDurableData() {
