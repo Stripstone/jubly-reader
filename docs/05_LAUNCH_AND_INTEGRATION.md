@@ -68,8 +68,10 @@ Supabase is the cloud persistence layer for runtime-owned truths.
 
 It should store:
 - users
+- owned library items
 - progress
-- sessions
+- compact per-book metrics
+- compact daily stats
 - settings
 - future entitlements
 
@@ -102,13 +104,27 @@ This keeps later Supabase work additive rather than forcing a theme ownership re
 - user-provided binary assets
 - caches
 
+
+### Durable table discipline
+Launch persistence must stay compact enough for normal multi-user usage.
+That means:
+- one owned-book row per user-owned item
+- one restore row per owned item
+- summary tables for per-book and daily metrics
+- no default append-only session ledger
+- delete and purge paths that remove orphan-prone restore state
+
+A same-content re-upload must not silently reconnect to prior progress unless the product explicitly offers a replace/reconnect action.
+
 ## Current Supabase scope
 
 ### Planned durable records
 - account state
+- owned library items
 - reading progress
+- compact per-book metrics
+- compact daily stats
 - settings
-- session history
 - future billing/entitlement state
 
 ### Still pending
@@ -202,7 +218,8 @@ Examples of launch-failing patterns:
 ### Signed-in persistence later
 - settings restore after sign-in
 - progress restores to correct source/page across devices
-- session history does not overwrite restore truth
+- compact metrics do not overwrite restore truth
+- deleting a book removes or invalidates matching restore truth for that owned item
 - durable prefs restore without trying to sync heavy local-only assets blindly
 
 ## Open integration questions

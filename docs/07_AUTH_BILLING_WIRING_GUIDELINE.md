@@ -49,7 +49,7 @@ Purpose:
 ### Supabase
 Purpose:
 - own identity and durable records
-- store users, settings, progress, sessions, and entitlement snapshots/links
+- store users, settings, owned library items, progress, compact metrics, daily stats, and entitlement snapshots/links
 
 ### Stripe
 Purpose:
@@ -244,9 +244,11 @@ Do not:
 - auth identity
 - session state
 - durable user row
+- owned library items
 - progress
 - settings
-- session/history
+- compact per-book metrics
+- compact daily stats
 - entitlement snapshot or linkage fields needed by the app
 
 ## 5.4 Stripe owns
@@ -273,10 +275,32 @@ This is conceptual guidance, not a strict schema.
 ## Supabase durable records should cover
 - `users`
 - `user_settings`
+- `user_library_items`
 - `user_progress`
-- `user_sessions`
+- `user_book_metrics`
+- `user_daily_stats`
 - `user_entitlements`
 - optional `user_usage` summary if daily usage is persisted server-side
+
+
+## 6.1 Owned-book identity rule
+The durable identity for a user-owned book is `user_library_items.id`, not a content fingerprint.
+
+That means:
+- importing the same file twice creates two distinct owned items by default
+- restore is keyed to the owned item
+- delete / soft-delete / purge operate on the owned item
+- content fingerprint may help dedupe or replace flows later, but it must not silently reconnect old progress
+
+## 6.2 Delete and cleanup rule
+Deleting a user-owned book must be explicit and durable.
+
+Minimum launch behavior:
+- soft-delete marks the `user_library_items` row as deleted
+- permanent delete removes the `user_library_items` row
+- matching `user_progress` must be removed or invalidated
+- matching `user_book_metrics` should be removed on permanent delete unless the product later explicitly chooses to preserve deleted-book history
+- daily stats remain compact summaries and do not recreate orphaned book-level restore state
 
 ## Entitlement record should answer
 - current plan

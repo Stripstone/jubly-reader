@@ -2,11 +2,11 @@
 
 Canonical pre-launch reference for Jubly Reader app-owned Supabase tables.
 
-This document exists to prevent schema drift.
+This document exists to prevent schema drift, accidental row explosion, and launch-breaking ownership confusion.
 
 ## Core rule
 
-These tables store **durable** truth only.
+These tables store **durable truth only**.
 
 They do **not** move live reading ownership out of runtime.
 
@@ -18,12 +18,19 @@ They do **not** move live reading ownership out of runtime.
 
 - `users`
 - `user_settings`
+- `user_library_items`
 - `user_progress`
-- `user_sessions`
+- `user_book_metrics`
+- `user_daily_stats`
 - `user_entitlements`
 - `user_usage`
 
-Do **not** use app patches to add ad hoc side tables for the same domains.
+## Explicit non-launch table
+
+- `user_sessions`
+
+`user_sessions` is intentionally retired from the canonical launch model.
+Do not keep or recreate an append-only session ledger as default product persistence unless the project later decides it truly needs one.
 
 ---
 
@@ -101,21 +108,19 @@ Server-authoritative settings sync.
 - `updated_at`
 
 ## Dropped columns (removed — theme-definition fields re-homed to runtime/local)
-The following columns were removed from `user_settings` as part of the theme ownership correction pass.
-They are now owned by runtime/local theme prefs (`rc_theme_prefs` localStorage) and must not be recreated here.
-- `explorer_accent_swatch` → `rcTheme` runtime, `rc_theme_prefs` local
-- `explorer_background_mode` → `rcTheme` runtime, `rc_theme_prefs` local
-- `particle_preset_id` → `rcTheme.settings.emberPreset`, `rc_theme_prefs` local
-- `music_profile_id` → `rcTheme.settings.music`, device-local track selection
-- `last_goal_celebrated_on` → `rc_profile_prefs` localStorage, `normalizeProfilePrefs()` in `state.js`
+The following columns are runtime/local concerns and must not be recreated here.
+- `explorer_accent_swatch`
+- `explorer_background_mode`
+- `particle_preset_id`
+- `music_profile_id`
+- `last_goal_celebrated_on`
 
 ## Key rules
 - One row per user.
 - Required booleans/default-backed fields must never depend on partial client payloads being perfect.
-- Server upserts should merge/coerce before write.
+- Server upserts must merge/coerce before write.
 - `daily_goal_minutes` is constrained to the current launch contract range.
 - `use_source_page_numbers` is `NOT NULL` with a DB default so settings writes do not fail on partial payloads.
-- Dropped columns listed above must never be re-added as Explorer-specific DB fields. Cross-device theme persistence, if needed later, goes through a generic theme-overrides model.
 
 ## Must never be used for
 - active playback state
@@ -125,7 +130,62 @@ They are now owned by runtime/local theme prefs (`rc_theme_prefs` localStorage) 
 
 ---
 
-# 3. user_progress
+# 3. user_library_items
+
+## Purpose
+Authoritative user-owned library registry.
+
+This table represents the user's owned book entry.
+It is the lifecycle anchor for restore, cleanup, soft-delete, and future storage management.
+
+## Durable owner
+Server-backed library ownership sync.
+
+## Written by
+- import success path
+- future rename / archive / delete / restore actions
+- future storage-management actions
+
+## Read by
+- library presentation
+- import-capacity checks
+- delete / restore flows
+- diagnostics/dev tools
+- restore lookup bootstrap
+
+## Canonical columns
+- `id` — UUID primary key; the owned-book identity
+- `user_id`
+- `title`
+- `source_kind` — for example `upload_file`, `pasted_text`
+- `source_name`
+- `content_fingerprint` — nullable dedupe signal only
+- `storage_kind` — for example `device_local`
+- `storage_ref` — nullable
+- `import_kind` — for example `epub`, `pdf`, `text`
+- `byte_size`
+- `page_count`
+- `status` — `active` or `deleted`
+- `created_at`
+- `updated_at`
+- `deleted_at`
+- `purge_after`
+
+## Key rules
+- One row represents one owned library item, not one content fingerprint.
+- `id` is the canonical identity used by downstream durable tables.
+- `content_fingerprint` is **not** restore identity and **not** delete identity.
+- Uploading the same underlying file again must create a new `user_library_items.id` unless the product explicitly invokes a replace/reconnect action.
+- Soft-delete lives here.
+
+## Must never be used for
+- live current page truth
+- billing or usage authority
+- theme/settings truth
+
+---
+
+# 4. user_progress
 
 ## Purpose
 Authoritative restore/continuity table.
@@ -141,95 +201,124 @@ Server-backed progress sync.
 
 ## Read by
 - restore lookup
-- book/library continuity summaries
+- continue reading summaries
 - diagnostics/dev tools
 
 ## Canonical columns
-- `id`
+- `library_item_id` — PK/FK to `user_library_items.id`
 - `user_id`
-- `book_id`
-- `source_type`
-- `source_id`
-- `chapter_id`
+- `current_chapter_id`
+- `current_page_index`
 - `page_count`
-- `last_page_index`
 - `last_read_at`
-- `is_active`
 - `session_version`
 - `created_at`
 - `updated_at`
 
 ## Identity / uniqueness
 Current launch identity is:
-- `user_id`
-- `book_id`
-- `source_type`
-- `source_id`
-- `chapter_id` (normalized so null does not create duplicate “same target” rows)
+- one row per `library_item_id`
 
 ## Key rules
 - This is the **only durable restore authority**.
-- Current launch contract uses `source_type = 'book'`.
-- `user_sessions` must never be used as the restore fallback truth.
+- One owned book = one progress row max.
 - Runtime still decides **when** restore is applied.
+- Delete or permanent purge of a library item must remove the matching progress row.
+- No generated helper columns such as `chapter_key` belong in canonical launch schema.
 
 ## Must never be used for
 - append-only analytics history
+- per-chapter fanout records
 - session summaries
 - plan / billing / usage state
 
 ---
 
-# 4. user_sessions
+# 5. user_book_metrics
 
 ## Purpose
-Append-only reading session history and analytics.
+Compact per-book summary and profile/library metrics.
+
+This replaces most product-facing need for an append-only `user_sessions` table.
 
 ## Durable owner
-Server-backed session recording.
+Server-backed session-summary aggregation.
 
 ## Written by
-- `record_session`
-- reading completion/session-close flows
+- reading exit flushes
+- completion/session-close flows
+- future reconciliation tools if needed
 
 ## Read by
 - profile metrics
-- daily/weekly minutes summaries
-- book completion history
+- library summaries
+- completion history
 - diagnostics/dev tools
 
 ## Canonical columns
-- `id`
+- `library_item_id` — PK/FK to `user_library_items.id`
 - `user_id`
-- `pages_completed`
-- `minutes_listened`
-- `source_type`
-- `source_id`
-- `book_id`
-- `chapter_id`
-- `mode`
-- `tts_seconds`
-- `completed`
-- `started_at`
-- `ended_at`
-- `elapsed_seconds`
+- `minutes_read_total`
+- `pages_completed_total`
+- `first_opened_at`
+- `last_opened_at`
+- `completed_at`
+- `completion_count`
 - `created_at`
 - `updated_at`
 
 ## Key rules
-- Append-only history.
-- `created_at` must have a DB default.
-- Current launch contract uses `source_type = 'book'`.
-- This table is **not restore truth**.
+- One summary row per owned book.
+- This is aggregate product data, not event history.
+- Permanent delete of the owned library item should remove this row unless the product later explicitly decides to preserve historical metrics after deletion.
 
 ## Must never be used for
-- last-read restore fallback
-- authoritative current page/chapter
+- restore fallback truth
+- active page/chapter truth
 - billing or usage authority
 
 ---
 
-# 5. user_entitlements
+# 6. user_daily_stats
+
+## Purpose
+Compact daily profile/activity summary.
+
+## Durable owner
+Server-backed daily aggregation.
+
+## Written by
+- reading exit flushes
+- summary aggregation paths
+
+## Read by
+- daily/weekly profile summaries
+- diagnostics/dev tools
+
+## Canonical columns
+- `user_id`
+- `stat_date`
+- `minutes_read`
+- `pages_read`
+- `sessions_count`
+- `created_at`
+- `updated_at`
+
+## Identity / uniqueness
+- one row per `user_id + stat_date`
+
+## Key rules
+- This table exists to keep long-term metrics compact.
+- It intentionally avoids a large append-only session/event table for normal launch usage.
+
+## Must never be used for
+- restore truth
+- library ownership truth
+- billing or usage authority
+
+---
+
+# 7. user_entitlements
 
 ## Purpose
 Billing / plan / feature truth.
@@ -271,7 +360,7 @@ Stripe webhook/backend entitlement resolution.
 
 ---
 
-# 6. user_usage
+# 8. user_usage
 
 ## Purpose
 Current server-authoritative usage window summary.
@@ -304,7 +393,6 @@ Server-owned usage consumption/reset logic.
 - This is **not** a historical event ledger.
 - Window ordering must always be valid.
 - Counters are non-negative.
-- Launch SQL includes an optional `consume_user_usage` RPC aligned to current tier limits.
 
 ## Must never be used for
 - entitlement truth
@@ -313,7 +401,7 @@ Server-owned usage consumption/reset logic.
 
 ---
 
-# 7. RLS intent
+# 9. RLS intent
 
 Current launch intent is strict:
 
@@ -325,18 +413,30 @@ If future direct client writes are ever allowed, update this document first and 
 
 ---
 
-# 8. Cross-table guardrails
+# 10. Cross-table guardrails
 
 ## One table, one role
 Do not split one durable domain across multiple pseudo-authority tables.
 
 ## No mixed restore truth
+- `user_library_items` = owned-book identity
 - `user_progress` = restore truth
-- `user_sessions` = history only
+- `user_book_metrics` = per-book summary
+- `user_daily_stats` = daily summary
 
-## No mixed billing truth
-- `user_entitlements` = billing/plan truth
-- `users` = account shell only
+## No content-fingerprint ownership
+- `content_fingerprint` may help dedupe or replace flows
+- it must not become the canonical owned-book id
+- it must not silently reconnect deleted or replaced books to old progress
+
+## No append-only default session ledger
+The launch model intentionally avoids `user_sessions` row growth as a default persistence surface.
+If a future analytics/event table is added, it must be documented as a separate intentional system.
+
+## Cleanup must follow ownership
+- deleting an owned library item must also clear its restore truth
+- soft-delete and purge policy must be explicit
+- orphaned progress/metric rows are defects
 
 ## No fake defaults in place of schema discipline
 If a field must exist, give it a DB default and a stable server-side merge path.
@@ -347,14 +447,17 @@ Do not keep legacy checks that reject the current launch payload.
 
 ---
 
-# 9. Related server actions
+# 11. Related server actions
 
-Current code paths tied to this schema:
+Current or expected code paths tied to this schema:
 
 - `sync_user`
 - `sync_settings`
+- owned-library import/create actions
+- owned-library delete / restore / purge actions
 - `write_progress`
-- `record_session`
+- per-book metrics aggregation
+- daily summary aggregation
 - usage reset / usage consume paths
 - Stripe entitlement upsert paths
 

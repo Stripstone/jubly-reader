@@ -18,6 +18,15 @@ Before planning or editing:
 
 If the base is wrong, discard the pass and restart from the correct state.
 
+
+### 0.5 Schema-replacement sequencing rule
+When a pass is replacing a drifted durable schema before launch:
+1. rewrite the docs first
+2. run the replacement SQL second
+3. patch the code against that new schema third
+
+Do not finalize a runtime continuity patch against a schema that is about to be retired.
+
 ### 1. Define one bounded pass
 A pass should cover one coherent runtime-owned system or one contained follow-up inside that system.
 

@@ -27,6 +27,22 @@ If a scaffold shape, bridge pattern, or prototype convenience makes ownership am
 
 Treat any drift from thin-client responsibilities toward client-owned business or policy truth as protected-code regression, even if runtime behavior still appears correct.
 
+
+## Durable-table discipline rule
+Launch persistence must use compact, role-clean tables.
+
+Required durable split:
+- owned-book identity in `user_library_items`
+- restore truth in `user_progress`
+- per-book summary in `user_book_metrics`
+- daily summary in `user_daily_stats`
+
+Forbidden launch defaults:
+- content fingerprint as owned-book identity
+- append-only session/event growth as default product persistence
+- generated helper columns in canonical write payloads
+- delete flows that leave orphaned restore state behind
+
 ## Non-negotiable rules
 
 ### 1. One owner per launch-critical truth
@@ -152,6 +168,8 @@ These require explicit justification or removal.
 - reading entry split across shell and runtime without a defined owner
 - mode changes accepted before entitlement is checked
 - importer staged state controlled by multiple layers
+- restore truth attached to content identity instead of owned-book identity
+- delete lifecycle split between local UI and remote durable truth
 - playback controls claiming success when runtime state did not change
 
 ### Scaffold anti-patterns
