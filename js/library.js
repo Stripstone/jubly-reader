@@ -2863,7 +2863,7 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   if (!bookId) return false;
 
   // MUST be synchronous — before any await — so reading mode never shows stale
-  // page content during the flushProgressSync network roundtrip that follows.
+  // page content while network calls are in flight.
   const pagesEl = document.getElementById('pages');
   const readingModeEl = document.getElementById('reading-mode');
   try {
@@ -2871,7 +2871,10 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     if (readingModeEl) readingModeEl.classList.add('reading-restore-pending');
   } catch (_) {}
 
-  try { if (window.rcSync && typeof window.rcSync.flushProgressSync === 'function') await window.rcSync.flushProgressSync(); } catch (_) {}
+  // Fire-and-forget: the current reading target is safe in memory and will be
+  // persisted in the background. Awaiting this was causing a multi-second blank
+  // screen before the book loaded — unacceptable for a responsive entry path.
+  try { if (window.rcSync && typeof window.rcSync.flushProgressSync === 'function') window.rcSync.flushProgressSync().catch(() => {}); } catch (_) {}
 
   // Set source selector to book mode for UI accuracy.
   // setSourceUI() is display-only so no change event dispatch is needed here.
@@ -2897,17 +2900,13 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     }
   } catch (_) {}
 
-  // Now that restore truth is known, flag whether we are returning to a saved
-  // position. Only set data-restore-kind="returning" when the saved page index
-  // is meaningfully non-zero — this controls whether the overlay text shows.
-  // Fresh opens are silent: pages are hidden while rendering but no text appears.
+  // Compute restore truth. data-restore-kind is intentionally NOT set — with
+  // the blocking flush removed the render is near-instant, so the overlay text
+  // "Returning to your place…" would only flash for a frame. The hide/reveal
+  // is silent: pages stay invisible via reading-restore-pending until scrolled
+  // to the correct position, then fade in. No visible loading message needed.
   const hasRestore = !!(restore && Number.isFinite(Number(restore.pageIndex)) && Number(restore.pageIndex) > 0);
-  try {
-    if (readingModeEl) {
-      if (hasRestore) readingModeEl.setAttribute('data-restore-kind', 'returning');
-      else readingModeEl.removeAttribute('data-restore-kind');
-    }
-  } catch (_) {}
+  try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
 
   // Await the runtime-owned book load path. This resolves only after render()
   // and applyPendingReadingRestore() have both completed, so #pages is already

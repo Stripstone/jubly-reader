@@ -1189,10 +1189,17 @@
         const sub     = document.getElementById('dashboard-subtitle');
         if (!rowsEl) return;
 
+        // Hide all library states at the very start — the correct state is revealed
+        // only when we actually know what to show. This prevents flash of stale data
+        // on navigation and prevents intermediate DOM states being visible during
+        // async resolution. On boot, auth-hydrating covers this; on navigation it does not.
+        if (popEl) popEl.classList.add('hidden-section');
+        if (emptyEl) emptyEl.classList.add('hidden-section');
+        if (sampleEl) sampleEl.classList.add('hidden-section');
+        if (sub) sub.style.display = 'none';
+
         if (!isAuthedUser()) {
             if (sampleEl) sampleEl.classList.remove('hidden-section');
-            if (popEl) popEl.classList.add('hidden-section');
-            if (emptyEl) emptyEl.classList.add('hidden-section');
             if (sub) {
                 sub.style.display = '';
                 sub.innerHTML = 'Try the sample first. Create an account later when you want ownership, saved state, and your personal library.';
@@ -1200,19 +1207,19 @@
             return;
         }
 
-        if (sampleEl) sampleEl.classList.add('hidden-section');
-
         // Keep the library surface honest during boot. Until runtime book storage is
         // actually available, do not imply an empty library by showing the empty/import CTA.
+        // Return a promise that resolves only after the retry completes — this ensures
+        // DOMContentLoaded does not remove auth-hydrating before the final state is rendered.
         if (typeof localBooksGetAll !== 'function') {
-            if (popEl) popEl.classList.add('hidden-section');
-            if (emptyEl) emptyEl.classList.add('hidden-section');
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
-            libraryRefreshRetryTimer = setTimeout(() => {
-                libraryRefreshRetryTimer = null;
-                refreshLibrary();
-            }, 120);
-            return;
+            return new Promise(resolve => {
+                libraryRefreshRetryTimer = setTimeout(async () => {
+                    libraryRefreshRetryTimer = null;
+                    try { await refreshLibrary(); } catch (_) {}
+                    resolve();
+                }, 120);
+            });
         }
         let books = [];
         try { books = await localBooksGetAll(); } catch(_) { books = []; }
