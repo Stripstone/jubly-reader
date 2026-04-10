@@ -2866,6 +2866,9 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
 
   const pagesEl = document.getElementById('pages');
   const readingModeEl = document.getElementById('reading-mode');
+  // Clear pages and add pending class immediately so the empty #pages div is
+  // never briefly visible. No overlay text yet — we don't know if there is a
+  // saved place until the restore fetch below resolves.
   try {
     if (pagesEl) pagesEl.innerHTML = '';
     if (readingModeEl) readingModeEl.classList.add('reading-restore-pending');
@@ -2895,15 +2898,30 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     }
   } catch (_) {}
 
-  // Await the runtime-owned book load path directly only after restore truth is
-  // known or explicitly absent. This prevents a misleading page-1 flash before
-  // the user is returned to their durable page.
+  // Now that restore truth is known, flag whether we are returning to a saved
+  // position. Only set data-restore-kind="returning" when the saved page index
+  // is meaningfully non-zero — this controls whether the overlay text shows.
+  // Fresh opens are silent: pages are hidden while rendering but no text appears.
+  const hasRestore = !!(restore && Number.isFinite(Number(restore.pageIndex)) && Number(restore.pageIndex) > 0);
+  try {
+    if (readingModeEl) {
+      if (hasRestore) readingModeEl.setAttribute('data-restore-kind', 'returning');
+      else readingModeEl.removeAttribute('data-restore-kind');
+    }
+  } catch (_) {}
+
+  // Await the runtime-owned book load path. This resolves only after render()
+  // and applyPendingReadingRestore() have both completed, so #pages is already
+  // scrolled to the correct position before reading-restore-pending is removed.
   if (typeof window.__rcLoadBook === 'function') {
     try { await window.__rcLoadBook(normalizedId, { restore }); } catch (_) {}
   }
   try { await waitForNextPaint(2); } catch (_) {}
 
+  // Remove pending state and clean up the restore-kind attribute.
+  // The opacity transition on #pages produces a smooth fade-in from this point.
   try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
+  try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
   try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}
   return true;
 };

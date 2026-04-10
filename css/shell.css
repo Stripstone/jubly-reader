@@ -1331,11 +1331,19 @@ body.auth-hydrating #profile-page {
   }
 }
 
-/* Restore-pending overlay: hide pages until restore position is known */
+/* Restore-pending overlay: hide pages until restore position is known and applied */
+#pages {
+  transition: opacity 0.14s ease;
+}
 #reading-mode.reading-restore-pending #pages {
   visibility: hidden;
+  opacity: 0;
+  transition: none; /* suppress transition while hidden; runs on reveal */
 }
-#reading-mode.reading-restore-pending .reading-content::after {
+/* Overlay text only when genuinely returning to a saved place (data-restore-kind="returning").
+   Fresh opens are silent — pages are hidden during render but no text is shown,
+   so the experience feels like a clean appearance rather than a loading state. */
+#reading-mode.reading-restore-pending[data-restore-kind="returning"] .reading-content::after {
   content: 'Returning to your place\2026';
   position: absolute;
   inset: 0;
