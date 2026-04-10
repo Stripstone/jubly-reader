@@ -17,6 +17,12 @@
 //   - Applied on sign-in before server responds (display projection only)
 //   - NEVER used as restore authority — restore always hits the server
 //   - NEVER used as a first-entry position guess
+//
+// localStorage dirty set (rc_dirty_settings_v1):
+//   - Written on every user-initiated setting change (field-level, with timestamp)
+//   - Survives page refresh — replayed on top of server snapshot after hydration
+//   - Cleared field-by-field when server confirms those fields
+//   - Drives retry-without-snap-back on server write failures
 // ─────────────────────────────────────────────────────────────────────────────
 
 window.rcSync = (function () {
@@ -38,6 +44,53 @@ window.rcSync = (function () {
   let _requestSeq = 0;
   let _appliedSeq = 0;
   let _applyingRemoteSettings = false;
+
+  // Dirty settings: field-level record of user mutations not yet confirmed by the server.
+  // Persisted to localStorage so uncommitted changes survive page refresh.
+  // Entries: { [fieldName]: { value, ts } }
+  const RC_DIRTY_SETTINGS_KEY = 'rc_dirty_settings_v1';
+  let _dirtySettings = {};
+  let _confirmedSettingsRow = null; // last server-ACKed settings row (never overwritten by projection)
+  try { const _ds = localStorage.getItem(RC_DIRTY_SETTINGS_KEY); if (_ds) _dirtySettings = JSON.parse(_ds) || {}; } catch (_) {}
+
+  function _saveDirtySettings() {
+    try {
+      Object.keys(_dirtySettings).length === 0
+        ? localStorage.removeItem(RC_DIRTY_SETTINGS_KEY)
+        : localStorage.setItem(RC_DIRTY_SETTINGS_KEY, JSON.stringify(_dirtySettings));
+    } catch (_) {}
+  }
+
+  function _recordDirtyFields(collected) {
+    // Diff collected UI state against last server-confirmed row (not the projected row).
+    // Only fields that diverge from confirmed server truth are marked dirty.
+    const confirmed = _confirmedSettingsRow || {};
+    const now = Date.now();
+    let changed = false;
+    Object.keys(collected).forEach(k => {
+      if (k === 'updated_at') return;
+      if (JSON.stringify(collected[k]) !== JSON.stringify(confirmed[k])) {
+        _dirtySettings[k] = { value: collected[k], ts: now };
+        changed = true;
+      }
+    });
+    if (changed) _saveDirtySettings();
+  }
+
+  function _replayDirtyOntoSettings() {
+    // Overlay any pending dirty mutations onto _remoteSettingsRow and apply them
+    // to the DOM/localStorage. Called after a server snapshot lands so user intent
+    // from before the refresh is immediately visible and queued for server write.
+    const dirtyKeys = Object.keys(_dirtySettings);
+    if (dirtyKeys.length === 0) return;
+    const dirtyValues = Object.fromEntries(dirtyKeys.map(k => [k, _dirtySettings[k].value]));
+    const merged = Object.assign({}, _remoteSettingsRow || {}, dirtyValues);
+    _remoteSettingsRow = merged;
+    _applyRemoteSettingsRow(merged);
+    // Queue a sync so dirty mutations are written to the server.
+    // Slight delay avoids racing with whatever triggered _applySnapshot.
+    setTimeout(() => { try { _queueSettingsSync(); } catch (_) {} }, 80);
+  }
 
   const RC_THEME_PREFS_KEY = 'rc_theme_prefs';
   const RC_APPEARANCE_PREFS_KEY = 'rc_appearance_prefs';
@@ -303,8 +356,16 @@ window.rcSync = (function () {
     _remoteEntitlement = snap.entitlement || null;
     _hydrationState = { inFlight: false, users: true, settings: true, progress: true, sessions: true, usage: !!snap.usage };
     _lastSyncSnapshotAt = new Date().toISOString();
+    // Track the server-confirmed settings row separately from the projected row.
+    // _confirmedSettingsRow is the baseline for dirty-field diffing and is never
+    // overwritten by optimistic projection — only by actual server ACKs.
+    if (!options.fromCache && _remoteSettingsRow) _confirmedSettingsRow = _remoteSettingsRow;
     if (_remoteSettingsRow) _applyRemoteSettingsRow(_remoteSettingsRow);
     else _deriveRemoteProfileMetrics();
+    // Replay any dirty user mutations on top of the server-confirmed settings so
+    // changes made before this snapshot (including across a page refresh) are
+    // immediately visible and scheduled for server write.
+    _replayDirtyOntoSettings();
     try {
       if (window.rcUsage && typeof window.rcUsage.applySnapshot === 'function' && snap.usage) {
         window.rcUsage.applySnapshot({
@@ -426,37 +487,35 @@ window.rcSync = (function () {
   // ── Settings sync ─────────────────────────────────────────────────────────
   async function syncSettings() {
     if (!_ready()) return null;
-    // Capture last confirmed row before optimistic projection so we can snap back on failure.
-    const _prevSettingsRow = _remoteSettingsRow;
-    const payload = _collectSettingsRow();
+    // Snapshot which dirty keys are being sent in this request so we can clear
+    // only those on success. New mutations that arrive during the network roundtrip
+    // stay dirty and will be included in the next sync cycle.
+    const syncingKeys = new Set(Object.keys(_dirtySettings));
+    const dirtyValues = Object.fromEntries([...syncingKeys].map(k => [k, _dirtySettings[k].value]));
+    // Payload: full collected row merged with dirty values (dirty wins).
+    // This sends authoritative user intent rather than blindly resending cached values.
+    const payload = Object.assign(_collectSettingsRow(), dirtyValues);
     _projectCurrentSettingsLocal();
-    _recordSync('settings', 'pending', { payload });
+    _recordSync('settings', 'pending', { payload, dirtyFields: [...syncingKeys] });
     try {
       const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'sync_settings', payload } });
+      // Clear only the dirty keys that were included in this request.
+      syncingKeys.forEach(k => delete _dirtySettings[k]);
+      _saveDirtySettings();
       if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      // Update confirmed baseline to whatever the server just settled.
+      if (_remoteSettingsRow) _confirmedSettingsRow = _remoteSettingsRow;
       _recordSync('settings', 'success', { row: data && data.row ? data.row : null, snapshotAt: _lastSyncSnapshotAt });
       _emitHydrated('settings');
       return data && data.row ? data.row : null;
     } catch (error) {
       _recordSync('settings', 'error', { message: String(error?.message || error || 'settings sync failed') });
-      // Snap-back: revert to last confirmed state.
-      // Non-null _prevSettingsRow: revert _remoteSettingsRow AND re-apply confirmed state
-      // to local/runtime prefs (theme prefs, DOM controls, appearance).
-      // _applyRemoteSettingsRow uses _applyingRemoteSettings guard to prevent the re-apply
-      // from retriggering another sync cycle.
-      // Null _prevSettingsRow (first-write failure): revert _remoteSettingsRow to null
-      // and re-derive metrics. Local prefs remain correct because _projectCurrentSettingsLocal
-      // never writes to localStorage — only _remoteSettingsRow (in-memory) was projected.
-      // Leaving _remoteSettingsRow at the projected value would be "doing nothing" —
-      // this branch ensures the projected value is cleared even when there is no prior row.
-      if (_prevSettingsRow) {
-        _remoteSettingsRow = _prevSettingsRow;
-        _applyRemoteSettingsRow(_prevSettingsRow);
-      } else {
-        _remoteSettingsRow = null;
-        _deriveRemoteProfileMetrics();
-        _emitHydrated('settings-snapback');
-      }
+      // Do NOT snap back. The dirty set preserves user intent and will be retried.
+      // Snapping back on transient server errors (503, network timeout) violates the
+      // runtime contract: "no setting that changes and then snaps back for no reason."
+      // The optimistic projection stays in place until the server confirms or the user
+      // changes the setting again.
+      _queueSettingsSync(); // schedule a retry with dirty set intact
       return null;
     }
   }
@@ -836,6 +895,9 @@ window.rcSync = (function () {
 
   function _handlePrefsChanged() {
     if (_applyingRemoteSettings) return;
+    // Record dirty fields before projecting — diff against confirmed server truth,
+    // not the projected row (_remoteSettingsRow would include previous projections).
+    try { _recordDirtyFields(_collectSettingsRow()); } catch (_) {}
     _projectCurrentSettingsLocal();
     _queueSettingsSync();
   }
@@ -844,6 +906,7 @@ window.rcSync = (function () {
     if (_applyingRemoteSettings) return;
     const id = String(event?.target?.id || '').trim();
     if (!WATCHED_SETTING_IDS.has(id)) return;
+    try { _recordDirtyFields(_collectSettingsRow()); } catch (_) {}
     _projectCurrentSettingsLocal();
     _queueSettingsSync();
   }

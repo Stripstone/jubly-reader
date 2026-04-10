@@ -102,7 +102,8 @@
     function renderLibrarySubtitle(authed) {
         const subtitle = document.getElementById('dashboard-subtitle');
         if (!subtitle) return;
-        subtitle.style.display = '';
+        // Do not toggle display — CSS min-height on #dashboard-subtitle reserves
+        // a fixed line of space so text changes never cause layout shift.
         if (!authed) {
             subtitle.innerHTML = 'Create an account to enter your library and keep your settings, billing, and progress in one place.';
             return;
@@ -1193,7 +1194,9 @@
         const popEl   = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
         const sampleEl = document.getElementById('library-public-sample');
-        const sub     = document.getElementById('dashboard-subtitle');
+        // NOTE: #dashboard-subtitle is NOT owned by refreshLibrary.
+        // renderLibrarySubtitle() is the single owner of that element.
+        // CSS min-height on #dashboard-subtitle ensures it never causes layout shift.
         if (!rowsEl) return;
 
         // Hide all library states at the very start — the correct state is revealed
@@ -1203,14 +1206,9 @@
         if (popEl) popEl.classList.add('hidden-section');
         if (emptyEl) emptyEl.classList.add('hidden-section');
         if (sampleEl) sampleEl.classList.add('hidden-section');
-        if (sub) sub.style.display = 'none';
 
         if (!isAuthedUser()) {
             if (sampleEl) sampleEl.classList.remove('hidden-section');
-            if (sub) {
-                sub.style.display = '';
-                sub.innerHTML = 'Try the sample first. Create an account later when you want ownership, saved state, and your personal library.';
-            }
             return;
         }
 
@@ -1235,7 +1233,6 @@
         const has = books.length > 0;
         if (popEl)   popEl.classList.toggle('hidden-section', !has);
         if (emptyEl) emptyEl.classList.toggle('hidden-section', has);
-        if (sub) sub.style.display = has ? '' : 'none';
         if (!has) {
             try { renderSubscriptionSurface([]); } catch (_) {}
             return;

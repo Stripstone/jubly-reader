@@ -1123,6 +1123,14 @@
 }
 
 
+/* Dashboard subtitle — fixed height allocation so content changes never cause
+   layout shift in the Library header. Text is set by renderLibrarySubtitle();
+   the space is always present whether the text is empty or populated. */
+#dashboard-subtitle {
+  min-height: 1.4em;
+  display: block;
+}
+
 /* Auth hydration gate: avoid flashing signed-out landing/profile truth before
    Supabase session restore resolves on page load. */
 body.auth-hydrating nav,
