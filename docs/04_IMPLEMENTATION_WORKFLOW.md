@@ -57,6 +57,24 @@ Rules:
 Served runtime results decide status.
 Do not mark behavior fixed from code inspection alone.
 
+Runtime testing should use the runtime experience evaluation lens in `02_RUNTIME_CONTRACT.md`.
+
+At minimum, record observations in these categories:
+- state transitions
+- settings
+- value rendering
+- reading continuity
+
+For each category, note:
+- client immediate
+- mutations
+- server settle
+- later truth
+- must not happen
+
+Do not mark a behavior acceptable merely because it corrected itself later.
+If runtime first shows a believable wrong state, treat that as a failure unless the contract explicitly allows that transition.
+
 ### 6. Revise or reclassify
 - same pass → revise the same diff
 - new pass → create a new diff

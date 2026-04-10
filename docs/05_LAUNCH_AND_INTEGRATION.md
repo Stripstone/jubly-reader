@@ -131,6 +131,32 @@ Rules:
 
 ## Validation checklist
 
+## Runtime validation lens
+
+Use the runtime experience evaluation lens from `02_RUNTIME_CONTRACT.md` when judging launch readiness.
+
+For persistence and account-backed behavior, always check:
+- state transitions
+- settings
+- value rendering
+- reading continuity
+
+For each category, judge:
+- client immediate
+- mutations
+- server settle
+- later truth
+- must not happen
+
+Launch is not honest if the app merely settles to the right answer later after first showing a believable wrong state.
+
+Examples of launch-failing patterns:
+- flashing page 1 before restore catches up
+- showing a believable but wrong usage value before account truth loads
+- showing a setting change immediately and then snapping back unexpectedly
+- leaving stale signed-in or continue state visible after sign-out
+
+
 ### Reading continuity
 - open document
 - advance beyond page 1

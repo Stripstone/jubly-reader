@@ -23,6 +23,7 @@ Use this before changing code.
 What the user should experience.
 
 Use this to judge behavior and reject regressions.
+It also contains the runtime experience evaluation lens used during runtime testing.
 
 ### `03_ARCHITECTURE_MAP.md`
 Who owns what.

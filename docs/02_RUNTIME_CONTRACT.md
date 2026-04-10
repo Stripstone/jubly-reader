@@ -14,6 +14,84 @@ The user should be able to:
 - leave reading without lingering state
 - return to the correct place later
 
+## Runtime experience evaluation lens
+
+Use this section to judge runtime behavior during testing.
+
+This is not a second ownership model.
+It is the user-facing way to judge whether the current implementation is behaving honestly.
+
+For the categories below, judge all five:
+- client immediate
+- mutations
+- server settle
+- later truth
+- must not happen
+
+### 1. State transitions
+Sign-in, refresh, reading entry, reading exit, and sign-out: correct or incorrect.
+
+**Client immediate:** account and continue surfaces are blank if nothing is loaded yet, or filled with the last client-captured state if that is safe to show.
+
+**Mutations:** when I sign in, sign out, leave reading, or come back, the visible state should react right away.
+
+**Server settle:** the app checks the real account state, saved settings, and saved reading place in the background.
+
+**Later truth:** once loading finishes, I should still be in the right account state and the right continue state.
+
+**Must not happen:** no stale signed-in state after sign-out, no wrong account surface flashing first, no old continue state sticking around after the app learns better.
+
+### 2. Settings
+User-controlled settings and profile-style preferences: responsive or unresponsive.
+
+**Client immediate:** when I change a setting, I should see it change right away.
+
+**Mutations:** new setting changes should appear immediately in the UI, even if the real save is still finishing in the background.
+
+**Server settle:** the real saved setting is written and confirmed through the account-backed path.
+
+**Later truth:** after refresh, reopen, or another device, it should still be set the way I left it.
+
+**Must not happen:** no setting that changes and then snaps back for no reason, no local-only setting pretending it was truly saved, no duplicate owner between shell and runtime.
+
+### 3. Value rendering
+Displayed values like goals, usage, plan info, account info, and continue labels: responsive or unresponsive.
+
+**Client immediate:** values are blank, loading, or filled with the last safe client-captured value. New changes should show right away.
+
+**Mutations:** when plan, usage, or account-backed values change, the screen should react quickly without inventing fake numbers.
+
+**Server settle:** the app loads the real values and replaces placeholders or older local values.
+
+**Later truth:** the values on screen should end up matching the real saved account state and resolved entitlement state.
+
+**Must not happen:** no made-up usage count, no fake plan state, no decorative value that looks real but is only a local guess.
+
+### 4. Reading continuity
+Chapter, page, continue reading, and restore behavior: responsive or unresponsive.
+
+**Client immediate:** when I open a book, the app should either wait briefly for the right place or show a safe loading state.
+
+**Mutations:** when my page changes, when I leave reading, or when I reopen later, my place should update and stay current.
+
+**Server settle:** the app checks the real saved reading place in the background and lets runtime apply it.
+
+**Later truth:** I should end up on the right chapter and page, and leaving and returning should keep bringing me back to that place.
+
+**Must not happen:** no flash of page 1 while catching up to server, no snap from the wrong page to the right page after the user already saw the wrong one, no stale old-book or old-chapter restore, no restore path that only works from one special entry path.
+
+## How to use this during testing
+
+When runtime testing:
+1. judge the category
+2. write what happened at client immediate
+3. write what changed during mutation
+4. write what settled later
+5. write the exact failure pattern if one occurred
+
+A result is not considered correct just because it settled eventually.
+If the app shows a believable wrong state first, that is still a runtime failure.
+
 ## Reading contract
 
 ### Cold open
