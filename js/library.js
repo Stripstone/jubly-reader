@@ -2593,14 +2593,12 @@ function _installScrollPageTracker() {
         if (!bestEl || !Number.isFinite(bestIdx) || bestIdx < 0) return;
         // Guard: skip if the winning element is in a hidden section (double-check).
         if (bestEl.getBoundingClientRect().height <= 0) return;
-        const prevIdx = typeof lastFocusedPageIndex === 'number' ? lastFocusedPageIndex : -1;
         lastFocusedPageIndex = bestIdx;
         updateReadingMetricsPage(bestIdx);
         // Keep reading target in sync so bottom-bar Play speaks the scrolled-to page.
         try {
           const _ctx = window.getReadingTargetContext();
           if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
-          if (bestIdx !== prevIdx && window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') window.rcSync.scheduleProgressSync(_ctx.bookId || '', _ctx.chapterIndex != null ? _ctx.chapterIndex : -1, bestIdx, { reason: 'scroll-tracker' });
         } catch (_) {}
       } catch (_) {}
     });
@@ -2724,7 +2722,7 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   try {
     if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
       const _t = window.__rcReadingTarget || {};
-      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx, { reason: 'focus-reading-page' });
+      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx);
     }
   } catch (_) {}
   return { ok: true, index: idx, total };
@@ -2768,20 +2766,6 @@ window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 // Resolves the book, prepares all page content, and renders page cards.
 // Returns true when reading is ready; shell awaits this rather than polling.
 // No selector event dispatch — the entire entry path is direct and awaited.
-async function flushCurrentReadingProgress(reason) {
-  try {
-    if (!(window.rcSync && typeof window.rcSync.saveProgressNow === 'function')) return null;
-    const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
-    const pageIndex = getFocusedOrInferredReadingPageIndex();
-    const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
-    const bookId = String(ctx.bookId || (window.__rcReadingTarget || {}).bookId || '').trim();
-    if (!bookId) return null;
-    return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'runtime-immediate') });
-  } catch (_) {
-    return null;
-  }
-}
-
 window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
   if (!bookId) return false;
 
@@ -2829,7 +2813,6 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
 };
 
 window.exitReadingSession = function exitReadingSession() {
-  try { flushCurrentReadingProgress('exit-reading'); } catch (_) {}
   const metrics = finalizeReadingMetricsSession();
   const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}
