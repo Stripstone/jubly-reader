@@ -1,0 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Karla:wght@400;500;600&display=swap');
+    
+    /* ========================================
+       ðŸŽ¨ TEXTURE & IMAGE CONFIGURATION
+       ======================================== 
+       
+       To use LOCAL files instead of URLs:
+       1. Save your texture images in the same folder as this HTML file
+       2. Replace the URLs below with your local filenames:
+          --paper-texture: url('my-paper-texture.jpg');
+          --card-texture: url('my-card-background.png');
+       3. Adjust opacity values to taste (0.0 = invisible, 1.0 = fully opaque)
+       
+       Recommended texture types:
+       - Paper textures: .jpg or .png
+       - Seamless patterns work best for backgrounds
+       - Transparent PNGs (.png) for overlay effects
+    */
+    :root {
+      /* Background Textures */
+      --paper-texture: url('https://wallpapers.com/images/hd/world-map-in-old-paper-tjbf6z87cm5gxsru.jpg');
+      --paper-texture-opacity: 0.95;
+      --paper-texture-brightness: 0.84;  /* 1.0 = normal, 0.7 = darker, 0.5 = much darker */
+      
+      /* Card Textures (optional - set to 'none' to disable) */
+      --card-texture: none;
+      --card-texture-opacity: 0.15;
+      
+      /* ðŸ”¥ FIRE EMBER SETTINGS */
+      --ember-quantity: 45;
+      --ember-size-min: 1;
+      --ember-size-max: 3;
+      --ember-speed-min: 0.3;
+      --ember-speed-max: 0.5;
+      --ember-life-min: 0.5;  /* fraction of screen height */
+      --ember-life-max: 1.0;  /* fraction of screen height */
+      --ember-fade-threshold: 25; /* when to turn to ash */
+      
+      /* ðŸœï¸ SAND ANIMATION SETTINGS */
+      --sand-drift-duration: 4s;  /* speed of grain movement */
+      
+      /* Color Scheme */
+      --primary-bg: #d8d6d1;
+      --secondary-bg: #dfddd8;
+      --card-bg: #f5f1e8;
+      --accent: #c17d4a;
+      --accent-h: #8B2500; 
+      --accent-hover: #a96939;
+      --text-primary: #2b2520;
+      --text-secondary: #6b5d54;
+      --border: #e8dfd4;
+      --shadow-sm: 0 2px 8px rgba(139, 111, 87, 0.08);
+      --shadow-md: 0 4px 16px rgba(139, 111, 87, 0.12);
+      --shadow-lg: 0 8px 32px rgba(139, 111, 87, 0.16);
+    }
