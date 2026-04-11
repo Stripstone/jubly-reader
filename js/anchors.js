@@ -398,7 +398,7 @@ function writeAnchorsToCache(pageHash, payload) {
       throw err;
     }
     // Spend 1 token for anchor generation (display/diagnostics tracking only).
-    try { (window.rcUsage?.spend('anchors')) || (typeof tokenSpend === 'function' && tokenSpend('anchors')); } catch(_) {}
+    try { if (typeof tokenSpend === 'function') tokenSpend('anchors'); } catch(_) {}
     // Basic schema check
     if (!Array.isArray(data?.anchors) || !data?.meta?.pageHash) {
       const err = new Error('Invalid /api/ai?action=anchors response schema');

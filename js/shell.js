@@ -1479,9 +1479,7 @@
         const cur   = (playback.active && !playback.paused)
                         ? Math.max(0, getActivePlaybackPageIndex(playback))
                         : Math.max(0, getVisibleReadingPageIndex());
-        const dispCur = (typeof window.getDisplayPageNumber === 'function') ? window.getDisplayPageNumber(cur) : `Page ${cur + 1}`;
-        const dispTotal = (typeof window.getDisplayPageTotal === 'function') ? window.getDisplayPageTotal(total) : String(total);
-        prog.textContent = total > 0 ? `${dispCur} / ${dispTotal}` : '—';
+        prog.textContent = total > 0 ? `Page ${cur + 1} / ${total}` : '—';
         shellDebugRemember('lastProgressSnapshot', { type: 'progress', visible: true, label: prog.textContent, current: cur, total });
     }
 
