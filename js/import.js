@@ -82,6 +82,17 @@
     return out;
   }
 
+  async function requestServerPageBreak(payload) {
+    const response = await fetch(apiUrl('/api/content?action=page-break'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(data?.error || `Page breaking failed (${response.status})`);
+    return data || {};
+  }
+
   function parseChaptersFromMarkdown(raw) {
     const text = String(raw || "");
     const lines = text.split(/\r?\n/);
@@ -937,7 +948,7 @@
         // keepParasChk is currently informational; paragraph preservation is the default behavior.
         const cleanupHeadings = !!cleanupHeadingsChk?.checked;
 
-        const md = await epubToMarkdownFromSelected(
+        const sections = await epubToMarkdownFromSelected(
           _zip,
           _tocItems,
           selectedIds,
@@ -952,7 +963,10 @@
           }
         );
 
-        // Estimate page count by counting H2
+        const pageBreak = await requestServerPageBreak({ kind: 'sections', sections });
+        const md = String(pageBreak?.markdown || '');
+
+        // Estimate page count by counting H2.
         createdPages = (md.match(/^\s*##\s+/gm) || []).length;
         setProgress(92, 'Saving to device', `${createdPages} pages created`);
 
