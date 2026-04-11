@@ -52,12 +52,28 @@ The shell must not own, mirror, infer, or compete with runtime truth in launch-c
 ### Supabase owns
 - durable account data
 - durable settings
-- durable progress records
-- durable sessions/history
-- future entitlement records
+- durable owned-library records
+- durable restore records
+- compact per-book metrics
+- compact daily stats
+- durable entitlement records
+- durable usage window summaries
 
 Supabase does not define runtime behavior.
 It stores durable records that runtime interprets.
+
+
+## Durable data identity rules
+
+Supabase durable identity is split intentionally:
+- `user_library_items.id` = owned-book identity
+- `content_fingerprint` = optional dedupe signal only
+- `user_progress.library_item_id` = restore identity
+- `user_book_metrics.library_item_id` = per-book summary identity
+- `user_daily_stats(user_id, stat_date)` = daily summary identity
+
+Content identity must not silently become ownership identity.
+Deleting an owned library item must clear matching restore truth and dependent summaries.
 
 ## Current file map
 
@@ -164,6 +180,7 @@ This order is part of the runtime contract.
 - autoplay or countdown
 - importer state
 - restore
+- owned-book identity or delete cleanup
 - progress or completion truth
 - mode or tier enforcement once runtime has resolved entitlement truth
 - selected theme or appearance truth
@@ -231,6 +248,9 @@ Treat these as architectural defects unless explicitly documented as temporary a
 - mirroring runtime state in shell variables
 - auto-clicking buttons to trigger hidden state changes
 - duplicate mode/tier checks in multiple files
+- content-hash identity silently reused as owned-book identity
+- restore keyed to a content fingerprint instead of an owned library item
+- append-only session history used as default product persistence when compact summaries would do
 - shell-side fallback logic that silently becomes runtime authority
 - production policy derived from cosmetic UI state
 - prototype helper paths that bypass the real owner layer

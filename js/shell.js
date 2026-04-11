@@ -92,9 +92,34 @@
     }
 
     function deriveDisplayName(user) {
+        const explicit = String((user && (user.displayName || user?.user_metadata?.full_name || user?.user_metadata?.name)) || '').trim();
+        if (explicit) return explicit;
         const email = String((user && user.email) || '').trim();
         if (!email) return 'Account';
         return email.split('@')[0] || email;
+    }
+
+    function renderLibrarySubtitle(authed) {
+        const subtitle = document.getElementById('dashboard-subtitle');
+        if (!subtitle) return;
+        // Do not toggle display — CSS min-height on #dashboard-subtitle reserves
+        // a fixed line of space so text changes never cause layout shift.
+        if (!authed) {
+            subtitle.innerHTML = 'Create an account to enter your library and keep your settings, billing, and progress in one place.';
+            return;
+        }
+        const remoteMetrics = (window.rcSync && typeof window.rcSync.getRemoteProfileMetrics === 'function') ? window.rcSync.getRemoteProfileMetrics() : null;
+        const localMetrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
+            ? window.rcReadingMetrics.getReadingProfileMetrics()
+            : { sessionsCompleted: 0, weeklyMinutes: 0 };
+        const metrics = remoteMetrics || localMetrics;
+        const sessions = Math.max(0, Number(metrics.sessionsCompleted || 0));
+        const weekly = Math.max(0, Number(metrics.weeklyMinutes || 0));
+        if (weekly > 0) {
+            subtitle.innerHTML = `You've completed <strong>${sessions} session${sessions === 1 ? '' : 's'}</strong> all time and read <strong>${weekly} min</strong> this week.`;
+        } else {
+            subtitle.innerHTML = `You've completed <strong>${sessions} session${sessions === 1 ? '' : 's'}</strong> all time. Keep the momentum going.`;
+        }
     }
 
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
@@ -122,14 +147,13 @@
         if (navProfileTrigger) navProfileTrigger.style.display = authed ? '' : 'none';
         if (navUsagePill) navUsagePill.classList.toggle('hidden-section', !authed || isReading);
 
-        const displayName = deriveDisplayName(user);
+        const remoteDisplayName = (window.rcSync && typeof window.rcSync.getRemoteUsersRow === 'function') ? (window.rcSync.getRemoteUsersRow()?.display_name || '') : '';
+        const displayName = remoteDisplayName || deriveDisplayName(user);
         if (navUserName) {
             navUserName.textContent = authed ? displayName : '';
             navUserName.classList.toggle('hidden-section', !authed);
         }
-        if (navAvatar) navAvatar.src = authed && user && user.email
-            ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.email)}`
-            : 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
+        if (navAvatar) navAvatar.src = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
 
         const sidebar = document.getElementById('app-sidebar');
         if (sidebar) sidebar.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
@@ -144,13 +168,7 @@
         const librarySample = document.getElementById('library-public-sample');
         if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !authed);
         if (librarySample) librarySample.classList.add('hidden-section');
-        const subtitle = document.getElementById('dashboard-subtitle');
-        if (subtitle) {
-            subtitle.style.display = '';
-            subtitle.innerHTML = authed
-                ? "You've completed <strong>2 sessions</strong> this week. Keep the momentum going."
-                : 'Create an account to enter your library and keep your settings, billing, and progress in one place.';
-        }
+        renderLibrarySubtitle(authed);
 
         const profileGuestCard = document.getElementById('profile-guest-card');
         const profileGuestContent = document.getElementById('profile-guest-content');
@@ -168,12 +186,10 @@
         const profileEmailSettings = document.getElementById('profile-email-settings');
         const profileAvatarSettings = document.getElementById('profile-avatar-settings');
         if (profileNameMain) profileNameMain.textContent = authed ? displayName : 'Your account';
-        if (profileEmailMain) profileEmailMain.textContent = authed && user ? (user.email || '') : 'Sign in to personalize this area.';
+        if (profileEmailMain) profileEmailMain.textContent = authed ? 'Signed-in account' : 'Account settings';
         if (profileNameSettings) profileNameSettings.textContent = authed ? displayName : 'Your account';
-        if (profileEmailSettings) profileEmailSettings.textContent = authed && user ? (user.email || '') : 'Sign in to personalize this area.';
-        const avatarSrc = authed && user && user.email
-            ? `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.email)}`
-            : 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
+        if (profileEmailSettings) profileEmailSettings.textContent = authed ? 'Signed-in account' : 'Account settings';
+        const avatarSrc = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
         if (profileAvatarMain) profileAvatarMain.src = avatarSrc;
         if (profileAvatarSettings) profileAvatarSettings.src = avatarSrc;
     }
@@ -221,11 +237,16 @@
         }
 
         syncShellAuthPresentation(targetId);
-        if (targetId === 'dashboard') refreshLibrary();
+        let _sectionRefreshPromise = null;
+        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary();
+        if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
 
         window.scrollTo(0, 0);
+        // Return the async library refresh promise so callers that need to wait
+        // (e.g. DOMContentLoaded before removing auth-hydrating) can await it.
+        return _sectionRefreshPromise || Promise.resolve();
     }
 
     // ── Focus mode fade ──────────────────────────────────────────
@@ -557,7 +578,17 @@
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
-        showSection(settledSection, { historyMode: 'replace' });
+        // Await the section's async work (e.g. refreshLibrary on dashboard) before
+        // removing auth-hydrating, so the correct state is rendered before the
+        // section becomes visible — preventing flash of intermediate states.
+        // Race against a hard 500ms cap: auth-hydrating must never permanently
+        // block the page regardless of what happens in library init.
+        try {
+            await Promise.race([
+                showSection(settledSection, { historyMode: 'replace' }),
+                new Promise(resolve => setTimeout(resolve, 500))
+            ]);
+        } catch (_) {}
         try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
     });
     // ── Profile tabs ─────────────────────────────────────────────
@@ -567,6 +598,8 @@
         document.querySelectorAll('.profile-tab-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tab === tabId);
         });
+        if (tabId === 'tab-profile') { try { renderProfileSurface(); } catch (_) {} }
+        if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
     }
 
     // ── Tier — drives #tierSelect so ui.js applyTierAccess() fires ──
@@ -1161,55 +1194,69 @@
         const popEl   = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
         const sampleEl = document.getElementById('library-public-sample');
-        const sub     = document.getElementById('dashboard-subtitle');
+        // NOTE: #dashboard-subtitle is NOT owned by refreshLibrary.
+        // renderLibrarySubtitle() is the single owner of that element.
+        // CSS min-height on #dashboard-subtitle ensures it never causes layout shift.
         if (!rowsEl) return;
+
+        // Hide all library states at the very start — the correct state is revealed
+        // only when we actually know what to show. This prevents flash of stale data
+        // on navigation and prevents intermediate DOM states being visible during
+        // async resolution. On boot, auth-hydrating covers this; on navigation it does not.
+        if (popEl) popEl.classList.add('hidden-section');
+        if (emptyEl) emptyEl.classList.add('hidden-section');
+        if (sampleEl) sampleEl.classList.add('hidden-section');
 
         if (!isAuthedUser()) {
             if (sampleEl) sampleEl.classList.remove('hidden-section');
-            if (popEl) popEl.classList.add('hidden-section');
-            if (emptyEl) emptyEl.classList.add('hidden-section');
-            if (sub) {
-                sub.style.display = '';
-                sub.innerHTML = 'Try the sample first. Create an account later when you want ownership, saved state, and your personal library.';
-            }
             return;
         }
-
-        if (sampleEl) sampleEl.classList.add('hidden-section');
 
         // Keep the library surface honest during boot. Until runtime book storage is
         // actually available, do not imply an empty library by showing the empty/import CTA.
+        // Return a promise that resolves after one retry tick so DOMContentLoaded's
+        // auth-hydrating removal is delayed until the retry has had a chance to render.
+        // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
+        // or successive unavailability creates an infinite chain that hangs the page.
         if (typeof localBooksGetAll !== 'function') {
-            if (popEl) popEl.classList.add('hidden-section');
-            if (emptyEl) emptyEl.classList.add('hidden-section');
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
-            libraryRefreshRetryTimer = setTimeout(() => {
-                libraryRefreshRetryTimer = null;
-                refreshLibrary();
-            }, 120);
-            return;
+            return new Promise(resolve => {
+                libraryRefreshRetryTimer = setTimeout(() => {
+                    libraryRefreshRetryTimer = null;
+                    try { refreshLibrary(); } catch (_) {}
+                    resolve();
+                }, 120);
+            });
         }
-
         let books = [];
         try { books = await localBooksGetAll(); } catch(_) { books = []; }
         const has = books.length > 0;
         if (popEl)   popEl.classList.toggle('hidden-section', !has);
         if (emptyEl) emptyEl.classList.toggle('hidden-section', has);
-        if (sub) sub.style.display = has ? '' : 'none';
-        if (!has) return;
+        if (!has) {
+            try { renderSubscriptionSurface([]); } catch (_) {}
+            return;
+        }
         books.sort((a, b) => (b.createdAt||0) - (a.createdAt||0));
-        rowsEl.innerHTML = books.map(b => {
-            const pages   = (String(b.markdown||'').match(/^\s*##\s+/gm)||[]).length;
-            const date    = new Date(b.createdAt||Date.now()).toLocaleDateString();
-            const estMins = Math.max(1, Math.round(pages * 1.5));
-            const id      = ('local:' + String(b.id)).replace(/'/g,"\\'");
-            const title   = escHtml(b.title||'Untitled');
+        const rows = books.map(b => {
+            const pages = (window.rcLibraryData && typeof window.rcLibraryData.countPagesFromMarkdown === 'function')
+                ? window.rcLibraryData.countPagesFromMarkdown(b.markdown || '')
+                : Math.max(1, (String(b.markdown||'').match(/^\s*##\s+/gm)||[]).length || 1);
+            const surface = (window.rcLibraryData && typeof window.rcLibraryData.getBookSurfaceData === 'function')
+                ? window.rcLibraryData.getBookSurfaceData(`local:${String(b.id)}`, pages, { record: b })
+                : { status: 'Unread', timeLabel: `${Math.max(1, Math.ceil(pages * 2.5))} min left` };
+            const date = new Date(b.createdAt||Date.now()).toLocaleDateString();
+            const id = ('local:' + String(b.id)).replace(/'/g,"\\'");
+            const title = escHtml(b.title||'Untitled');
             return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
                 <div class="flex-grow flex items-center gap-3"><div class="w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">Added ${date}</p></div></div>
-                <div class="w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">Unread</span></div>
-                <div class="w-32 hidden md:block text-sm text-slate-500 font-medium">${estMins} min left</div>
+                <div class="w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div>
+                <div class="w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div>
                 <div class="w-8 text-slate-300">→</div></div>`;
-        }).join('');
+        });
+        rowsEl.innerHTML = rows.join('');
+        try { renderSubscriptionSurface(books); } catch (_) {}
+
     }
     // Hook called by library.js after populateBookSelectWithLocal()
     window.__jublyLibraryRefresh = refreshLibrary;
@@ -1256,9 +1303,8 @@
     let _previewBookId = null;
     function openPreview(id, title) {
         _previewBookId = id;
-        const el = document.getElementById('preview-title');
-        if (el) el.innerText = title || 'Book';
         openModal('preview-modal');
+        refreshPreviewSurface(id, title);
     }
 
     async function startReading() {
@@ -1268,6 +1314,126 @@
         showSection('reading-mode');
         if (!_previewBookId) return;
         try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(_previewBookId); } catch (_) {}
+    }
+
+    let _goalCelebrationTimer = null;
+    let _goalEditOpen = false;
+
+    function setGoalEditMode(open) {
+        _goalEditOpen = !!open;
+        const editBtn = document.getElementById('profile-goal-edit-btn');
+        const editForm = document.getElementById('profile-goal-edit-form');
+        const input = document.getElementById('profile-goal-input');
+        if (editBtn) editBtn.classList.toggle('hidden-section', _goalEditOpen);
+        if (editForm) editForm.classList.toggle('hidden-section', !_goalEditOpen);
+        if (_goalEditOpen && input) {
+            const current = (window.rcPrefs && typeof window.rcPrefs.loadProfilePrefs === 'function') ? window.rcPrefs.loadProfilePrefs().dailyGoalMinutes : 15;
+            input.value = String(current || 15);
+            try { input.focus(); input.select(); } catch (_) {}
+        }
+    }
+
+    function triggerGoalCelebration() {
+        const banner = document.getElementById('profile-goal-celebration');
+        if (!banner) return;
+        if (_goalCelebrationTimer) clearTimeout(_goalCelebrationTimer);
+        banner.textContent = '🎉🎊 Goal reached';
+        banner.classList.remove('hidden-section');
+        void banner.offsetWidth;
+        banner.classList.remove('profile-goal-celebration-animate');
+        banner.classList.add('profile-goal-celebration-animate');
+        _goalCelebrationTimer = setTimeout(() => {
+            try { banner.classList.add('hidden-section'); } catch (_) {}
+            try { banner.classList.remove('profile-goal-celebration-animate'); } catch (_) {}
+        }, 1600);
+    }
+
+    async function renderSubscriptionSurface(existingBooks) {
+        const booksValue = document.getElementById('subscription-books-value');
+        const storageValue = document.getElementById('subscription-storage-value');
+        let books = Array.isArray(existingBooks) ? existingBooks : [];
+        if (!books.length && typeof localBooksGetAll === 'function') {
+            try { books = await localBooksGetAll(); } catch (_) { books = []; }
+        }
+        if (booksValue) booksValue.textContent = String(Array.isArray(books) ? books.length : 0);
+        if (storageValue) {
+            const totalBytes = Array.isArray(books) ? books.reduce((sum, book) => sum + Math.max(0, Number(book?.byteSize || 0)), 0) : 0;
+            if (totalBytes >= 1024 * 1024) storageValue.textContent = `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`;
+            else if (totalBytes >= 1024) storageValue.textContent = `${Math.max(1, Math.round(totalBytes / 1024))} KB`;
+            else storageValue.textContent = totalBytes > 0 ? `${totalBytes} B` : '0 B';
+        }
+    }
+
+
+    function renderUsageSurface() {
+        const valueEl = document.getElementById('nav-usage-pill-value');
+        if (!valueEl) return;
+        const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
+            ? window.rcUsage.getSnapshot()
+            : { remaining: null, allowance: null, authoritative: false };
+        const remaining = Number(snapshot?.remaining);
+        valueEl.textContent = Number.isFinite(remaining) ? `${Math.max(0, remaining)} left today` : 'Usage';
+    }
+
+    function renderProfileSurface() {
+        // When signed in, require at least one confirmed snapshot (cache or live)
+        // before rendering values. Until settings hydration is confirmed, local
+        // pref values can contradict server truth (e.g. a local goal of 5 against
+        // a server-confirmed 30 → "15/5"). A safe blank is correct here per the
+        // runtime contract. rc:durable-data-hydrated fires after cache apply
+        // (sub-100ms on returning users) and re-triggers this render with clean data.
+        if (isAuthedUser()) {
+            const hydrated = !!(window.rcSync && typeof window.rcSync.getHydrationState === 'function' && window.rcSync.getHydrationState().settings);
+            if (!hydrated) return;
+        }
+        const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
+            ? window.rcReadingMetrics.getReadingProfileMetrics()
+            : { dailyGoalMinutes: 15, dailyMinutes: 0, weeklyMinutes: 0, sessionsCompleted: 0, progressPct: 0, lastGoalCelebratedOn: '', todayIso: '' };
+        const dailyEl = document.getElementById('profile-daily-minutes');
+        const goalEl = document.getElementById('profile-goal-minutes');
+        const weeklyEl = document.getElementById('profile-weekly-minutes');
+        const sessionsEl = document.getElementById('profile-sessions-completed');
+        const labelEl = document.getElementById('profile-goal-progress-label');
+        const copyEl = document.getElementById('profile-goal-copy');
+        const ringEl = document.getElementById('profile-goal-ring');
+        const goalMinutes = Math.max(5, Number(metrics.dailyGoalMinutes || 15));
+        const displayDailyMinutes = Math.max(0, Number(metrics.displayDailyMinutes != null ? metrics.displayDailyMinutes : Math.min(Number(metrics.dailyMinutes || 0), goalMinutes)));
+        const remainingGoalMinutes = Math.max(0, Number(metrics.remainingGoalMinutes != null ? metrics.remainingGoalMinutes : Math.max(0, goalMinutes - Number(metrics.dailyMinutes || 0))));
+        if (dailyEl) dailyEl.textContent = String(Math.round(displayDailyMinutes));
+        if (goalEl) goalEl.textContent = String(goalMinutes);
+        if (weeklyEl) weeklyEl.textContent = String(metrics.weeklyMinutes || 0);
+        if (sessionsEl) sessionsEl.textContent = String(metrics.sessionsCompleted || 0);
+        if (labelEl) labelEl.textContent = '';
+        if (ringEl) ringEl.style.setProperty('--goal-progress', `${Math.max(0, Math.min(100, Number(metrics.progressPct || 0)))}%`);
+        if (copyEl) {
+            copyEl.textContent = metrics.progressPct >= 100
+                ? 'Goal complete for today.'
+                : `${remainingGoalMinutes} min to go today.`;
+        }
+        if (metrics.progressPct >= 100 && metrics.lastGoalCelebratedOn !== metrics.todayIso) {
+            try {
+                if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') {
+                    window.rcPrefs.saveProfilePrefs({ lastGoalCelebratedOn: metrics.todayIso });
+                }
+            } catch (_) {}
+            triggerGoalCelebration();
+        }
+    }
+
+    async function refreshPreviewSurface(id, fallbackTitle) {
+        const titleEl = document.getElementById('preview-title');
+        const trioEl = document.getElementById('preview-meta-trio');
+        if (titleEl) titleEl.innerText = fallbackTitle || 'Book';
+        if (trioEl) trioEl.textContent = 'Loading preview…';
+        try {
+            if (window.rcLibraryData && typeof window.rcLibraryData.getBookPreviewSurface === 'function') {
+                const surface = await window.rcLibraryData.getBookPreviewSurface(id);
+                if (titleEl) titleEl.innerText = surface.title || fallbackTitle || 'Book';
+                if (trioEl) trioEl.textContent = surface.previewTrio || '0 Pages • 0 min read • Unread';
+                return;
+            }
+        } catch (_) {}
+        if (trioEl) trioEl.textContent = '0 Pages • 0 min read • Unread';
     }
 
     // Empty state drag/drop
@@ -1286,16 +1452,16 @@
         }
     }
 
-    // ── F7: Reading time tracker (shell-only) ────────────────────
-    let _readingStartTime = null;
-
-    // Session complete signal — uses real pages[] and shell reading timer
+    // Session complete signal — presents current runtime page truth only.
     function showSessionComplete() {
         const signal = document.getElementById('session-complete');
         if (!signal || !hasActiveReadingCards()) return;
         const pageCount = (typeof pages !== 'undefined' && Array.isArray(pages)) ? pages.length : 0;
-        const elapsed   = _readingStartTime ? Date.now() - _readingStartTime : 0;
-        const mins      = elapsed > 0 ? Math.max(1, Math.round(elapsed / 60000)) : Math.max(1, Math.round(pageCount * 1.5));
+        const currentTarget = window.__rcReadingTarget || {};
+        const isTextImport = /^local:text-/i.test(String(currentTarget.bookId || ''));
+        const mins = (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function')
+            ? window.rcReadingMetrics.estimateReadMinutesFromPages(pageCount, { textImport: isTextImport })
+            : Math.max(1, isTextImport ? pageCount : Math.ceil(pageCount * 2.5));
         document.getElementById('stat-pages').textContent   = pageCount;
         document.getElementById('stat-minutes').textContent = mins;
         signal.classList.remove('hidden-section');
@@ -1324,6 +1490,84 @@
     window.jublySessionComplete = showSessionComplete;
 
     document.addEventListener('DOMContentLoaded', () => {
+        const goalEditBtn = document.getElementById('profile-goal-edit-btn');
+        const goalEditForm = document.getElementById('profile-goal-edit-form');
+        const goalCancelBtn = document.getElementById('profile-goal-cancel-btn');
+        const goalInput = document.getElementById('profile-goal-input');
+        goalEditBtn?.addEventListener('click', () => { setGoalEditMode(true); });
+        goalCancelBtn?.addEventListener('click', () => { setGoalEditMode(false); });
+        goalEditForm?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const next = Math.max(5, Math.min(300, Math.round(Number(goalInput && goalInput.value || 0) || 0)));
+            if (!Number.isFinite(next) || next <= 0) return;
+            // saveProfilePrefs fires rc:prefs-changed, which queues rcSync.syncSettings
+            // via _handlePrefsChanged. Shell does not call syncSettings directly to
+            // avoid a competing parallel durable write for the same mutation.
+            try { if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') window.rcPrefs.saveProfilePrefs({ dailyGoalMinutes: next }); } catch (_) {}
+            setGoalEditMode(false);
+            renderProfileSurface();
+        });
+        const nameTrigger = document.getElementById('profile-name-edit-trigger');
+        const nameForm = document.getElementById('profile-name-edit-form');
+        const nameInput = document.getElementById('profile-name-input');
+        const nameCancel = document.getElementById('profile-name-cancel-btn');
+        const passwordToggle = document.getElementById('profile-password-toggle-btn');
+        const passwordForm = document.getElementById('profile-password-form');
+        const passwordInput = document.getElementById('profile-password-input');
+        const passwordCancel = document.getElementById('profile-password-cancel-btn');
+        const settingsStatus = document.getElementById('profile-settings-status');
+
+        function setSettingsStatus(message, kind) {
+            if (!settingsStatus) return;
+            settingsStatus.textContent = message || '';
+            settingsStatus.classList.toggle('hidden-section', !message);
+            settingsStatus.classList.remove('profile-settings-status-error', 'profile-settings-status-success');
+            if (message) settingsStatus.classList.add(kind === 'error' ? 'profile-settings-status-error' : 'profile-settings-status-success');
+        }
+        function setNameEdit(open) {
+            if (nameForm) nameForm.classList.toggle('hidden-section', !open);
+            if (nameTrigger) nameTrigger.classList.toggle('hidden-section', !!open);
+            if (open && nameInput) {
+                nameInput.value = deriveDisplayName(getAuthUser());
+                setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch (_) {} }, 0);
+            }
+        }
+        function setPasswordEdit(open) {
+            if (passwordForm) passwordForm.classList.toggle('hidden-section', !open);
+            if (passwordToggle) passwordToggle.classList.toggle('hidden-section', !!open);
+            if (!open && passwordInput) passwordInput.value = '';
+            if (open && passwordInput) setTimeout(() => { try { passwordInput.focus(); } catch (_) {} }, 0);
+        }
+        nameTrigger?.addEventListener('click', () => { setSettingsStatus('', 'success'); setNameEdit(true); });
+        nameCancel?.addEventListener('click', () => { setNameEdit(false); });
+        nameForm?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            setSettingsStatus('', 'success');
+            const nextName = String(nameInput?.value || '').trim();
+            if (!nextName) { setSettingsStatus('Username is required.', 'error'); return; }
+            const result = await (window.rcAuth && typeof window.rcAuth.updateDisplayName === 'function'
+                ? window.rcAuth.updateDisplayName(nextName)
+                : Promise.resolve({ error: { message: 'Profile editing is not available.' } }));
+            if (result?.error) { setSettingsStatus(result.error.message || 'Unable to update username.', 'error'); return; }
+            setNameEdit(false);
+            syncShellAuthPresentation();
+            setSettingsStatus('Username updated.', 'success');
+        });
+        passwordToggle?.addEventListener('click', () => { setSettingsStatus('', 'success'); setPasswordEdit(true); });
+        passwordCancel?.addEventListener('click', () => { setPasswordEdit(false); });
+        passwordForm?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            setSettingsStatus('', 'success');
+            const nextPassword = String(passwordInput?.value || '');
+            const result = await (window.rcAuth && typeof window.rcAuth.changePassword === 'function'
+                ? window.rcAuth.changePassword(nextPassword)
+                : Promise.resolve({ error: { message: 'Password changes are not available.' } }));
+            if (result?.error) { setSettingsStatus(result.error.message || 'Unable to change password.', 'error'); return; }
+            setPasswordEdit(false);
+            setSettingsStatus('Password updated.', 'success');
+        });
+        document.getElementById('profile-help-chat-btn')?.addEventListener('click', async (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openChat === 'function') await window.rcHelp.openChat(); } catch (_) {} });
+        document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') await window.rcHelp.openFeedback(); } catch (_) {} });
         const tierSel = document.getElementById('tierSelect');
         if (tierSel) {
             tierSel.addEventListener('change', () => {
@@ -1342,21 +1586,22 @@
             try { syncExplorerMusicSource(); } catch (_) {}
             refreshExplorerPanel();
         });
+        document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} });
+        document.addEventListener('rc:durable-data-hydrated', () => { const section = getCurrentVisibleSection(); try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (section === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} } if (section === 'dashboard') { try { refreshLibrary(); } catch (_) {} } });
+        window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (getCurrentVisibleSection() === 'dashboard') { try { refreshLibrary(); } catch (_) {} } });
+        window.addEventListener('rc:deleted-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
+        window.addEventListener('rc:usage-changed', () => { try { renderUsageSurface(); } catch (_) {} });
         try { switchReadingSettingsTab('general'); } catch (_) {}
         try { syncTierButtonState(); } catch (_) {}
 
-        // After a successful import the engine fires Done; refresh shell library explicitly.
-        const importDoneBtn = document.getElementById('importDoneBtn');
-        if (importDoneBtn) {
-            importDoneBtn.addEventListener('click', () => {
-                try { refreshLibrary(); } catch(_) {}
-                setTimeout(() => { try { if (typeof resetImporterState === 'function') resetImporterState({ keepModalOpen: false }); } catch(_) {} }, 0)
-            });
-        }
         const importCloseBtn = document.getElementById('importBookClose');
         if (importCloseBtn) {
             importCloseBtn.addEventListener('click', () => setTimeout(() => { try { if (typeof resetImporterState === 'function') resetImporterState({ keepModalOpen: false }); } catch(_) {} }, 0));
         }
+        try { renderProfileSurface(); } catch (_) {}
+        try { renderSubscriptionSurface(); } catch (_) {}
+        try { renderUsageSurface(); } catch (_) {}
+        try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {}
 
         const topSettingsBtn = document.getElementById('openReadingSettings');
         if (topSettingsBtn) {
@@ -1513,4 +1758,8 @@
         };
     };
     // Engine scripts load dynamically after window.load; refresh shell library once boot settles.
-    window.addEventListener('load', () => setTimeout(() => { refreshLibrary(); patchRefreshHook(); }, 350));
+    // refreshLibrary() removed from this timer — it was a timing workaround that
+    // raced against auth and could show the unauthenticated sample state after
+    // auth had resolved. DOMContentLoaded now awaits refreshLibrary() before
+    // removing auth-hydrating, so this stale call is no longer needed.
+    window.addEventListener('load', () => setTimeout(() => { patchRefreshHook(); }, 350));

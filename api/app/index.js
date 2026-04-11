@@ -16,13 +16,15 @@ const HANDLERS = {
   'health': () => import('../../server/lib/app-health.js'),
   'usage-check': () => import('../../server/lib/app-usage-check.js'),
   'import-capacity': () => import('../../server/lib/app-import-capacity.js'),
+  'dev-tools': () => import('../../server/lib/app-dev-tools.js'),
+  'durable-sync': () => import('../../server/lib/app-durable-sync.js'),
 };
 
 export default async function handler(req, res) {
   const kind = getKind(req) || 'health';
   const loader = HANDLERS[kind];
   if (!loader) {
-    return json(res, 400, { error: 'Unknown app endpoint kind.', expected: ['public-config','runtime-config','health','usage-check','import-capacity'] });
+    return json(res, 400, { error: 'Unknown app endpoint kind.', expected: ['public-config','runtime-config','health','usage-check','import-capacity','dev-tools','durable-sync'] });
   }
   const mod = await loader();
   return mod.default(req, res);

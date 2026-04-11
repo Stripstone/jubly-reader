@@ -147,7 +147,7 @@ window.rcBilling = (function () {
     if (premiumInterval) premiumInterval.textContent = plans?.premium?.intervalLabel || '';
 
     if (!signedIn) {
-      applyPlanButtonState(freeBtn, 'Create Free Account', () => rememberPlanAndOpenSignup('free'));
+      applyPlanButtonState(freeBtn, 'Free', () => rememberPlanAndOpenSignup('free'));
       applyPlanButtonState(proBtn, 'Choose Pro', () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
       applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
       return;
@@ -199,8 +199,8 @@ window.rcBilling = (function () {
     const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
 
     if (!signedIn) {
-      if (statusCopy) statusCopy.textContent = 'Sign in when you want billing ownership. Choose Sign Up to view plans and create an account.';
-      if (billingState) billingState.innerHTML = 'Guest <span class="text-slate-300 text-sm font-normal">mode</span>';
+      if (statusCopy) statusCopy.textContent = 'Sign in to view your plan details and billing options.';
+      if (billingState) billingState.textContent = 'Not signed in';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
         primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
@@ -212,10 +212,14 @@ window.rcBilling = (function () {
       return;
     }
 
-    if (entitlement && entitlement.status === 'active') {
+    if (entitlement && (entitlement.status === 'active' || entitlement.status === 'trialing')) {
       const tierLabel = entitlement.tier === 'premium' ? 'Premium' : entitlement.tier === 'paid' ? 'Pro' : 'Free';
-      if (statusCopy) statusCopy.textContent = `Your resolved plan is ${tierLabel}. Billing changes go through the Stripe portal, not the browser.`;
-      if (billingState) billingState.innerHTML = `${tierLabel} <span class="text-slate-300 text-sm font-normal">active</span>`;
+      const renewsAt = entitlement.renewsAt || entitlement.periodEnd || null;
+      const renewsLabel = renewsAt
+        ? new Date(renewsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+        : `${tierLabel} active`;
+      if (statusCopy) statusCopy.textContent = `Your ${tierLabel} plan is active.`;
+      if (billingState) billingState.textContent = renewsLabel;
       if (primaryBtn) {
         primaryBtn.textContent = 'Manage Billing';
         primaryBtn.onclick = function () { openCustomerPortal(); };
@@ -225,8 +229,8 @@ window.rcBilling = (function () {
         secondaryBtn.onclick = function () { if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
     } else {
-      if (statusCopy) statusCopy.textContent = 'Your account is on the free path until Stripe creates an active entitlement. Upgrade when you are ready.';
-      if (billingState) billingState.innerHTML = 'Free <span class="text-slate-300 text-sm font-normal">path</span>';
+      if (statusCopy) statusCopy.textContent = 'You are on the Free plan. Upgrade whenever you want more books, storage, and features.';
+      if (billingState) billingState.textContent = 'Free';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
         primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };

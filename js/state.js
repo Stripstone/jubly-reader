@@ -46,20 +46,21 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
 
   // ---- Token Tracking ----
   // Session token counter. Counts consumption per category for diagnostic purposes.
-  // Tokens do not enforce limits during prototype — this is observational only.
+  // Usage does not enforce limits client-side; it is display/diagnostics only.
   // Resets when tier changes.
   //
-  // Token costs (must match ExperienceSpec):
-  //   TTS page (cloud)     = 1
-  //   AI Evaluate          = 2
-  //   Generate anchors     = 1
-  //   Research analysis    = 3
-
+  // Usage cost per protected backend action.
+  // Display/diagnostics only on the client — the server remains the authority.
   const TOKEN_COSTS = {
-    tts:      1,
+    tts: 2,
     evaluate: 2,
-    anchors:  1,
-    research: 3,
+    anchors: 2,
+    research: 2,
+    ai: 2,
+    summary: 2,
+    book_import: 2,
+    import: 2,
+    other_protected_backend_action: 2,
   };
 
   const SAFE_FALLBACK_POLICY = Object.freeze({
@@ -258,7 +259,10 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   }
 
   let sessionTokens = {
-    remaining: SAFE_FALLBACK_POLICY.usageDailyLimit,
+    remaining: null,
+    allowance: null,
+    authoritative: false,
+    source: 'unknown',
     spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
   };
 
@@ -266,12 +270,14 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     const cost = TOKEN_COSTS[category] || 0;
     if (!cost) return;
     sessionTokens.spent[category] = (sessionTokens.spent[category] || 0) + cost;
-    sessionTokens.remaining = Math.max(0, sessionTokens.remaining - cost);
   }
 
   function tokenReset() {
     sessionTokens = {
-      remaining: getRuntimeUsageAllowance(),
+      remaining: null,
+      allowance: null,
+      authoritative: false,
+      source: 'reset',
       spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
     };
   }
@@ -317,6 +323,20 @@ window.purgeStrippedRuntimePersistence = purgeStrippedRuntimePersistence;
 const STORAGE_KEY_SESSION = "rc_session_v2";
 const STORAGE_KEY_META = "rc_session_meta_v2"; // small future-proof hook
 
+function loadSessionMetaPayload() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY_META) || "{}") || {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveSessionMetaPayload(payload) {
+  const safe = (payload && typeof payload === "object") ? payload : {};
+  try { localStorage.setItem(STORAGE_KEY_META, JSON.stringify(safe)); } catch (_) {}
+  return safe;
+}
+
 function getConsolidationCacheKey(pageHash) {
   return `rc_consolidation_${pageHash}`;
 }
@@ -359,7 +379,8 @@ function persistSessionNow() {
       consolidations: pageData.map(p => p?.consolidation || "")
     };
     localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(payload));
-    localStorage.setItem(STORAGE_KEY_META, JSON.stringify({ savedAt: payload.savedAt }));
+    const existingMeta = loadSessionMetaPayload();
+    saveSessionMetaPayload({ ...existingMeta, savedAt: payload.savedAt });
     return true;
   } catch (e) {
     return false;
@@ -368,7 +389,11 @@ function persistSessionNow() {
 
 function clearPersistedSession() {
   try { localStorage.removeItem(STORAGE_KEY_SESSION); } catch (_) {}
-  try { localStorage.removeItem(STORAGE_KEY_META); } catch (_) {}
+  try {
+    const existingMeta = loadSessionMetaPayload();
+    if (existingMeta && existingMeta.readingMetrics) saveSessionMetaPayload({ readingMetrics: existingMeta.readingMetrics, savedAt: Date.now() });
+    else localStorage.removeItem(STORAGE_KEY_META);
+  } catch (_) {}
 }
 
 function clearPersistedWorkForPageHashes(pageHashes, { clearAnchors = false } = {}) {
@@ -556,15 +581,11 @@ async function stableHashText(text) {
   // -----------------------------------
   // Debug flag helper
   // -----------------------------------
-  // We support truthy URL forms: ?debug=1, ?debug=true, ?debug (empty), ?debug=on/yes
-  // and treat ?debug=0/false/off/no as disabled.
+  // Diagnostics/debug mode is enabled only when the authenticated user matches
+  // DEV_CREDA on the server. This replaces the old public ?debug=1 path.
   function isDebugEnabledFromUrl() {
     try {
-      const params = new URLSearchParams(location.search);
-      if (!params.has('debug')) return false;
-      const v = (params.get('debug') || '').trim().toLowerCase();
-      if (v === '' || v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-      return false;
+      return !!(window.rcDevTools && typeof window.rcDevTools.isDiagnosticsEnabled === 'function' && window.rcDevTools.isDiagnosticsEnabled());
     } catch (_) {
       return false;
     }
@@ -641,6 +662,7 @@ window.getReadingRestoreStatus = getReadingRestoreStatus;
 const RC_THEME_PREFS_KEY = 'rc_theme_prefs';
 const RC_APPEARANCE_PREFS_KEY = 'rc_appearance_prefs';
 const RC_DIAGNOSTICS_PREFS_KEY = 'rc_diagnostics_prefs';
+const RC_PROFILE_PREFS_KEY = 'rc_profile_prefs';
 
 let appTheme = 'default';
 let appThemeSettings = {};
@@ -707,6 +729,18 @@ const DEFAULT_PREFS_ADAPTER = {
     const safePayload = (payload && typeof payload === 'object') ? payload : {};
     try { localStorage.setItem(RC_DIAGNOSTICS_PREFS_KEY, JSON.stringify(safePayload)); } catch (_) {}
     return safePayload;
+  },
+  loadProfilePrefs() {
+    try {
+      return JSON.parse(localStorage.getItem(RC_PROFILE_PREFS_KEY) || '{}') || {};
+    } catch (_) {
+      return {};
+    }
+  },
+  saveProfilePrefs(payload) {
+    const safePayload = (payload && typeof payload === 'object') ? payload : {};
+    try { localStorage.setItem(RC_PROFILE_PREFS_KEY, JSON.stringify(safePayload)); } catch (_) {}
+    return safePayload;
   }
 };
 
@@ -721,6 +755,8 @@ function getPrefsAdapter() {
     saveAppearancePrefs: typeof adapter.saveAppearancePrefs === 'function' ? adapter.saveAppearancePrefs.bind(adapter) : DEFAULT_PREFS_ADAPTER.saveAppearancePrefs,
     loadDiagnosticsPrefs: typeof adapter.loadDiagnosticsPrefs === 'function' ? adapter.loadDiagnosticsPrefs.bind(adapter) : DEFAULT_PREFS_ADAPTER.loadDiagnosticsPrefs,
     saveDiagnosticsPrefs: typeof adapter.saveDiagnosticsPrefs === 'function' ? adapter.saveDiagnosticsPrefs.bind(adapter) : DEFAULT_PREFS_ADAPTER.saveDiagnosticsPrefs,
+    loadProfilePrefs: typeof adapter.loadProfilePrefs === 'function' ? adapter.loadProfilePrefs.bind(adapter) : DEFAULT_PREFS_ADAPTER.loadProfilePrefs,
+    saveProfilePrefs: typeof adapter.saveProfilePrefs === 'function' ? adapter.saveProfilePrefs.bind(adapter) : DEFAULT_PREFS_ADAPTER.saveProfilePrefs,
   };
 }
 
@@ -753,6 +789,190 @@ function loadDiagnosticsPrefs() {
 
 function saveDiagnosticsPrefs(payload) {
   return getPrefsAdapter().saveDiagnosticsPrefs(payload);
+}
+
+const DEFAULT_PROFILE_PREFS = Object.freeze({
+  dailyGoalMinutes: 15,
+  lastGoalCelebratedOn: ''
+});
+
+function normalizeProfilePrefs(raw) {
+  const input = (raw && typeof raw === 'object') ? raw : {};
+  const next = { ...DEFAULT_PROFILE_PREFS };
+  const goal = Number(input.dailyGoalMinutes);
+  if (Number.isFinite(goal) && goal > 0) next.dailyGoalMinutes = Math.max(5, Math.min(300, Math.round(goal)));
+  if (typeof input.lastGoalCelebratedOn === 'string') next.lastGoalCelebratedOn = input.lastGoalCelebratedOn.trim();
+  return next;
+}
+
+function loadProfilePrefs() {
+  return normalizeProfilePrefs(getPrefsAdapter().loadProfilePrefs());
+}
+
+function saveProfilePrefs(payload) {
+  const base = loadProfilePrefs();
+  const result = normalizeProfilePrefs({ ...base, ...(payload && typeof payload === 'object' ? payload : {}) });
+  const saved = getPrefsAdapter().saveProfilePrefs(result);
+  try { document.dispatchEvent(new CustomEvent('rc:prefs-changed', { detail: { source: 'profile' } })); } catch (_) {}
+  return normalizeProfilePrefs(saved);
+}
+
+function getTodayIsoDate() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function normalizeReadingMetrics(raw) {
+  const input = (raw && typeof raw === 'object') ? raw : {};
+  const summaries = (input.bookSummaries && typeof input.bookSummaries === 'object') ? input.bookSummaries : {};
+  const sessions = Array.isArray(input.sessionHistory) ? input.sessionHistory : [];
+  const outSummaries = {};
+  Object.keys(summaries).forEach((bookId) => {
+    const row = summaries[bookId] || {};
+    outSummaries[String(bookId)] = {
+      bookId: String(bookId),
+      totalPages: Number.isFinite(Number(row.totalPages)) ? Math.max(0, Number(row.totalPages)) : 0,
+      lastPageIndex: Number.isFinite(Number(row.lastPageIndex)) ? Math.max(0, Number(row.lastPageIndex)) : 0,
+      totalReadingSeconds: Number.isFinite(Number(row.totalReadingSeconds)) ? Math.max(0, Math.round(Number(row.totalReadingSeconds))) : 0,
+      lastOpenedAt: typeof row.lastOpenedAt === 'string' ? row.lastOpenedAt : null,
+      completed: !!row.completed,
+      completedAt: typeof row.completedAt === 'string' ? row.completedAt : null
+    };
+  });
+  const outSessions = sessions.map((entry) => ({
+    bookId: String((entry && entry.bookId) || ''),
+    startedAt: typeof entry?.startedAt === 'string' ? entry.startedAt : null,
+    endedAt: typeof entry?.endedAt === 'string' ? entry.endedAt : null,
+    elapsedSeconds: Number.isFinite(Number(entry?.elapsedSeconds)) ? Math.max(0, Math.round(Number(entry.elapsedSeconds))) : 0,
+    pagesAdvanced: Number.isFinite(Number(entry?.pagesAdvanced)) ? Math.max(0, Math.round(Number(entry.pagesAdvanced))) : 0,
+    completed: !!entry?.completed
+  })).filter((entry) => entry.bookId && entry.endedAt);
+  return {
+    bookSummaries: outSummaries,
+    sessionHistory: outSessions.slice(-200)
+  };
+}
+
+function loadReadingMetrics() {
+  const meta = loadSessionMetaPayload();
+  return normalizeReadingMetrics(meta.readingMetrics);
+}
+
+function saveReadingMetrics(payload) {
+  const meta = loadSessionMetaPayload();
+  const next = normalizeReadingMetrics(payload);
+  meta.savedAt = Date.now();
+  meta.readingMetrics = next;
+  saveSessionMetaPayload(meta);
+  return next;
+}
+
+function estimateReadMinutesFromPages(pageCount, options = {}) {
+  const pagesCount = Number(pageCount);
+  const normalized = Number.isFinite(pagesCount) && pagesCount > 0 ? pagesCount : 0;
+  const isTextImport = !!(options && options.textImport);
+  if (isTextImport) return Math.max(1, Math.ceil(normalized));
+  return Math.max(1, Math.ceil(normalized * 2.5));
+}
+
+function upsertReadingBookSummary(summary) {
+  const store = loadReadingMetrics();
+  const bookId = String(summary?.bookId || '');
+  if (!bookId) return store;
+  const prev = store.bookSummaries[bookId] || { bookId, totalPages: 0, lastPageIndex: 0, totalReadingSeconds: 0, lastOpenedAt: null, completed: false, completedAt: null };
+  const next = {
+    ...prev,
+    ...summary,
+    bookId,
+    totalPages: Number.isFinite(Number(summary?.totalPages)) ? Math.max(0, Number(summary.totalPages)) : prev.totalPages,
+    lastPageIndex: Number.isFinite(Number(summary?.lastPageIndex)) ? Math.max(0, Number(summary.lastPageIndex)) : prev.lastPageIndex,
+    totalReadingSeconds: Number.isFinite(Number(summary?.totalReadingSeconds)) ? Math.max(0, Math.round(Number(summary.totalReadingSeconds))) : prev.totalReadingSeconds,
+    lastOpenedAt: typeof summary?.lastOpenedAt === 'string' ? summary.lastOpenedAt : prev.lastOpenedAt,
+    completed: typeof summary?.completed === 'boolean' ? summary.completed : prev.completed,
+    completedAt: typeof summary?.completedAt === 'string' || summary?.completedAt === null ? summary.completedAt : prev.completedAt
+  };
+  store.bookSummaries[bookId] = next;
+  return saveReadingMetrics(store);
+}
+
+function appendReadingSession(entry) {
+  const bookId = String(entry?.bookId || '');
+  if (!bookId) return loadReadingMetrics();
+  const store = loadReadingMetrics();
+  store.sessionHistory.push({
+    bookId,
+    startedAt: typeof entry?.startedAt === 'string' ? entry.startedAt : null,
+    endedAt: typeof entry?.endedAt === 'string' ? entry.endedAt : null,
+    elapsedSeconds: Number.isFinite(Number(entry?.elapsedSeconds)) ? Math.max(0, Math.round(Number(entry.elapsedSeconds))) : 0,
+    pagesAdvanced: Number.isFinite(Number(entry?.pagesAdvanced)) ? Math.max(0, Math.round(Number(entry.pagesAdvanced))) : 0,
+    completed: !!entry?.completed
+  });
+  return saveReadingMetrics(store);
+}
+
+function getReadingBookSummary(bookId, totalPagesHint) {
+  const key = String(bookId || '');
+  try {
+    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+    if (signedIn && window.rcSync && typeof window.rcSync.getRemoteReadingBookSummary === 'function') {
+      const remote = window.rcSync.getRemoteReadingBookSummary(key, totalPagesHint);
+      if (remote) return remote;
+    }
+  } catch (_) {}
+  const row = loadReadingMetrics().bookSummaries[key] || null;
+  if (!row) return null;
+  const totalPages = Number.isFinite(Number(totalPagesHint)) && Number(totalPagesHint) > 0 ? Number(totalPagesHint) : row.totalPages;
+  const completed = !!row.completed || (totalPages > 0 && row.lastPageIndex >= Math.max(0, totalPages - 1));
+  return {
+    ...row,
+    totalPages,
+    completed,
+    completedAt: completed ? (row.completedAt || row.lastOpenedAt || new Date().toISOString()) : null
+  };
+}
+
+function getReadingProfileMetrics() {
+  try {
+    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+    if (signedIn && window.rcSync && typeof window.rcSync.getRemoteProfileMetrics === 'function') {
+      const remote = window.rcSync.getRemoteProfileMetrics();
+      if (remote) return remote;
+    }
+  } catch (_) {}
+  const prefs = loadProfilePrefs();
+  const metrics = loadReadingMetrics();
+  const today = getTodayIsoDate();
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - (6 * 24 * 60 * 60 * 1000));
+  let dailySeconds = 0;
+  let weeklySeconds = 0;
+  let sessionsCompleted = 0;
+  metrics.sessionHistory.forEach((entry) => {
+    if (!entry?.endedAt) return;
+    const ended = new Date(entry.endedAt);
+    if (Number.isNaN(ended.getTime())) return;
+    const seconds = Math.max(0, Math.round(Number(entry.elapsedSeconds || 0)));
+    if (ended.toISOString().slice(0, 10) === today) dailySeconds += seconds;
+    if (ended >= sevenDaysAgo) weeklySeconds += seconds;
+    sessionsCompleted += 1;
+  });
+  const goal = Math.max(5, Number(prefs.dailyGoalMinutes || DEFAULT_PROFILE_PREFS.dailyGoalMinutes));
+  const progressPct = goal > 0 ? Math.max(0, Math.min(100, Math.round((dailySeconds / (goal * 60)) * 100))) : 0;
+  const dailyMinutes = Math.round(dailySeconds / 60);
+  return {
+    dailyGoalMinutes: goal,
+    dailyMinutes,
+    displayDailyMinutes: Math.max(0, Math.min(dailyMinutes, goal)),
+    weeklyMinutes: Math.round(weeklySeconds / 60),
+    sessionsCompleted,
+    progressPct,
+    remainingGoalMinutes: Math.max(0, goal - dailyMinutes),
+    lastGoalCelebratedOn: String(prefs.lastGoalCelebratedOn || ''),
+    todayIso: today
+  };
 }
 
 function getRuntimeTier() {
@@ -963,7 +1183,20 @@ window.rcPrefs = {
   loadAppearancePrefs,
   saveAppearancePrefs,
   loadDiagnosticsPrefs,
-  saveDiagnosticsPrefs
+  saveDiagnosticsPrefs,
+  loadProfilePrefs,
+  saveProfilePrefs
+};
+
+window.rcReadingMetrics = {
+  loadReadingMetrics,
+  saveReadingMetrics,
+  upsertReadingBookSummary,
+  appendReadingSession,
+  getReadingBookSummary,
+  getReadingProfileMetrics,
+  estimateReadMinutesFromPages,
+  getTodayIsoDate
 };
 
 window.rcTheme = {
@@ -1042,7 +1275,8 @@ window.rcPolicy = {
 // The server resolves its own policy limits — the client cannot inflate them
 // by claiming a higher tier on production.
 // Spend tracking (sessionTokens) is kept for display/diagnostics only.
-// Falls back to client-side check only when the server is unreachable.
+// When the server is unavailable, protected actions stay blocked rather than
+// inventing a client-owned usage verdict.
 window.rcUsage = {
   // Returns { allowed, cost, remaining, limit, meta } from server.
   // Await this before any cloud action and block if allowed === false.
@@ -1060,6 +1294,13 @@ window.rcUsage = {
       );
       if (resp.ok) {
         const data = await resp.json();
+        const limit = Number(data.limit);
+        const remaining = Number(data.remaining);
+        if (Number.isFinite(limit) && limit >= 0) sessionTokens.allowance = limit;
+        sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
+        sessionTokens.authoritative = Number.isFinite(remaining);
+        sessionTokens.source = 'server';
+        try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: data.remaining, allowance: data.limit, source: 'server' } })); } catch (_) {}
         return {
           allowed: !!data.allowed,
           cost: data.cost,
@@ -1069,26 +1310,41 @@ window.rcUsage = {
         };
       }
     } catch (_) {}
-    // Server unreachable: degrade to client-side check (safe-free behavior only).
-    // BRIDGE: client fallback until server is reliably reachable.
-    // Real owner: /api/app?kind=usage-check + server-resolved policy.
-    // This fallback uses the server-resolved limit (from the last successful
-    // policy fetch) so it is not a full client-only path.
-    const limit = getRuntimeUsageAllowance();
-    const totalSpent = Object.values(spent).reduce((a, b) => a + b, 0);
     const cost = TOKEN_COSTS[category] || 0;
-    const remaining = Math.max(0, limit - totalSpent);
+    sessionTokens.authoritative = false;
+    sessionTokens.source = 'server-unavailable';
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: null, allowance: sessionTokens.allowance, source: 'server-unavailable' } })); } catch (_) {}
     return {
-      allowed: remaining >= cost,
+      allowed: false,
       cost,
-      remaining,
-      limit,
-      meta: { policySource: 'client-fallback' },
+      remaining: null,
+      limit: sessionTokens.allowance,
+      meta: { policySource: 'server-unavailable' },
     };
   },
   // Local spend tracking for display/diagnostics. Not enforcement authority.
   spend: function rcUsageSpend(category) {
     try { if (typeof tokenSpend === 'function') tokenSpend(category); } catch (_) {}
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: 'server' } })); } catch (_) {}
+  },
+  getSnapshot: function rcUsageGetSnapshot() {
+    return {
+      remaining: Number.isFinite(Number(sessionTokens?.remaining)) ? Math.max(0, Number(sessionTokens.remaining)) : null,
+      allowance: Number.isFinite(Number(sessionTokens?.allowance)) ? Math.max(0, Number(sessionTokens.allowance)) : null,
+      authoritative: typeof sessionTokens?.authoritative === 'boolean' ? sessionTokens.authoritative : Number.isFinite(Number(sessionTokens?.remaining)),
+      source: sessionTokens?.source || null,
+      spent: { ...(sessionTokens?.spent || {}) },
+    };
+  },
+  applySnapshot: function rcUsageApplySnapshot(snapshot) {
+    const remaining = Number(snapshot?.remaining);
+    const allowance = Number(snapshot?.limit ?? snapshot?.allowance);
+    sessionTokens.allowance = Number.isFinite(allowance) ? Math.max(0, allowance) : null;
+    sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
+    sessionTokens.authoritative = typeof snapshot?.authoritative === 'boolean' ? !!snapshot.authoritative : Number.isFinite(remaining);
+    sessionTokens.source = snapshot?.source || 'server-sync';
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: sessionTokens.source } })); } catch (_) {}
+    return this.getSnapshot();
   },
 };
 

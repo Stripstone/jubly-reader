@@ -145,6 +145,13 @@
     const fileInput = document.getElementById('importFileInput');
     const scanBtn = document.getElementById('importScanBtn');
     const uploadStatus = document.getElementById('importUploadStatus');
+    const modeFileBtn = document.getElementById('importModeFile');
+    const modeTextBtn = document.getElementById('importModeText');
+    const filePanel = document.getElementById('importFilePanel');
+    const textPanel = document.getElementById('importTextPanel');
+    const textTitleInput = document.getElementById('importTextTitle');
+    const textBodyInput = document.getElementById('importTextBody');
+    const textImportBtn = document.getElementById('importTextImportBtn');
 
     const stageUpload = document.getElementById('importStageUpload');
     const stagePick = document.getElementById('importStagePick');
@@ -184,6 +191,24 @@
     let _bookTitle = '';
 
     let _advancedMode = false;
+    let _inputMode = 'file';
+
+    // Action locks — prevent duplicate concurrent operations.
+    // _capacityVerified: false until background server check resolves after modal open.
+    //   Action buttons are disabled during this window to prevent capacity bypass.
+    // _scanInProgress / _importInProgress: prevent re-entrant scans or imports from
+    //   rapid button clicks. Set synchronously before the first await in each operation.
+    let _capacityVerified = false;
+    let _scanInProgress = false;
+    let _importInProgress = false;
+
+    function _setActionButtonsLocked(locked) {
+      // Apply/release the capacity verification lock on action surfaces.
+      // Each button's final enabled state also respects its own readiness condition.
+      if (scanBtn) scanBtn.disabled = locked || !_file;
+      if (doImportBtn) doImportBtn.disabled = locked || !(_tocItems.some(x => x.selected));
+      if (textImportBtn) textImportBtn.disabled = locked || !(textBodyInput && String(textBodyInput.value || '').trim());
+    }
 
     function resetImporterState(opts = {}) {
       const keepModalOpen = !!opts.keepModalOpen;
@@ -195,6 +220,12 @@
       _activeId = null;
       _spineHrefs = [];
       _bookTitle = '';
+      // Reset action locks on every close. Next open will re-verify capacity.
+      if (!keepModalOpen) {
+        _capacityVerified = false;
+        _scanInProgress = false;
+        _importInProgress = false;
+      }
       setAdvancedMode(false);
       if (fileInput) fileInput.value = '';
       if (dropzone) dropzone.classList.remove('is-dragover');
@@ -210,6 +241,10 @@
       if (doneBtn) doneBtn.style.display = 'none';
       if (scanBtn) scanBtn.disabled = true;
       if (doImportBtn) doImportBtn.disabled = true;
+      if (textTitleInput) textTitleInput.value = '';
+      if (textBodyInput) textBodyInput.value = '';
+      _inputMode = 'file';
+      syncInputMode();
       if (!keepModalOpen) {
         if (modal) modal.style.display = 'none';
         if (modal) modal.setAttribute('aria-hidden', 'true');
@@ -249,7 +284,8 @@
         inputFormat: _inputFormat || '',
         tocCount: Array.isArray(_tocItems) ? _tocItems.length : 0,
         activeId: _activeId || null,
-        modalOpen: modal ? modal.style.display === 'flex' : false
+        modalOpen: modal ? modal.style.display === 'flex' : false,
+        inputMode: _inputMode
       };
     };
 
@@ -266,14 +302,130 @@
       if (advancedToggleBtn) advancedToggleBtn.textContent = _advancedMode ? 'Contents' : 'Advanced';
     }
 
-    async function showModal() {
+    function syncInputMode() {
+      const isText = _inputMode === 'text';
+      if (modeFileBtn) {
+        modeFileBtn.classList.toggle('active', !isText);
+        modeFileBtn.setAttribute('aria-pressed', !isText ? 'true' : 'false');
+      }
+      if (modeTextBtn) {
+        modeTextBtn.classList.toggle('active', isText);
+        modeTextBtn.setAttribute('aria-pressed', isText ? 'true' : 'false');
+      }
+      if (filePanel) filePanel.classList.toggle('hidden-section', isText);
+      if (textPanel) textPanel.classList.toggle('hidden-section', !isText);
+      if (scanBtn) scanBtn.classList.toggle('hidden-section', isText);
+      if (textImportBtn) textImportBtn.classList.toggle('hidden-section', !isText);
+      if (isText) syncTextImportState();
+    }
+
+    function syncTextImportState() {
+      if (!textImportBtn) return;
+      const hasText = !!(textBodyInput && String(textBodyInput.value || '').trim());
+      textImportBtn.disabled = !hasText;
+      if (_inputMode === 'text') setStatus(hasText ? 'Text will be split into pages using the normal importer page-breaking behavior.' : 'Paste text to import it as a book.');
+    }
+
+    function generateLocalImportId(prefix = 'upl') {
+      const safePrefix = String(prefix || 'upl').replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'upl';
+      try {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') return `${safePrefix}-${window.crypto.randomUUID()}`;
+      } catch (_) {}
+      return `${safePrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    async function completeImportAndReturn(countLabel) {
+      try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
+      try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: await getLocalBookCount() } })); } catch (_) {}
+      try { syncImportEntryState(await getImportCapacitySnapshot()); } catch (_) {}
+      setStatus(countLabel || 'Import complete');
+      hideModal();
+    }
+
+    async function savePastedTextImport() {
+      if (_importInProgress || !_capacityVerified) return;
+      const raw = String(textBodyInput && textBodyInput.value || '').trim();
+      if (!raw) return;
+      const pages = splitIntoPages(raw);
+      if (!pages.length) {
+        setStatus('No readable pages were found in the pasted text.');
+        return;
+      }
+      _importInProgress = true;
+      if (textImportBtn) textImportBtn.disabled = true;
+
       const guard = await guardImportCapacity();
       syncImportEntryState(guard.snapshot);
       if (!guard.ok) return;
+
+      showStage('progress');
+      doneBtn.style.display = 'none';
+      setProgress(15, 'Preparing text import', `${pages.length} pages detected`);
+
+      const stamp = new Date();
+      const title = String(textTitleInput && textTitleInput.value || '').trim() || `Pasted Text ${stamp.toLocaleDateString()} ${stamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+      const id = generateLocalImportId('text');
+      const markdown = pages.map((page, idx) => `## Page ${idx + 1}\n\n${page}`).join('\n\n');
+      const record = {
+        id,
+        title,
+        createdAt: Date.now(),
+        sourceName: 'Pasted Text',
+        importKind: 'text',
+        byteSize: raw.length,
+        pageCount: pages.length,
+        markdown,
+      };
+
+      setProgress(75, 'Saving to device', `${pages.length} pages created`);
+      try {
+        if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
+        else if (typeof localBookPut === 'function') await localBookPut(record);
+        setProgress(100, 'Import complete', `${pages.length} pages created`);
+        await completeImportAndReturn(`${pages.length} pages created`);
+      } catch (e) {
+        console.error('Text import error:', e);
+        setProgress(100, 'Import failed', 'Try again with different text.');
+        doneBtn.style.display = 'inline-block';
+      } finally {
+        _importInProgress = false;
+        if (textImportBtn) textImportBtn.disabled = !(textBodyInput && String(textBodyInput.value || '').trim());
+      }
+    }
+
+    async function showModal() {
+      // Open the modal immediately using the local capacity snapshot — no perceptible lag.
+      // Action buttons are locked until the server confirms capacity, preventing the window
+      // where a user could start an import before a server-side denial arrives.
+      const localSnapshot = await getImportCapacitySnapshot();
+      syncImportEntryState(localSnapshot);
       resetImporterState({ keepModalOpen: true });
-      setStatus(describeCapacity(guard.snapshot));
+      _capacityVerified = false;
+      setStatus(describeCapacity(localSnapshot));
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
+      syncInputMode();
+      syncTextImportState();
+      // Lock all action buttons until server check resolves.
+      _setActionButtonsLocked(true);
+
+      guardImportCapacity().then(guard => {
+        if (modal.style.display === 'none') return;
+        setStatus(describeCapacity(guard.snapshot));
+        if (!guard.ok) {
+          // Server denied — close modal (guardImportCapacity already set status and
+          // may have opened the pricing modal).
+          resetImporterState({ keepModalOpen: false });
+        } else {
+          // Server confirmed capacity — unlock actions.
+          _capacityVerified = true;
+          _setActionButtonsLocked(false);
+        }
+      }).catch(() => {
+        // Server unreachable — trust local verdict and unlock.
+        _capacityVerified = true;
+        _setActionButtonsLocked(false);
+      });
     }
 
     function hideModal() {
@@ -536,7 +688,13 @@
     }
 
     async function scanContents() {
-      if (!_file) return;
+      if (!_file || _scanInProgress || !_capacityVerified) return;
+      // Lock immediately — before any await — so rapid clicks cannot trigger
+      // concurrent scans regardless of which code path runs next.
+      _scanInProgress = true;
+      if (scanBtn) scanBtn.disabled = true;
+
+      try {
 
       // Branch to the FreeConvert conversion path for all non-EPUB formats.
       if (_needsConversion) { await scanContentsViaConversion(); return; }
@@ -553,7 +711,6 @@
       }
 
       try {
-        scanBtn.disabled = true;
         setStatus('Reading book…');
         const buf = await _file.arrayBuffer();
         _zip = await JSZip.loadAsync(buf);
@@ -611,7 +768,14 @@
         console.error('Book scan error:', e);
         setStatus('Failed to scan book. Try another file.');
       } finally {
-        scanBtn.disabled = !_file;
+        if (scanBtn) scanBtn.disabled = !_file;
+      }
+
+      } finally {
+        // Release the in-progress lock whether the scan succeeded, failed, or was
+        // short-circuited by an early return. Button state is managed by the inner
+        // finally above; this only resets the concurrency guard.
+        _scanInProgress = false;
       }
     }
 
@@ -738,11 +902,17 @@
     }
 
     async function doImportSelected() {
-      if (!_file || !_zip) return;
+      if (!_file || !_zip || _importInProgress || !_capacityVerified) return;
       const selectedIds = new Set(_tocItems.filter(x => x.selected).map(x => x.id));
       if (selectedIds.size === 0) return;
+      // Lock immediately — before any await — so rapid clicks cannot trigger concurrent imports.
+      _importInProgress = true;
+      if (doImportBtn) doImportBtn.disabled = true;
 
       try {
+        // Re-verify capacity at write time as a server-side safety check.
+        // (Capacity was already verified when the modal opened, but this catches
+        // edge cases like another device importing during the same session.)
         const guard = await guardImportCapacity();
         syncImportEntryState(guard.snapshot);
         if (!guard.ok) {
@@ -757,8 +927,7 @@
         const buf = await _file.arrayBuffer();
         const bookHash = await hashArrayBufferSha256(buf);
 
-        // Create a stable record id per file hash
-        const id = bookHash;
+        const id = generateLocalImportId('upl');
         const title = _file.name.replace(/\.[^.]+$/, '').trim();
 
         const total = selectedIds.size;
@@ -792,22 +961,24 @@
           title,
           createdAt: Date.now(),
           sourceName: _file.name,
+          contentFingerprint: bookHash,
+          importKind: (_inputFormat || 'epub').toLowerCase(),
           byteSize: _file.size || 0,
+          pageCount: createdPages,
           markdown: md
         };
         await localBookPut(record);
 
         setProgress(100, 'Import complete', `${createdPages} pages created`);
-        doneBtn.style.display = 'inline-block';
-
-        // Refresh book dropdown
-        try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
-        try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: await getLocalBookCount() } })); } catch (_) {}
-        try { syncImportEntryState(await getImportCapacitySnapshot()); } catch (_) {}
+        await completeImportAndReturn(`${createdPages} pages created`);
       } catch (e) {
         console.error('EPUB import error:', e);
         setProgress(100, 'Import failed', 'Try again with a different file.');
         doneBtn.style.display = 'inline-block';
+      } finally {
+        // Always release the import lock so the user can retry without reopening the modal.
+        _importInProgress = false;
+        if (doImportBtn) doImportBtn.disabled = !(_tocItems.some(x => x.selected));
       }
     }
 
@@ -827,8 +998,6 @@
 
     // Open/close
     openBtn.addEventListener('click', showModal);
-    closeBtn?.addEventListener('click', hideModal);
-    modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(); });
     try { getImportCapacitySnapshot().then(syncImportEntryState).catch(() => {}); } catch (_) {}
     window.addEventListener('rc:runtime-policy-changed', () => {
       try { getImportCapacitySnapshot().then(syncImportEntryState).catch(() => {}); } catch (_) {}
@@ -869,6 +1038,11 @@
       if (f) onFileSelected(f);
     });
 
+    modeFileBtn?.addEventListener('click', () => { _inputMode = 'file'; syncInputMode(); });
+    modeTextBtn?.addEventListener('click', () => { _inputMode = 'text'; syncInputMode(); });
+    textTitleInput?.addEventListener('input', syncTextImportState);
+    textBodyInput?.addEventListener('input', syncTextImportState);
+    textImportBtn?.addEventListener('click', savePastedTextImport);
     scanBtn?.addEventListener('click', scanContents);
     backBtn?.addEventListener('click', () => showStage('upload'));
     filterInput?.addEventListener('input', renderToc);

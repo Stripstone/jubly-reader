@@ -19,6 +19,32 @@
     return 0;
   }
 
+  async function flushCurrentReadingProgress(reason) {
+    try {
+      if (!(window.rcSync && typeof window.rcSync.saveProgressNow === 'function')) return null;
+      const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
+      const bookId = String(ctx.bookId || '').trim();
+      if (!bookId) return null;
+      const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
+      const pageIndex = getFocusedOrInferredReadingPageIndex();
+      return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'flush') });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function queueCurrentReadingProgress(reason) {
+    try {
+      if (!(window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function')) return;
+      const ctx = (typeof window.getReadingTargetContext === 'function') ? window.getReadingTargetContext() : (window.__rcReadingTarget || {});
+      const bookId = String(ctx.bookId || '').trim();
+      if (!bookId) return;
+      const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
+      const pageIndex = getFocusedOrInferredReadingPageIndex();
+      window.rcSync.scheduleProgressSync(bookId, chapterIndex, pageIndex, { reason: String(reason || 'queue') });
+    } catch (_) {}
+  }
+
   function applyPendingReadingRestore() {
     try {
       const idx = Number(window.__rcPendingRestorePageIndex ?? -1);
@@ -40,8 +66,9 @@
       return false;
     }
   }
-  const LOCAL_DB_VERSION = 1;
+  const LOCAL_DB_VERSION = 2;
   const LOCAL_STORE_BOOKS = 'books';
+  const LOCAL_STORE_DELETED = 'deleted_books';
 
   let _localDbPromise = null;
 
@@ -54,6 +81,9 @@
           const db = req.result;
           if (!db.objectStoreNames.contains(LOCAL_STORE_BOOKS)) {
             db.createObjectStore(LOCAL_STORE_BOOKS, { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains(LOCAL_STORE_DELETED)) {
+            db.createObjectStore(LOCAL_STORE_DELETED, { keyPath: 'id' });
           }
         };
         req.onsuccess = () => resolve(req.result);
@@ -97,6 +127,240 @@
       req.onerror = () => reject(req.error || new Error('put failed'));
     });
   }
+
+  async function localDeletedBooksGetAll() {
+    const db = await openLocalDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(LOCAL_STORE_DELETED, 'readonly');
+      const store = tx.objectStore(LOCAL_STORE_DELETED);
+      const req = store.getAll();
+      req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result : []);
+      req.onerror = () => reject(req.error || new Error('deleted getAll failed'));
+    });
+  }
+
+  async function localDeletedBookPut(record) {
+    const db = await openLocalDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(LOCAL_STORE_DELETED, 'readwrite');
+      const store = tx.objectStore(LOCAL_STORE_DELETED);
+      const req = store.put(record);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error || new Error('deleted put failed'));
+    });
+  }
+
+  async function syncRemoteLibraryItemState(bookId, options = {}) {
+    try {
+      if (!(window.rcSync && typeof bookId === 'string' && bookId.trim())) return null;
+      if (options.restore) {
+        if (typeof window.rcSync.restoreLibraryItem === 'function') return await window.rcSync.restoreLibraryItem(bookId);
+        return null;
+      }
+      if (typeof window.rcSync.deleteLibraryItem === 'function') return await window.rcSync.deleteLibraryItem(bookId, options);
+    } catch (_) {}
+    return null;
+  }
+
+  function queueRemoteLibraryItemState(bookId, options = {}) {
+    const normalized = String(bookId || '').trim();
+    if (!normalized) return Promise.resolve(null);
+    const task = (async () => {
+      const row = await syncRemoteLibraryItemState(normalized, options);
+      try {
+        if (window.rcSync && typeof window.rcSync.rehydrateDurableData === 'function') {
+          await window.rcSync.rehydrateDurableData();
+        }
+      } catch (_) {}
+      return row;
+    })();
+    task.catch((error) => {
+      try { console.warn('Remote library sync failed:', error); } catch (_) {}
+    });
+    return task;
+  }
+
+  function waitForNextPaint(count = 2) {
+    const frames = Math.max(1, Number(count) || 1);
+    return new Promise((resolve) => {
+      let remaining = frames;
+      const step = () => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          resolve(true);
+          return;
+        }
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  async function localDeletedBookDelete(id) {
+    const db = await openLocalDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(LOCAL_STORE_DELETED, 'readwrite');
+      const store = tx.objectStore(LOCAL_STORE_DELETED);
+      const req = store.delete(id);
+      req.onsuccess = () => resolve(true);
+      req.onerror = () => reject(req.error || new Error('deleted delete failed'));
+    });
+  }
+
+  async function moveLocalBookToDeleted(id) {
+    const db = await openLocalDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction([LOCAL_STORE_BOOKS, LOCAL_STORE_DELETED], 'readwrite');
+      const books = tx.objectStore(LOCAL_STORE_BOOKS);
+      const deleted = tx.objectStore(LOCAL_STORE_DELETED);
+      const req = books.get(id);
+      req.onsuccess = () => {
+        const record = req.result;
+        if (!record) { reject(new Error('book not found')); return; }
+        deleted.put({ ...record, deletedAt: Date.now() });
+        books.delete(id);
+      };
+      req.onerror = () => reject(req.error || new Error('move failed'));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error || new Error('move failed'));
+      tx.onabort = () => reject(tx.error || new Error('move aborted'));
+    });
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: false });
+    return true;
+  }
+
+  async function restoreDeletedLocalBook(id) {
+    const db = await openLocalDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction([LOCAL_STORE_BOOKS, LOCAL_STORE_DELETED], 'readwrite');
+      const books = tx.objectStore(LOCAL_STORE_BOOKS);
+      const deleted = tx.objectStore(LOCAL_STORE_DELETED);
+      const req = deleted.get(id);
+      req.onsuccess = () => {
+        const record = req.result;
+        if (!record) { reject(new Error('deleted book not found')); return; }
+        const restored = { ...record };
+        delete restored.deletedAt;
+        books.put(restored);
+        deleted.delete(id);
+      };
+      req.onerror = () => reject(req.error || new Error('restore failed'));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error || new Error('restore failed'));
+      tx.onabort = () => reject(tx.error || new Error('restore aborted'));
+    });
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { restore: true });
+    return true;
+  }
+
+  async function permanentlyDeleteLocalBook(id) {
+    await localDeletedBookDelete(id);
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: true });
+    return true;
+  }
+
+  window.__rcLocalBookGet = localBookGet;
+  window.__rcLocalBookPut = localBookPut;
+  window.__rcLocalBooksGetAll = localBooksGetAll;
+  window.__rcLocalDeletedBooksGetAll = localDeletedBooksGetAll;
+
+  const _bookPreviewCache = new Map();
+
+  function countPagesFromMarkdown(markdown) {
+    const count = (String(markdown || '').match(/^\s*##\s+/gm) || []).length;
+    return Math.max(1, count || 0);
+  }
+
+  function normalizeLocalBookId(bookId) {
+    const raw = String(bookId || '').trim();
+    return raw.startsWith('local:') ? raw.slice(6) : raw;
+  }
+
+  function isTextImportRecord(recordOrId) {
+    if (!recordOrId) return false;
+    if (typeof recordOrId === 'string') {
+      const id = normalizeLocalBookId(recordOrId);
+      return /^text-/i.test(id);
+    }
+    const record = recordOrId || {};
+    const id = normalizeLocalBookId(record.id || record.bookId || '');
+    return String(record.importKind || '').toLowerCase() === 'text'
+      || String(record.sourceName || '').toLowerCase() === 'pasted text'
+      || /^text-/i.test(id);
+  }
+
+  function estimateBookReadMinutes(pageCount, recordOrId) {
+    const pages = Math.max(1, Number(pageCount) || 1);
+    if (isTextImportRecord(recordOrId)) return pages;
+    return Math.max(1, Math.ceil(pages * 2.5));
+  }
+
+  function getBookSurfaceData(bookId, totalPages, options = {}) {
+    const pageCount = Math.max(1, Number(totalPages) || 1);
+    const summary = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingBookSummary === 'function')
+      ? window.rcReadingMetrics.getReadingBookSummary(bookId, pageCount)
+      : null;
+    const status = !summary ? 'Unread' : (summary.completed ? 'Completed' : 'In Progress');
+    const record = options && options.record ? options.record : null;
+    const totalMinutes = (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function')
+      ? window.rcReadingMetrics.estimateReadMinutesFromPages(pageCount, { textImport: isTextImportRecord(record || bookId) })
+      : estimateBookReadMinutes(pageCount, record || bookId);
+    const lastPage = summary ? Math.max(0, Number(summary.lastPageIndex || 0)) : 0;
+    const remainingPages = summary && !summary.completed ? Math.max(0, pageCount - (lastPage + 1)) : 0;
+    const remainingMinutes = status === 'Unread'
+      ? totalMinutes
+      : (status === 'Completed' ? 0 : Math.max(1, (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function') ? window.rcReadingMetrics.estimateReadMinutesFromPages(remainingPages || 1, { textImport: isTextImportRecord(record || bookId) }) : estimateBookReadMinutes(remainingPages || 1, record || bookId)));
+    const timeLabel = status === 'Completed' ? 'Done' : `${remainingMinutes} min left`;
+    return {
+      status,
+      timeLabel,
+      totalPages: pageCount,
+      totalMinutes,
+      previewTrio: `${pageCount} Pages • ${totalMinutes} min read • ${status}`
+    };
+  }
+
+  async function getBookRecordById(bookId) {
+    if (!bookId) return null;
+    if (isLocalBookId(bookId)) {
+      const rec = await localBookGet(stripLocalPrefix(bookId)).catch(() => null);
+      return rec ? { title: rec.title || 'Untitled', markdown: rec.markdown || '', totalPages: countPagesFromMarkdown(rec.markdown || '') } : null;
+    }
+    const cacheHit = _bookPreviewCache.get(String(bookId));
+    if (cacheHit) return cacheHit;
+    if (!Array.isArray(manifest) || !manifest.length) {
+      try { await loadManifest(); } catch (_) {}
+    }
+    const entry = Array.isArray(manifest) ? manifest.find((b) => b.id === bookId) : null;
+    if (!entry) return null;
+    let raw = '';
+    try {
+      const res = await fetch(entry.path, { cache: 'no-cache' });
+      if (!res.ok) throw new Error('fetch failed');
+      raw = await res.text();
+    } catch (_) {
+      try { if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[bookId] === 'string') raw = window.EMBED_BOOKS[bookId]; } catch (_) {}
+    }
+    if (!raw) return null;
+    const record = { title: entry.title || titleFromBookId(bookId) || 'Untitled', markdown: raw, totalPages: countPagesFromMarkdown(raw) };
+    _bookPreviewCache.set(String(bookId), record);
+    return record;
+  }
+
+  async function getBookPreviewSurface(bookId) {
+    const record = await getBookRecordById(bookId).catch(() => null);
+    if (!record) return { title: 'Book', previewTrio: '0 Pages • 0 min read • Unread', totalPages: 0, status: 'Unread' };
+    return {
+      title: record.title,
+      ...getBookSurfaceData(bookId, record.totalPages)
+    };
+  }
+
+  window.rcLibraryData = {
+    getBookSurfaceData,
+    getBookPreviewSurface,
+    countPagesFromMarkdown,
+  };
 
   async function localBookDelete(id) {
     const db = await openLocalDb();
@@ -1249,30 +1513,41 @@
       return currentBookRaw;
     }
 
-    function refreshChapterAndPagesUI() {
+    // Async so that loadBook can await full render + restore before resolving.
+    // This closes the race where reading-restore-pending was removed before
+    // render() and applyPendingReadingRestore() had actually run.
+    async function refreshChapterAndPagesUI(options = {}) {
+      const restore = (options && options.restore && typeof options.restore === 'object') ? options.restore : null;
+      const restorePageIndex = Number.isFinite(Number(restore?.pageIndex)) ? Math.max(0, Number(restore.pageIndex)) : 0;
+      const restoreChapterIndex = Number.isFinite(Number(restore?.chapterIndex)) ? Math.max(0, Number(restore.chapterIndex)) : null;
+
       // Chapters present?
       if (!hasExplicitChapters) {
         chapterControls.style.display = "none";
         currentChapterIndex = null;
         const bookPages = parsePagesWithTitles(currentBookRaw);
         populatePagesSelect(bookPages);
-        // Auto-render all pages as one set — no Load click required.
+        try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, bookPages.length - 1)); } catch (_) {}
+        // Await render completion so the restore scroll finishes before the caller
+        // removes reading-restore-pending and reveals pages to the user.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
-        if (allText) applySelectionToBulkInput(allText, { append: false });
+        if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true });
         return;
       }
 
       chapterControls.style.display = "flex";
       const chapOpts = chapterList.map((ch, idx) => ({ value: idx, label: ch.title || `Chapter ${idx + 1}` }));
       setSelectOptions(chapterSelect, chapOpts, "Select a chapter…");
-      chapterSelect.value = "0";
-      currentChapterIndex = 0;
+      const nextChapterIndex = Math.max(0, Math.min(Number.isFinite(restoreChapterIndex) ? restoreChapterIndex : 0, Math.max(0, chapterList.length - 1)));
+      chapterSelect.value = String(nextChapterIndex);
+      currentChapterIndex = nextChapterIndex;
 
       const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
       populatePagesSelect(chapterPages);
-      // Auto-render chapter 0 — no Load click required.
+      try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, chapterPages.length - 1)); } catch (_) {}
+      // Await render completion before resolving.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      if (chapterText) applySelectionToBulkInput(chapterText, { append: false });
+      if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true });
     }
 
     async function loadManifest() {
@@ -1314,7 +1589,7 @@
       throw lastErr || new Error("manifest fetch failed");
     }
 
-    async function loadBook(id) {
+    async function loadBook(id, options = {}) {
       currentBookRaw = "";
       chapterList = [];
       hasExplicitChapters = false;
@@ -1332,7 +1607,8 @@
           currentBookRaw = rec.markdown;
           hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
           if (hasExplicitChapters) chapterList = parseChaptersFromMarkdown(currentBookRaw);
-          refreshChapterAndPagesUI();
+          // Await so loadBook only resolves after render() + applyPendingReadingRestore().
+          await refreshChapterAndPagesUI(options);
           return;
         } catch (e) {
           setSelectOptions(chapterSelect, [], "Failed to load local book");
@@ -1361,7 +1637,7 @@
           chapterList = parseChaptersFromMarkdown(currentBookRaw);
         }
 
-        refreshChapterAndPagesUI();
+        await refreshChapterAndPagesUI(options);
       } catch (e) {
         // Fallback for local file:// usage: try embedded books
         try {
@@ -1371,7 +1647,7 @@
             if (hasExplicitChapters) {
               chapterList = parseChaptersFromMarkdown(currentBookRaw);
             }
-            refreshChapterAndPagesUI();
+            await refreshChapterAndPagesUI(options);
             return;
           }
         } catch (_) {}
@@ -1383,10 +1659,14 @@
       }
     }
 
-    function applySelectionToBulkInput(text, { append = false } = {}) {
+    // Returns the addPages / appendPages promise so that callers on the
+    // reading-entry path can await full render completion before revealing pages.
+    // Fire-and-forget callers (chapter select, page slice controls) simply ignore
+    // the returned promise, which is safe — they don't use the restore path.
+    function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false } = {}) {
       bulkInput.value = String(text || "").trim();
-      if (append) appendPages();
-      else addPages();
+      if (append) return appendPages();
+      return addPages({ preservePendingRestore });
     }
 
     // Events
@@ -1396,7 +1676,11 @@
     bookSelect.addEventListener("change", async () => {
       const id = bookSelect.value;
       if (!id) return;
-      await loadBook(id);
+      let restore = null;
+      try {
+        if (window.rcSync && typeof window.rcSync.getRestoreProgress === 'function') restore = await window.rcSync.getRestoreProgress(String(id));
+      } catch (_) {}
+      await loadBook(id, { restore });
     });
 
     chapterSelect.addEventListener("change", () => {
@@ -1547,14 +1831,14 @@
 
 
 
-  async function addPages() {
+  async function addPages(options = {}) {
     const input = document.getElementById("bulkInput").value;
     goalTime = parseInt(document.getElementById("goalTimeInput").value);
     goalCharCount = parseInt(document.getElementById("goalCharInput").value);
     if (!input || !input.trim()) return;
 
     // UX rule: whenever user generates new pages, start fresh (no leftover pages)
-    if (pages.length > 0) resetSession({ confirm: false });
+    if (pages.length > 0) resetSession({ confirm: false, preservePendingRestore: !!options.preservePendingRestore });
 
     // Split pasted text into pages using paragraph breaks (blank lines).
     // Still supports legacy delimiters (--- / "## Page X") if present.
@@ -1667,7 +1951,7 @@
     checkSubmitButton();
   }
 
-  function resetSession({ confirm = true, clearPersistedWork = false, clearAnchors = false } = {}) {
+  function resetSession({ confirm = true, clearPersistedWork = false, clearAnchors = false, preservePendingRestore = false } = {}) {
     if (confirm && !window.confirm("Clear loaded pages and remove your consolidations and feedback?")) return false;
 
     if (clearPersistedWork) {
@@ -1689,7 +1973,7 @@
     // session's page index. Without this clear, applyPendingReadingRestore() —
     // called at the end of render() — can scroll to that stale index in the new
     // source, placing TTS and lastFocusedPageIndex at the wrong page.
-    window.__rcPendingRestorePageIndex = -1;
+    if (!preservePendingRestore) window.__rcPendingRestorePageIndex = -1;
     evaluationPhase = false;
     // Clear reading target — no source is active after a reset.
     try { if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: '', bookId: '', chapterIndex: -1, pageIndex: 0 }); } catch (_) {}
@@ -2143,7 +2427,30 @@
     const modal = document.getElementById('manageLibraryModal');
     const closeBtn = document.getElementById('manageLibraryClose');
     const listEl = document.getElementById('manageLibraryList');
+    const deletedModal = document.getElementById('deletedFilesModal');
+    const deletedCloseBtn = document.getElementById('deletedFilesClose');
+    const deletedListEl = document.getElementById('deletedFilesList');
+    const deletedManageBtn = document.getElementById('profile-deleted-manage-btn');
+    const deletedCountEl = document.getElementById('profile-deleted-count');
     if (!openBtn || !modal || !listEl) return;
+
+    function emitLibraryChanged() {
+      try { window.dispatchEvent(new CustomEvent('rc:local-library-changed')); } catch (_) {}
+    }
+    function emitDeletedChanged() {
+      try { window.dispatchEvent(new CustomEvent('rc:deleted-library-changed')); } catch (_) {}
+    }
+
+    async function refreshBookSelect() {
+      try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
+    }
+
+    async function renderDeletedCount() {
+      if (!deletedCountEl) return;
+      let deleted = [];
+      try { deleted = await localDeletedBooksGetAll(); } catch (_) { deleted = []; }
+      deletedCountEl.textContent = `${deleted.length} file${deleted.length === 1 ? '' : 's'} waiting in Deleted Files`;
+    }
 
     function show() {
       modal.style.display = 'flex';
@@ -2153,6 +2460,17 @@
     function hide() {
       modal.style.display = 'none';
       modal.setAttribute('aria-hidden', 'true');
+    }
+    function showDeleted() {
+      if (!deletedModal || !deletedListEl) return;
+      deletedModal.style.display = 'flex';
+      deletedModal.setAttribute('aria-hidden', 'false');
+      renderDeleted();
+    }
+    function hideDeleted() {
+      if (!deletedModal) return;
+      deletedModal.style.display = 'none';
+      deletedModal.setAttribute('aria-hidden', 'true');
     }
 
     async function render() {
@@ -2174,7 +2492,7 @@
       if (!books.length) {
         const empty = document.createElement('div');
         empty.className = 'import-status';
-        empty.textContent = 'No local books yet. Use “Import EPUB” to add one.';
+        empty.textContent = 'No local books yet. Use Import Book to add one.';
         listEl.appendChild(empty);
         return;
       }
@@ -2205,14 +2523,16 @@
           del.type = 'button';
           del.textContent = 'Delete';
           del.addEventListener('click', async () => {
-            const ok = confirm(`Delete “${b.title || 'this book'}” from this device?\n\nThis cannot be undone.`);
+            const ok = confirm(`Move “${b.title || 'this book'}” to Deleted Files?\n\nIt will leave your Library now, stay on this device, and can be restored later from Profile.`);
             if (!ok) return;
             try {
-              await localBookDelete(b.id);
-              try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
-              try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: Math.max(0, books.length - 1) } })); } catch (_) {}
+              await moveLocalBookToDeleted(b.id);
+              await refreshBookSelect();
+              emitLibraryChanged();
+              emitDeletedChanged();
+              await renderDeletedCount();
               render();
-            } catch (e) {
+            } catch (_) {
               alert('Delete failed.');
             }
           });
@@ -2224,9 +2544,91 @@
         });
     }
 
+    async function renderDeleted() {
+      if (!deletedListEl) return;
+      deletedListEl.innerHTML = '';
+      let deleted = [];
+      try { deleted = await localDeletedBooksGetAll(); } catch (_) { deleted = []; }
+      const info = document.createElement('div');
+      info.className = 'import-status';
+      info.textContent = 'Deleted Files use this device storage until you permanently delete them. Restore puts the book back in Library.';
+      deletedListEl.appendChild(info);
+      if (!deleted.length) {
+        const empty = document.createElement('div');
+        empty.className = 'import-status';
+        empty.textContent = 'No deleted files are waiting here.';
+        deletedListEl.appendChild(empty);
+        await renderDeletedCount();
+        return;
+      }
+      deleted
+        .slice()
+        .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0))
+        .forEach((b) => {
+          const row = document.createElement('div');
+          row.className = 'library-row';
+          const left = document.createElement('div');
+          const t = document.createElement('div');
+          t.className = 'library-row-title';
+          t.textContent = b.title || 'Untitled';
+          const m = document.createElement('div');
+          m.className = 'library-row-meta';
+          const kb = Math.round((b.byteSize || 0) / 1024);
+          const deletedOn = new Date(b.deletedAt || Date.now()).toLocaleDateString();
+          m.textContent = `~${kb} KB • deleted ${deletedOn}`;
+          left.appendChild(t);
+          left.appendChild(m);
+          const actions = document.createElement('div');
+          actions.className = 'library-row-actions';
+          const restore = document.createElement('button');
+          restore.className = 'btn-primary';
+          restore.type = 'button';
+          restore.textContent = 'Restore';
+          restore.addEventListener('click', async () => {
+            try {
+              await restoreDeletedLocalBook(b.id);
+              await refreshBookSelect();
+              emitLibraryChanged();
+              emitDeletedChanged();
+              await renderDeletedCount();
+              renderDeleted();
+            } catch (_) {
+              alert('Restore failed.');
+            }
+          });
+          const purge = document.createElement('button');
+          purge.className = 'btn-danger';
+          purge.type = 'button';
+          purge.textContent = 'Delete';
+          purge.addEventListener('click', async () => {
+            const ok = confirm(`Permanently delete “${b.title || 'this book'}”?\n\nThis removes it from Deleted Files and frees the device storage.`);
+            if (!ok) return;
+            try {
+              await permanentlyDeleteLocalBook(b.id);
+              emitDeletedChanged();
+              await renderDeletedCount();
+              renderDeleted();
+            } catch (_) {
+              alert('Delete failed.');
+            }
+          });
+          actions.appendChild(restore);
+          actions.appendChild(purge);
+          row.appendChild(left);
+          row.appendChild(actions);
+          deletedListEl.appendChild(row);
+        });
+      await renderDeletedCount();
+    }
+
     openBtn.addEventListener('click', show);
     closeBtn?.addEventListener('click', hide);
     modal.addEventListener('click', (e) => { if (e.target === modal) hide(); });
+    deletedManageBtn?.addEventListener('click', showDeleted);
+    deletedCloseBtn?.addEventListener('click', hideDeleted);
+    deletedModal?.addEventListener('click', (e) => { if (e.target === deletedModal) hideDeleted(); });
+    window.addEventListener('rc:deleted-library-changed', () => { renderDeletedCount().catch(() => {}); });
+    renderDeletedCount().catch(() => {});
   })();
 
   // ===================================
@@ -2252,6 +2654,7 @@ function _installScrollPageTracker() {
   if (window.__rcScrollPageTrackerInstalled) return;
   window.__rcScrollPageTrackerInstalled = true;
   var raf = 0;
+  var prevIdx = -1;
   window.addEventListener('scroll', function () {
     if (raf) return;
     raf = requestAnimationFrame(function () {
@@ -2279,16 +2682,111 @@ function _installScrollPageTracker() {
         // Guard: skip if the winning element is in a hidden section (double-check).
         if (bestEl.getBoundingClientRect().height <= 0) return;
         lastFocusedPageIndex = bestIdx;
+        updateReadingMetricsPage(bestIdx);
         // Keep reading target in sync so bottom-bar Play speaks the scrolled-to page.
         try {
           const _ctx = window.getReadingTargetContext();
           if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
         } catch (_) {}
+        // Queue progress sync only when the page actually changed.
+        if (bestIdx !== prevIdx) {
+          prevIdx = bestIdx;
+          try { queueCurrentReadingProgress('scroll-tracker'); } catch (_) {}
+        }
       } catch (_) {}
     });
   }, { passive: true });
 }
 
+
+
+let _activeReadingMetricsSession = null;
+
+function beginReadingMetricsSession(bookId, totalPages) {
+  const safeBookId = String(bookId || '');
+  if (!safeBookId) return;
+  const startingPageIndex = Math.max(0, getFocusedOrInferredReadingPageIndex());
+  const now = Date.now();
+  _activeReadingMetricsSession = {
+    bookId: safeBookId,
+    totalPages: Math.max(1, Number(totalPages) || 1),
+    startingPageIndex,
+    lastPageIndex: startingPageIndex,
+    pagesAdvanced: 0,
+    startedAt: new Date(now).toISOString(),
+    lastResumeAt: document.hidden ? 0 : now,
+    accumulatedMs: 0,
+  };
+}
+
+function pauseReadingMetricsSession() {
+  if (!_activeReadingMetricsSession || !_activeReadingMetricsSession.lastResumeAt) return;
+  _activeReadingMetricsSession.accumulatedMs += Math.max(0, Date.now() - _activeReadingMetricsSession.lastResumeAt);
+  _activeReadingMetricsSession.lastResumeAt = 0;
+}
+
+function resumeReadingMetricsSession() {
+  if (!_activeReadingMetricsSession || _activeReadingMetricsSession.lastResumeAt) return;
+  _activeReadingMetricsSession.lastResumeAt = Date.now();
+}
+
+function updateReadingMetricsPage(index) {
+  if (!_activeReadingMetricsSession) return;
+  const idx = Math.max(0, Number(index) || 0);
+  if (idx !== _activeReadingMetricsSession.lastPageIndex) {
+    _activeReadingMetricsSession.pagesAdvanced += 1;
+    _activeReadingMetricsSession.lastPageIndex = idx;
+  }
+}
+
+function finalizeReadingMetricsSession() {
+  if (!_activeReadingMetricsSession) return null;
+  pauseReadingMetricsSession();
+  const session = _activeReadingMetricsSession;
+  _activeReadingMetricsSession = null;
+  const elapsedSeconds = Math.max(0, Math.round(session.accumulatedMs / 1000));
+  const completed = session.totalPages > 0 && session.lastPageIndex >= (session.totalPages - 1);
+  const summary = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingBookSummary === 'function')
+    ? window.rcReadingMetrics.getReadingBookSummary(session.bookId, session.totalPages)
+    : null;
+  const nextTotal = Math.max(0, Number(summary?.totalReadingSeconds || 0)) + elapsedSeconds;
+  try {
+    if (window.rcReadingMetrics && typeof window.rcReadingMetrics.upsertReadingBookSummary === 'function') {
+      window.rcReadingMetrics.upsertReadingBookSummary({
+        bookId: session.bookId,
+        totalPages: session.totalPages,
+        lastPageIndex: session.lastPageIndex,
+        totalReadingSeconds: nextTotal,
+        lastOpenedAt: new Date().toISOString(),
+        completed,
+        completedAt: completed ? new Date().toISOString() : (summary?.completedAt || null)
+      });
+    }
+    if (window.rcReadingMetrics && typeof window.rcReadingMetrics.appendReadingSession === 'function') {
+      if (elapsedSeconds >= 60 || session.pagesAdvanced >= 1) {
+        const sessionEntry = {
+          bookId: session.bookId,
+          startedAt: session.startedAt,
+          endedAt: new Date().toISOString(),
+          elapsedSeconds,
+          pagesAdvanced: session.pagesAdvanced,
+          completed,
+        };
+        window.rcReadingMetrics.appendReadingSession(sessionEntry);
+        try { if (window.rcSync && typeof window.rcSync.recordReadingSession === 'function') window.rcSync.recordReadingSession(sessionEntry).catch(() => {}); } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return { elapsedSeconds, completed, pagesAdvanced: session.pagesAdvanced, bookId: session.bookId };
+}
+
+try {
+  document.addEventListener('visibilitychange', () => {
+    if (!_activeReadingMetricsSession) return;
+    if (document.hidden) pauseReadingMetricsSession();
+    else resumeReadingMetricsSession();
+  });
+} catch (_) {}
 
 window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   const pageEls = Array.from(document.querySelectorAll('.page'));
@@ -2305,6 +2803,7 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   target.scrollIntoView({ behavior: options.behavior || 'smooth', block: 'start' });
   lastFocusedPageIndex = idx;
   try { currentPageIndex = idx; } catch (_) {}
+  updateReadingMetricsPage(idx);
   // Keep reading target in sync so bottom-bar Play speaks the navigated-to page.
   try {
     const _ctx = window.getReadingTargetContext();
@@ -2316,7 +2815,7 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   try {
     if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
       const _t = window.__rcReadingTarget || {};
-      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx);
+      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx, { reason: 'focus-reading-page' });
     }
   } catch (_) {}
   return { ok: true, index: idx, total };
@@ -2363,50 +2862,72 @@ window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
   if (!bookId) return false;
 
+  // MUST be synchronous — before any await — so reading mode never shows stale
+  // page content while network calls are in flight.
+  const pagesEl = document.getElementById('pages');
+  const readingModeEl = document.getElementById('reading-mode');
+  try {
+    if (pagesEl) pagesEl.innerHTML = '';
+    if (readingModeEl) readingModeEl.classList.add('reading-restore-pending');
+  } catch (_) {}
+
+  // Fire-and-forget: the current reading target is safe in memory and will be
+  // persisted in the background. Awaiting this was causing a multi-second blank
+  // screen before the book loaded — unacceptable for a responsive entry path.
+  try { if (window.rcSync && typeof window.rcSync.flushProgressSync === 'function') window.rcSync.flushProgressSync().catch(() => {}); } catch (_) {}
+
   // Set source selector to book mode for UI accuracy.
   // setSourceUI() is display-only so no change event dispatch is needed here.
   const sourceSel = document.getElementById('importSource');
   if (sourceSel && sourceSel.value !== 'book') sourceSel.value = 'book';
+
+  let normalizedId = String(bookId);
 
   // Keep bookSelect value in sync for diagnostics and chapter navigation,
   // but do not dispatch a change event — the load path is direct, not event-driven.
   const bookSel = document.getElementById('bookSelect');
   if (bookSel) {
     const opts = Array.from(bookSel.options || []).map(o => String(o.value || ''));
-    const normalizedId = opts.includes(String(bookId)) ? String(bookId)
+    normalizedId = opts.includes(String(bookId)) ? String(bookId)
       : (opts.includes(`local:${bookId}`) ? `local:${bookId}` : String(bookId));
     bookSel.value = normalizedId;
   }
 
-  // Await the runtime-owned book load path directly.
-  // loadBook fetches book data, prepares pages, and calls render() before returning.
-  // Reading is ready when this resolves — no polling or secondary click needed.
-  if (typeof window.__rcLoadBook === 'function') {
-    try { await window.__rcLoadBook(String(bookId)); } catch (_) {}
-  }
-
-  // Pass 4: if the user is signed in, fetch their durable reading position and
-  // apply it. chapterIndex comes from the current reading target set by loadBook.
-  // rcSync.getReadingProgress returns null when not signed in or no record exists,
-  // so this is a safe no-op in the signed-out free path.
+  let restore = null;
   try {
-    if (window.rcSync && typeof window.rcSync.getReadingProgress === 'function') {
-      const _t = window.__rcReadingTarget || {};
-      const durable = await window.rcSync.getReadingProgress(String(bookId), _t.chapterIndex != null ? _t.chapterIndex : -1);
-      if (durable && typeof durable.pageIndex === 'number' && durable.pageIndex > 0) {
-        const total = Array.isArray(pages) ? pages.length : 0;
-        if (total > 0 && durable.pageIndex < total) {
-          window.focusReadingPage(durable.pageIndex, { behavior: 'auto' });
-        }
-      }
+    if (window.rcSync && typeof window.rcSync.getRestoreProgress === 'function') {
+      restore = await window.rcSync.getRestoreProgress(normalizedId);
     }
   } catch (_) {}
 
+  // Compute restore truth. data-restore-kind is intentionally NOT set — with
+  // the blocking flush removed the render is near-instant, so the overlay text
+  // "Returning to your place…" would only flash for a frame. The hide/reveal
+  // is silent: pages stay invisible via reading-restore-pending until scrolled
+  // to the correct position, then fade in. No visible loading message needed.
+  const hasRestore = !!(restore && Number.isFinite(Number(restore.pageIndex)) && Number(restore.pageIndex) > 0);
+  try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
+
+  // Await the runtime-owned book load path. This resolves only after render()
+  // and applyPendingReadingRestore() have both completed, so #pages is already
+  // scrolled to the correct position before reading-restore-pending is removed.
+  if (typeof window.__rcLoadBook === 'function') {
+    try { await window.__rcLoadBook(normalizedId, { restore }); } catch (_) {}
+  }
+  try { await waitForNextPaint(2); } catch (_) {}
+
+  // Remove pending state and clean up the restore-kind attribute.
+  // The opacity transition on #pages produces a smooth fade-in from this point.
+  try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
+  try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
+  try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}
   return true;
 };
 
 window.exitReadingSession = function exitReadingSession() {
-  const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex() };
+  try { flushCurrentReadingProgress('reading-exit').catch(() => {}); } catch (_) {}
+  const metrics = finalizeReadingMetricsSession();
+  const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}
   try { if (typeof ttsAutoplayCancelCountdown === 'function') { ttsAutoplayCancelCountdown(); result.countdownCleared = true; } } catch (_) {}
   try { const signal = document.getElementById('session-complete'); if (signal) signal.classList.add('hidden-section'); } catch (_) {}

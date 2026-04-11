@@ -95,6 +95,18 @@ Current role:
 - The app is now served from root with `/api/*` alongside it.
 - `docs/` is now documentation only.
 
+
+### Durable persistence status
+The current validated runtime artifact still reflects a transitional durable model that is being retired before launch.
+
+Canonical pre-launch replacement direction:
+- `user_library_items` becomes the owned-book identity table
+- `user_progress` becomes one-row-per-owned-item restore truth
+- `user_book_metrics` and `user_daily_stats` replace default append-only session history for product-facing summaries
+- `user_sessions` is no longer treated as canonical launch persistence
+
+Until the replacement SQL and follow-up code pass land, treat durable table drift as known pre-launch debt rather than launch-ready architecture.
+
 ### Architectural discipline now treated as active project state
 - folder scaffolding is part of architecture and must be treated as an authority surface
 - the repository-root web app shape is intentional, not a cosmetic preference

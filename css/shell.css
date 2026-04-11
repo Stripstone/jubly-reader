@@ -369,7 +369,7 @@
         .reading-select { font-size: 0.75rem; font-weight: 700; color: #475569; background: transparent; border: none; outline: none; cursor: pointer; padding: 4px 2px; white-space: nowrap; }
         .reading-select:hover { color: var(--jubly-purple); }
         .reading-divider { width: 1px; height: 16px; background: #e2e8f0; flex-shrink: 0; }
-        .tier-pill { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; background: #f5f3ff; color: var(--jubly-purple); border: 1px solid #ddd6fe; white-space: nowrap; flex-shrink: 0; }
+        .tier-pill { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; background: #f5f3ff; color: var(--jubly-purple); border: 1px solid #ddd6fe; white-space: nowrap; flex-shrink: 0; display:inline-flex; align-items:center; justify-content:center; justify-self:start; width:auto; max-width:max-content; }
         .pb-icon-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px; padding: 7px 12px; border-radius: 8px; font-size: 0.82rem; font-weight: 700; color: #64748b; background: transparent; border: none; cursor: pointer; transition: background 0.15s, color 0.15s; white-space: nowrap; flex-shrink: 0; }
         #shell-play-btn { min-width: 104px; font-size: 0.94rem; }
         .pb-icon-btn:hover { background: #f1f5f9; color: #1e293b; }
@@ -1123,6 +1123,14 @@
 }
 
 
+/* Dashboard subtitle — fixed height allocation so content changes never cause
+   layout shift in the Library header. Text is set by renderLibrarySubtitle();
+   the space is always present whether the text is empty or populated. */
+#dashboard-subtitle {
+  min-height: 1.4em;
+  display: block;
+}
+
 /* Auth hydration gate: avoid flashing signed-out landing/profile truth before
    Supabase session restore resolves on page load. */
 body.auth-hydrating nav,
@@ -1131,4 +1139,226 @@ body.auth-hydrating #login-page,
 body.auth-hydrating #dashboard,
 body.auth-hydrating #profile-page {
   visibility: hidden;
+}
+
+
+.import-source-tabs {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 14px;
+}
+.import-source-tab {
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font-weight: 800;
+  font-size: 0.82rem;
+  padding: 9px 14px;
+  border-radius: 12px;
+  transition: background .2s ease, color .2s ease;
+}
+.import-source-tab.active {
+  background: rgba(124,58,237,0.12);
+  color: var(--jubly-purple);
+}
+.import-text-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin: 10px 0 6px;
+}
+.import-text-title,
+.import-text-body {
+  width: 100%;
+  border: 1px solid #dbe4ef;
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  color: #1e293b;
+  background: #fff;
+}
+.import-text-body {
+  min-height: 220px;
+  resize: vertical;
+  line-height: 1.55;
+}
+.profile-goal-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.profile-goal-copy-block {
+  min-width: 0;
+  flex: 1;
+}
+.profile-goal-inline-row {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.profile-goal-edit-btn {
+  border: 0;
+  background: transparent;
+  color: var(--jubly-purple);
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0;
+}
+.profile-goal-edit-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.profile-goal-input {
+  width: 88px;
+  border: 1px solid #dbe4ef;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+  color: #1e293b;
+  background: #fff;
+}
+.profile-goal-inline-btn {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--jubly-purple);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.78rem;
+}
+.profile-goal-inline-btn-secondary {
+  background: #e2e8f0;
+  color: #475569;
+}
+.profile-goal-ring {
+  --goal-progress: 0%;
+  width: 96px;
+  height: 96px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: conic-gradient(var(--jubly-purple) var(--goal-progress), #e2e8f0 0);
+}
+.profile-goal-ring-inner {
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  color: #1e293b;
+  font-size: 0.95rem;
+}
+#profile-goal-progress-label { display:none; }
+.profile-goal-celebration {
+  border-radius: 16px;
+  padding: 10px 14px;
+  background: rgba(124,58,237,0.12);
+  color: var(--jubly-purple);
+  font-weight: 800;
+  text-align: center;
+}
+.profile-goal-celebration-animate {
+  animation: profileConfettiSwing 1.6s ease-in-out;
+}
+
+.profile-inline-trigger {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.profile-inline-form {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+.profile-inline-input {
+  width: 100%;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  color: #1e293b;
+  background: #fff;
+}
+.profile-inline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.profile-inline-save,
+.profile-inline-cancel {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-weight: 800;
+  font-size: 0.78rem;
+}
+.profile-inline-save {
+  background: var(--jubly-purple);
+  color: #fff;
+}
+.profile-inline-cancel {
+  background: #e2e8f0;
+  color: #475569;
+}
+.profile-settings-status-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+.profile-settings-status-error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+@keyframes profileConfettiSwing {
+  0% { transform: translateY(8px) rotate(-4deg); opacity: 0; }
+  20% { transform: translateY(0) rotate(4deg); opacity: 1; }
+  40% { transform: translateY(-2px) rotate(-3deg); opacity: 1; }
+  60% { transform: translateY(0) rotate(3deg); opacity: 1; }
+  100% { transform: translateY(0) rotate(0deg); opacity: 0; }
+}
+@media (max-width: 640px) {
+  .profile-goal-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* Restore-pending overlay: hide pages until restore position is known and applied */
+#pages {
+  transition: opacity 0.14s ease;
+}
+#reading-mode.reading-restore-pending #pages {
+  visibility: hidden;
+  opacity: 0;
+  transition: none; /* suppress transition while hidden; runs on reveal */
+}
+/* Overlay text only when genuinely returning to a saved place (data-restore-kind="returning").
+   Fresh opens are silent — pages are hidden during render but no text is shown,
+   so the experience feels like a clean appearance rather than a loading state. */
+#reading-mode.reading-restore-pending[data-restore-kind="returning"] .reading-content::after {
+  content: 'Returning to your place\2026';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  opacity: 0.6;
+  pointer-events: none;
 }

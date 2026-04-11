@@ -112,8 +112,8 @@
     let diagClearCacheBtn = null;
     let diagCopyBtn = null;
 
-    // URL flag: show diagnostics when debug is present/truthy.
-    const debugEnabled = isDebugEnabledFromUrl();
+    // Diagnostics are enabled only when the authenticated dev account is active.
+    let debugEnabled = !!isDebugEnabledFromUrl();
 
     // If any legacy diag elements exist in the DOM (from older patches), hide them
     // so they don't consume layout space.
@@ -124,8 +124,7 @@
       }
     });
 
-    // Hide any legacy "debug" dropdown/controls if present.
-    if (debugEnabled) {
+    function hideLegacyDebugControls() {
       const legacySelectors = [
         '#debugControls', '#debugControl', '#debugPanelLegacy', '#debugSelect', '#debugMode',
         '#debugDropdown', '#debugToggle', '#debugMenu', '.debug-controls', '.debug-control',
@@ -137,6 +136,7 @@
         });
       });
     }
+    if (debugEnabled) hideLegacyDebugControls();
 
     function hideAllPanels() {
       if (volumePanel) volumePanel.style.display = 'none';
@@ -466,21 +466,24 @@
           return;
         }
         const totalSpent = Object.values(sessionTokens?.spent || {}).reduce((a, b) => a + b, 0);
+        const usageSnapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function') ? window.rcUsage.getSnapshot() : null;
+        const remoteUsageSummary = (window.rcSync && typeof window.rcSync.getRemoteUsageSummary === 'function') ? window.rcSync.getRemoteUsageSummary() : null;
         const merged = {
-          tokens: {
-            tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
-            remaining: sessionTokens?.remaining ?? '—',
-            allowance: (window.rcPolicy && typeof window.rcPolicy.getUsageDailyLimit === 'function') ? window.rcPolicy.getUsageDailyLimit() : '—',
-            totalSpent,
-            breakdown: sessionTokens?.spent || {},
-          },
+          usage: (() => {
+            const remaining = usageSnapshot && usageSnapshot.remaining != null ? usageSnapshot.remaining : (remoteUsageSummary && remoteUsageSummary.remaining != null ? remoteUsageSummary.remaining : '—');
+            const allowance = usageSnapshot && usageSnapshot.allowance != null ? usageSnapshot.allowance : (remoteUsageSummary && remoteUsageSummary.limit != null ? remoteUsageSummary.limit : null);
+            return {
+              tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
+              remaining,
+              allowance,
+              authoritative: !!(usageSnapshot && usageSnapshot.authoritative),
+              totalSpent,
+              breakdown: sessionTokens?.spent || {},
+              remote: remoteUsageSummary,
+            };
+          })(),
           stored: {
             persistenceMode: (window.__rcRuntimePersistenceStripped ? 'stripped-for-stabilization' : 'normal'),
-            tier: null,
-            voiceVariant: null,
-            voiceSelection: null,
-            ttsSpeed: null,
-            autoplay: null,
           },
           tts: {
             variant: TTS_STATE?.voiceVariant || 'female',
@@ -498,6 +501,7 @@
           shell: (typeof window.getShellDiagnosticsSnapshot === 'function') ? window.getShellDiagnosticsSnapshot() : null,
           runtime: (typeof window.getRuntimeUiState === 'function') ? window.getRuntimeUiState() : null,
           restore: (typeof window.getReadingRestoreStatus === 'function') ? window.getReadingRestoreStatus() : null,
+          sync: (window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function') ? window.rcSync.getDiagnosticsSnapshot() : null,
           importer: (typeof window.getImporterDiagnosticsSnapshot === 'function') ? window.getImporterDiagnosticsSnapshot() : null,
           ai: lastAIDiagnostics || null,
           anchors: lastAnchorsDiagnostics || null,
@@ -573,8 +577,24 @@
       });
     }
 
+    function syncDiagnosticsVisibility() {
+      debugEnabled = !!isDebugEnabledFromUrl();
+      if (debugEnabled) {
+        hideLegacyDebugControls();
+        ensureDiagUI();
+      }
+      if (diagBtn) diagBtn.style.display = debugEnabled ? 'block' : 'none';
+      if (!debugEnabled && diagPanel) diagPanel.style.display = 'none';
+      try {
+        if (window.rcDevTools && typeof window.rcDevTools.attachDiagnosticsHost === 'function') {
+          window.rcDevTools.attachDiagnosticsHost({ button: diagBtn, panel: diagPanel, text: diagText });
+        }
+      } catch (_) {}
+    }
+    window.syncDiagnosticsVisibility = syncDiagnosticsVisibility;
+
     // Build debug UI only when enabled.
-    ensureDiagUI();
+    syncDiagnosticsVisibility();
 
     // Click outside closes panels (lightweight)
     document.addEventListener('click', (e) => {

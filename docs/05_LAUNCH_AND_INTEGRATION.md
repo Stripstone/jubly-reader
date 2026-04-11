@@ -68,8 +68,10 @@ Supabase is the cloud persistence layer for runtime-owned truths.
 
 It should store:
 - users
+- owned library items
 - progress
-- sessions
+- compact per-book metrics
+- compact daily stats
 - settings
 - future entitlements
 
@@ -102,13 +104,27 @@ This keeps later Supabase work additive rather than forcing a theme ownership re
 - user-provided binary assets
 - caches
 
+
+### Durable table discipline
+Launch persistence must stay compact enough for normal multi-user usage.
+That means:
+- one owned-book row per user-owned item
+- one restore row per owned item
+- summary tables for per-book and daily metrics
+- no default append-only session ledger
+- delete and purge paths that remove orphan-prone restore state
+
+A same-content re-upload must not silently reconnect to prior progress unless the product explicitly offers a replace/reconnect action.
+
 ## Current Supabase scope
 
 ### Planned durable records
 - account state
+- owned library items
 - reading progress
+- compact per-book metrics
+- compact daily stats
 - settings
-- session history
 - future billing/entitlement state
 
 ### Still pending
@@ -131,6 +147,37 @@ Rules:
 
 ## Validation checklist
 
+## Runtime validation lens
+
+Use the runtime experience evaluation lens from `02_RUNTIME_CONTRACT.md` when judging launch readiness.
+
+For persistence and account-backed behavior, always check:
+- state transitions
+- settings
+- value rendering
+- reading continuity
+
+For each category, judge:
+- client immediate
+- mutations
+- server settle
+- later truth
+- must not happen
+
+Launch is not honest if the app merely settles to the right answer later after first showing a believable wrong state.
+
+Examples of launch-failing patterns:
+- flashing page 1 before restore catches up
+- showing a believable but wrong usage value before account truth loads
+- showing a setting change immediately and then snapping back unexpectedly
+- leaving stale signed-in or continue state visible after sign-out
+- showing stale content before a pending state or hidden state is applied
+- delaying a modal shell until server verification returns
+- allowing gated actions before required verification has settled
+- showing intermediate dashboard/library states before hydration knows enough to choose the right one
+- letting late subtitle or status text shift nearby headings or controls
+
+
 ### Reading continuity
 - open document
 - advance beyond page 1
@@ -148,11 +195,17 @@ Rules:
 - close clears staged state
 - dismiss clears staged state if supported
 - reopen shows clean state
+- modal shell opens immediately when the user requests it
+- server-backed capacity or permission checks do not delay the modal shell itself
+- gated action buttons stay locked until verification settles
+- repeated clicks cannot start duplicate scans or duplicate imports
 
 ### Layout
 - footer stays below content
 - library/profile do not clip or overlay
 - reading controls remain reachable at narrow widths
+- subtitles and similar late-hydrating labels do not shift nearby headings or controls
+- the page does not visibly shake when durable text replaces placeholders
 
 ### Themes / appearance
 - switching theme preserves reading layout stability
@@ -176,8 +229,12 @@ Rules:
 ### Signed-in persistence later
 - settings restore after sign-in
 - progress restores to correct source/page across devices
-- session history does not overwrite restore truth
+- compact metrics do not overwrite restore truth
+- deleting a book removes or invalidates matching restore truth for that owned item
 - durable prefs restore without trying to sync heavy local-only assets blindly
+- last-safe cached values may improve immediate display without becoming durable authority
+- dirty unconfirmed preference changes survive refresh and replay cleanly
+- cache never blindly overwrites fresher server-confirmed truth
 
 ## Open integration questions
 - when should signed-in users bypass landing friction?

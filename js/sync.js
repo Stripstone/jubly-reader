@@ -3,35 +3,132 @@
 // Durable sync seam.
 //
 // window.rcSync owns:
-//   - reading progress sync against public.user_progress
-//   - settings sync against public.user_settings
-//   - sign-in pull/apply handshake
-//   - quiet degradation when Supabase is unavailable or the user is signed out
+//   - server-authoritative durable sync for user/settings/progress/sessions
+//   - cached last-confirmed durable snapshot for signed-in refresh responsiveness
+//   - optimistic projection of persistent-looking UI while durable writes confirm
+//   - restore lookups against durable progress
+//   - sync diagnostics visibility for runtime validation
 //
-// This module does NOT own auth state or runtime truth. It borrows the client
-// from rcAuth and persists runtime-owned values through thin adapters.
+// This module does NOT own auth state, shell truth, or live reading behavior.
+// Runtime still owns reading entry/apply timing and current page truth.
+//
+// localStorage cache (rc_durable_snapshot_v1:<userId>):
+//   - Written on every confirmed server snapshot
+//   - Applied on sign-in before server responds (display projection only)
+//   - NEVER used as restore authority — restore always hits the server
+//   - NEVER used as a first-entry position guess
+//
+// localStorage dirty set (rc_dirty_settings_v1):
+//   - Written on every user-initiated setting change (field-level, with timestamp)
+//   - Survives page refresh — replayed on top of server snapshot after hydration
+//   - Cleared field-by-field when server confirms those fields
+//   - Drives retry-without-snap-back on server write failures
 // ─────────────────────────────────────────────────────────────────────────────
 
 window.rcSync = (function () {
   let _progressTimer = null;
   let _prefsSyncTimer = null;
+  let _remoteUsersRow = null;
+  let _remoteSettingsRow = null;
+  let _remoteLibraryItems = [];
+  let _remoteProgressRows = [];
+  let _remoteBookMetricsRows = [];
+  let _remoteDailyStatsRows = [];
+  let _remoteSessions = [];
+  let _remoteProfileMetrics = null;
+  let _remoteUsageSummary = null;
+  let _remoteEntitlement = null;
+  let _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false, usage: false };
+  let _lastSyncSnapshotAt = null;
+  let _syncDiagnostics = { users: null, settings: null, progress: null, sessions: null, restore: null, snapshot: null };
+  let _requestSeq = 0;
+  let _appliedSeq = 0;
+  let _applyingRemoteSettings = false;
+
+  // Dirty settings: field-level record of user mutations not yet confirmed by the server.
+  // Persisted to localStorage so uncommitted changes survive page refresh.
+  // Entries: { [fieldName]: { value, ts } }
+  const RC_DIRTY_SETTINGS_KEY = 'rc_dirty_settings_v1';
+  let _dirtySettings = {};
+  let _confirmedSettingsRow = null; // last server-ACKed settings row (never overwritten by projection)
+  try { const _ds = localStorage.getItem(RC_DIRTY_SETTINGS_KEY); if (_ds) _dirtySettings = JSON.parse(_ds) || {}; } catch (_) {}
+
+  function _saveDirtySettings() {
+    try {
+      Object.keys(_dirtySettings).length === 0
+        ? localStorage.removeItem(RC_DIRTY_SETTINGS_KEY)
+        : localStorage.setItem(RC_DIRTY_SETTINGS_KEY, JSON.stringify(_dirtySettings));
+    } catch (_) {}
+  }
+
+  function _recordDirtyFields(collected) {
+    // Diff collected UI state against last server-confirmed row (not the projected row).
+    // Only fields that diverge from confirmed server truth are marked dirty.
+    const confirmed = _confirmedSettingsRow || {};
+    const now = Date.now();
+    let changed = false;
+    Object.keys(collected).forEach(k => {
+      if (k === 'updated_at') return;
+      if (JSON.stringify(collected[k]) !== JSON.stringify(confirmed[k])) {
+        _dirtySettings[k] = { value: collected[k], ts: now };
+        changed = true;
+      }
+    });
+    if (changed) _saveDirtySettings();
+  }
+
+  function _replayDirtyOntoSettings() {
+    // Overlay any pending dirty mutations onto _remoteSettingsRow and apply them
+    // to the DOM/localStorage. Called after a server snapshot lands so user intent
+    // from before the refresh is immediately visible and queued for server write.
+    const dirtyKeys = Object.keys(_dirtySettings);
+    if (dirtyKeys.length === 0) return;
+    const dirtyValues = Object.fromEntries(dirtyKeys.map(k => [k, _dirtySettings[k].value]));
+    const merged = Object.assign({}, _remoteSettingsRow || {}, dirtyValues);
+    _remoteSettingsRow = merged;
+    _applyRemoteSettingsRow(merged);
+    // Queue a sync so dirty mutations are written to the server.
+    // Slight delay avoids racing with whatever triggered _applySnapshot.
+    setTimeout(() => { try { _queueSettingsSync(); } catch (_) {} }, 80);
+  }
 
   const RC_THEME_PREFS_KEY = 'rc_theme_prefs';
   const RC_APPEARANCE_PREFS_KEY = 'rc_appearance_prefs';
-  const RC_DIAGNOSTICS_PREFS_KEY = 'rc_diagnostics_prefs';
+  const RC_DURABLE_CACHE_PREFIX = 'rc_durable_snapshot_v1:';
 
-  function _client() {
-    try { return window.rcAuth && typeof window.rcAuth.getClient === 'function' ? window.rcAuth.getClient() : null; } catch (_) { return null; }
-  }
+  const WATCHED_SETTING_IDS = new Set([
+    'shell-speed',
+    'voiceFemaleSelect',
+    'voiceMaleSelect',
+    'autoplayToggle',
+    'vol_voice',
+  ]);
 
   function _user() {
     try { return window.rcAuth && typeof window.rcAuth.getUser === 'function' ? window.rcAuth.getUser() : null; } catch (_) { return null; }
   }
 
+  function _accessToken() {
+    try { return window.rcAuth && typeof window.rcAuth.getAccessToken === 'function' ? String(window.rcAuth.getAccessToken() || '').trim() : ''; } catch (_) { return ''; }
+  }
+
   function _ready() {
-    const c = _client();
     const u = _user();
-    return !!(c && u && u.id);
+    return !!(u && u.id && _accessToken());
+  }
+
+  function _emitHydrated(kind) {
+    try { document.dispatchEvent(new CustomEvent('rc:durable-data-hydrated', { detail: { kind: String(kind || 'sync') } })); } catch (_) {}
+  }
+
+  function _recordSync(kind, status, detail = {}) {
+    _syncDiagnostics[kind] = Object.assign({ status: String(status || 'idle'), at: new Date().toISOString() }, detail || {});
+    try { if (typeof window.updateDiagnostics === 'function') window.updateDiagnostics(); } catch (_) {}
+    return _syncDiagnostics[kind];
+  }
+
+  function _cacheKey(userId) {
+    return `${RC_DURABLE_CACHE_PREFIX}${String(userId || '').trim()}`;
   }
 
   function _readLocalJson(key) {
@@ -44,6 +141,16 @@ window.rcSync = (function () {
     return safe;
   }
 
+  function _readDurableCache(userId) {
+    const key = _cacheKey(userId);
+    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; }
+  }
+
+  function _writeDurableCache(userId, snapshot) {
+    const key = _cacheKey(userId);
+    try { localStorage.setItem(key, JSON.stringify({ savedAt: new Date().toISOString(), snapshot: snapshot || null })); } catch (_) {}
+  }
+
   function _currentThemePrefs() {
     const stored = _readLocalJson(RC_THEME_PREFS_KEY);
     try {
@@ -54,8 +161,6 @@ window.rcSync = (function () {
         return {
           theme_id: themeId,
           theme_settings: Object.assign({}, stored.theme_settings || {}, settings || {}),
-          diagnostics_enabled: typeof stored.diagnostics_enabled === 'boolean' ? stored.diagnostics_enabled : undefined,
-          diagnostics_mode: typeof stored.diagnostics_mode === 'string' ? stored.diagnostics_mode : undefined,
         };
       }
     } catch (_) {}
@@ -72,13 +177,29 @@ window.rcSync = (function () {
     return stored;
   }
 
-  function _currentDiagnosticsPrefs() {
-    return _readLocalJson(RC_DIAGNOSTICS_PREFS_KEY);
+  function _currentProfilePrefs() {
+    try {
+      if (window.rcPrefs && typeof window.rcPrefs.loadProfilePrefs === 'function') {
+        return window.rcPrefs.loadProfilePrefs() || {};
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  function _normalizeBookId(bookId) {
+    return String(bookId || '').trim();
+  }
+
+  function _normalizeChapterId(value) {
+    if (value == null || value === '') return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? String(num) : String(value);
   }
 
   function _collectSettingsRow() {
     const theme = _currentThemePrefs();
     const appearance = _currentAppearancePrefs();
+    const profile = _currentProfilePrefs();
     const themeSettings = (theme.theme_settings && typeof theme.theme_settings === 'object') ? theme.theme_settings : {};
     const speedEl = document.getElementById('shell-speed');
     const voiceVolumeEl = document.getElementById('vol_voice');
@@ -94,11 +215,11 @@ window.rcSync = (function () {
       tts_voice_id: selectedVoice || null,
       tts_volume: voiceVolumeEl && voiceVolumeEl.value !== '' ? Number(voiceVolumeEl.value) : null,
       autoplay_enabled: autoplayToggle ? !!autoplayToggle.checked : null,
-      music_enabled: typeof themeSettings.music === 'string' ? themeSettings.music !== 'off' : null,
-      music_profile_id: typeof themeSettings.music === 'string' ? themeSettings.music : null,
-      particles_enabled: typeof themeSettings.embersOn === 'boolean' ? !!themeSettings.embersOn : null,
-      particle_preset_id: themeSettings.emberPreset ? String(themeSettings.emberPreset) : null,
-      use_source_page_numbers: typeof theme.use_source_page_numbers === 'boolean' ? !!theme.use_source_page_numbers : null,
+      music_enabled: typeof themeSettings.music === 'string' ? themeSettings.music !== 'off' : (_remoteSettingsRow && typeof _remoteSettingsRow.music_enabled === 'boolean' ? !!_remoteSettingsRow.music_enabled : true),
+      particles_enabled: typeof themeSettings.embersOn === 'boolean' ? !!themeSettings.embersOn : (_remoteSettingsRow && typeof _remoteSettingsRow.particles_enabled === 'boolean' ? !!_remoteSettingsRow.particles_enabled : true),
+      use_source_page_numbers: typeof theme.use_source_page_numbers === 'boolean' ? !!theme.use_source_page_numbers : (_remoteSettingsRow && typeof _remoteSettingsRow.use_source_page_numbers === 'boolean' ? !!_remoteSettingsRow.use_source_page_numbers : false),
+      appearance_mode: appearance && appearance.appearance ? String(appearance.appearance) : (_remoteSettingsRow && _remoteSettingsRow.appearance_mode ? String(_remoteSettingsRow.appearance_mode) : 'light'),
+      daily_goal_minutes: Number.isFinite(Number(profile.dailyGoalMinutes)) ? Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes)))) : (_remoteSettingsRow && Number.isFinite(Number(_remoteSettingsRow.daily_goal_minutes)) ? Math.max(5, Math.min(300, Math.round(Number(_remoteSettingsRow.daily_goal_minutes)))) : 15),
       updated_at: new Date().toISOString(),
     };
 
@@ -108,104 +229,379 @@ window.rcSync = (function () {
     return row;
   }
 
+  function _deriveRemoteProfileMetrics() {
+    const profile = _currentProfilePrefs();
+    const goal = _remoteSettingsRow && Number.isFinite(Number(_remoteSettingsRow.daily_goal_minutes))
+      ? Math.max(5, Math.min(300, Math.round(Number(_remoteSettingsRow.daily_goal_minutes))))
+      : Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes || 15))));
+    const today = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getTodayIsoDate === 'function')
+      ? window.rcReadingMetrics.getTodayIsoDate()
+      : new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - (6 * 24 * 60 * 60 * 1000));
+    const weekStartIso = sevenDaysAgo.toISOString().slice(0, 10);
+    let dailyMinutes = 0;
+    let weeklyMinutes = 0;
+    let sessionsCompleted = 0;
+    (_remoteDailyStatsRows || []).forEach((entry) => {
+      const statDate = String(entry?.stat_date || '');
+      const minutes = Math.max(0, Math.round(Number(entry?.minutes_read || 0)));
+      const count = Math.max(0, Math.round(Number(entry?.sessions_count || 0)));
+      if (statDate === today) dailyMinutes += minutes;
+      if (statDate && statDate >= weekStartIso) weeklyMinutes += minutes;
+      sessionsCompleted += count;
+    });
+    const displayDailyMinutes = Math.max(0, Math.min(dailyMinutes, goal));
+    _remoteProfileMetrics = {
+      dailyGoalMinutes: goal,
+      dailyMinutes,
+      displayDailyMinutes,
+      weeklyMinutes,
+      sessionsCompleted,
+      progressPct: goal > 0 ? Math.max(0, Math.min(100, Math.round((dailyMinutes / goal) * 100))) : 0,
+      remainingGoalMinutes: Math.max(0, goal - dailyMinutes),
+      lastGoalCelebratedOn: String(profile.lastGoalCelebratedOn || ''),
+      todayIso: today,
+    };
+    return _remoteProfileMetrics;
+  }
+
   function _applyRemoteSettingsRow(row) {
     if (!row || typeof row !== 'object') return;
+    _remoteSettingsRow = row;
+    _applyingRemoteSettings = true;
+    try {
+      const localTheme = _currentThemePrefs();
+      const nextTheme = Object.assign({}, localTheme || {});
+      if (row.theme_id) nextTheme.theme_id = String(row.theme_id);
+      nextTheme.theme_settings = Object.assign({}, nextTheme.theme_settings || {});
+      if (row.font_id) nextTheme.theme_settings.font = String(row.font_id);
+      if (typeof row.music_enabled === 'boolean' && !row.music_enabled) nextTheme.theme_settings.music = 'off';
+      if (typeof row.particles_enabled === 'boolean') nextTheme.theme_settings.embersOn = !!row.particles_enabled;
+      if (typeof row.use_source_page_numbers === 'boolean') nextTheme.use_source_page_numbers = !!row.use_source_page_numbers;
+      _writeLocalJson(RC_THEME_PREFS_KEY, nextTheme);
+      try { if (window.rcTheme && typeof window.rcTheme.load === 'function') window.rcTheme.load(); } catch (_) {}
 
-    const localTheme = _currentThemePrefs();
-    const nextTheme = Object.assign({}, localTheme || {});
-    if (row.theme_id) nextTheme.theme_id = String(row.theme_id);
-    nextTheme.theme_settings = Object.assign({}, nextTheme.theme_settings || {});
-    if (row.font_id) nextTheme.theme_settings.font = String(row.font_id);
-    if (typeof row.music_profile_id === 'string' && row.music_profile_id) nextTheme.theme_settings.music = row.music_profile_id;
-    if (typeof row.particles_enabled === 'boolean') nextTheme.theme_settings.embersOn = !!row.particles_enabled;
-    if (row.particle_preset_id) nextTheme.theme_settings.emberPreset = String(row.particle_preset_id);
-    if (typeof row.use_source_page_numbers === 'boolean') nextTheme.use_source_page_numbers = !!row.use_source_page_numbers;
-    _writeLocalJson(RC_THEME_PREFS_KEY, nextTheme);
-    try { if (window.rcTheme && typeof window.rcTheme.load === 'function') window.rcTheme.load(); } catch (_) {}
+      if (row.appearance_mode) {
+        try {
+          if (window.rcPrefs && typeof window.rcPrefs.saveAppearancePrefs === 'function') {
+            window.rcPrefs.saveAppearancePrefs({ appearance: String(row.appearance_mode) });
+          } else {
+            _writeLocalJson(RC_APPEARANCE_PREFS_KEY, { appearance: String(row.appearance_mode) });
+          }
+        } catch (_) {}
+        try { if (window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load(); } catch (_) {}
+      }
 
-    // Appearance is not represented in the current Supabase user_settings schema,
-    // so local appearance remains the source of truth for now.
-    const appearance = _currentAppearancePrefs();
-    _writeLocalJson(RC_APPEARANCE_PREFS_KEY, appearance);
-    try { if (window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load(); } catch (_) {}
+      if (row.daily_goal_minutes != null) {
+        try {
+          if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') {
+            window.rcPrefs.saveProfilePrefs({ dailyGoalMinutes: Number(row.daily_goal_minutes) });
+          }
+        } catch (_) {}
+      }
 
-    if (row.tts_speed != null) {
-      const speedEl = document.getElementById('shell-speed');
-      if (speedEl) speedEl.value = String(row.tts_speed);
-      try { if (typeof window.shellSetSpeed === 'function') window.shellSetSpeed(row.tts_speed); } catch (_) {}
+      if (row.tts_speed != null) {
+        const speedEl = document.getElementById('shell-speed');
+        if (speedEl) speedEl.value = String(row.tts_speed);
+        try { if (typeof window.shellSetSpeed === 'function') window.shellSetSpeed(row.tts_speed); } catch (_) {}
+      }
+
+      if (row.tts_voice_id) {
+        try { window.__rcSessionVoiceSelection = String(row.tts_voice_id); } catch (_) {}
+        const female = document.getElementById('voiceFemaleSelect');
+        const male = document.getElementById('voiceMaleSelect');
+        [female, male].forEach((select) => {
+          if (!select) return;
+          const exists = Array.from(select.options || []).some((opt) => String(opt.value) === String(row.tts_voice_id));
+          if (exists) select.value = String(row.tts_voice_id);
+        });
+      }
+
+      if (row.tts_volume != null) {
+        const voiceVolumeEl = document.getElementById('vol_voice');
+        if (voiceVolumeEl) {
+          voiceVolumeEl.value = String(row.tts_volume);
+          try { voiceVolumeEl.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+        }
+      }
+
+      if (typeof row.autoplay_enabled === 'boolean') {
+        const autoplayToggle = document.getElementById('autoplayToggle');
+        if (autoplayToggle) autoplayToggle.checked = !!row.autoplay_enabled;
+        try { localStorage.setItem('rc_autoplay', row.autoplay_enabled ? '1' : '0'); } catch (_) {}
+      }
+    } finally {
+      _applyingRemoteSettings = false;
     }
+    _deriveRemoteProfileMetrics();
+  }
 
-    if (row.tts_voice_id) {
-      try { window.__rcSessionVoiceSelection = String(row.tts_voice_id); } catch (_) {}
-      const female = document.getElementById('voiceFemaleSelect');
-      const male = document.getElementById('voiceMaleSelect');
-      [female, male].forEach((select) => {
-        if (!select) return;
-        const exists = Array.from(select.options || []).some((opt) => String(opt.value) === String(row.tts_voice_id));
-        if (exists) select.value = String(row.tts_voice_id);
+  // Bulk-apply a server snapshot to all in-memory state. Rejects stale responses
+  // via seq ordering. Persists to localStorage as last-confirmed projection.
+  function _applySnapshot(snapshot, options = {}) {
+    const seq = Number(options.seq || 0);
+    if (seq && seq < _appliedSeq) return false;
+    if (seq) _appliedSeq = seq;
+    const snap = snapshot && typeof snapshot === 'object' ? snapshot : {};
+    _remoteUsersRow = snap.usersRow || null;
+    _remoteSettingsRow = snap.settingsRow || null;
+    _remoteLibraryItems = Array.isArray(snap.libraryItems) ? snap.libraryItems.slice() : [];
+    _remoteProgressRows = Array.isArray(snap.progressRows) ? snap.progressRows.slice() : [];
+    _remoteBookMetricsRows = Array.isArray(snap.bookMetricsRows) ? snap.bookMetricsRows.slice() : [];
+    _remoteDailyStatsRows = Array.isArray(snap.dailyStatsRows) ? snap.dailyStatsRows.slice() : [];
+    const sessionRows = snap.sessions && Array.isArray(snap.sessions.rows) ? snap.sessions.rows.slice() : [];
+    _remoteSessions = sessionRows;
+    _remoteUsageSummary = snap.usage || null;
+    _remoteEntitlement = snap.entitlement || null;
+    _hydrationState = { inFlight: false, users: true, settings: true, progress: true, sessions: true, usage: !!snap.usage };
+    _lastSyncSnapshotAt = new Date().toISOString();
+    // Track the server-confirmed settings row separately from the projected row.
+    // _confirmedSettingsRow is the baseline for dirty-field diffing and is never
+    // overwritten by optimistic projection — only by actual server ACKs.
+    if (!options.fromCache && _remoteSettingsRow) _confirmedSettingsRow = _remoteSettingsRow;
+    if (_remoteSettingsRow) _applyRemoteSettingsRow(_remoteSettingsRow);
+    else _deriveRemoteProfileMetrics();
+    // Replay any dirty user mutations on top of the server-confirmed settings so
+    // changes made before this snapshot (including across a page refresh) are
+    // immediately visible and scheduled for server write.
+    _replayDirtyOntoSettings();
+    try {
+      if (window.rcUsage && typeof window.rcUsage.applySnapshot === 'function' && snap.usage) {
+        window.rcUsage.applySnapshot({
+          remaining: snap.usage.remaining,
+          limit: snap.usage.limit,
+          authoritative: !!snap.usage.authoritative,
+          source: options.fromCache ? 'server-cache' : 'server-sync',
+        });
+      }
+    } catch (_) {}
+    // Apply server-resolved runtime policy from snapshot.
+    // buildSnapshot() on the server already resolves the correct policy for this user.
+    // Applying it here keeps tier/entitlement state current after every durable sync —
+    // not only on auth events (which refresh policy via billing.js separately).
+    // Guard: skip cached snapshots to avoid applying a potentially stale tier from storage.
+    // The rc:runtime-policy-changed event dispatched by applyResolvedRuntimePolicy()
+    // triggers shell UI updates (tier pill, explorer gating, etc.) automatically.
+    if (!options.fromCache && snap.runtimePolicy && typeof snap.runtimePolicy === 'object') {
+      try {
+        if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
+          window.rcPolicy.apply(snap.runtimePolicy);
+        }
+      } catch (_) {}
+    }
+    // Persist as last-confirmed display projection (not restore authority).
+    try {
+      const u = _user();
+      if (options.persist !== false && u && u.id) _writeDurableCache(u.id, snap);
+    } catch (_) {}
+    return true;
+  }
+
+  // Apply last-confirmed snapshot from localStorage for immediate display on refresh.
+  // This is a projection ONLY — it paints the UI without blocking on the server.
+  // It must NOT be used as a restore position source.
+  function _applyCachedSnapshotForUser(userId) {
+    const cached = _readDurableCache(userId);
+    if (!cached || !cached.snapshot) return false;
+    const applied = _applySnapshot(cached.snapshot, { seq: 0, persist: false, fromCache: true });
+    if (applied) {
+      _recordSync('snapshot', 'cache', { cachedAt: cached.savedAt || null });
+      _emitHydrated('cache');
+    }
+    return applied;
+  }
+
+  // Optimistic projection: write current local settings to _remoteSettingsRow
+  // so the UI doesn't flash back to stale server values between saves.
+  function _projectCurrentSettingsLocal() {
+    if (!_ready()) return null;
+    const u = _user();
+    if (!u || !u.id) return null;
+    const projected = Object.assign({}, _remoteSettingsRow || {}, { user_id: u.id }, _collectSettingsRow());
+    _remoteSettingsRow = projected;
+    _deriveRemoteProfileMetrics();
+    _recordSync('settings', 'projected', { row: projected });
+    _emitHydrated('settings-projected');
+    return projected;
+  }
+
+  // Generic server fetch against /api/app?kind=durable-sync.
+  // Returns { seq, data } where seq is a monotonic counter for stale-rejection.
+  async function _serverSync(scope = 'snapshot', init = {}) {
+    const token = _accessToken();
+    if (!token) throw new Error('Missing auth token.');
+    const method = String(init.method || 'GET').toUpperCase();
+    const url = new URL('/api/app', window.location.origin);
+    url.searchParams.set('kind', 'durable-sync');
+    url.searchParams.set('scope', String(scope || 'snapshot'));
+    if (init.params && typeof init.params === 'object') {
+      Object.entries(init.params).forEach(([key, value]) => {
+        if (value == null || value === '') return;
+        url.searchParams.set(String(key), String(value));
       });
     }
+    const seq = ++_requestSeq;
+    const resp = await fetch(url.toString(), {
+      method,
+      cache: 'no-store',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        ...(typeof init.body !== 'undefined' ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: typeof init.body !== 'undefined' ? JSON.stringify(init.body) : undefined,
+    });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok || !data || data.ok === false) {
+      throw new Error(String((data && (data.error || data.reason)) || `Durable sync ${resp.status}`));
+    }
+    return { seq, data };
+  }
 
-    if (row.tts_volume != null) {
-      const voiceVolumeEl = document.getElementById('vol_voice');
-      if (voiceVolumeEl) {
-        voiceVolumeEl.value = String(row.tts_volume);
-        try { voiceVolumeEl.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+  // ── Sign-in bootstrap ─────────────────────────────────────────────────────
+  // 1. Paint cached snapshot immediately (display projection only)
+  // 2. POST sync_user → returns full snapshot → apply
+  // 3. If settingsRow === null (confirmed empty), seed from local
+  async function _onSignIn() {
+    const u = _user();
+    _hydrationState = { inFlight: true, users: false, settings: false, progress: false, sessions: false, usage: false };
+    if (u && u.id) _applyCachedSnapshotForUser(u.id);
+    _recordSync('snapshot', 'pending', { reason: 'signin' });
+    try {
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'sync_user', payload: {} } });
+      if (data && data.snapshot) {
+        _applySnapshot(data.snapshot, { seq, persist: true });
+        // Seed settings only when server explicitly confirmed no settings row.
+        if (data.snapshot.settingsRow === null) {
+          await syncSettings().catch(() => {});
+        }
       }
-    }
-
-    if (typeof row.autoplay_enabled === 'boolean') {
-      const autoplayToggle = document.getElementById('autoplayToggle');
-      if (autoplayToggle) autoplayToggle.checked = !!row.autoplay_enabled;
-      try { localStorage.setItem('rc_autoplay', row.autoplay_enabled ? '1' : '0'); } catch (_) {}
+      _recordSync('snapshot', 'success', { reason: 'signin', snapshotAt: _lastSyncSnapshotAt });
+      _emitHydrated('signin');
+    } catch (error) {
+      _hydrationState.inFlight = false;
+      _recordSync('snapshot', 'error', { reason: 'signin', message: String(error?.message || error || 'signin hydration failed') });
     }
   }
 
+  // ── Settings sync ─────────────────────────────────────────────────────────
   async function syncSettings() {
-    const c = _client();
-    const u = _user();
-    if (!c || !u) return;
-    const payload = Object.assign({ user_id: u.id }, _collectSettingsRow());
+    if (!_ready()) return null;
+    // Snapshot which dirty keys are being sent in this request so we can clear
+    // only those on success. New mutations that arrive during the network roundtrip
+    // stay dirty and will be included in the next sync cycle.
+    const syncingKeys = new Set(Object.keys(_dirtySettings));
+    const dirtyValues = Object.fromEntries([...syncingKeys].map(k => [k, _dirtySettings[k].value]));
+    // Payload: full collected row merged with dirty values (dirty wins).
+    // This sends authoritative user intent rather than blindly resending cached values.
+    const payload = Object.assign(_collectSettingsRow(), dirtyValues);
+    _projectCurrentSettingsLocal();
+    _recordSync('settings', 'pending', { payload, dirtyFields: [...syncingKeys] });
     try {
-      await c.from('user_settings').upsert(payload, { onConflict: 'user_id' });
-    } catch (_) {}
-  }
-
-  async function getSettings() {
-    const c = _client();
-    const u = _user();
-    if (!c || !u) return null;
-    try {
-      const { data, error } = await c
-        .from('user_settings')
-        .select('user_id,theme_id,font_id,text_size,line_spacing,page_turn_sound_id,tts_speed,tts_voice_id,tts_volume,autoplay_enabled,music_enabled,music_profile_id,particles_enabled,particle_preset_id,use_source_page_numbers,updated_at')
-        .eq('user_id', u.id)
-        .maybeSingle();
-      if (error || !data) return null;
-      return data;
-    } catch (_) {
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'sync_settings', payload } });
+      // Clear only the dirty keys that were included in this request.
+      syncingKeys.forEach(k => delete _dirtySettings[k]);
+      _saveDirtySettings();
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      // Update confirmed baseline to whatever the server just settled.
+      if (_remoteSettingsRow) _confirmedSettingsRow = _remoteSettingsRow;
+      _recordSync('settings', 'success', { row: data && data.row ? data.row : null, snapshotAt: _lastSyncSnapshotAt });
+      _emitHydrated('settings');
+      return data && data.row ? data.row : null;
+    } catch (error) {
+      _recordSync('settings', 'error', { message: String(error?.message || error || 'settings sync failed') });
+      // Do NOT snap back. The dirty set preserves user intent and will be retried.
+      // Snapping back on transient server errors (503, network timeout) violates the
+      // runtime contract: "no setting that changes and then snaps back for no reason."
+      // The optimistic projection stays in place until the server confirms or the user
+      // changes the setting again.
+      _queueSettingsSync(); // schedule a retry with dirty set intact
       return null;
     }
   }
 
-  async function _onSignIn() {
-    const remote = await getSettings();
-    if (remote) {
-      _applyRemoteSettingsRow(remote);
-    } else {
-      await syncSettings();
+  async function getSettings() {
+    if (_remoteSettingsRow) return _remoteSettingsRow;
+    if (!_ready()) return null;
+    try {
+      const { seq, data } = await _serverSync('snapshot');
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      return _remoteSettingsRow;
+    } catch (error) {
+      _recordSync('settings', 'error', { message: String(error?.message || error || 'settings fetch failed') });
+      return null;
     }
   }
 
+  // ── User row sync ─────────────────────────────────────────────────────────
+  async function _syncUserRow() {
+    if (!_ready()) return null;
+    _recordSync('users', 'pending');
+    try {
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'sync_user', payload: {} } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      _recordSync('users', 'success', { row: data && data.row ? data.row : null });
+      return data && data.row ? data.row : null;
+    } catch (error) {
+      _recordSync('users', 'error', { message: String(error?.message || error || 'user sync failed') });
+      return null;
+    }
+  }
+
+  function _inferLibrarySourceKind(bookId) {
+    const raw = String(bookId || '').trim();
+    if (/^local:text-/i.test(raw)) return 'pasted_text';
+    if (/^local:/i.test(raw)) return 'upload_file';
+    return 'embedded_book';
+  }
+
+  function _inferLibraryStorageKind(bookId) {
+    return /^local:/i.test(String(bookId || '').trim()) ? 'device_local' : 'embedded';
+  }
+
+  async function _collectLibraryItemMeta(bookId, pageCountHint) {
+    const normalizedBookId = _normalizeBookId(bookId);
+    if (!normalizedBookId) return null;
+    const meta = {
+      storage_ref: normalizedBookId,
+      source_kind: _inferLibrarySourceKind(normalizedBookId),
+      storage_kind: _inferLibraryStorageKind(normalizedBookId),
+      import_kind: /^local:text-/i.test(normalizedBookId) ? 'text' : (/^local:/i.test(normalizedBookId) ? 'epub' : 'embedded'),
+      page_count: Math.max(0, Number(pageCountHint) || 0),
+    };
+    if (!/^local:/i.test(normalizedBookId)) return meta;
+    try {
+      if (typeof window.__rcLocalBookGet !== 'function') return meta;
+      const localId = normalizedBookId.replace(/^local:/i, '');
+      const record = await window.__rcLocalBookGet(localId);
+      if (!record) return meta;
+      meta.title = String(record.title || '').trim() || meta.title || 'Book';
+      meta.source_name = String(record.sourceName || '').trim() || null;
+      meta.content_fingerprint = String(record.contentFingerprint || '').trim() || null;
+      meta.import_kind = String(record.importKind || meta.import_kind || '').trim() || meta.import_kind;
+      meta.byte_size = Math.max(0, Number(record.byteSize) || 0);
+      const storedPageCount = Math.max(0, Number(record.pageCount) || 0);
+      if (storedPageCount > 0) meta.page_count = storedPageCount;
+      else if (!(meta.page_count > 0)) {
+        if (window.rcLibraryData && typeof window.rcLibraryData.countPagesFromMarkdown === 'function') {
+          meta.page_count = Math.max(0, Number(window.rcLibraryData.countPagesFromMarkdown(record.markdown || '')) || 0);
+        }
+      }
+      return meta;
+    } catch (_) {
+      return meta;
+    }
+  }
+
+  // ── Progress identity ─────────────────────────────────────────────────────
   function _collectProgressIdentity(bookId, chapterIndex) {
     const target = window.__rcReadingTarget || {};
-    const normalizedBookId = String(bookId || target.bookId || target.sourceId || '');
+    const normalizedBookId = _normalizeBookId(bookId || target.bookId || target.sourceId || '');
     const sourceType = String(target.sourceType || 'book');
     const sourceId = String(target.bookId || normalizedBookId || '');
     const chapterId = Number.isFinite(Number(chapterIndex)) ? String(Number(chapterIndex)) : (target.chapterIndex != null ? String(target.chapterIndex) : null);
     const pageCount = document.querySelectorAll('.page').length || null;
     return {
-      user_id: (_user() || {}).id,
       book_id: normalizedBookId,
       source_type: sourceType,
       source_id: sourceId,
@@ -216,88 +612,351 @@ window.rcSync = (function () {
     };
   }
 
-  async function _findProgressRow(identity) {
-    const c = _client();
-    if (!c || !identity || !identity.user_id || !identity.book_id) return null;
-    try {
-      let query = c
-        .from('user_progress')
-        .select('id,last_page_index,updated_at,chapter_id')
-        .eq('user_id', identity.user_id)
-        .eq('book_id', identity.book_id)
-        .eq('source_type', identity.source_type)
-        .eq('source_id', identity.source_id)
-        .order('updated_at', { ascending: false })
-        .limit(1);
-      if (identity.chapter_id != null) query = query.eq('chapter_id', identity.chapter_id);
-      const { data, error } = await query;
-      if (error || !Array.isArray(data) || !data[0]) return null;
-      return data[0];
-    } catch (_) {
-      return null;
+  function _findCachedProgressRow(bookId, chapterIndex) {
+    const normalizedBookId = _normalizeBookId(bookId);
+    const normalizedChapterId = _normalizeChapterId(chapterIndex);
+    if (!normalizedBookId) return null;
+    let best = null;
+    for (const row of _remoteProgressRows) {
+      if (_normalizeBookId(row.book_id) !== normalizedBookId) continue;
+      if (normalizedChapterId != null && _normalizeChapterId(row.chapter_id) !== normalizedChapterId) continue;
+      if (!best) { best = row; continue; }
+      const currentTime = Date.parse(best.updated_at || best.last_read_at || 0) || 0;
+      const rowTime = Date.parse(row.updated_at || row.last_read_at || 0) || 0;
+      if (rowTime > currentTime) best = row;
     }
+    return best;
   }
 
-  function scheduleProgressSync(bookId, chapterIndex, pageIndex) {
+  function _findLatestCachedBookProgress(bookId) {
+    return _findCachedProgressRow(bookId, null);
+  }
+
+  // ── Progress write ────────────────────────────────────────────────────────
+  function scheduleProgressSync(bookId, chapterIndex, pageIndex, meta = {}) {
     if (!_ready()) return;
     if (_progressTimer) clearTimeout(_progressTimer);
     _progressTimer = setTimeout(() => {
       _progressTimer = null;
-      _writeProgress(bookId, chapterIndex, pageIndex).catch(() => {});
-    }, 500);
+      _writeProgress(bookId, chapterIndex, pageIndex, meta).catch(() => {});
+    }, 450);
   }
 
-  async function _writeProgress(bookId, chapterIndex, pageIndex) {
-    const c = _client();
+  async function _writeProgress(bookId, chapterIndex, pageIndex, meta = {}) {
     const u = _user();
-    if (!c || !u) return;
+    if (!_ready() || !u) return null;
     const identity = _collectProgressIdentity(bookId, chapterIndex);
-    const payload = Object.assign({}, identity, {
+    const itemMeta = await _collectLibraryItemMeta(identity.book_id, identity.page_count);
+    const payload = Object.assign({}, identity, itemMeta || {}, {
       last_page_index: Number.isFinite(Number(pageIndex)) && Number(pageIndex) >= 0 ? Number(pageIndex) : 0,
       last_read_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
+    _recordSync('progress', 'pending', { payload, reason: String(meta.reason || 'write') });
     try {
-      const existing = await _findProgressRow(identity);
-      if (existing && existing.id) {
-        await c.from('user_progress').update(payload).eq('id', existing.id);
-      } else {
-        await c.from('user_progress').insert(payload);
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'write_progress', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      const row = data && data.row ? data.row : payload;
+      _recordSync('progress', 'success', { row, reason: String(meta.reason || 'write') });
+      _emitHydrated('progress');
+      return row;
+    } catch (error) {
+      _recordSync('progress', 'error', { message: String(error?.message || error || 'progress write failed'), payload, reason: String(meta.reason || 'write') });
+      return null;
+    }
+  }
+
+  // Flush any pending debounced progress write immediately.
+  async function saveProgressNow(bookId, chapterIndex, pageIndex, meta = {}) {
+    if (_progressTimer) {
+      clearTimeout(_progressTimer);
+      _progressTimer = null;
+    }
+    return _writeProgress(bookId, chapterIndex, pageIndex, meta);
+  }
+
+  // Flush progress for the current __rcReadingTarget before switching books.
+  async function flushProgressSync() {
+    if (_progressTimer) {
+      clearTimeout(_progressTimer);
+      _progressTimer = null;
+    }
+    const target = window.__rcReadingTarget || {};
+    if (!target || !target.bookId) return null;
+    return _writeProgress(target.bookId, target.chapterIndex, target.pageIndex, { reason: 'flush-current-target' });
+  }
+
+  // ── Progress reads ────────────────────────────────────────────────────────
+  async function getReadingProgress(bookId, chapterIndex) {
+    const cached = _findCachedProgressRow(bookId, chapterIndex);
+    if (cached) {
+      const idx = Number(cached.last_page_index);
+      return Number.isFinite(idx) && idx >= 0 ? { pageIndex: idx, updatedAt: cached.updated_at || cached.last_read_at || null } : null;
+    }
+    const identity = _collectProgressIdentity(bookId, chapterIndex);
+    const existing = _findCachedProgressRow(identity.book_id, identity.chapter_id != null ? identity.chapter_id : null);
+    if (!existing) return null;
+    const idx = Number(existing.last_page_index);
+    return Number.isFinite(idx) && idx >= 0 ? { pageIndex: idx, updatedAt: existing.updated_at || existing.last_read_at || null } : null;
+  }
+
+  // Restore: trust in-memory cache only if _hydrationState.progress === true
+  // (meaning server confirmed this session). Otherwise always fetch the server.
+  // localStorage cache is NEVER used as restore source.
+  async function getRestoreProgress(bookId) {
+    const normalizedBookId = _normalizeBookId(bookId);
+    if (!normalizedBookId || !_ready()) return null;
+
+    // Cache hit only when server has confirmed progress this session.
+    if (_hydrationState.progress === true) {
+      const cached = _findLatestCachedBookProgress(normalizedBookId);
+      if (cached) {
+        const idx = Number(cached.last_page_index);
+        if (Number.isFinite(idx) && idx >= 0) {
+          const result = {
+            pageIndex: idx,
+            chapterIndex: _normalizeChapterId(cached.chapter_id) != null ? Number(cached.chapter_id) : null,
+            updatedAt: cached.updated_at || cached.last_read_at || null,
+          };
+          _recordSync('restore', 'cache-hit', { bookId: normalizedBookId, result });
+          return result;
+        }
+      }
+    }
+
+    // Always fetch server for restore when cache is not confirmed.
+    _recordSync('restore', 'pending', { bookId: normalizedBookId });
+    try {
+      const { data } = await _serverSync('restore', { params: { book_id: normalizedBookId } });
+      const row = data && data.row ? data.row : null;
+      if (!row) {
+        _recordSync('restore', 'empty', { bookId: normalizedBookId });
+        return null;
+      }
+      // Merge fetched row into in-memory progress cache.
+      _remoteProgressRows = [row, ...(_remoteProgressRows || []).filter((entry) => String(entry.id || '') !== String(row.id || ''))];
+      try {
+        const u = _user();
+        if (u && u.id) {
+          _writeDurableCache(u.id, {
+            usersRow: _remoteUsersRow,
+            settingsRow: _remoteSettingsRow,
+            libraryItems: _remoteLibraryItems,
+            progressRows: _remoteProgressRows,
+            bookMetricsRows: _remoteBookMetricsRows,
+            dailyStatsRows: _remoteDailyStatsRows,
+            sessions: { rows: _remoteSessions, latest: _remoteSessions[0] || null, totalSessions: (_remoteSessions || []).length },
+            usage: _remoteUsageSummary,
+            entitlement: _remoteEntitlement,
+          });
+        }
+      } catch (_) {}
+      const idx = Number(row.last_page_index);
+      if (!Number.isFinite(idx) || idx < 0) {
+        _recordSync('restore', 'empty', { bookId: normalizedBookId });
+        return null;
+      }
+      const result = {
+        pageIndex: idx,
+        chapterIndex: _normalizeChapterId(row.chapter_id) != null ? Number(row.chapter_id) : null,
+        updatedAt: row.updated_at || row.last_read_at || null,
+      };
+      _recordSync('restore', 'success', { bookId: normalizedBookId, result });
+      return result;
+    } catch (error) {
+      _recordSync('restore', 'error', { bookId: normalizedBookId, message: String(error?.message || error || 'restore lookup failed') });
+      return null;
+    }
+  }
+
+  // ── Session record ────────────────────────────────────────────────────────
+  async function recordReadingSession(entry) {
+    const u = _user();
+    if (!_ready() || !u || !entry || !entry.bookId) return null;
+    const target = window.__rcReadingTarget || {};
+    const elapsedSeconds = Math.max(0, Math.round(Number(entry.elapsedSeconds || 0)));
+    const itemMeta = await _collectLibraryItemMeta(String(entry.bookId || ''), target.pageCount || 0);
+    const payload = Object.assign({}, itemMeta || {}, {
+      pages_completed: Math.max(0, Math.round(Number(entry.pagesAdvanced || 0))),
+      minutes_listened: Math.max(0, Math.round(elapsedSeconds / 60)),
+      source_type: String(target.sourceType || 'book'),
+      source_id: String(target.bookId || entry.bookId || ''),
+      book_id: String(entry.bookId || ''),
+      chapter_id: target.chapterIndex != null ? String(target.chapterIndex) : null,
+      mode: typeof window.appMode === 'string' ? String(window.appMode) : 'reading',
+      tts_seconds: 0,
+      completed: !!entry.completed,
+      started_at: entry.startedAt || new Date().toISOString(),
+      ended_at: entry.endedAt || new Date().toISOString(),
+      elapsed_seconds: elapsedSeconds,
+    });
+    _recordSync('sessions', 'pending', { payload });
+    try {
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'record_session', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      _recordSync('sessions', 'success', { row: data && data.row ? data.row : payload });
+      _emitHydrated('sessions');
+      return data && data.row ? data.row : payload;
+    } catch (error) {
+      _recordSync('sessions', 'error', { message: String(error?.message || error || 'session write failed'), payload });
+      return null;
+    }
+  }
+
+  // ── Profile metrics ───────────────────────────────────────────────────────
+  function getRemoteReadingBookSummary(bookId, totalPagesHint) {
+    if (!_ready()) return null;
+    const row = _findLatestCachedBookProgress(bookId);
+    const key = _normalizeBookId(bookId);
+    const metric = (_remoteBookMetricsRows || []).find((entry) => _normalizeBookId(entry.book_id) === key) || null;
+    if (!row && !metric) return null;
+    const totalPages = Number.isFinite(Number(totalPagesHint)) && Number(totalPagesHint) > 0
+      ? Number(totalPagesHint)
+      : Math.max(0, Number((row && row.page_count) || (metric && metric.page_count) || 0));
+    const lastPageIndex = Math.max(0, Number((row && row.last_page_index) || 0));
+    const totalReadingSeconds = metric ? Math.max(0, Number(metric.minutes_read_total || 0) * 60) : 0;
+    const completed = !!(metric && metric.completed_at) || (totalPages > 0 && lastPageIndex >= Math.max(0, totalPages - 1));
+    return {
+      bookId: key,
+      totalPages,
+      lastPageIndex,
+      totalReadingSeconds,
+      lastOpenedAt: (metric && metric.last_opened_at) || (row && (row.last_read_at || row.updated_at)) || null,
+      completed,
+      completedAt: metric ? (metric.completed_at || null) : null,
+    };
+  }
+
+  function getRemoteProfileMetrics() {
+    return _ready() ? (_remoteProfileMetrics || _deriveRemoteProfileMetrics()) : null;
+  }
+
+  // ── State clearing ────────────────────────────────────────────────────────
+  function _clearRemoteState() {
+    _remoteUsersRow = null;
+    _remoteSettingsRow = null;
+    _remoteLibraryItems = [];
+    _remoteProgressRows = [];
+    _remoteBookMetricsRows = [];
+    _remoteDailyStatsRows = [];
+    _remoteSessions = [];
+    _remoteProfileMetrics = null;
+    _remoteUsageSummary = null;
+    _remoteEntitlement = null;
+    _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false, usage: false };
+    _lastSyncSnapshotAt = null;
+    _requestSeq = 0;
+    _appliedSeq = 0;
+    // Clear session tokens so a stale usage count from the previous session does not
+    // leak into the next user's projection window. The usage pill is hidden when not
+    // authed, so this does not create a visible blank state for the current user.
+    // When the next user signs in, their cached or server-confirmed usage replaces this.
+    try {
+      if (window.rcUsage && typeof window.rcUsage.applySnapshot === 'function') {
+        window.rcUsage.applySnapshot({ remaining: null, limit: null, authoritative: false, source: 'signout' });
       }
     } catch (_) {}
   }
 
-  async function getReadingProgress(bookId, chapterIndex) {
-    const identity = _collectProgressIdentity(bookId, chapterIndex);
-    const existing = await _findProgressRow(identity);
-    if (!existing) return null;
-    const idx = Number(existing.last_page_index);
-    return Number.isFinite(idx) && idx >= 0 ? { pageIndex: idx, updatedAt: existing.updated_at || null } : null;
-  }
-
-  function _handleAuthChanged(e) {
-    const { signedIn, source } = e.detail || {};
-    if (signedIn && source !== 'init-unconfigured' && source !== 'init-client-error') {
-      setTimeout(() => { _onSignIn().catch(() => {}); }, 0);
+  async function rehydrateDurableData() {
+    if (!_ready()) {
+      _clearRemoteState();
+      _emitHydrated('signout');
+      return;
     }
+    await _onSignIn();
   }
 
-  function _handlePrefsChanged() {
+  // ── Settings queue ────────────────────────────────────────────────────────
+  function _queueSettingsSync() {
     if (!_ready()) return;
     if (_prefsSyncTimer) clearTimeout(_prefsSyncTimer);
     _prefsSyncTimer = setTimeout(() => {
       _prefsSyncTimer = null;
       syncSettings().catch(() => {});
-    }, 400);
+    }, 350);
+  }
+
+  // ── Event handlers ────────────────────────────────────────────────────────
+  function _handleAuthChanged(e) {
+    const { signedIn, source } = e.detail || {};
+    if (signedIn && source !== 'init-unconfigured' && source !== 'init-client-error') {
+      const u = _user();
+      _hydrationState = { inFlight: true, users: false, settings: false, progress: false, sessions: false, usage: false };
+      if (u && u.id) _applyCachedSnapshotForUser(u.id);
+      setTimeout(() => { _onSignIn().catch(() => {}); }, 0);
+      return;
+    }
+    if (!signedIn) {
+      _clearRemoteState();
+      _emitHydrated('signout');
+    }
+  }
+
+  function _handlePrefsChanged() {
+    if (_applyingRemoteSettings) return;
+    // Record dirty fields before projecting — diff against confirmed server truth,
+    // not the projected row (_remoteSettingsRow would include previous projections).
+    try { _recordDirtyFields(_collectSettingsRow()); } catch (_) {}
+    _projectCurrentSettingsLocal();
+    _queueSettingsSync();
+  }
+
+  function _handleSettingsControlEvent(event) {
+    if (_applyingRemoteSettings) return;
+    const id = String(event?.target?.id || '').trim();
+    if (!WATCHED_SETTING_IDS.has(id)) return;
+    try { _recordDirtyFields(_collectSettingsRow()); } catch (_) {}
+    _projectCurrentSettingsLocal();
+    _queueSettingsSync();
   }
 
   try { document.addEventListener('rc:auth-changed', _handleAuthChanged); } catch (_) {}
   try { document.addEventListener('rc:prefs-changed', _handlePrefsChanged); } catch (_) {}
+  try { document.addEventListener('change', _handleSettingsControlEvent, true); } catch (_) {}
+  try { document.addEventListener('input', _handleSettingsControlEvent, true); } catch (_) {}
 
   return {
     scheduleProgressSync,
+    saveProgressNow,
+    flushProgressSync,
     getReadingProgress,
+    getRestoreProgress,
+    recordReadingSession,
+    getRemoteReadingBookSummary,
+    getRemoteProfileMetrics,
     syncSettings,
     getSettings,
+    rehydrateDurableData,
+    getRemoteUsersRow: () => _remoteUsersRow,
+    getRemoteUsageSummary: () => _remoteUsageSummary,
+    getHydrationState: () => ({ ..._hydrationState }),
+    getDiagnosticsSnapshot: () => ({
+      sync: { ..._syncDiagnostics },
+      hydrated: { ..._hydrationState },
+      snapshotAt: _lastSyncSnapshotAt,
+      usersRow: _remoteUsersRow,
+      settingsRow: _remoteSettingsRow,
+      usage: _remoteUsageSummary,
+      libraryItemCount: (_remoteLibraryItems || []).length,
+      progressCount: (_remoteProgressRows || []).length,
+      bookMetricsCount: (_remoteBookMetricsRows || []).length,
+      dailyStatCount: (_remoteDailyStatsRows || []).length,
+      sessionCount: (_remoteSessions || []).length,
+    }),
+    deleteLibraryItem: async (bookId, options = {}) => {
+      if (!_ready()) return null;
+      const payload = { book_id: _normalizeBookId(bookId), purge: !!options.purge };
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'delete_library_item', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      return data && data.row ? data.row : null;
+    },
+    restoreLibraryItem: async (bookId) => {
+      if (!_ready()) return null;
+      const payload = { book_id: _normalizeBookId(bookId) };
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'restore_library_item', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      return data && data.row ? data.row : null;
+    },
   };
 })();
