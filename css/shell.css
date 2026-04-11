@@ -61,7 +61,6 @@
             --ember-life-min:       0.5;
             --ember-life-max:       1.0;
             --ember-fade-threshold: 25;
-            --explorer-paper-wallpaper: url('https://wallpapers.com/images/hd/world-map-in-old-paper-tjbf6z87cm5gxsru.jpg');
         }
         /* Theme overrides — applied as body class by setTheme() */
         body.theme-green  { --theme-accent: #22c55e; --theme-accent-deep: #16a34a; --theme-accent-soft: #dcfce7; --rm-accent:#22c55e; --rm-accent-soft:#dcfce7; --rm-btn-bg:rgba(34,197,94,0.08); --rm-btn-hover:rgba(34,197,94,0.15); --rm-page-bg:#f0fdf4; --rm-shadow:0 4px 16px rgba(34,197,94,0.10); }
@@ -71,67 +70,6 @@
          * Full texture/typography overhaul ships separately via theme.css / components.css.
          * This block covers the color system bridge so app features respond correctly.
          */
-        body.theme-explorer {
-            --theme-accent:      #c17d4a;
-            --theme-accent-deep: #8B2500;
-            --theme-accent-soft: #f5ede4;
-            --accent:            #c17d4a;
-            --rm-accent:      #c17d4a;
-            --rm-accent-soft: #f5ede0;
-            --rm-card-bg:     #f5f1e8;
-            --rm-page-bg:     #ebe7de;
-            --rm-text:        #2b2520;
-            --rm-text-2:      #6b5d54;
-            --rm-border:      #e8dfd4;
-            --rm-shadow:      0 4px 16px rgba(139,111,87,0.12);
-            --rm-btn-bg:      rgba(193,125,74,0.10);
-            --rm-btn-hover:   rgba(193,125,74,0.18);
-        }
-        body.theme-explorer.reading-active #reading-mode .reading-content {
-            position: relative;
-            isolation: isolate;
-            overflow: hidden;
-            background: linear-gradient(180deg, rgba(235,231,222,0.97) 0%, rgba(223,221,216,0.98) 100%);
-        }
-        body.theme-explorer.reading-active #reading-mode .reading-content::before,
-        body.theme-explorer.reading-active #reading-mode .reading-content::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-        }
-        body.theme-explorer.reading-active #reading-mode .reading-content::before {
-            z-index: 0;
-            opacity: 0;
-            background:
-                radial-gradient(circle at 18% 22%, rgba(255,255,255,0.2) 0 1px, transparent 2px 100%),
-                radial-gradient(circle at 72% 34%, rgba(43,37,32,0.04) 0 1px, transparent 2px 100%),
-                radial-gradient(circle at 34% 78%, rgba(255,255,255,0.14) 0 1px, transparent 2px 100%),
-                linear-gradient(115deg, rgba(139,37,0,0.05), rgba(193,125,74,0.02) 26%, transparent 54%),
-                linear-gradient(180deg, rgba(255,255,255,0.08), rgba(0,0,0,0.02)),
-                repeating-linear-gradient(0deg, rgba(107,93,84,0.025) 0 2px, transparent 2px 6px),
-                repeating-linear-gradient(90deg, rgba(255,255,255,0.035) 0 3px, transparent 3px 11px);
-            background-size: 180px 180px, 220px 220px, 260px 260px, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
-            filter: saturate(0.92) brightness(0.98);
-        }
-        body.theme-explorer.reading-active #reading-mode .reading-content::after {
-            z-index: 0;
-            opacity: 0;
-            background-image: var(--explorer-paper-wallpaper);
-            background-repeat: repeat;
-            background-position: 50% 120px;
-            background-size: auto;
-            filter: brightness(0.84);
-        }
-        body.theme-explorer.reading-active #reading-mode .reading-content.explorer-bg-texture::before { opacity: 0.92; }
-        body.theme-explorer.reading-active #reading-mode .reading-content.explorer-bg-wallpaper::after { opacity: 0.95; }
-        body.theme-explorer.reading-active #reading-mode .reading-content > :not(#fireCanvas) {
-            position: relative;
-            z-index: 2;
-        }
-        body.theme-explorer.reading-active:not(.explorer-embers-off) #fireCanvas { display: block !important; }
-        body.theme-explorer.reading-active.explorer-embers-off #fireCanvas,
-        body:not(.reading-active) #fireCanvas { display: none !important; }
 
         body.app-light { background-color: #ffffff; color: #1e293b; }
         body.app-dark { background: #0f172a; color: #e2e8f0; }
@@ -202,6 +140,8 @@
         .import-stage { display:block; }
         .import-dropzone { border:2px dashed #dbe4ff; border-radius:18px; padding:2.75rem 1.5rem; text-align:center; background:linear-gradient(180deg,#fcfcff 0%,#f8faff 100%); transition:border-color 0.15s, background 0.15s, transform 0.15s; cursor:pointer; }
         .import-dropzone:hover, .import-dropzone.is-dragover { border-color:var(--jubly-purple); background:#f7f5ff; transform:translateY(-1px); }
+        body.import-drop-pending .import-dropzone { border-color:var(--jubly-purple); background:#f7f5ff; animation:import-drop-pulse 0.6s ease infinite alternate; }
+        @keyframes import-drop-pulse { from { opacity:1; } to { opacity:0.7; } }
         .import-dropzone-title { font-size:1rem; font-weight:800; color:#1e293b; }
         .import-dropzone-sub { margin-top:6px; font-size:0.82rem; color:#64748b; }
         .import-file-input { display:none; }
@@ -416,9 +356,6 @@
         #reading-mode .page.page-active {
             border-left-width: 6px;
             box-shadow: var(--rm-shadow), -6px 0 12px -2px rgba(99,68,245,0.20);
-        }
-        body.theme-explorer #reading-mode .page.page-active {
-            box-shadow: var(--rm-shadow), -6px 0 12px -2px rgba(193,125,74,0.35);
         }
         @keyframes rmSlideIn { from { opacity:0; transform:translateX(-16px); } to { opacity:1; transform:translateX(0); } }
         #reading-mode .page-header {
@@ -829,21 +766,9 @@
 .rs-theme-swatches { display:flex; flex-wrap:wrap; gap:18px; margin-top:14px; }
 .rs-theme-btn { min-width:76px; }
 .rs-themes-empty { margin-top:16px; font-size:0.82rem; color:#64748b; padding:14px 0 2px; }
-#rs-explorer-panel { border:1px solid #e8dfd4; border-radius:16px; background:#f5f1e8; padding:16px 18px; margin-top:18px; }
-#rs-explorer-panel .explorer-panel-row { padding:12px 0; border-bottom:1px solid #e8dfd4; }
-#rs-explorer-panel .explorer-panel-row:last-child { border-bottom:none; }
-.explorer-panel-head { padding-bottom:8px; }
-.explorer-swatch-group { display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
-.explorer-accent-swatch, .explorer-ember-swatch { width:28px; height:28px; border-radius:999px; border:3px solid transparent; box-shadow:0 1px 4px rgba(0,0,0,0.14); cursor:pointer; transition:transform 0.15s, border-color 0.15s; }
-.explorer-accent-swatch:hover, .explorer-ember-swatch:hover { transform:scale(1.08); }
-.explorer-accent-swatch.selected, .explorer-ember-swatch.selected { border-color:#2b2520; }
-.explorer-panel-row select { border:1px solid #d8cfc4; border-radius:10px; padding:7px 10px; font-size:0.82rem; background:#fff; color:#2b2520; cursor:pointer; }
-.explorer-row-btn, .explorer-reset-btn, .music-upload-btn, .music-delete-btn, .appearance-mode-btn { border-radius:10px; border:1px solid #d8cfc4; background:#ffffff; padding:7px 12px; font-size:0.78rem; font-weight:800; color:#6b5d54; cursor:pointer; transition:background 0.15s, border-color 0.15s, color 0.15s; }
-.explorer-row-btn:hover, .explorer-reset-btn:hover, .music-upload-btn:hover, .music-delete-btn:hover, .appearance-mode-btn:hover { background:#f8fafc; border-color:#cbd5e1; color:#334155; }
-.explorer-reset-btn { border-color:#c17d4a; color:#9a5a28; }
-.explorer-reset-btn:hover { background:#c17d4a; border-color:#c17d4a; color:#fff; }
-.explorer-panel-row-reset { align-items:flex-start; }
 .appearance-mode-group { display:flex; align-items:center; gap:8px; }
+.appearance-mode-btn { border-radius:10px; border:1px solid #d8cfc4; background:#ffffff; padding:7px 12px; font-size:0.78rem; font-weight:800; color:#6b5d54; cursor:pointer; transition:background 0.15s, border-color 0.15s, color 0.15s; }
+.appearance-mode-btn:hover { background:#f8fafc; border-color:#cbd5e1; color:#334155; }
 .appearance-mode-btn.active { background:var(--theme-accent-soft); border-color:rgba(99,68,245,0.18); color:var(--theme-accent); }
 .music-picker-modal { width:min(560px, 96vw); }
 .music-picker-list { display:flex; flex-direction:column; gap:12px; max-height:min(52vh, 460px); overflow:auto; }

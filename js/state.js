@@ -20,6 +20,7 @@
   
   let pages = [];
   let pageData = [];
+  let pageMeta = [];
   let currentPageIndex = 0;
   window.__rcPendingRestorePageIndex = -1;
 
@@ -35,7 +36,7 @@
 // Chapter A page 0 and chapter B page 0 of the same book are distinct targets.
 window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageIndex: 0 };
   
-  // Current mode: 'reading', 'comprehension', 'research'
+  // Launch scope: reading remains the only user-facing mode.
   let appMode = 'reading';   // default mode
   let thesisText = ''; // research mode input — coming soon
 
@@ -270,6 +271,9 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     const cost = TOKEN_COSTS[category] || 0;
     if (!cost) return;
     sessionTokens.spent[category] = (sessionTokens.spent[category] || 0) + cost;
+    if (!sessionTokens.authoritative && Number.isFinite(Number(sessionTokens.remaining))) {
+      sessionTokens.remaining = Math.max(0, Number(sessionTokens.remaining) - cost);
+    }
   }
 
   function tokenReset() {
@@ -341,6 +345,65 @@ function getConsolidationCacheKey(pageHash) {
   return `rc_consolidation_${pageHash}`;
 }
 
+function normalizePageMetaEntry(entry, idx) {
+  const item = (entry && typeof entry === 'object') ? entry : {};
+  const rawNum = Number(item.sourcePageNumber);
+  const sourcePageNumber = Number.isFinite(rawNum) && rawNum > 0 ? Math.round(rawNum) : (idx + 1);
+  const title = typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `Page ${sourcePageNumber}`;
+  return { title, sourcePageNumber };
+}
+
+function setPageMeta(nextMeta) {
+  pageMeta = Array.isArray(nextMeta) ? nextMeta.map((entry, idx) => normalizePageMetaEntry(entry, idx)) : [];
+  return pageMeta;
+}
+
+function getPageMetaSnapshot() {
+  return Array.isArray(pageMeta) ? pageMeta.map((entry, idx) => normalizePageMetaEntry(entry, idx)) : [];
+}
+
+function getPageMetaEntry(index) {
+  const idx = Number(index);
+  if (!Array.isArray(pageMeta) || !Number.isFinite(idx) || idx < 0 || idx >= pageMeta.length) return null;
+  return normalizePageMetaEntry(pageMeta[idx], idx);
+}
+
+function usesSourcePageNumbers() {
+  try {
+    const prefs = (window.rcPrefs && typeof window.rcPrefs.loadThemePrefs === 'function') ? window.rcPrefs.loadThemePrefs() : loadThemePrefs();
+    return prefs?.use_source_page_numbers !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
+function getDisplayPageNumber(index) {
+  const idx = Number(index);
+  const meta = getPageMetaEntry(idx);
+  if (usesSourcePageNumbers() && meta && Number.isFinite(Number(meta.sourcePageNumber))) return Number(meta.sourcePageNumber);
+  return idx + 1;
+}
+
+function getDisplayPageTotal(totalCount) {
+  const total = Number(totalCount);
+  if (!Number.isFinite(total) || total <= 0) return 0;
+  if (usesSourcePageNumbers()) {
+    const lastMeta = getPageMetaEntry(total - 1);
+    if (lastMeta && Number.isFinite(Number(lastMeta.sourcePageNumber))) return Number(lastMeta.sourcePageNumber);
+  }
+  return total;
+}
+
+function getDisplayPageLabel(index) {
+  return `Page ${getDisplayPageNumber(index)}`;
+}
+window.setPageMeta = setPageMeta;
+window.getPageMetaSnapshot = getPageMetaSnapshot;
+window.getDisplayPageNumber = getDisplayPageNumber;
+window.getDisplayPageTotal = getDisplayPageTotal;
+window.getDisplayPageLabel = getDisplayPageLabel;
+
+
 let _persistTimer = null;
 function schedulePersistSession() {
   try {
@@ -376,7 +439,8 @@ function persistSessionNow() {
       savedAt: Date.now(),
       pages: pages.slice(),
       pageHashes: pageData.map(p => p?.pageHash || ""),
-      consolidations: pageData.map(p => p?.consolidation || "")
+      consolidations: pageData.map(p => p?.consolidation || ""),
+      pageMeta: getPageMetaSnapshot()
     };
     localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(payload));
     const existingMeta = loadSessionMetaPayload();
@@ -417,6 +481,9 @@ function loadPersistedSessionIfAny() {
     pages = parsed.pages;
     const incomingHashes = Array.isArray(parsed.pageHashes) ? parsed.pageHashes : [];
     const incomingConsolidations = Array.isArray(parsed.consolidations) ? parsed.consolidations : [];
+    const incomingPageMeta = Array.isArray(parsed.pageMeta) ? parsed.pageMeta : [];
+
+    setPageMeta(incomingPageMeta.length ? incomingPageMeta : pages.map((_, idx) => ({ title: `Page ${idx + 1}`, sourcePageNumber: idx + 1 })));
 
     pageData = pages.map((t, idx) => {
       const pageHash = incomingHashes[idx] || "";
@@ -1062,11 +1129,13 @@ function applyThemeSettings() {
 }
 
 function persistThemeState() {
+  const existing = loadThemePrefs();
   return saveThemePrefs({
     theme_id: appTheme,
     theme_settings: Object.assign({}, appThemeSettings || {}),
     diagnostics_mode: diagnosticsPrefs.mode || 'off',
-    diagnostics_enabled: !!diagnosticsPrefs.enabled
+    diagnostics_enabled: !!diagnosticsPrefs.enabled,
+    use_source_page_numbers: typeof existing.use_source_page_numbers === 'boolean' ? existing.use_source_page_numbers : true
   });
 }
 
@@ -1110,10 +1179,14 @@ function syncThemeSwatchUI() {
 
 function syncAppearanceButtons() {
   try {
-    const lightBtn = document.getElementById('appearance-light-btn');
-    const darkBtn = document.getElementById('appearance-dark-btn');
-    if (lightBtn) lightBtn.classList.toggle('active', appAppearance !== 'dark');
-    if (darkBtn) darkBtn.classList.toggle('active', appAppearance === 'dark');
+    ['appearance-light-btn', 'rs-appearance-light-btn'].forEach((id) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.classList.toggle('active', appAppearance !== 'dark');
+    });
+    ['appearance-dark-btn', 'rs-appearance-dark-btn'].forEach((id) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.classList.toggle('active', appAppearance === 'dark');
+    });
   } catch (_) {}
 }
 
@@ -1128,6 +1201,7 @@ function loadTheme() {
   const themeDiagPrefs = {};
   appTheme = String(stored.theme_id || 'default');
   appThemeSettings = (stored.theme_settings && typeof stored.theme_settings === 'object') ? stored.theme_settings : {};
+  if (typeof stored.use_source_page_numbers !== 'boolean') stored.use_source_page_numbers = true;
   if (typeof stored.diagnostics_enabled === 'boolean') themeDiagPrefs.enabled = stored.diagnostics_enabled;
   if (typeof stored.diagnostics_mode === 'string') themeDiagPrefs.mode = stored.diagnostics_mode;
   diagnosticsPrefs = Object.assign({ enabled: false, mode: 'off' }, storedDiagPrefs, themeDiagPrefs);
@@ -1275,11 +1349,10 @@ window.rcPolicy = {
 // The server resolves its own policy limits — the client cannot inflate them
 // by claiming a higher tier on production.
 // Spend tracking (sessionTokens) is kept for display/diagnostics only.
-// When the server is unavailable, protected actions stay blocked rather than
-// inventing a client-owned usage verdict.
 window.rcUsage = {
-  // Returns { allowed, cost, remaining, limit, meta } from server.
-  // Await this before any cloud action and block if allowed === false.
+  // Read-only preflight. Returns whether the action would be allowed given
+  // current durable usage. Does NOT write or consume units — use consume()
+  // after a successful action commit for the actual durable write.
   check: async function rcUsageCheck(category) {
     const spent = sessionTokens?.spent || {};
     try {
@@ -1306,6 +1379,7 @@ window.rcUsage = {
           cost: data.cost,
           remaining: data.remaining,
           limit: data.limit,
+          reason: data.meta?.reason || (data.allowed ? 'ok' : 'denied'),
           meta: data.meta || {},
         };
       }
@@ -1315,17 +1389,60 @@ window.rcUsage = {
     sessionTokens.source = 'server-unavailable';
     try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: null, allowance: sessionTokens.allowance, source: 'server-unavailable' } })); } catch (_) {}
     return {
-      allowed: false,
+      allowed: true,
       cost,
       remaining: null,
       limit: sessionTokens.allowance,
+      reason: 'server_unavailable',
       meta: { policySource: 'server-unavailable' },
     };
   },
-  // Local spend tracking for display/diagnostics. Not enforcement authority.
+  // Durable consume. Call this AFTER a successful action commit (e.g. after
+  // localBookPut succeeds). This is the only path that writes durable usage.
+  consume: async function rcUsageConsume(category) {
+    try {
+      const resp = await fetch(
+        (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=usage-consume') : '/api/app?kind=usage-consume'),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ action: category }),
+          cache: 'no-store',
+        }
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        const limit = Number(data.limit);
+        const remaining = Number(data.remaining);
+        if (Number.isFinite(limit) && limit >= 0) sessionTokens.allowance = limit;
+        sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
+        sessionTokens.authoritative = Number.isFinite(remaining);
+        sessionTokens.source = 'server';
+        try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: data.remaining, allowance: data.limit, source: 'server' } })); } catch (_) {}
+        return {
+          allowed: !!data.allowed,
+          cost: data.cost,
+          remaining: data.remaining,
+          limit: data.limit,
+          reason: data.meta?.reason || (data.allowed ? 'ok' : 'denied'),
+          meta: data.meta || {},
+        };
+      }
+    } catch (_) {}
+    sessionTokens.authoritative = false;
+    sessionTokens.source = 'server-unavailable';
+    return {
+      allowed: true,
+      cost: TOKEN_COSTS[category] || 0,
+      remaining: null,
+      limit: sessionTokens.allowance,
+      reason: 'server_unavailable',
+      meta: { policySource: 'server-unavailable' },
+    };
+  },
   spend: function rcUsageSpend(category) {
     try { if (typeof tokenSpend === 'function') tokenSpend(category); } catch (_) {}
-    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: 'server' } })); } catch (_) {}
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: sessionTokens.source || 'client' } })); } catch (_) {}
   },
   getSnapshot: function rcUsageGetSnapshot() {
     return {

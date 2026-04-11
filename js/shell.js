@@ -1479,7 +1479,9 @@
         const cur   = (playback.active && !playback.paused)
                         ? Math.max(0, getActivePlaybackPageIndex(playback))
                         : Math.max(0, getVisibleReadingPageIndex());
-        prog.textContent = total > 0 ? `Page ${cur + 1} / ${total}` : '—';
+        const currentLabel = (typeof getDisplayPageNumber === 'function') ? getDisplayPageNumber(cur) : (cur + 1);
+        const totalLabel = (typeof getDisplayPageTotal === 'function') ? getDisplayPageTotal(total) : total;
+        prog.textContent = total > 0 ? `Page ${currentLabel} / ${totalLabel}` : '—';
         shellDebugRemember('lastProgressSnapshot', { type: 'progress', visible: true, label: prog.textContent, current: cur, total });
     }
 

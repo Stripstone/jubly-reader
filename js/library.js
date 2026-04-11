@@ -490,8 +490,21 @@
     if (!root) return [];
 
     const blocks = [];
-    const candidates = root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li');
-    candidates.forEach((el) => {
+    let lastMarker = null;
+    const nodes = root.querySelectorAll('[id],[name],h1,h2,h3,h4,h5,h6,p,li');
+    nodes.forEach((el) => {
+      try {
+        const rawMarker = el.getAttribute('id') || el.getAttribute('name') || '';
+        const markerMatch = String(rawMarker).match(/^page[_-]?(\d+)$/i);
+        if (markerMatch) {
+          const marker = `## Page ${Number(markerMatch[1])}`;
+          if (marker !== lastMarker) {
+            blocks.push(marker);
+            lastMarker = marker;
+          }
+        }
+      } catch (_) {}
+      if (!/^(H[1-6]|P|LI)$/i.test(el.tagName || '')) return;
       const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
       if (!txt) return;
       if (txt.length < 2) return;
@@ -506,6 +519,10 @@
 
   function escapeRegExp(s) {
     return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function isExplicitImportedPageMarker(text) {
+    return /^(?:##\s*)?Page\s+\d+\s*$/i.test(String(text || '').trim());
   }
 
   function titleArtifactVariants(title) {
@@ -633,6 +650,10 @@
       if (out.length === 0) { out.push(cur); continue; }
 
       const prev = out[out.length - 1];
+      if (isExplicitImportedPageMarker(prev) || isExplicitImportedPageMarker(cur)) {
+        out.push(cur);
+        continue;
+      }
       // Always keep blocks separate when the PREV looks like a section heading —
       // it should stand alone.  Only gate on CUR being a heading when prev has
       // already ended cleanly (strong stop); if prev is a fragment, a heading-
@@ -970,23 +991,10 @@
     }
     return merged;
   }
-  function buildMarkdownBookFromSections(sections) {
-    const out = [];
-    (sections || []).forEach((sec) => {
-      const title = (sec?.title || 'Untitled Section').trim();
-      out.push(`# ${title}`);
-      out.push('');
-      const pages = chunkBlocksToPages(sec?.blocks || []);
-      pages.forEach((p, idx) => {
-        out.push(`## Page ${idx + 1}`);
-        out.push('');
-        out.push(p);
-        out.push('');
-      });
-      out.push('');
-    });
-    return out.join('\n');
-  }
+  // Page-breaking for imported books now lives behind the server content route
+  // (/api/content?action=page-break) so the crown-jewel chunking logic does not
+  // ship to the client. The EPUB import pipeline extracts cleaned section blocks
+  // here, then sends them to the backend for page construction.
 
   function _normEpubHref(href) {
     return String(href || '')
@@ -1291,7 +1299,7 @@
         const href = spine[s];
         const html = await zipReadText(zip, href);
         let cleaned = extractTextBlocksFromHtml(html)
-          .map(b => cleanImportedBlock(b, { bookTitle, artifactTitles: toc.map(x => x.title) }))
+          .map(b => isExplicitImportedPageMarker(b) ? String(b || '').trim() : cleanImportedBlock(b, { bookTitle, artifactTitles: toc.map(x => x.title) }))
           .filter(b => b && (!cleanupHeadings || !isDecorativeSpacedHeading(b)));
         cleaned = mergeFragmentedBlocks(cleaned);
         cleaned = cleaned.filter(b => b && (!cleanupHeadings || !isDecorativeSpacedHeading(b)));
@@ -1318,7 +1326,7 @@
       if (typeof onProgress === 'function') onProgress({ done, total: chosen.length });
     }
 
-    return buildMarkdownBookFromSections(sections);
+    return sections;
   }
 
   async function initBookImporter() {
@@ -1399,6 +1407,15 @@
       return count;
     }
 
+    function parseSourcePageNumber(title, fallbackIndex = 0) {
+      const match = String(title || "").match(/(?:\bpage\s+|\bp\.\s*)(\d+)\b/i);
+      if (match) {
+        const num = Number(match[1]);
+        if (Number.isFinite(num) && num > 0) return num;
+      }
+      return Number(fallbackIndex) + 1;
+    }
+
     function parsePagesWithTitles(raw) {
       const text = String(raw || "");
       const lines = text.split(/\r?\n/);
@@ -1413,7 +1430,7 @@
           .filter(l => l && !/^\s{0,3}#{1,6}\s+/.test(l) && !/^\s*[—-]{2,}\s*$/.test(l));
 
         const body = cleaned.join(" ").trim();
-        if (body) pages.push({ title: cur.title, text: body });
+        if (body) pages.push({ title: cur.title, text: body, sourcePageNumber: parseSourcePageNumber(cur.title, pages.length) });
       }
 
       for (const line of lines) {
@@ -1439,7 +1456,7 @@
               .map(l => l.trim())
               .filter(l => l && !/^\s{0,3}#{1,6}\s+/.test(l) && !/^\s*[—-]{2,}\s*$/.test(l));
             const body = cleaned.join(" ").trim();
-            if (body) out.push({ title: `Page ${out.length + 1}`, text: body });
+            if (body) out.push({ title: `Page ${out.length + 1}`, text: body, sourcePageNumber: out.length + 1 });
           });
           return out.length ? out : pages;
         }
@@ -1461,7 +1478,8 @@
     if (blocks.length > 1) {
       pages = blocks.map((b, i) => ({
         title: `Page ${i + 1}`,
-        text: b.replace(/\s+/g, " ").trim()
+        text: b.replace(/\s+/g, " ").trim(),
+        sourcePageNumber: i + 1
       }));
     }
   }
@@ -1493,10 +1511,12 @@
         return;
       }
 
-      const opts = currentPages.map((p, idx) => ({
-        value: idx,
-        label: `${idx + 1}. ${p.title || `Page ${idx + 1}`}`
-      }));
+      const opts = currentPages.map((p, idx) => {
+        const sourcePageNumber = Number(p?.sourcePageNumber);
+        const title = p?.title || `Page ${idx + 1}`;
+        const numericLabel = Number.isFinite(sourcePageNumber) && sourcePageNumber > 0 ? `Page ${sourcePageNumber}` : `Page ${idx + 1}`;
+        return { value: idx, label: title && title !== numericLabel ? `${numericLabel} — ${title}` : numericLabel };
+      });
 
       setSelectOptions(pageStart, opts, "Start page…");
       setSelectOptions(pageEnd, opts, "End page…");
@@ -1663,10 +1683,10 @@
     // reading-entry path can await full render completion before revealing pages.
     // Fire-and-forget callers (chapter select, page slice controls) simply ignore
     // the returned promise, which is safe — they don't use the restore path.
-    function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false } = {}) {
+    function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false, pageMeta = null } = {}) {
       bulkInput.value = String(text || "").trim();
-      if (append) return appendPages();
-      return addPages({ preservePendingRestore });
+      if (append) return appendPages({ pageMeta });
+      return addPages({ preservePendingRestore, pageMeta });
     }
 
     // Events
@@ -1843,7 +1863,10 @@
     // Split pasted text into pages using paragraph breaks (blank lines).
     // Still supports legacy delimiters (--- / "## Page X") if present.
     const newPages = splitIntoPages(input);
-    for (const pageText of newPages) {
+    const incomingMeta = Array.isArray(options.pageMeta) ? options.pageMeta : [];
+    const nextPageMeta = (typeof getPageMetaSnapshot === "function") ? getPageMetaSnapshot() : [];
+    for (let pageIdx = 0; pageIdx < newPages.length; pageIdx++) {
+      const pageText = newPages[pageIdx];
       const pageHash = await stableHashText(pageText);
       let consolidation = "";
       let rating = 0;
@@ -1867,7 +1890,9 @@
         }
       } catch (_) {}
 
+      const assignedIndex = pages.length;
       pages.push(pageText);
+      nextPageMeta.push({ title: incomingMeta[pageIdx]?.title || `Page ${assignedIndex + 1}`, sourcePageNumber: Number.isFinite(Number(incomingMeta[pageIdx]?.sourcePageNumber)) ? Number(incomingMeta[pageIdx].sourcePageNumber) : (assignedIndex + 1) });
       pageData.push({
         text: pageText,
         consolidation,
@@ -1888,6 +1913,7 @@
     }
 
     document.getElementById("bulkInput").value = "";
+    try { if (typeof setPageMeta === "function") setPageMeta(nextPageMeta); } catch (_) {}
     schedulePersistSession();
     render();
     checkSubmitButton();
@@ -1895,14 +1921,17 @@
 
   // Append pages to the existing session (does NOT clear pages/timers/ratings).
   // Uses the same splitting rules as addPages().
-  async function appendPages() {
+  async function appendPages(options = {}) {
     const input = document.getElementById("bulkInput").value;
     goalTime = parseInt(document.getElementById("goalTimeInput").value);
     goalCharCount = parseInt(document.getElementById("goalCharInput").value);
     if (!input || !input.trim()) return;
 
     const newPages = splitIntoPages(input);
-    for (const pageText of newPages) {
+    const incomingMeta = Array.isArray(options.pageMeta) ? options.pageMeta : [];
+    const nextPageMeta = (typeof getPageMetaSnapshot === "function") ? getPageMetaSnapshot() : [];
+    for (let pageIdx = 0; pageIdx < newPages.length; pageIdx++) {
+      const pageText = newPages[pageIdx];
       const pageHash = await stableHashText(pageText);
       let consolidation = "";
       let rating = 0;
@@ -1926,7 +1955,9 @@
         }
       } catch (_) {}
 
+      const assignedIndex = pages.length;
       pages.push(pageText);
+      nextPageMeta.push({ title: incomingMeta[pageIdx]?.title || `Page ${assignedIndex + 1}`, sourcePageNumber: Number.isFinite(Number(incomingMeta[pageIdx]?.sourcePageNumber)) ? Number(incomingMeta[pageIdx].sourcePageNumber) : (assignedIndex + 1) });
       pageData.push({
         text: pageText,
         consolidation,
@@ -1947,6 +1978,8 @@
     }
 
     document.getElementById("bulkInput").value = "";
+    try { if (typeof setPageMeta === "function") setPageMeta(nextPageMeta); } catch (_) {}
+    schedulePersistSession();
     render();
     checkSubmitButton();
   }
@@ -1959,6 +1992,7 @@
     }
     pages = [];
     pageData = [];
+    try { if (typeof setPageMeta === "function") setPageMeta([]); } catch (_) {}
     timers = [];
     intervals.forEach(i => clearInterval(i));
     intervals = [];
@@ -2010,7 +2044,7 @@
       // in reading mode. applyModeVisibility() handles display toggling when
       // mode changes, but in reading mode these elements simply do not exist.
       page.innerHTML = `
-        <div class="page-header">Page ${i + 1}</div>
+        <div class="page-header">${(typeof getDisplayPageLabel === "function") ? getDisplayPageLabel(i) : `Page ${i + 1}`}</div>
         <div class="page-text">${escapeHtml(text)}</div>
 
         ${_isReadingMode ? '' : `
