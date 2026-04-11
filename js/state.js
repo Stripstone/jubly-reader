@@ -1354,8 +1354,12 @@ window.rcPolicy = {
 // When the server is unavailable, protected actions stay blocked rather than
 // inventing a client-owned usage verdict.
 window.rcUsage = {
-  // Returns { allowed, cost, remaining, limit, meta } from server.
-  // Await this before any cloud action and block if allowed === false.
+  // Read-only preflight. Returns whether the action would be allowed given
+  // current durable usage. Does NOT write or consume units — use consume()
+  // after a successful action commit for the actual durable write.
+  //
+  // Server unavailable → allowed: true (non-blocking). The caller should
+  // only hard-block on reason === 'daily_limit_reached' or 'auth_required'.
   check: async function rcUsageCheck(category) {
     const spent = sessionTokens?.spent || {};
     try {
@@ -1382,19 +1386,72 @@ window.rcUsage = {
           cost: data.cost,
           remaining: data.remaining,
           limit: data.limit,
+          reason: data.meta?.reason || (data.allowed ? 'ok' : 'denied'),
           meta: data.meta || {},
         };
       }
     } catch (_) {}
+    // Server unreachable: allow proceeding. check() is advisory — it cannot
+    // confirm the limit is reached when the server is down, so blocking here
+    // would cause every network hiccup to look like "daily limit reached."
     const cost = TOKEN_COSTS[category] || 0;
     sessionTokens.authoritative = false;
     sessionTokens.source = 'server-unavailable';
     try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: null, allowance: sessionTokens.allowance, source: 'server-unavailable' } })); } catch (_) {}
     return {
-      allowed: false,
+      allowed: true,
       cost,
       remaining: null,
       limit: sessionTokens.allowance,
+      reason: 'server_unavailable',
+      meta: { policySource: 'server-unavailable' },
+    };
+  },
+  // Durable consume. Call this AFTER a successful action commit (e.g. after
+  // localBookPut succeeds). This is the only path that writes durable usage.
+  //
+  // Server unavailable → allowed: true (optimistic). The book is saved locally
+  // and the user can use it. The server will reconcile on the next durable sync.
+  consume: async function rcUsageConsume(category) {
+    try {
+      const resp = await fetch(
+        (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=usage-consume') : '/api/app?kind=usage-consume'),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ action: category }),
+          cache: 'no-store',
+        }
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        const limit = Number(data.limit);
+        const remaining = Number(data.remaining);
+        if (Number.isFinite(limit) && limit >= 0) sessionTokens.allowance = limit;
+        sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
+        sessionTokens.authoritative = Number.isFinite(remaining);
+        sessionTokens.source = 'server';
+        try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: data.remaining, allowance: data.limit, source: 'server' } })); } catch (_) {}
+        return {
+          allowed: !!data.allowed,
+          cost: data.cost,
+          remaining: data.remaining,
+          limit: data.limit,
+          reason: data.meta?.reason || (data.allowed ? 'ok' : 'denied'),
+          meta: data.meta || {},
+        };
+      }
+    } catch (_) {}
+    // Server unreachable at commit time. Treat optimistically — the local save
+    // already succeeded and rolling it back would be worse than the discrepancy.
+    sessionTokens.authoritative = false;
+    sessionTokens.source = 'server-unavailable';
+    return {
+      allowed: true,
+      cost: TOKEN_COSTS[category] || 0,
+      remaining: null,
+      limit: sessionTokens.allowance,
+      reason: 'server_unavailable',
       meta: { policySource: 'server-unavailable' },
     };
   },

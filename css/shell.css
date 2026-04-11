@@ -134,6 +134,9 @@
         .import-stage { display:block; }
         .import-dropzone { border:2px dashed #dbe4ff; border-radius:18px; padding:2.75rem 1.5rem; text-align:center; background:linear-gradient(180deg,#fcfcff 0%,#f8faff 100%); transition:border-color 0.15s, background 0.15s, transform 0.15s; cursor:pointer; }
         .import-dropzone:hover, .import-dropzone.is-dragover { border-color:var(--jubly-purple); background:#f7f5ff; transform:translateY(-1px); }
+        /* Brief pulse while openImporterWithFile fetches local capacity before opening modal */
+        body.import-drop-pending .import-dropzone { border-color:var(--jubly-purple); background:#f7f5ff; animation:import-drop-pulse 0.6s ease infinite alternate; }
+        @keyframes import-drop-pulse { from { opacity:1; } to { opacity:0.7; } }
         .import-dropzone-title { font-size:1rem; font-weight:800; color:#1e293b; }
         .import-dropzone-sub { margin-top:6px; font-size:0.82rem; color:#64748b; }
         .import-file-input { display:none; }

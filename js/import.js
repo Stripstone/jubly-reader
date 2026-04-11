@@ -271,20 +271,45 @@ async function requestServerPageBreak(payload) {
     };
 
     // One authoritative entry path when a file is already in hand (e.g. page-level
-    // drag/drop). Does the capacity check, opens the modal, resets stale state, and
-    // stages the file — all in one async sequence so the reset always precedes the
-    // file staging and there is no race between showModal()'s reset and an external
-    // file dispatch.
+    // drag/drop). Opens the modal immediately — same pattern as showModal() — so there
+    // is no perceptible delay between drop and modal appearance. Action buttons are
+    // locked until the background server capacity check resolves.
     window.openImporterWithFile = async function openImporterWithFile(file) {
       if (!file || !modal) return false;
-      const guard = await guardImportCapacity();
-      syncImportEntryState(guard.snapshot);
-      if (!guard.ok) return false;
+
+      // Signal immediately (synchronous, before any await) that the drop was received.
+      // This gives the user visible feedback during the local IndexedDB snapshot fetch.
+      try { document.body.classList.add('import-drop-pending'); } catch (_) {}
+
+      const localSnapshot = await getImportCapacitySnapshot();
+      syncImportEntryState(localSnapshot);
+
+      // Open the modal right away — do not wait for the server.
+      _capacityVerified = false;
       resetImporterState({ keepModalOpen: true });
-      setStatus(describeCapacity(guard.snapshot));
+      setStatus(describeCapacity(localSnapshot));
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
+      _setActionButtonsLocked(true);
       onFileSelected(file);
+
+      try { document.body.classList.remove('import-drop-pending'); } catch (_) {}
+
+      // Background: confirm with server. Unlock or close based on response.
+      guardImportCapacity().then(guard => {
+        if (modal.style.display === 'none') return;
+        setStatus(describeCapacity(guard.snapshot));
+        if (!guard.ok) {
+          resetImporterState({ keepModalOpen: false });
+        } else {
+          _capacityVerified = true;
+          _setActionButtonsLocked(false);
+        }
+      }).catch(() => {
+        _capacityVerified = true;
+        _setActionButtonsLocked(false);
+      });
+
       return true;
     };
 
@@ -382,16 +407,6 @@ async function savePastedTextImport() {
       return;
     }
 
-    if (window.rcUsage && typeof window.rcUsage.check === 'function') {
-      try {
-        const verdict = await window.rcUsage.check('book_import');
-        if (!verdict.allowed) {
-          setStatus('Token limit reached for imports today.');
-          return;
-        }
-      } catch (_) {}
-    }
-
     showStage('progress');
     doneBtn.style.display = 'none';
     setProgress(15, 'Preparing text import', `${pages.length} pages detected`);
@@ -415,7 +430,15 @@ async function savePastedTextImport() {
     if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
     else if (typeof localBookPut === 'function') await localBookPut(record);
     setProgress(100, 'Import complete', `${pages.length} pages created`);
-    try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('book_import'); } catch (_) {}
+    // Consume usage post-commit: book is already saved, so the import
+    // succeeds regardless of the verdict. The verdict is informational.
+    try {
+      if (window.rcUsage && typeof window.rcUsage.consume === 'function') {
+        const usageVerdict = await window.rcUsage.consume('book_import');
+        const usageMsg = _describeUsageConsumeVerdict(usageVerdict);
+        if (usageMsg) setProgress(100, 'Import complete', usageMsg);
+      }
+    } catch (_) {}
     await completeImportAndReturn(`${pages.length} pages created`);
   } catch (e) {
     console.error('Text import error:', e);
@@ -550,6 +573,17 @@ async function showModal() {
       return snapshot.limit == null
         ? `Saved on this device: ${snapshot.count}`
         : `Saved on this device: ${snapshot.count}/${snapshot.limit}`;
+    }
+
+    // Returns a human-readable note about a usage consume verdict, or null if
+    // no extra message is needed (e.g. allowed, or server was simply unavailable).
+    function _describeUsageConsumeVerdict(verdict) {
+      if (!verdict || verdict.allowed) return null;
+      const reason = String(verdict.reason || '');
+      if (reason === 'daily_limit_reached') return 'Daily import limit reached — resets at midnight UTC.';
+      if (reason === 'auth_required') return 'Sign in to track your import usage.';
+      // server_unavailable and server_error: book is saved, usage just wasn't recorded.
+      return null;
     }
 
     function syncImportEntryState(snapshot) {
@@ -955,17 +989,6 @@ async function showModal() {
         }
 
 
-if (window.rcUsage && typeof window.rcUsage.check === 'function') {
-  try {
-    const verdict = await window.rcUsage.check('book_import');
-    if (!verdict.allowed) {
-      setStatus('Token limit reached for imports today.');
-      showStage('upload');
-      return;
-    }
-  } catch (_) {}
-}
-
 showStage('progress');
 doneBtn.style.display = 'none';
 setProgress(0, 'Preparing', '');
@@ -1025,7 +1048,15 @@ setProgress(0, 'Preparing', '');
         await localBookPut(record);
 
         setProgress(100, 'Import complete', `${createdPages} pages created`);
-        try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('book_import'); } catch (_) {}
+        // Consume usage post-commit: book is already saved, so the import
+        // succeeds regardless of the verdict. The verdict is informational.
+        try {
+          if (window.rcUsage && typeof window.rcUsage.consume === 'function') {
+            const usageVerdict = await window.rcUsage.consume('book_import');
+            const usageMsg = _describeUsageConsumeVerdict(usageVerdict);
+            if (usageMsg) setProgress(100, 'Import complete', usageMsg);
+          }
+        } catch (_) {}
         await completeImportAndReturn(`${createdPages} pages created`);
       } catch (e) {
         console.error('EPUB import error:', e);
