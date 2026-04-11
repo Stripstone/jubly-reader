@@ -490,8 +490,9 @@
     if (!root) return [];
 
     const blocks = [];
-    const candidates = root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li');
-    candidates.forEach((el) => {
+    const nodes = root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li');
+    nodes.forEach((el) => {
+      if (!/^(H[1-6]|P|LI)$/i.test(el.tagName || '')) return;
       const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
       if (!txt) return;
       if (txt.length < 2) return;
@@ -502,6 +503,34 @@
       if (txt) blocks.push(txt);
     }
     return blocks;
+  }
+
+  function extractTextBlocksWithLeadingMarkersFromHtml(htmlStr) {
+    const doc = htmlParseSafe(htmlStr);
+    if (!doc) return [];
+    const root = doc.body || doc.documentElement;
+    if (!root) return [];
+
+    const items = [];
+    let pendingMarker = null;
+    const nodes = root.querySelectorAll('[id],[name],h1,h2,h3,h4,h5,h6,p,li');
+    nodes.forEach((el) => {
+      try {
+        const rawMarker = el.getAttribute('id') || el.getAttribute('name') || '';
+        const markerMatch = String(rawMarker).match(/^page[_-]?(\d+)$/i);
+        if (markerMatch) pendingMarker = Number(markerMatch[1]);
+      } catch (_) {}
+      if (!/^(H[1-6]|P|LI)$/i.test(el.tagName || '')) return;
+      const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!txt || txt.length < 2) return;
+      items.push({ text: txt, sourcePageNumber: Number.isFinite(pendingMarker) ? pendingMarker : null });
+      pendingMarker = null;
+    });
+    if (items.length === 0) {
+      const txt = (root.textContent || '').replace(/\s+/g, ' ').trim();
+      if (txt) items.push({ text: txt, sourcePageNumber: null });
+    }
+    return items;
   }
 
   function escapeRegExp(s) {
@@ -679,6 +708,50 @@
     return out;
   }
 
+
+
+  function mergeFragmentedBlockItems(items) {
+    const out = [];
+    const listLineRe = /^\s*(\d+[\.|\)]\s+|box\s+\d+\s*:|line\s+\d+\s*:|part\s+[ivxlcdm]+\b|[-•*]\s+)/i;
+    const strongEndRe = /[.!?]["'”’\)\]\}]*\s*$/;
+    const weakTailRe = /(?:,|;|:)\s*$/;
+    const startsContinuationRe = /^\s*(?:[a-z]|\(|\[|\{|and\b|or\b|but\b|nor\b|for\b|so\b|yet\b|because\b|which\b|who\b|whom\b|whose\b|that\b|to\b|of\b|in\b|on\b|at\b|by\b|from\b|with\b|without\b|under\b|over\b|between\b|among\b|through\b|into\b|onto\b)/i;
+
+    for (let i = 0; i < (items || []).length; i++) {
+      const curItem = items[i] && typeof items[i] === 'object' ? items[i] : null;
+      const cur = String(curItem?.text || '').trim();
+      if (!cur) continue;
+      const curSegments = Array.isArray(curItem?.segments) && curItem.segments.length
+        ? curItem.segments.filter(seg => String(seg?.text || '').trim())
+        : [{ text: cur, sourcePageNumber: Number.isFinite(Number(curItem?.sourcePageNumber)) ? Number(curItem.sourcePageNumber) : null }];
+      if (out.length === 0) { out.push({ text: cur, segments: curSegments }); continue; }
+
+      const prevItem = out[out.length - 1];
+      const prev = String(prevItem?.text || '').trim();
+      if (!prev) { out[out.length - 1] = { text: cur, segments: curSegments }; continue; }
+
+      if (looksLikeMajorHeading(prev)) { out.push({ text: cur, segments: curSegments }); continue; }
+      if (looksLikeMajorHeading(cur) && strongEndRe.test(prev)) { out.push({ text: cur, segments: curSegments }); continue; }
+      if (listLineRe.test(prev)) { out.push({ text: cur, segments: curSegments }); continue; }
+      if (listLineRe.test(cur) && strongEndRe.test(prev)) { out.push({ text: cur, segments: curSegments }); continue; }
+
+      if (/\b[A-Za-z]{2,}-$/.test(prev) && /^\s*[a-z]{2,}/.test(cur)) {
+        const mergedText = (prev.replace(/-\s*$/, '') + cur.replace(/^\s+/, '')).replace(/\s+/g, ' ').trim();
+        out[out.length - 1] = { text: mergedText, segments: [...(prevItem.segments || []), ...curSegments] };
+        continue;
+      }
+
+      const prevIncomplete = !strongEndRe.test(prev);
+      if (prevIncomplete || (weakTailRe.test(prev) && startsContinuationRe.test(cur))) {
+        const mergedText = (prev + ' ' + cur).replace(/\s+/g, ' ').trim();
+        out[out.length - 1] = { text: mergedText, segments: [...(prevItem.segments || []), ...curSegments] };
+        continue;
+      }
+      out.push({ text: cur, segments: curSegments });
+    }
+    return out;
+  }
+
   function isDecorativeSpacedHeading(text) {
     const s = String(text || '').trim();
     if (!s) return false;
@@ -696,296 +769,12 @@
   }
 
   
-  function chunkBlocksToPages(blocks) {
-    const pagesOut = [];
-
-    // Derive a consistent target from the chapter's own content so that every
-    // chapter auto-calibrates to its density — no user knob needed.
-    // NOMINAL_PAGE = ~1600 chars (~200 words). We compute how many such pages
-    // the chapter would naturally produce, then set target = totalChars / count
-    // so all pages land close to the same size.
-    const NOMINAL_PAGE = 1600;
-    const totalChars   = (blocks || []).reduce((s, b) => s + String(b || '').trim().length, 0);
-    const pageCount    = Math.max(1, Math.round(totalChars / NOMINAL_PAGE));
-    const target       = Math.max(400, Math.round(totalChars / pageCount));
-
-    const minChars = Math.max(200, Math.round(target * 0.5));
-    const softMax  = Math.round(target * 1.15);
-    const hardMax  = Math.max(softMax + 300, Math.round(target * 2.0)); // tighter ceiling
-
-    // A plain word: letters only, optional internal apostrophe (contractions).
-    const plainWordRe = /^[A-Za-z]+(?:['\u2019][A-Za-z]+)?$/;
-    const listLineRe  = /^\s*(?:\d+[.)]\s+|[-\u2022*]\s+)/i;
-
-    // Abbreviations whose trailing dot is NOT a sentence boundary.
-    // Covers titles, military ranks, civic titles, location suffixes, business/legal, and common shortenings.
-    const abbrevRe = /\b(?:Mr|Mrs|Ms|Miss|Dr|Prof|Rev|Hon|Sr|Jr|Capt|Maj|Lt|Sgt|Col|Gen|Cpl|Pvt|Cmdr|Cdr|Adm|Brig|Gov|Sen|Rep|Atty|Insp|Supt|Pres|St|Ave|Blvd|Rd|Ln|Ct|Sq|Dept|Est|Corp|Inc|Ltd|Co|Bros|Assn|Intl|etc|vs|approx|vol|chap|sec|no|art|fig|ed|trans|repr|rev|supp|pp|ibid|op|cf)\.\s*$/i;
-    const initialChainRe  = /(?:\b[A-Za-z]\.){2,}\s*$/;   // "U.S.A."  "J.K."
-    const singleInitialRe = /(?:^|\s)[A-Za-z]\.\s*$/;     // lone "J."
-
-    function norm(s)  { return String(s || '').replace(/\s+/g, ' ').trim(); }
-    function toks(s)  { return norm(s).split(' ').filter(Boolean); }
-    function plainCount(arr) { return arr.filter(t => plainWordRe.test(t)).length; }
-    function isListLine(s)   { return listLineRe.test(String(s || '').trim()); }
-
-    // Comma/semicolon rate: how list-like or enumeration-heavy a sentence is.
-    function commaRate(sentence) {
-      const words = toks(sentence).length;
-      if (!words) return 0;
-      return ((sentence.match(/[,;]/g) || []).length) / words;
-    }
-
-    // Collect valid hard-punctuation stops (. ? !) that are:
-    //   - outside all block delimiters: () [] {} "" \u201c\u201d
-    //   - not an abbreviation, initial chain, or lone initial
-    function collectStops(text) {
-      const t = String(text || '');
-      const stops = [];
-      let paren = 0, bracket = 0, brace = 0, straightQ = false, curlyQ = 0;
-
-      for (let i = 0; i < t.length; i++) {
-        const ch   = t[i];
-        const prev = i > 0 ? t[i - 1] : '';
-
-        if (ch === '"' && prev !== '\\') { straightQ = !straightQ;                  continue; }
-        if (ch === '\u201C')             { curlyQ++;                                 continue; }
-        if (ch === '\u201D')             { curlyQ = Math.max(0, curlyQ - 1);         continue; }
-        if (ch === '(') { paren++;                              continue; }
-        if (ch === ')') { paren   = Math.max(0, paren   - 1);  continue; }
-        if (ch === '[') { bracket++;                            continue; }
-        if (ch === ']') { bracket = Math.max(0, bracket - 1);  continue; }
-        if (ch === '{') { brace++;                              continue; }
-        if (ch === '}') { brace   = Math.max(0, brace   - 1);  continue; }
-
-        if (paren || bracket || brace || straightQ || curlyQ) continue;
-        if (ch !== '.' && ch !== '?' && ch !== '!') continue;
-
-        // Skip dots that are part of a URL/domain (e.g. founders.archives.gov).
-        // A sentence-ending period is always followed by whitespace or end-of-string.
-        if (ch === '.' && i + 1 < t.length && /[a-z]/.test(t[i + 1])) continue;
-
-        const tail = t.slice(0, i + 1);
-        if (abbrevRe.test(tail))                       continue;
-        if (initialChainRe.test(tail))                 continue;
-        if (ch === '.' && singleInitialRe.test(tail))  continue;
-
-        // Advance past trailing closers and whitespace to the cut point.
-        let cut = i + 1;
-        while (cut < t.length && /['\u2019"\u201D)\]}]/.test(t[cut])) cut++;
-        while (cut < t.length && /\s/.test(t[cut])) cut++;
-
-        stops.push({ punct: i, cut });
-      }
-      return stops;
-    }
-
-    // Score one candidate stop.  Returns null if validation fails.
-    function scoreStop(text, stop, allStops) {
-      const { punct, cut } = stop;
-
-      // ── Token-level gates ────────────────────────────────────────────────
-      const preSlice  = norm(text.slice(Math.max(0, punct - 200), punct));
-      const postSlice = norm(text.slice(cut, Math.min(text.length, cut + 200)));
-      const preToks   = toks(preSlice);
-      const postToks  = toks(postSlice);
-
-      // Hard gate: 3 plain words must exist in each window.
-      if (plainCount(preToks)  < 3) return null;
-      if (plainCount(postToks) < 3) return null;
-
-      // Hard gate: the very first token after the cut must be a plain word.
-      // Catches page starts like "archives.gov/...", "32,", "04 (c)", "(c) [Limitation".
-      const firstPostToken = postToks[0] || '';
-      if (!plainWordRe.test(firstPostToken)) return null;
-
-      // ── Ending sentence ────────────────────────────────────────────────
-      // The sentence whose period closes this page.
-      const prevStop      = [...allStops].reverse().find(s => s.cut <= Math.max(0, punct - 2));
-      const sentStart     = prevStop ? prevStop.cut : 0;
-      const endSentence   = norm(text.slice(sentStart, punct));
-      const endLen        = plainCount(toks(endSentence));
-      const endCommaRate  = commaRate(endSentence);
-
-      // ── Starting sentence ──────────────────────────────────────────────
-      // The sentence that opens the next page.
-      const nextStop      = allStops.find(s => s.punct > cut);
-      const nextPunct     = nextStop ? nextStop.punct : Math.min(text.length, cut + 500);
-      const startSentence = norm(text.slice(cut, nextPunct));
-      const startLen      = plainCount(toks(startSentence));
-      const startCommaRate = commaRate(startSentence);
-
-      let score = 0;
-
-      // ── Sentence shape scoring ─────────────────────────────────────────
-      // Both sides favour a moderate sentence length (not too terse, not sprawling).
-      // Ending page: ideal 14–22 words  →  peak reward = 30 pts
-      // Starting page: ideal 8–18 words →  peak reward = 22 pts
-      // Score falls linearly the further the sentence deviates from the ideal band.
-      const endIdeal = 18,  endBand = 10;   // peak ± band
-      const strIdeal = 13,  strBand = 8;
-      score += Math.max(0, endBand - Math.abs(endLen   - endIdeal)) * 3.0;
-      score += Math.max(0, strBand - Math.abs(startLen - strIdeal)) * 2.75;
-
-      // ── Comma / semicolon density penalty ─────────────────────────────
-      // High comma rate signals lists, enumerations, or supporting clauses —
-      // poor material for a page boundary on either side.
-      // A rate of 0.12 (≈1 comma per 8 words) is the threshold where prose
-      // starts feeling list-heavy; penalty scales sharply above that.
-      const endCommaExcess   = Math.max(0, endCommaRate   - 0.12);
-      const startCommaExcess = Math.max(0, startCommaRate - 0.12);
-      score -= endCommaExcess   * 120;
-      score -= startCommaExcess * 100;
-
-      // ── Last token before punct ───────────────────────────────────────
-      // If the word immediately before the period is not plain prose (e.g. a
-      // number, symbol, or punctuation-laden token like "322" or "below:"),
-      // the ending feels like a citation fragment or list marker.
-      // Apply a heavy score penalty — but don't hard-block, so that a clean
-      // page START can still rescue the break (e.g. "[00000]." → "This is...").
-      const lastPreToken = preToks[preToks.length - 1] || '';
-      if (!plainWordRe.test(lastPreToken)) {
-        // Pure digit (e.g. list marker "2", "1"): hard block — a sentence cannot
-        // end cleanly on a standalone number.
-        if (/^\d+$/.test(lastPreToken)) return null;
-        // Other non-plain tokens (brackets, symbols): heavy penalty but clean
-        // page start can still rescue the break.
-        score -= 60;
-      }
-
-      // ── Size proximity ─────────────────────────────────────────────────
-      const delta = cut - target;
-      if (delta < 0) {
-        score -= Math.abs(delta) / 40;
-      } else {
-        score -= delta / 15;
-        score -= Math.max(0, delta - Math.round(target * 0.1)) / 5;
-      }
-
-      return { cut, score };
-    }
-
-    function chooseCut(text) {
-      const t = String(text || '').trim();
-      if (!t) return -1;
-
-      const allStops = collectStops(t).filter(s => s.cut >= minChars);
-      if (!allStops.length) return -1;
-
-      // ── Pass 1: tight window (target ±30%) ──────────────────────────────
-      // Restricts candidates to stops near the target, enforcing size
-      // consistency. A good stop here always wins over a better stop at 2×
-      // target — consistency beats marginal quality gains at extreme distances.
-      const windowLo = Math.round(target * 0.7);
-      const windowHi = Math.round(target * 1.3);
-      const tightStops = allStops.filter(s => s.cut >= windowLo && s.cut <= windowHi);
-      const tightScored = tightStops.map(s => scoreStop(t, s, allStops)).filter(Boolean);
-      if (tightScored.length) {
-        tightScored.sort((a, b) => b.score - a.score || a.cut - b.cut);
-        return tightScored[0].cut;
-      }
-
-      // ── Pass 2: full range fallback ─────────────────────────────────────
-      // No scoreable stop in the tight window (dense citations, form fields,
-      // vendor lists). Accept any valid stop anywhere >= minChars.
-      const scored = allStops.map(s => scoreStop(t, s, allStops)).filter(Boolean);
-      if (!scored.length) return -1;
-
-      scored.sort((a, b) => b.score - a.score || a.cut - b.cut);
-      return scored[0].cut;
-    }
-
-    // Find the paragraph boundary (\n\n) closest to `target` that is >= minChars.
-    // Returns the index just after the boundary, or -1 if none found.
-    function nearestBlockBoundaryCut(text, tgt, min) {
-      const re = /\n\n/g;
-      let best = -1, bestDist = Infinity, m;
-      while ((m = re.exec(text)) !== null) {
-        if (m.index < min) continue;
-        const dist = Math.abs(m.index - tgt);
-        if (dist < bestDist) { bestDist = dist; best = m.index + 2; }
-      }
-      return best;
-    }
-
-    function flushBuffer(force = false) {
-      let t = String(buf || '').trim();
-      while (t) {
-        if (!force && t.length <= softMax) break;
-        const cut = chooseCut(t);
-        if (cut < 0 || cut >= t.length) {
-          if (force) {
-            // No sentence stop found. Try a paragraph boundary near target so
-            // list-dense content (form fields, vendor lists) breaks gracefully
-            // instead of producing one massive page.
-            const bbCut = nearestBlockBoundaryCut(t, target, minChars);
-            if (bbCut > 0 && bbCut < t.length) {
-              pagesOut.push(t.slice(0, bbCut).trim());
-              t = t.slice(bbCut).trim();
-              continue;
-            }
-            pagesOut.push(t); t = '';
-          }
-          break;
-        }
-        pagesOut.push(t.slice(0, cut).trim());
-        t = t.slice(cut).trim();
-      }
-      buf = t;
-    }
-
-    const cleanBlocks = (blocks || []).map(b => String(b || '').trim()).filter(Boolean);
-    let buf = '';
-
-    for (const block of cleanBlocks) {
-      // Always start a fresh page at a major section heading.
-      if (looksLikeMajorHeading(block) && buf.length >= minChars) {
-        flushBuffer(true);
-      }
-      buf = buf ? `${buf}\n\n${block}` : block;
-      flushBuffer(false);
-      // Safety valve: force a break if the buffer grows far beyond hardMax.
-      if (buf.length > hardMax) flushBuffer(true);
-    }
-
-    flushBuffer(true);
-
-    // Absorb orphan pages (below minChars) into the preceding page.
-    const merged = [];
-    for (const p of pagesOut) {
-      const page = String(p || '').trim();
-      if (!page) continue;
-      if (!merged.length) { merged.push(page); continue; }
-      const prev = merged[merged.length - 1];
-      const combined = prev + '\n\n' + page;
-      // Absorb threshold: target * 0.7 so short sections (vendor lists,
-      // boilerplate paragraphs) merge with the preceding page rather than
-      // standing alone as micro pages. The old minChars (target * 0.5) was
-      // too low — pages just above it were visibly undersized.
-      const absorbThreshold = Math.round(target * 0.7);
-      if (page.length < absorbThreshold && combined.length <= hardMax && !isListLine(page)) {
-        merged[merged.length - 1] = combined.trim();
-      } else {
-        merged.push(page);
-      }
-    }
-    return merged;
+  function chunkBlocksToPages() {
+    throw new Error('Client page breaking has moved to the server page-break route.');
   }
-  function buildMarkdownBookFromSections(sections) {
-    const out = [];
-    (sections || []).forEach((sec) => {
-      const title = (sec?.title || 'Untitled Section').trim();
-      out.push(`# ${title}`);
-      out.push('');
-      const pages = chunkBlocksToPages(sec?.blocks || []);
-      pages.forEach((p, idx) => {
-        out.push(`## Page ${idx + 1}`);
-        out.push('');
-        out.push(p);
-        out.push('');
-      });
-      out.push('');
-    });
-    return out.join('\n');
+
+  function buildMarkdownBookFromSections() {
+    throw new Error('Client page breaking has moved to the server page-break route.');
   }
 
   function _normEpubHref(href) {
@@ -1290,15 +1079,23 @@
       for (let s = it.spineIndex; s < endSpine; s++) {
         const href = spine[s];
         const html = await zipReadText(zip, href);
-        let cleaned = extractTextBlocksFromHtml(html)
-          .map(b => cleanImportedBlock(b, { bookTitle, artifactTitles: toc.map(x => x.title) }))
-          .filter(b => b && (!cleanupHeadings || !isDecorativeSpacedHeading(b)));
-        cleaned = mergeFragmentedBlocks(cleaned);
-        cleaned = cleaned.filter(b => b && (!cleanupHeadings || !isDecorativeSpacedHeading(b)));
+        let cleanedItems = extractTextBlocksWithLeadingMarkersFromHtml(html)
+          .map(item => {
+            const cleanedText = cleanImportedBlock(item?.text || '', { bookTitle, artifactTitles: toc.map(x => x.title) });
+            const sourcePageNumber = Number.isFinite(Number(item?.sourcePageNumber)) ? Number(item.sourcePageNumber) : null;
+            return {
+              text: cleanedText,
+              sourcePageNumber,
+              segments: [{ text: cleanedText, sourcePageNumber }],
+            };
+          })
+          .filter(item => item.text && (!cleanupHeadings || !isDecorativeSpacedHeading(item.text)));
+        cleanedItems = mergeFragmentedBlockItems(cleanedItems);
+        cleanedItems = cleanedItems.filter(item => item.text && (!cleanupHeadings || !isDecorativeSpacedHeading(item.text)));
 
         let startIdx = 0;
-        let endIdx = cleaned.length;
-        if (s === it.spineIndex && Number.isFinite(it.blockIndex)) startIdx = Math.min(cleaned.length, Math.max(0, it.blockIndex));
+        let endIdx = cleanedItems.length;
+        if (s === it.spineIndex && Number.isFinite(it.blockIndex)) startIdx = Math.min(cleanedItems.length, Math.max(0, it.blockIndex));
         if (s === it.spineIndex && nextSameSpine && Number.isFinite(nextSameSpine.blockIndex)) endIdx = Math.min(endIdx, Math.max(startIdx, nextSameSpine.blockIndex));
         if (s === endSpine - 1 && !nextSameSpine) {
           // If the next TOC item starts inside the same final spine doc, stop there.
@@ -1311,14 +1108,28 @@
             if (typeof nxt.spineIndex === 'number' && nxt.spineIndex > s) break;
           }
         }
-        for (let bi = startIdx; bi < endIdx; bi++) blocks.push(cleaned[bi]);
+        let lastMarker = null;
+        for (let bi = startIdx; bi < endIdx; bi++) {
+          const entry = cleanedItems[bi];
+          const segments = Array.isArray(entry?.segments) && entry.segments.length ? entry.segments : [{ text: entry?.text || '', sourcePageNumber: null }];
+          for (const seg of segments) {
+            const segText = String(seg?.text || '').trim();
+            if (!segText) continue;
+            const markerNum = Number(seg?.sourcePageNumber);
+            if (Number.isFinite(markerNum) && markerNum > 0 && markerNum !== lastMarker) {
+              blocks.push(`[[RC_PAGE:${markerNum}]]`);
+              lastMarker = markerNum;
+            }
+            blocks.push(segText);
+          }
+        }
       }
       sections.push({ title: it.title, blocks });
       done++;
       if (typeof onProgress === 'function') onProgress({ done, total: chosen.length });
     }
 
-    return buildMarkdownBookFromSections(sections);
+    return sections;
   }
 
   async function initBookImporter() {
@@ -1347,6 +1158,8 @@
     // When chapters exist, we keep chapter pages in memory
     let chapterList = []; // {title, raw}
     let currentPages = []; // [{title, text}]
+    let currentBookPageMeta = []; // [{title, sourcePageNumber}] aligned to whole-book pages
+    let currentChapterPageOffsets = [];
     let currentChapterIndex = null;
 
     function getReadingTargetContext() {
@@ -1399,6 +1212,45 @@
       return count;
     }
 
+    function normalizeSourcePageMeta(entry, idx) {
+      const item = (entry && typeof entry === 'object') ? entry : {};
+      const rawNum = Number(item.sourcePageNumber);
+      const sourcePageNumber = Number.isFinite(rawNum) && rawNum > 0 ? Math.round(rawNum) : (idx + 1);
+      const title = typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `Page ${sourcePageNumber}`;
+      return { title, sourcePageNumber };
+    }
+
+    function applySourcePageMeta(pagesIn, meta, startOffset = 0) {
+      const pagesList = Array.isArray(pagesIn) ? pagesIn : [];
+      const metaList = Array.isArray(meta) ? meta : [];
+      return pagesList.map((page, idx) => {
+        const pageTitle = page?.title || `Page ${idx + 1}`;
+        const rawMeta = metaList[startOffset + idx];
+        if (!rawMeta) {
+          return {
+            title: pageTitle,
+            text: page?.text || '',
+            sourcePageNumber: idx + 1,
+          };
+        }
+        const metaEntry = normalizeSourcePageMeta(rawMeta, idx);
+        return {
+          title: pageTitle,
+          text: page?.text || '',
+          sourcePageNumber: metaEntry.sourcePageNumber,
+        };
+      });
+    }
+
+    function rebuildChapterPageOffsets() {
+      currentChapterPageOffsets = [];
+      let running = 0;
+      chapterList.forEach((chapter) => {
+        currentChapterPageOffsets.push(running);
+        running += parsePagesWithTitles(chapter.raw).length;
+      });
+    }
+
     function parsePagesWithTitles(raw) {
       const text = String(raw || "");
       const lines = text.split(/\r?\n/);
@@ -1413,7 +1265,7 @@
           .filter(l => l && !/^\s{0,3}#{1,6}\s+/.test(l) && !/^\s*[—-]{2,}\s*$/.test(l));
 
         const body = cleaned.join(" ").trim();
-        if (body) pages.push({ title: cur.title, text: body });
+        if (body) pages.push({ title: cur.title, text: body, sourcePageNumber: pages.length + 1 });
       }
 
       for (const line of lines) {
@@ -1429,44 +1281,39 @@
       }
       push();
 
-      // Fallback: if no H2 pages were detected, try --- separators
       if (pages.length <= 1) {
         const blocks = String(raw || "").trim().split(/\n---\n/g);
         if (blocks.length > 1) {
           const out = [];
-          blocks.forEach((blk, i) => {
+          blocks.forEach((blk) => {
             const cleaned = blk.split(/\r?\n/)
               .map(l => l.trim())
               .filter(l => l && !/^\s{0,3}#{1,6}\s+/.test(l) && !/^\s*[—-]{2,}\s*$/.test(l));
             const body = cleaned.join(" ").trim();
-            if (body) out.push({ title: `Page ${out.length + 1}`, text: body });
+            if (body) out.push({ title: `Page ${out.length + 1}`, text: body, sourcePageNumber: out.length + 1 });
           });
           return out.length ? out : pages;
         }
       }
 
-      
-  // If the user didn't use explicit separators (--- / ## Page X), fall back to a
-  // "paragraph pages" heuristic: blocks separated by one-or-more blank lines.
-  // This matches typical copy/paste behavior (news articles, essays, etc.).
-  const usedExplicitSeparators = /\n\s*---\s*\n/.test(raw) || /^\s*##\s*Page\s+\d+/im.test(raw);
-  if (!usedExplicitSeparators) {
-    const blocks = raw
-      .replace(/\r\n?/g, "\n")
-      .split(/\n\s*\n+/)
-      .map(b => b.trim())
-      .filter(Boolean);
+      const usedExplicitSeparators = /\n\s*---\s*\n/.test(raw) || /^\s*##\s*Page\s+\d+/im.test(raw);
+      if (!usedExplicitSeparators) {
+        const blocks = raw
+          .replace(/\r\n?/g, "\n")
+          .split(/\n\s*\n+/)
+          .map(b => b.trim())
+          .filter(Boolean);
 
-    // If we got multiple blocks, treat each as a page.
-    if (blocks.length > 1) {
-      pages = blocks.map((b, i) => ({
-        title: `Page ${i + 1}`,
-        text: b.replace(/\s+/g, " ").trim()
-      }));
-    }
-  }
+        if (blocks.length > 1) {
+          pages = blocks.map((b, i) => ({
+            title: `Page ${i + 1}`,
+            text: b.replace(/\s+/g, " ").trim(),
+            sourcePageNumber: i + 1,
+          }));
+        }
+      }
 
-  return pages;
+      return pages;
     }
 
     function setSelectOptions(selectEl, options, placeholder) {
@@ -1493,15 +1340,18 @@
         return;
       }
 
-      const opts = currentPages.map((p, idx) => ({
-        value: idx,
-        label: `${idx + 1}. ${p.title || `Page ${idx + 1}`}`
-      }));
+      const opts = currentPages.map((p, idx) => {
+        const sourcePageNumber = Number(p?.sourcePageNumber);
+        const title = p?.title || `Page ${idx + 1}`;
+        const numericLabel = Number.isFinite(sourcePageNumber) && sourcePageNumber > 0 ? `Page ${sourcePageNumber}` : `Page ${idx + 1}`;
+        return {
+          value: idx,
+          label: title && title !== numericLabel ? `${numericLabel} — ${title}` : numericLabel
+        };
+      });
 
       setSelectOptions(pageStart, opts, "Start page…");
       setSelectOptions(pageEnd, opts, "End page…");
-
-      // Default to full range
       pageStart.value = "0";
       pageEnd.value = String(currentPages.length - 1);
     }
@@ -1511,6 +1361,11 @@
         return chapterList[currentChapterIndex].raw;
       }
       return currentBookRaw;
+    }
+
+    function getCurrentChapterPageOffset() {
+      if (!hasExplicitChapters || !Number.isFinite(currentChapterIndex)) return 0;
+      return Number(currentChapterPageOffsets[currentChapterIndex] || 0);
     }
 
     // Async so that loadBook can await full render + restore before resolving.
@@ -1525,13 +1380,14 @@
       if (!hasExplicitChapters) {
         chapterControls.style.display = "none";
         currentChapterIndex = null;
-        const bookPages = parsePagesWithTitles(currentBookRaw);
+        const bookPages = applySourcePageMeta(parsePagesWithTitles(currentBookRaw), currentBookPageMeta, 0);
         populatePagesSelect(bookPages);
         try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, bookPages.length - 1)); } catch (_) {}
         // Await render completion so the restore scroll finishes before the caller
         // removes reading-restore-pending and reveals pages to the user.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
-        if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true });
+        const pageMeta = bookPages.map((p, idx) => ({ title: p.title || `Page ${idx + 1}`, sourcePageNumber: Number.isFinite(Number(p?.sourcePageNumber)) ? Number(p.sourcePageNumber) : (idx + 1) }));
+        if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true, pageMeta });
         return;
       }
 
@@ -1542,12 +1398,14 @@
       chapterSelect.value = String(nextChapterIndex);
       currentChapterIndex = nextChapterIndex;
 
-      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
+      const chapterOffset = getCurrentChapterPageOffset();
+      const chapterPages = applySourcePageMeta(parsePagesWithTitles(getCurrentChapterRaw()), currentBookPageMeta, chapterOffset);
       populatePagesSelect(chapterPages);
       try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, chapterPages.length - 1)); } catch (_) {}
       // Await render completion before resolving.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true });
+      const pageMeta = chapterPages.map((p, idx) => ({ title: p.title || `Page ${idx + 1}`, sourcePageNumber: Number.isFinite(Number(p?.sourcePageNumber)) ? Number(p.sourcePageNumber) : (idx + 1) }));
+      if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta });
     }
 
     async function loadManifest() {
@@ -1592,6 +1450,8 @@
     async function loadBook(id, options = {}) {
       currentBookRaw = "";
       chapterList = [];
+      currentBookPageMeta = [];
+      currentChapterPageOffsets = [];
       hasExplicitChapters = false;
       currentChapterIndex = null;
 
@@ -1605,8 +1465,12 @@
           const rec = await localBookGet(stripLocalPrefix(id));
           if (!rec || typeof rec.markdown !== 'string') throw new Error('local book missing');
           currentBookRaw = rec.markdown;
+          currentBookPageMeta = Array.isArray(rec.pageMeta) ? rec.pageMeta : [];
           hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
-          if (hasExplicitChapters) chapterList = parseChaptersFromMarkdown(currentBookRaw);
+          if (hasExplicitChapters) {
+            chapterList = parseChaptersFromMarkdown(currentBookRaw);
+            rebuildChapterPageOffsets();
+          }
           // Await so loadBook only resolves after render() + applyPendingReadingRestore().
           await refreshChapterAndPagesUI(options);
           return;
@@ -1635,6 +1499,7 @@
         hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
         if (hasExplicitChapters) {
           chapterList = parseChaptersFromMarkdown(currentBookRaw);
+          rebuildChapterPageOffsets();
         }
 
         await refreshChapterAndPagesUI(options);
@@ -1646,6 +1511,7 @@
             hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
             if (hasExplicitChapters) {
               chapterList = parseChaptersFromMarkdown(currentBookRaw);
+              rebuildChapterPageOffsets();
             }
             await refreshChapterAndPagesUI(options);
             return;
@@ -1663,10 +1529,10 @@
     // reading-entry path can await full render completion before revealing pages.
     // Fire-and-forget callers (chapter select, page slice controls) simply ignore
     // the returned promise, which is safe — they don't use the restore path.
-    function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false } = {}) {
+    function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false, pageMeta = null } = {}) {
       bulkInput.value = String(text || "").trim();
-      if (append) return appendPages();
-      return addPages({ preservePendingRestore });
+      if (append) return appendPages({ pageMeta });
+      return addPages({ preservePendingRestore, pageMeta });
     }
 
     // Events
@@ -1692,7 +1558,8 @@
       const selectedIdx = idx;
       currentChapterIndex = selectedIdx;
 
-      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
+      const chapterOffset = getCurrentChapterPageOffset();
+      const chapterPages = applySourcePageMeta(parsePagesWithTitles(getCurrentChapterRaw()), currentBookPageMeta, chapterOffset);
       populatePagesSelect(chapterPages);
 
       // Immediately replace rendered page cards with the new chapter's content.
@@ -1701,7 +1568,8 @@
       // closes the race window between chapter assignment and card DOM update —
       // no Load button click required, no timing assumption.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      applySelectionToBulkInput(chapterText, { append: false });
+      const pageMeta = chapterPages.map((p, idx) => ({ title: p.title || `Page ${idx + 1}`, sourcePageNumber: Number.isFinite(Number(p?.sourcePageNumber)) ? Number(p.sourcePageNumber) : (idx + 1) }));
+      applySelectionToBulkInput(chapterText, { append: false, pageMeta });
     });
 
     // Keep end >= start
@@ -1730,12 +1598,11 @@
       const s = Math.max(0, parseInt(pageStart.value || "0", 10));
       const e = Math.max(s, parseInt(pageEnd.value || String(s), 10));
 
-      const slice = currentPages
-        .slice(s, e + 1)
-        .map((p) => p.text)
-        .filter(Boolean);
+      const selectedPages = currentPages.slice(s, e + 1);
+      const slice = selectedPages.map((p) => p.text).filter(Boolean);
+      const pageMeta = selectedPages.map((p, idx) => ({ title: p.title || `Page ${s + idx + 1}`, sourcePageNumber: Number.isFinite(Number(p?.sourcePageNumber)) ? Number(p.sourcePageNumber) : (s + idx + 1) }));
       // Keep delimiter in a single JS string line (prevents accidental raw-newline parse errors)
-      applySelectionToBulkInput(slice.join("\n---\n"), { append: false });
+      applySelectionToBulkInput(slice.join("\n---\n"), { append: false, pageMeta });
     });
 
     appendBtn.addEventListener("click", () => {
@@ -1752,12 +1619,11 @@
       const s = Math.max(0, parseInt(pageStart.value || "0", 10));
       const e = Math.max(s, parseInt(pageEnd.value || String(s), 10));
 
-      const slice = currentPages
-        .slice(s, e + 1)
-        .map((p) => p.text)
-        .filter(Boolean);
+      const selectedPages = currentPages.slice(s, e + 1);
+      const slice = selectedPages.map((p) => p.text).filter(Boolean);
+      const pageMeta = selectedPages.map((p, idx) => ({ title: p.title || `Page ${s + idx + 1}`, sourcePageNumber: Number.isFinite(Number(p?.sourcePageNumber)) ? Number(p.sourcePageNumber) : (s + idx + 1) }));
 
-      applySelectionToBulkInput(slice.join("\n---\n"), { append: true });
+      applySelectionToBulkInput(slice.join("\n---\n"), { append: true, pageMeta });
     });
 
     async function populateBookSelectWithLocal() {
@@ -1837,13 +1703,13 @@
     goalCharCount = parseInt(document.getElementById("goalCharInput").value);
     if (!input || !input.trim()) return;
 
-    // UX rule: whenever user generates new pages, start fresh (no leftover pages)
     if (pages.length > 0) resetSession({ confirm: false, preservePendingRestore: !!options.preservePendingRestore });
 
-    // Split pasted text into pages using paragraph breaks (blank lines).
-    // Still supports legacy delimiters (--- / "## Page X") if present.
     const newPages = splitIntoPages(input);
-    for (const pageText of newPages) {
+    const incomingMeta = Array.isArray(options.pageMeta) ? options.pageMeta : [];
+    const nextPageMeta = [];
+    for (let pageIdx = 0; pageIdx < newPages.length; pageIdx++) {
+      const pageText = newPages[pageIdx];
       const pageHash = await stableHashText(pageText);
       let consolidation = "";
       let rating = 0;
@@ -1867,66 +1733,12 @@
         }
       } catch (_) {}
 
+      const assignedIndex = pages.length;
       pages.push(pageText);
-      pageData.push({
-        text: pageText,
-        consolidation,
-        aiExpanded,
-        aiFeedbackRaw,
-        aiAt,
-        aiRating,
-        charCount: (consolidation || "").length,
-        completedOnTime: true, // Assume true until sandstoned
-        isSandstone,
-        rating,
-        // Anchors
-        pageHash,
-        anchors: null,
-        anchorVersion: 0,
-        anchorsMeta: null
+      nextPageMeta.push({
+        title: incomingMeta[pageIdx]?.title || `Page ${assignedIndex + 1}`,
+        sourcePageNumber: Number.isFinite(Number(incomingMeta[pageIdx]?.sourcePageNumber)) ? Number(incomingMeta[pageIdx].sourcePageNumber) : (assignedIndex + 1)
       });
-    }
-
-    document.getElementById("bulkInput").value = "";
-    schedulePersistSession();
-    render();
-    checkSubmitButton();
-  }
-
-  // Append pages to the existing session (does NOT clear pages/timers/ratings).
-  // Uses the same splitting rules as addPages().
-  async function appendPages() {
-    const input = document.getElementById("bulkInput").value;
-    goalTime = parseInt(document.getElementById("goalTimeInput").value);
-    goalCharCount = parseInt(document.getElementById("goalCharInput").value);
-    if (!input || !input.trim()) return;
-
-    const newPages = splitIntoPages(input);
-    for (const pageText of newPages) {
-      const pageHash = await stableHashText(pageText);
-      let consolidation = "";
-      let rating = 0;
-      let isSandstone = false;
-      let aiExpanded = false;
-      let aiFeedbackRaw = "";
-      let aiAt = null;
-      let aiRating = null;
-      try {
-        const rawC = localStorage.getItem(getConsolidationCacheKey(pageHash));
-        if (rawC) {
-          const rec = JSON.parse(rawC);
-          if (rec && typeof rec.consolidation === 'string') consolidation = rec.consolidation;
-          const r = Number(rec?.rating || 0);
-          rating = Number.isFinite(r) ? r : 0;
-          isSandstone = !!rec?.isSandstone;
-          aiExpanded = !!rec?.aiExpanded;
-          aiFeedbackRaw = typeof rec?.aiFeedbackRaw === 'string' ? rec.aiFeedbackRaw : "";
-          aiAt = rec?.aiAt ?? null;
-          aiRating = rec?.aiRating ?? null;
-        }
-      } catch (_) {}
-
-      pages.push(pageText);
       pageData.push({
         text: pageText,
         consolidation,
@@ -1938,7 +1750,6 @@
         completedOnTime: true,
         isSandstone,
         rating,
-        // Anchors
         pageHash,
         anchors: null,
         anchorVersion: 0,
@@ -1947,6 +1758,73 @@
     }
 
     document.getElementById("bulkInput").value = "";
+    try { if (typeof setPageMeta === 'function') setPageMeta(nextPageMeta); } catch (_) {}
+    schedulePersistSession();
+    render();
+    checkSubmitButton();
+  }
+
+  async function appendPages(options = {}) {
+    const input = document.getElementById("bulkInput").value;
+    goalTime = parseInt(document.getElementById("goalTimeInput").value);
+    goalCharCount = parseInt(document.getElementById("goalCharInput").value);
+    if (!input || !input.trim()) return;
+
+    const newPages = splitIntoPages(input);
+    const incomingMeta = Array.isArray(options.pageMeta) ? options.pageMeta : [];
+    const nextPageMeta = (typeof getPageMetaSnapshot === 'function') ? getPageMetaSnapshot() : [];
+    for (let pageIdx = 0; pageIdx < newPages.length; pageIdx++) {
+      const pageText = newPages[pageIdx];
+      const pageHash = await stableHashText(pageText);
+      let consolidation = "";
+      let rating = 0;
+      let isSandstone = false;
+      let aiExpanded = false;
+      let aiFeedbackRaw = "";
+      let aiAt = null;
+      let aiRating = null;
+      try {
+        const rawC = localStorage.getItem(getConsolidationCacheKey(pageHash));
+        if (rawC) {
+          const rec = JSON.parse(rawC);
+          if (rec && typeof rec.consolidation === 'string') consolidation = rec.consolidation;
+          const r = Number(rec?.rating || 0);
+          rating = Number.isFinite(r) ? r : 0;
+          isSandstone = !!rec?.isSandstone;
+          aiExpanded = !!rec?.aiExpanded;
+          aiFeedbackRaw = typeof rec?.aiFeedbackRaw === 'string' ? rec.aiFeedbackRaw : "";
+          aiAt = rec?.aiAt ?? null;
+          aiRating = rec?.aiRating ?? null;
+        }
+      } catch (_) {}
+
+      const assignedIndex = pages.length;
+      pages.push(pageText);
+      nextPageMeta.push({
+        title: incomingMeta[pageIdx]?.title || `Page ${assignedIndex + 1}`,
+        sourcePageNumber: Number.isFinite(Number(incomingMeta[pageIdx]?.sourcePageNumber)) ? Number(incomingMeta[pageIdx].sourcePageNumber) : (assignedIndex + 1)
+      });
+      pageData.push({
+        text: pageText,
+        consolidation,
+        aiExpanded,
+        aiFeedbackRaw,
+        aiAt,
+        aiRating,
+        charCount: (consolidation || "").length,
+        completedOnTime: true,
+        isSandstone,
+        rating,
+        pageHash,
+        anchors: null,
+        anchorVersion: 0,
+        anchorsMeta: null
+      });
+    }
+
+    document.getElementById("bulkInput").value = "";
+    try { if (typeof setPageMeta === 'function') setPageMeta(nextPageMeta); } catch (_) {}
+    schedulePersistSession();
     render();
     checkSubmitButton();
   }
@@ -1959,6 +1837,7 @@
     }
     pages = [];
     pageData = [];
+    try { if (typeof setPageMeta === 'function') setPageMeta([]); } catch (_) {}
     timers = [];
     intervals.forEach(i => clearInterval(i));
     intervals = [];
@@ -2010,7 +1889,7 @@
       // in reading mode. applyModeVisibility() handles display toggling when
       // mode changes, but in reading mode these elements simply do not exist.
       page.innerHTML = `
-        <div class="page-header">Page ${i + 1}</div>
+        <div class="page-header">${(typeof getDisplayPageLabel === "function") ? getDisplayPageLabel(i) : `Page ${i + 1}`}</div>
         <div class="page-text">${escapeHtml(text)}</div>
 
         ${_isReadingMode ? '' : `

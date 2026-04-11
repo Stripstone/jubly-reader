@@ -82,6 +82,17 @@
     return out;
   }
 
+  async function requestServerPageBreak(payload) {
+    const response = await fetch(apiUrl('/api/content?action=page-break'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(data?.error || `Page breaking failed (${response.status})`);
+    return data || {};
+  }
+
   function parseChaptersFromMarkdown(raw) {
     const text = String(raw || "");
     const lines = text.split(/\r?\n/);
@@ -170,6 +181,7 @@
 
     const keepParasChk = document.getElementById('importKeepParagraphs');
     const cleanupHeadingsChk = document.getElementById('importCleanupHeadings');
+    const breakByPageNumberChk = document.getElementById('importBreakByPageNumber');
 
     const previewTitle = document.getElementById('importPreviewTitle');
     const previewBody = document.getElementById('importPreviewBody');
@@ -375,6 +387,7 @@
         byteSize: raw.length,
         pageCount: pages.length,
         markdown,
+        pageMeta: pages.map((_, idx) => ({ title: `Page ${idx + 1}`, sourcePageNumber: idx + 1 })),
       };
 
       setProgress(75, 'Saving to device', `${pages.length} pages created`);
@@ -937,7 +950,7 @@
         // keepParasChk is currently informational; paragraph preservation is the default behavior.
         const cleanupHeadings = !!cleanupHeadingsChk?.checked;
 
-        const md = await epubToMarkdownFromSelected(
+        const sections = await epubToMarkdownFromSelected(
           _zip,
           _tocItems,
           selectedIds,
@@ -952,8 +965,17 @@
           }
         );
 
-        // Estimate page count by counting H2
-        createdPages = (md.match(/^\s*##\s+/gm) || []).length;
+        const pageBreak = await requestServerPageBreak({
+          kind: 'sections',
+          sections,
+          options: {
+            breakByPageNumber: !(breakByPageNumberChk && breakByPageNumberChk.checked === false),
+          },
+        });
+        const md = String(pageBreak?.markdown || '');
+        const pageMeta = Array.isArray(pageBreak?.pageMeta) ? pageBreak.pageMeta : [];
+
+        createdPages = Number(pageBreak?.pageCount || pageMeta.length || (md.match(/^\s*##\s+/gm) || []).length);
         setProgress(92, 'Saving to device', `${createdPages} pages created`);
 
         const record = {
@@ -965,7 +987,8 @@
           importKind: (_inputFormat || 'epub').toLowerCase(),
           byteSize: _file.size || 0,
           pageCount: createdPages,
-          markdown: md
+          markdown: md,
+          pageMeta: pageMeta
         };
         await localBookPut(record);
 
