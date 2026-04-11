@@ -484,38 +484,24 @@
   }
 
   function extractTextBlocksFromHtml(htmlStr) {
-    return extractTextBlockEntriesFromHtml(htmlStr).map((entry) => entry.text).filter(Boolean);
-  }
-
-  function extractTextBlockEntriesFromHtml(htmlStr) {
     const doc = htmlParseSafe(htmlStr);
     if (!doc) return [];
     const root = doc.body || doc.documentElement;
     if (!root) return [];
 
-    const entries = [];
-    const markerRe = /(?:^|[_:-])page[_:-]?(\d+)$/i;
-    let currentPageNumber = null;
-    const all = root.querySelectorAll('*');
-    all.forEach((el) => {
-      try {
-        const markerAttr = String(el.getAttribute('id') || el.getAttribute('name') || '').trim();
-        const markerMatch = markerAttr.match(markerRe);
-        if (markerMatch) {
-          const markerNum = Number(markerMatch[1]);
-          if (Number.isFinite(markerNum) && markerNum > 0) currentPageNumber = markerNum;
-        }
-      } catch (_) {}
-      if (!/^(H1|H2|H3|H4|H5|H6|P|LI)$/.test(el.tagName || '')) return;
+    const blocks = [];
+    const candidates = root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li');
+    candidates.forEach((el) => {
       const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
-      if (!txt || txt.length < 2) return;
-      entries.push({ text: txt, sourcePageNumber: currentPageNumber });
+      if (!txt) return;
+      if (txt.length < 2) return;
+      blocks.push(txt);
     });
-    if (entries.length === 0) {
+    if (blocks.length === 0) {
       const txt = (root.textContent || '').replace(/\s+/g, ' ').trim();
-      if (txt) entries.push({ text: txt, sourcePageNumber: currentPageNumber });
+      if (txt) blocks.push(txt);
     }
-    return entries;
+    return blocks;
   }
 
   function escapeRegExp(s) {
@@ -634,46 +620,6 @@
   }
 
   
-
-function mergeFragmentedBlockEntries(entries) {
-  const rawEntries = (entries || []).map((entry) => ({
-    text: String(entry && entry.text || '').trim(),
-    sourcePageNumber: Number.isFinite(Number(entry && entry.sourcePageNumber)) ? Number(entry.sourcePageNumber) : null,
-  })).filter((entry) => entry.text);
-  const out = [];
-  const listLineRe = /^\s*(\d+[\.|\)]\s+|box\s+\d+\s*:|line\s+\d+\s*:|part\s+[ivxlcdm]+|[-•*]\s+)/i;
-  const strongEndRe = /[.!?]["'”’\)\]\}]*\s*$/;
-  const weakTailRe = /(?:,|;|:)\s*$/;
-  const startsContinuationRe = /^\s*(?:[a-z]|\(|\[|\{|and|or|but|nor|for|so|yet|because|which|who|whom|whose|that|to|of|in|on|at|by|from|with|without|under|over|between|among|through|into|onto)/i;
-
-  for (let i = 0; i < rawEntries.length; i++) {
-    const cur = rawEntries[i];
-    const curText = String(cur.text || '').trim();
-    if (!curText) continue;
-    if (out.length === 0) { out.push({ ...cur, text: curText }); continue; }
-
-    const prev = out[out.length - 1];
-    const prevText = prev.text;
-    if (looksLikeMajorHeading(prevText)) { out.push({ ...cur, text: curText }); continue; }
-    if (looksLikeMajorHeading(curText) && strongEndRe.test(prevText)) { out.push({ ...cur, text: curText }); continue; }
-    if (listLineRe.test(prevText)) { out.push({ ...cur, text: curText }); continue; }
-    if (listLineRe.test(curText) && strongEndRe.test(prevText)) { out.push({ ...cur, text: curText }); continue; }
-    if (/[A-Za-z]{2,}-$/.test(prevText) && /^\s*[a-z]{2,}/.test(curText)) {
-      prev.text = (prevText.replace(/-\s*$/, '') + curText.replace(/^\s+/, '')).replace(/\s+/g, ' ').trim();
-      if (!Number.isFinite(Number(prev.sourcePageNumber)) && Number.isFinite(Number(cur.sourcePageNumber))) prev.sourcePageNumber = Number(cur.sourcePageNumber);
-      continue;
-    }
-    const prevIncomplete = !strongEndRe.test(prevText);
-    if (prevIncomplete || (weakTailRe.test(prevText) && startsContinuationRe.test(curText))) {
-      prev.text = (prevText + ' ' + curText).replace(/\s+/g, ' ').trim();
-      if (!Number.isFinite(Number(prev.sourcePageNumber)) && Number.isFinite(Number(cur.sourcePageNumber))) prev.sourcePageNumber = Number(cur.sourcePageNumber);
-      continue;
-    }
-    out.push({ ...cur, text: curText });
-  }
-  return out;
-}
-
   function mergeFragmentedBlocks(blocks) {
     const out = [];
     const listLineRe = /^\s*(\d+[\.|\)]\s+|box\s+\d+\s*:|line\s+\d+\s*:|part\s+[ivxlcdm]+\b|[-•*]\s+)/i;
@@ -1299,7 +1245,7 @@ function mergeFragmentedBlockEntries(entries) {
     return { metadata: md, items, spineHrefs };
   }
 
-  async function epubExtractSelectedSections(zip, tocItems, selectedIds, spineHrefs, { cleanupHeadings = false, onProgress = null, bookTitle = '' } = {}) {
+  async function epubToMarkdownFromSelected(zip, tocItems, selectedIds, spineHrefs, { cleanupHeadings = false, onProgress = null, bookTitle = '' } = {}) {
     // Extract each selected TOC item as a range in spine order: from its start file until next TOC start.
     const toc = (tocItems || [])
       .slice()
@@ -1344,11 +1290,11 @@ function mergeFragmentedBlockEntries(entries) {
       for (let s = it.spineIndex; s < endSpine; s++) {
         const href = spine[s];
         const html = await zipReadText(zip, href);
-        let cleaned = extractTextBlockEntriesFromHtml(html)
-          .map((entry) => ({ ...entry, text: cleanImportedBlock(entry.text, { bookTitle, artifactTitles: toc.map(x => x.title) }) }))
-          .filter(entry => entry.text && (!cleanupHeadings || !isDecorativeSpacedHeading(entry.text)));
-        cleaned = mergeFragmentedBlockEntries(cleaned);
-        cleaned = cleaned.filter(entry => entry.text && (!cleanupHeadings || !isDecorativeSpacedHeading(entry.text)));
+        let cleaned = extractTextBlocksFromHtml(html)
+          .map(b => cleanImportedBlock(b, { bookTitle, artifactTitles: toc.map(x => x.title) }))
+          .filter(b => b && (!cleanupHeadings || !isDecorativeSpacedHeading(b)));
+        cleaned = mergeFragmentedBlocks(cleaned);
+        cleaned = cleaned.filter(b => b && (!cleanupHeadings || !isDecorativeSpacedHeading(b)));
 
         let startIdx = 0;
         let endIdx = cleaned.length;
@@ -1372,12 +1318,7 @@ function mergeFragmentedBlockEntries(entries) {
       if (typeof onProgress === 'function') onProgress({ done, total: chosen.length });
     }
 
-    return sections;
-  }
-
-  async function epubToMarkdownFromSelected(zip, tocItems, selectedIds, spineHrefs, options = {}) {
-    const sections = await epubExtractSelectedSections(zip, tocItems, selectedIds, spineHrefs, options);
-    return buildMarkdownBookFromSections(sections, { breakByPageNumber: false }).markdown;
+    return buildMarkdownBookFromSections(sections);
   }
 
   async function initBookImporter() {
@@ -1401,12 +1342,10 @@ function mergeFragmentedBlockEntries(entries) {
 
     let manifest = [];
     let currentBookRaw = "";
-    let currentBookPageMeta = [];
     let hasExplicitChapters = false;
 
     // When chapters exist, we keep chapter pages in memory
     let chapterList = []; // {title, raw}
-    let chapterPageMetaList = [];
     let currentPages = []; // [{title, text}]
     let currentChapterIndex = null;
 
@@ -1460,7 +1399,7 @@ function mergeFragmentedBlockEntries(entries) {
       return count;
     }
 
-    function parsePagesWithTitles(raw, sourceMeta = null) {
+    function parsePagesWithTitles(raw) {
       const text = String(raw || "");
       const lines = text.split(/\r?\n/);
 
@@ -1474,10 +1413,7 @@ function mergeFragmentedBlockEntries(entries) {
           .filter(l => l && !/^\s{0,3}#{1,6}\s+/.test(l) && !/^\s*[—-]{2,}\s*$/.test(l));
 
         const body = cleaned.join(" ").trim();
-        if (body) {
-          const meta = Array.isArray(sourceMeta) ? sourceMeta[pages.length] : null;
-          pages.push({ title: cur.title, text: body, sourcePageNumber: Number.isFinite(Number(meta?.sourcePageNumber)) ? Number(meta.sourcePageNumber) : null });
-        }
+        if (body) pages.push({ title: cur.title, text: body });
       }
 
       for (const line of lines) {
@@ -1503,10 +1439,7 @@ function mergeFragmentedBlockEntries(entries) {
               .map(l => l.trim())
               .filter(l => l && !/^\s{0,3}#{1,6}\s+/.test(l) && !/^\s*[—-]{2,}\s*$/.test(l));
             const body = cleaned.join(" ").trim();
-            if (body) {
-              const meta = Array.isArray(sourceMeta) ? sourceMeta[out.length] : null;
-              out.push({ title: `Page ${out.length + 1}`, text: body, sourcePageNumber: Number.isFinite(Number(meta?.sourcePageNumber)) ? Number(meta.sourcePageNumber) : null });
-            }
+            if (body) out.push({ title: `Page ${out.length + 1}`, text: body });
           });
           return out.length ? out : pages;
         }
@@ -1560,12 +1493,10 @@ function mergeFragmentedBlockEntries(entries) {
         return;
       }
 
-      const opts = currentPages.map((p, idx) => {
-        const sourcePageNumber = Number(p?.sourcePageNumber);
-        const title = p?.title || `Page ${idx + 1}`;
-        const numericLabel = Number.isFinite(sourcePageNumber) && sourcePageNumber > 0 ? `Page ${sourcePageNumber}` : `Page ${idx + 1}`;
-        return { value: idx, label: title && title !== numericLabel ? `${numericLabel} — ${title}` : numericLabel };
-      });
+      const opts = currentPages.map((p, idx) => ({
+        value: idx,
+        label: `${idx + 1}. ${p.title || `Page ${idx + 1}`}`
+      }));
 
       setSelectOptions(pageStart, opts, "Start page…");
       setSelectOptions(pageEnd, opts, "End page…");
@@ -1594,14 +1525,13 @@ function mergeFragmentedBlockEntries(entries) {
       if (!hasExplicitChapters) {
         chapterControls.style.display = "none";
         currentChapterIndex = null;
-        const bookPages = parsePagesWithTitles(currentBookRaw, currentBookPageMeta);
+        const bookPages = parsePagesWithTitles(currentBookRaw);
         populatePagesSelect(bookPages);
         try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, bookPages.length - 1)); } catch (_) {}
-        const pageMeta = bookPages.map((p, idx) => ({ title: p.title || `Page ${idx + 1}`, sourcePageNumber: Number.isFinite(Number(p?.sourcePageNumber)) ? Number(p.sourcePageNumber) : (idx + 1) }));
         // Await render completion so the restore scroll finishes before the caller
         // removes reading-restore-pending and reveals pages to the user.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
-        if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true, pageMeta });
+        if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true });
         return;
       }
 
@@ -1612,14 +1542,12 @@ function mergeFragmentedBlockEntries(entries) {
       chapterSelect.value = String(nextChapterIndex);
       currentChapterIndex = nextChapterIndex;
 
-      const chapterMeta = Array.isArray(chapterPageMetaList[nextChapterIndex]) ? chapterPageMetaList[nextChapterIndex] : [];
-      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw(), chapterMeta);
+      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
       populatePagesSelect(chapterPages);
       try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, chapterPages.length - 1)); } catch (_) {}
-      const pageMeta = chapterPages.map((p, idx) => ({ title: p.title || `Page ${idx + 1}`, sourcePageNumber: Number.isFinite(Number(p?.sourcePageNumber)) ? Number(p.sourcePageNumber) : (idx + 1) }));
       // Await render completion before resolving.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta });
+      if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true });
     }
 
     async function loadManifest() {
@@ -1677,19 +1605,8 @@ function mergeFragmentedBlockEntries(entries) {
           const rec = await localBookGet(stripLocalPrefix(id));
           if (!rec || typeof rec.markdown !== 'string') throw new Error('local book missing');
           currentBookRaw = rec.markdown;
-          currentBookPageMeta = Array.isArray(rec.pageMeta) ? rec.pageMeta.slice() : [];
-          chapterPageMetaList = [];
           hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
-          if (hasExplicitChapters) {
-            chapterList = parseChaptersFromMarkdown(currentBookRaw);
-            let pageMetaCursor = 0;
-            chapterPageMetaList = chapterList.map((chapter) => {
-              const chapterPages = parsePagesWithTitles(chapter.raw);
-              const slice = currentBookPageMeta.slice(pageMetaCursor, pageMetaCursor + chapterPages.length);
-              pageMetaCursor += chapterPages.length;
-              return slice;
-            });
-          }
+          if (hasExplicitChapters) chapterList = parseChaptersFromMarkdown(currentBookRaw);
           // Await so loadBook only resolves after render() + applyPendingReadingRestore().
           await refreshChapterAndPagesUI(options);
           return;
@@ -1714,8 +1631,6 @@ function mergeFragmentedBlockEntries(entries) {
         const res = await fetch(entry.path, { cache: "no-cache" });
         if (!res.ok) throw new Error(`book fetch failed (${res.status}) at ${entry.path}`);
         currentBookRaw = await res.text();
-        currentBookPageMeta = [];
-        chapterPageMetaList = [];
 
         hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
         if (hasExplicitChapters) {
@@ -1728,8 +1643,6 @@ function mergeFragmentedBlockEntries(entries) {
         try {
           if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[id] === "string") {
             currentBookRaw = window.EMBED_BOOKS[id];
-            currentBookPageMeta = [];
-            chapterPageMetaList = [];
             hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
             if (hasExplicitChapters) {
               chapterList = parseChaptersFromMarkdown(currentBookRaw);
@@ -1750,10 +1663,10 @@ function mergeFragmentedBlockEntries(entries) {
     // reading-entry path can await full render completion before revealing pages.
     // Fire-and-forget callers (chapter select, page slice controls) simply ignore
     // the returned promise, which is safe — they don't use the restore path.
-    function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false, pageMeta = null } = {}) {
+    function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false } = {}) {
       bulkInput.value = String(text || "").trim();
-      if (append) return appendPages({ pageMeta });
-      return addPages({ preservePendingRestore, pageMeta });
+      if (append) return appendPages();
+      return addPages({ preservePendingRestore });
     }
 
     // Events
@@ -1779,8 +1692,7 @@ function mergeFragmentedBlockEntries(entries) {
       const selectedIdx = idx;
       currentChapterIndex = selectedIdx;
 
-      const chapterMeta = Array.isArray(chapterPageMetaList[selectedIdx]) ? chapterPageMetaList[selectedIdx] : [];
-      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw(), chapterMeta);
+      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
       populatePagesSelect(chapterPages);
 
       // Immediately replace rendered page cards with the new chapter's content.
@@ -1789,8 +1701,7 @@ function mergeFragmentedBlockEntries(entries) {
       // closes the race window between chapter assignment and card DOM update —
       // no Load button click required, no timing assumption.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      const pageMeta = chapterPages.map((p, pageIdx) => ({ title: p.title || `Page ${pageIdx + 1}`, sourcePageNumber: Number.isFinite(Number(p?.sourcePageNumber)) ? Number(p.sourcePageNumber) : (pageIdx + 1) }));
-      applySelectionToBulkInput(chapterText, { append: false, pageMeta });
+      applySelectionToBulkInput(chapterText, { append: false });
     });
 
     // Keep end >= start
@@ -1932,10 +1843,7 @@ function mergeFragmentedBlockEntries(entries) {
     // Split pasted text into pages using paragraph breaks (blank lines).
     // Still supports legacy delimiters (--- / "## Page X") if present.
     const newPages = splitIntoPages(input);
-    const incomingMeta = Array.isArray(options.pageMeta) ? options.pageMeta : [];
-    const nextPageMeta = [];
-    for (let pageIdx = 0; pageIdx < newPages.length; pageIdx++) {
-      const pageText = newPages[pageIdx];
+    for (const pageText of newPages) {
       const pageHash = await stableHashText(pageText);
       let consolidation = "";
       let rating = 0;
@@ -1959,9 +1867,7 @@ function mergeFragmentedBlockEntries(entries) {
         }
       } catch (_) {}
 
-      const assignedIndex = pages.length;
       pages.push(pageText);
-      nextPageMeta.push({ title: incomingMeta[pageIdx]?.title || `Page ${assignedIndex + 1}`, sourcePageNumber: Number.isFinite(Number(incomingMeta[pageIdx]?.sourcePageNumber)) ? Number(incomingMeta[pageIdx].sourcePageNumber) : (assignedIndex + 1) });
       pageData.push({
         text: pageText,
         consolidation,
@@ -1982,7 +1888,6 @@ function mergeFragmentedBlockEntries(entries) {
     }
 
     document.getElementById("bulkInput").value = "";
-    try { if (typeof setPageMeta === "function") setPageMeta(nextPageMeta); } catch (_) {}
     schedulePersistSession();
     render();
     checkSubmitButton();
@@ -1990,17 +1895,14 @@ function mergeFragmentedBlockEntries(entries) {
 
   // Append pages to the existing session (does NOT clear pages/timers/ratings).
   // Uses the same splitting rules as addPages().
-  async function appendPages(options = {}) {
+  async function appendPages() {
     const input = document.getElementById("bulkInput").value;
     goalTime = parseInt(document.getElementById("goalTimeInput").value);
     goalCharCount = parseInt(document.getElementById("goalCharInput").value);
     if (!input || !input.trim()) return;
 
     const newPages = splitIntoPages(input);
-    const incomingMeta = Array.isArray(options.pageMeta) ? options.pageMeta : [];
-    const nextPageMeta = (typeof getPageMetaSnapshot === 'function') ? getPageMetaSnapshot() : [];
-    for (let pageIdx = 0; pageIdx < newPages.length; pageIdx++) {
-      const pageText = newPages[pageIdx];
+    for (const pageText of newPages) {
       const pageHash = await stableHashText(pageText);
       let consolidation = "";
       let rating = 0;
@@ -2024,9 +1926,7 @@ function mergeFragmentedBlockEntries(entries) {
         }
       } catch (_) {}
 
-      const assignedIndex = pages.length;
       pages.push(pageText);
-      nextPageMeta.push({ title: incomingMeta[pageIdx]?.title || `Page ${assignedIndex + 1}`, sourcePageNumber: Number.isFinite(Number(incomingMeta[pageIdx]?.sourcePageNumber)) ? Number(incomingMeta[pageIdx].sourcePageNumber) : (assignedIndex + 1) });
       pageData.push({
         text: pageText,
         consolidation,
@@ -2047,8 +1947,6 @@ function mergeFragmentedBlockEntries(entries) {
     }
 
     document.getElementById("bulkInput").value = "";
-    try { if (typeof setPageMeta === "function") setPageMeta(nextPageMeta); } catch (_) {}
-    schedulePersistSession();
     render();
     checkSubmitButton();
   }
@@ -2061,7 +1959,6 @@ function mergeFragmentedBlockEntries(entries) {
     }
     pages = [];
     pageData = [];
-    try { if (typeof setPageMeta === 'function') setPageMeta([]); } catch (_) {}
     timers = [];
     intervals.forEach(i => clearInterval(i));
     intervals = [];
@@ -2113,7 +2010,7 @@ function mergeFragmentedBlockEntries(entries) {
       // in reading mode. applyModeVisibility() handles display toggling when
       // mode changes, but in reading mode these elements simply do not exist.
       page.innerHTML = `
-        <div class="page-header">${(typeof getDisplayPageLabel === 'function') ? getDisplayPageLabel(i) : `Page ${i + 1}`}</div>
+        <div class="page-header">Page ${i + 1}</div>
         <div class="page-text">${escapeHtml(text)}</div>
 
         ${_isReadingMode ? '' : `

@@ -68,7 +68,7 @@
         body.theme-purple { --theme-accent: #a78bfa; --theme-accent-deep: #7c3aed; --theme-accent-soft: #ede9fe; --rm-accent:#a78bfa; --rm-accent-soft:#ede9fe; --rm-btn-bg:rgba(167,139,250,0.08); --rm-btn-hover:rgba(167,139,250,0.15); --rm-page-bg:#faf5ff; --rm-shadow:0 4px 16px rgba(167,139,250,0.10); }
         /*
          * Explorer theme — Pro/Premium only. Activates parchment aesthetic + ember particles.
-         * Full texture/typography overhaul ships separately via themeExplorer.css / components.css.
+         * Full texture/typography overhaul ships separately via theme.css / components.css.
          * This block covers the color system bridge so app features respond correctly.
          */
         body.theme-explorer {
