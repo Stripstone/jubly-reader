@@ -12,7 +12,6 @@ Consolidated Hobby-safe route families:
 - `POST /api/ai?action=summary`
 - `POST /api/ai?action=tts`
 - `POST /api/content?action=book-import`
-- `POST /api/content?action=page-break`
 - `POST /api/billing?action=checkout`
 - `POST /api/billing?action=portal`
 - `POST /api/stripe/webhook`
