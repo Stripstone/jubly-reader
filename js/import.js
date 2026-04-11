@@ -193,6 +193,23 @@
     let _advancedMode = false;
     let _inputMode = 'file';
 
+    // Action locks — prevent duplicate concurrent operations.
+    // _capacityVerified: false until background server check resolves after modal open.
+    //   Action buttons are disabled during this window to prevent capacity bypass.
+    // _scanInProgress / _importInProgress: prevent re-entrant scans or imports from
+    //   rapid button clicks. Set synchronously before the first await in each operation.
+    let _capacityVerified = false;
+    let _scanInProgress = false;
+    let _importInProgress = false;
+
+    function _setActionButtonsLocked(locked) {
+      // Apply/release the capacity verification lock on action surfaces.
+      // Each button's final enabled state also respects its own readiness condition.
+      if (scanBtn) scanBtn.disabled = locked || !_file;
+      if (doImportBtn) doImportBtn.disabled = locked || !(_tocItems.some(x => x.selected));
+      if (textImportBtn) textImportBtn.disabled = locked || !(textBodyInput && String(textBodyInput.value || '').trim());
+    }
+
     function resetImporterState(opts = {}) {
       const keepModalOpen = !!opts.keepModalOpen;
       _file = null;
@@ -203,6 +220,12 @@
       _activeId = null;
       _spineHrefs = [];
       _bookTitle = '';
+      // Reset action locks on every close. Next open will re-verify capacity.
+      if (!keepModalOpen) {
+        _capacityVerified = false;
+        _scanInProgress = false;
+        _importInProgress = false;
+      }
       setAdvancedMode(false);
       if (fileInput) fileInput.value = '';
       if (dropzone) dropzone.classList.remove('is-dragover');
@@ -320,6 +343,7 @@
     }
 
     async function savePastedTextImport() {
+      if (_importInProgress || !_capacityVerified) return;
       const raw = String(textBodyInput && textBodyInput.value || '').trim();
       if (!raw) return;
       const pages = splitIntoPages(raw);
@@ -327,6 +351,8 @@
         setStatus('No readable pages were found in the pasted text.');
         return;
       }
+      _importInProgress = true;
+      if (textImportBtn) textImportBtn.disabled = true;
 
       const guard = await guardImportCapacity();
       syncImportEntryState(guard.snapshot);
@@ -361,36 +387,44 @@
         console.error('Text import error:', e);
         setProgress(100, 'Import failed', 'Try again with different text.');
         doneBtn.style.display = 'inline-block';
+      } finally {
+        _importInProgress = false;
+        if (textImportBtn) textImportBtn.disabled = !(textBodyInput && String(textBodyInput.value || '').trim());
       }
     }
 
     async function showModal() {
-      // Open the modal immediately using the local capacity snapshot so there
-      // is no perceptible lag. Server verification runs in the background and
-      // closes the modal (or updates the status) if the server disagrees.
+      // Open the modal immediately using the local capacity snapshot — no perceptible lag.
+      // Action buttons are locked until the server confirms capacity, preventing the window
+      // where a user could start an import before a server-side denial arrives.
       const localSnapshot = await getImportCapacitySnapshot();
       syncImportEntryState(localSnapshot);
       resetImporterState({ keepModalOpen: true });
+      _capacityVerified = false;
       setStatus(describeCapacity(localSnapshot));
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
       syncInputMode();
       syncTextImportState();
+      // Lock all action buttons until server check resolves.
+      _setActionButtonsLocked(true);
 
-      // Background: confirm with server. If server rejects capacity, close modal
-      // and show the appropriate message / upgrade prompt.
       guardImportCapacity().then(guard => {
-        // If the modal was closed while the server was responding, do nothing.
         if (modal.style.display === 'none') return;
-        // Update status with server-confirmed description (may have refined limit).
         setStatus(describeCapacity(guard.snapshot));
         if (!guard.ok) {
-          // Server says no capacity — hide modal (guardImportCapacity already
-          // set a status message and may have opened the pricing modal).
+          // Server denied — close modal (guardImportCapacity already set status and
+          // may have opened the pricing modal).
           resetImporterState({ keepModalOpen: false });
+        } else {
+          // Server confirmed capacity — unlock actions.
+          _capacityVerified = true;
+          _setActionButtonsLocked(false);
         }
       }).catch(() => {
-        // Server unreachable — local snapshot already shown, leave modal open.
+        // Server unreachable — trust local verdict and unlock.
+        _capacityVerified = true;
+        _setActionButtonsLocked(false);
       });
     }
 
@@ -654,7 +688,13 @@
     }
 
     async function scanContents() {
-      if (!_file) return;
+      if (!_file || _scanInProgress || !_capacityVerified) return;
+      // Lock immediately — before any await — so rapid clicks cannot trigger
+      // concurrent scans regardless of which code path runs next.
+      _scanInProgress = true;
+      if (scanBtn) scanBtn.disabled = true;
+
+      try {
 
       // Branch to the FreeConvert conversion path for all non-EPUB formats.
       if (_needsConversion) { await scanContentsViaConversion(); return; }
@@ -671,7 +711,6 @@
       }
 
       try {
-        scanBtn.disabled = true;
         setStatus('Reading book…');
         const buf = await _file.arrayBuffer();
         _zip = await JSZip.loadAsync(buf);
@@ -729,7 +768,14 @@
         console.error('Book scan error:', e);
         setStatus('Failed to scan book. Try another file.');
       } finally {
-        scanBtn.disabled = !_file;
+        if (scanBtn) scanBtn.disabled = !_file;
+      }
+
+      } finally {
+        // Release the in-progress lock whether the scan succeeded, failed, or was
+        // short-circuited by an early return. Button state is managed by the inner
+        // finally above; this only resets the concurrency guard.
+        _scanInProgress = false;
       }
     }
 
@@ -856,11 +902,17 @@
     }
 
     async function doImportSelected() {
-      if (!_file || !_zip) return;
+      if (!_file || !_zip || _importInProgress || !_capacityVerified) return;
       const selectedIds = new Set(_tocItems.filter(x => x.selected).map(x => x.id));
       if (selectedIds.size === 0) return;
+      // Lock immediately — before any await — so rapid clicks cannot trigger concurrent imports.
+      _importInProgress = true;
+      if (doImportBtn) doImportBtn.disabled = true;
 
       try {
+        // Re-verify capacity at write time as a server-side safety check.
+        // (Capacity was already verified when the modal opened, but this catches
+        // edge cases like another device importing during the same session.)
         const guard = await guardImportCapacity();
         syncImportEntryState(guard.snapshot);
         if (!guard.ok) {
@@ -923,6 +975,10 @@
         console.error('EPUB import error:', e);
         setProgress(100, 'Import failed', 'Try again with a different file.');
         doneBtn.style.display = 'inline-block';
+      } finally {
+        // Always release the import lock so the user can retry without reopening the modal.
+        _importInProgress = false;
+        if (doImportBtn) doImportBtn.disabled = !(_tocItems.some(x => x.selected));
       }
     }
 
