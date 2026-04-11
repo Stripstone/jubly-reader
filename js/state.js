@@ -20,7 +20,6 @@
   
   let pages = [];
   let pageData = [];
-  let pageMeta = [];
   let currentPageIndex = 0;
   window.__rcPendingRestorePageIndex = -1;
 
@@ -342,54 +341,6 @@ function getConsolidationCacheKey(pageHash) {
   return `rc_consolidation_${pageHash}`;
 }
 
-function normalizePageMetaEntry(entry, idx) {
-  const item = (entry && typeof entry === 'object') ? entry : {};
-  const rawNum = Number(item.sourcePageNumber);
-  const sourcePageNumber = Number.isFinite(rawNum) && rawNum > 0 ? Math.round(rawNum) : (idx + 1);
-  const title = typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `Page ${sourcePageNumber}`;
-  return { title, sourcePageNumber };
-}
-
-function setPageMeta(nextMeta) {
-  pageMeta = Array.isArray(nextMeta) ? nextMeta.map((entry, idx) => normalizePageMetaEntry(entry, idx)) : [];
-  return pageMeta;
-}
-
-function getPageMetaSnapshot() {
-  return Array.isArray(pageMeta) ? pageMeta.map((entry, idx) => normalizePageMetaEntry(entry, idx)) : [];
-}
-
-function getPageMetaEntry(index) {
-  const idx = Number(index);
-  if (!Array.isArray(pageMeta) || !Number.isFinite(idx) || idx < 0 || idx >= pageMeta.length) return null;
-  return normalizePageMetaEntry(pageMeta[idx], idx);
-}
-
-function getDisplayPageNumber(index) {
-  const idx = Number(index);
-  const meta = getPageMetaEntry(idx);
-  if (meta && Number.isFinite(Number(meta.sourcePageNumber)) && Number(meta.sourcePageNumber) > 0) return Number(meta.sourcePageNumber);
-  return idx + 1;
-}
-
-function getDisplayPageTotal(totalCount) {
-  const total = Number(totalCount);
-  if (!Number.isFinite(total) || total <= 0) return 0;
-  const lastMeta = getPageMetaEntry(total - 1);
-  if (lastMeta && Number.isFinite(Number(lastMeta.sourcePageNumber)) && Number(lastMeta.sourcePageNumber) > 0) return Number(lastMeta.sourcePageNumber);
-  return total;
-}
-
-function getDisplayPageLabel(index) {
-  return `Page ${getDisplayPageNumber(index)}`;
-}
-
-window.setPageMeta = setPageMeta;
-window.getPageMetaSnapshot = getPageMetaSnapshot;
-window.getDisplayPageNumber = getDisplayPageNumber;
-window.getDisplayPageTotal = getDisplayPageTotal;
-window.getDisplayPageLabel = getDisplayPageLabel;
-
 let _persistTimer = null;
 function schedulePersistSession() {
   try {
@@ -425,8 +376,7 @@ function persistSessionNow() {
       savedAt: Date.now(),
       pages: pages.slice(),
       pageHashes: pageData.map(p => p?.pageHash || ""),
-      consolidations: pageData.map(p => p?.consolidation || ""),
-      pageMeta: getPageMetaSnapshot()
+      consolidations: pageData.map(p => p?.consolidation || "")
     };
     localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(payload));
     const existingMeta = loadSessionMetaPayload();
@@ -467,9 +417,6 @@ function loadPersistedSessionIfAny() {
     pages = parsed.pages;
     const incomingHashes = Array.isArray(parsed.pageHashes) ? parsed.pageHashes : [];
     const incomingConsolidations = Array.isArray(parsed.consolidations) ? parsed.consolidations : [];
-    const incomingPageMeta = Array.isArray(parsed.pageMeta) ? parsed.pageMeta : [];
-
-    setPageMeta(incomingPageMeta.length ? incomingPageMeta : parsed.pages.map((_, idx) => ({ title: `Page ${idx + 1}`, sourcePageNumber: idx + 1 })));
 
     pageData = pages.map((t, idx) => {
       const pageHash = incomingHashes[idx] || "";
