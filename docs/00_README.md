@@ -107,7 +107,7 @@ That means the docs now treat these as current reality:
 
 The CSS surface is still slightly transitional:
 - `css/shell.css` is the live shell CSS patch surface today
-- `css/components.css` and `css/theme.css` still describe the intended split, but they are not the live implementation surface yet
+- `css/components.css` and `css/themeExplorer.css` describe the live reading-theme split.
 
 Treat that as logged debt, not as a reason to patch against dormant CSS files by default.
 
