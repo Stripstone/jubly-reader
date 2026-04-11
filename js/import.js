@@ -82,6 +82,18 @@
     return out;
   }
 
+
+async function requestServerPageBreak(payload) {
+  const response = await fetch(apiUrl('/api/content?action=page-break'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(data?.error || `Page breaking failed (${response.status})`);
+  return data || {};
+}
+
   function parseChaptersFromMarkdown(raw) {
     const text = String(raw || "");
     const lines = text.split(/\r?\n/);
@@ -170,6 +182,7 @@
 
     const keepParasChk = document.getElementById('importKeepParagraphs');
     const cleanupHeadingsChk = document.getElementById('importCleanupHeadings');
+    const breakByPageNumberChk = document.getElementById('importBreakByPageNumber');
 
     const previewTitle = document.getElementById('importPreviewTitle');
     const previewBody = document.getElementById('importPreviewBody');
@@ -342,58 +355,79 @@
       hideModal();
     }
 
-    async function savePastedTextImport() {
-      if (_importInProgress || !_capacityVerified) return;
-      const raw = String(textBodyInput && textBodyInput.value || '').trim();
-      if (!raw) return;
-      const pages = splitIntoPages(raw);
-      if (!pages.length) {
-        setStatus('No readable pages were found in the pasted text.');
-        return;
-      }
-      _importInProgress = true;
-      if (textImportBtn) textImportBtn.disabled = true;
+    
+async function savePastedTextImport() {
+  if (_importInProgress || !_capacityVerified) return;
+  const raw = String(textBodyInput && textBodyInput.value || '').trim();
+  if (!raw) return;
+  _importInProgress = true;
+  if (textImportBtn) textImportBtn.disabled = true;
 
-      const guard = await guardImportCapacity();
-      syncImportEntryState(guard.snapshot);
-      if (!guard.ok) return;
+  try {
+    const guard = await guardImportCapacity();
+    syncImportEntryState(guard.snapshot);
+    if (!guard.ok) return;
 
-      showStage('progress');
-      doneBtn.style.display = 'none';
-      setProgress(15, 'Preparing text import', `${pages.length} pages detected`);
-
-      const stamp = new Date();
-      const title = String(textTitleInput && textTitleInput.value || '').trim() || `Pasted Text ${stamp.toLocaleDateString()} ${stamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
-      const id = generateLocalImportId('text');
-      const markdown = pages.map((page, idx) => `## Page ${idx + 1}\n\n${page}`).join('\n\n');
-      const record = {
-        id,
-        title,
-        createdAt: Date.now(),
-        sourceName: 'Pasted Text',
-        importKind: 'text',
-        byteSize: raw.length,
-        pageCount: pages.length,
-        markdown,
-      };
-
-      setProgress(75, 'Saving to device', `${pages.length} pages created`);
-      try {
-        if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
-        else if (typeof localBookPut === 'function') await localBookPut(record);
-        setProgress(100, 'Import complete', `${pages.length} pages created`);
-        await completeImportAndReturn(`${pages.length} pages created`);
-      } catch (e) {
-        console.error('Text import error:', e);
-        setProgress(100, 'Import failed', 'Try again with different text.');
-        doneBtn.style.display = 'inline-block';
-      } finally {
-        _importInProgress = false;
-        if (textImportBtn) textImportBtn.disabled = !(textBodyInput && String(textBodyInput.value || '').trim());
-      }
+    const pageBreak = await requestServerPageBreak({
+      kind: 'text',
+      raw,
+      options: {
+        pageSize: document.getElementById('importPageSize') ? Number(document.getElementById('importPageSize').value || 1600) : 1600,
+        breakByPageNumber: !(breakByPageNumberChk && breakByPageNumberChk.checked === false),
+      },
+    });
+    const pages = Array.isArray(pageBreak?.pages) ? pageBreak.pages : [];
+    if (!pages.length) {
+      setStatus('No readable pages were found in the pasted text.');
+      return;
     }
 
-    async function showModal() {
+    if (window.rcUsage && typeof window.rcUsage.check === 'function') {
+      try {
+        const verdict = await window.rcUsage.check('book_import');
+        if (!verdict.allowed) {
+          setStatus('Token limit reached for imports today.');
+          return;
+        }
+      } catch (_) {}
+    }
+
+    showStage('progress');
+    doneBtn.style.display = 'none';
+    setProgress(15, 'Preparing text import', `${pages.length} pages detected`);
+
+    const stamp = new Date();
+    const title = String(textTitleInput && textTitleInput.value || '').trim() || `Pasted Text ${stamp.toLocaleDateString()} ${stamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    const id = generateLocalImportId('text');
+    const markdown = String(pageBreak?.markdown || '').trim();
+    const record = {
+      id,
+      title,
+      createdAt: Date.now(),
+      sourceName: 'Pasted Text',
+      importKind: 'text',
+      byteSize: raw.length,
+      pageCount: Number(pageBreak?.pageCount || pages.length),
+      markdown,
+    };
+
+    setProgress(75, 'Saving to device', `${pages.length} pages created`);
+    if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
+    else if (typeof localBookPut === 'function') await localBookPut(record);
+    setProgress(100, 'Import complete', `${pages.length} pages created`);
+    try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('book_import'); } catch (_) {}
+    await completeImportAndReturn(`${pages.length} pages created`);
+  } catch (e) {
+    console.error('Text import error:', e);
+    setProgress(100, 'Import failed', 'Try again with different text.');
+    doneBtn.style.display = 'inline-block';
+  } finally {
+    _importInProgress = false;
+    if (textImportBtn) textImportBtn.disabled = !(textBodyInput && String(textBodyInput.value || '').trim());
+  }
+}
+
+async function showModal() {
       // Open the modal immediately using the local capacity snapshot — no perceptible lag.
       // Action buttons are locked until the server confirms capacity, preventing the window
       // where a user could start an import before a server-side denial arrives.
@@ -920,9 +954,21 @@
           return;
         }
 
-        showStage('progress');
-        doneBtn.style.display = 'none';
-        setProgress(0, 'Preparing', '');
+
+if (window.rcUsage && typeof window.rcUsage.check === 'function') {
+  try {
+    const verdict = await window.rcUsage.check('book_import');
+    if (!verdict.allowed) {
+      setStatus('Token limit reached for imports today.');
+      showStage('upload');
+      return;
+    }
+  } catch (_) {}
+}
+
+showStage('progress');
+doneBtn.style.display = 'none';
+setProgress(0, 'Preparing', '');
 
         const buf = await _file.arrayBuffer();
         const bookHash = await hashArrayBufferSha256(buf);
@@ -937,7 +983,7 @@
         // keepParasChk is currently informational; paragraph preservation is the default behavior.
         const cleanupHeadings = !!cleanupHeadingsChk?.checked;
 
-        const md = await epubToMarkdownFromSelected(
+        const sections = await epubExtractSelectedSections(
           _zip,
           _tocItems,
           selectedIds,
@@ -946,14 +992,23 @@
             cleanupHeadings,
             bookTitle: title,
             onProgress: ({ done, total }) => {
-              const pct = total ? Math.round((done / total) * 80) : 0;
-              setProgress(pct, `Extracting sections (${done}/${total})`, `${createdPages} pages created`);
+              const pct = total ? Math.round((done / total) * 55) : 0;
+              setProgress(pct, `Extracting sections (${done}/${total})`, `${createdPages} pages prepared`);
             }
           }
         );
 
-        // Estimate page count by counting H2
-        createdPages = (md.match(/^\s*##\s+/gm) || []).length;
+        setProgress(72, 'Breaking pages', 'Preparing document pages');
+        const pageBreak = await requestServerPageBreak({
+          kind: 'sections',
+          sections,
+          options: {
+            pageSize: document.getElementById('importPageSize') ? Number(document.getElementById('importPageSize').value || 1600) : 1600,
+            breakByPageNumber: !(breakByPageNumberChk && breakByPageNumberChk.checked === false),
+          },
+        });
+        const md = String(pageBreak?.markdown || '').trim();
+        createdPages = Number(pageBreak?.pageCount || (md.match(/^\s*##\s+/gm) || []).length);
         setProgress(92, 'Saving to device', `${createdPages} pages created`);
 
         const record = {
@@ -970,6 +1025,7 @@
         await localBookPut(record);
 
         setProgress(100, 'Import complete', `${createdPages} pages created`);
+        try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('book_import'); } catch (_) {}
         await completeImportAndReturn(`${createdPages} pages created`);
       } catch (e) {
         console.error('EPUB import error:', e);
