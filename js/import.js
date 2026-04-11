@@ -170,6 +170,7 @@
 
     const keepParasChk = document.getElementById('importKeepParagraphs');
     const cleanupHeadingsChk = document.getElementById('importCleanupHeadings');
+    const breakByPageNumberChk = document.getElementById('importBreakByPageNumber');
 
     const previewTitle = document.getElementById('importPreviewTitle');
     const previewBody = document.getElementById('importPreviewBody');
@@ -264,14 +265,35 @@
     // file dispatch.
     window.openImporterWithFile = async function openImporterWithFile(file) {
       if (!file || !modal) return false;
-      const guard = await guardImportCapacity();
-      syncImportEntryState(guard.snapshot);
-      if (!guard.ok) return false;
+      // Signal immediately (synchronous) that the drop was received — gives feedback during async snapshot fetch.
+      try { document.body.classList.add('import-drop-pending'); } catch (_) {}
+      // Open immediately with local snapshot — no perceptible lag.
+      // Action buttons are locked until server confirms capacity.
+      const localSnapshot = await getImportCapacitySnapshot();
+      syncImportEntryState(localSnapshot);
       resetImporterState({ keepModalOpen: true });
-      setStatus(describeCapacity(guard.snapshot));
+      _capacityVerified = false;
+      setStatus(describeCapacity(localSnapshot));
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
+      _setActionButtonsLocked(true);
+      try { document.body.classList.remove('import-drop-pending'); } catch (_) {}
       onFileSelected(file);
+
+      guardImportCapacity().then(guard => {
+        if (modal.style.display === 'none') return;
+        syncImportEntryState(guard.snapshot);
+        setStatus(describeCapacity(guard.snapshot));
+        if (!guard.ok) {
+          resetImporterState({ keepModalOpen: false });
+        } else {
+          _capacityVerified = true;
+          _setActionButtonsLocked(false);
+        }
+      }).catch(() => {
+        _capacityVerified = true;
+        _setActionButtonsLocked(false);
+      });
       return true;
     };
 
@@ -346,43 +368,65 @@
       if (_importInProgress || !_capacityVerified) return;
       const raw = String(textBodyInput && textBodyInput.value || '').trim();
       if (!raw) return;
-      const pages = splitIntoPages(raw);
-      if (!pages.length) {
-        setStatus('No readable pages were found in the pasted text.');
-        return;
-      }
       _importInProgress = true;
       if (textImportBtn) textImportBtn.disabled = true;
 
       const guard = await guardImportCapacity();
       syncImportEntryState(guard.snapshot);
-      if (!guard.ok) return;
+      if (!guard.ok) { _importInProgress = false; if (textImportBtn) textImportBtn.disabled = !raw; return; }
 
       showStage('progress');
       doneBtn.style.display = 'none';
-      setProgress(15, 'Preparing text import', `${pages.length} pages detected`);
+      setProgress(10, 'Preparing text import', '');
 
       const stamp = new Date();
       const title = String(textTitleInput && textTitleInput.value || '').trim() || `Pasted Text ${stamp.toLocaleDateString()} ${stamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
       const id = generateLocalImportId('text');
-      const markdown = pages.map((page, idx) => `## Page ${idx + 1}\n\n${page}`).join('\n\n');
-      const record = {
-        id,
-        title,
-        createdAt: Date.now(),
-        sourceName: 'Pasted Text',
-        importKind: 'text',
-        byteSize: raw.length,
-        pageCount: pages.length,
-        markdown,
-      };
 
-      setProgress(75, 'Saving to device', `${pages.length} pages created`);
       try {
+        setProgress(30, 'Breaking text into pages…', '');
+        let markdown;
+        let pageCount = 0;
+        try {
+          const blocks = splitIntoPages(raw);
+          const breakResult = await requestServerPageBreak(
+            [{ title, blocks }],
+            { breakByPageNumber: false }
+          );
+          markdown = breakResult.markdown;
+          pageCount = breakResult.pageCount || (markdown.match(/^\s*##\s+/gm) || []).length;
+        } catch (_) {
+          // Server unavailable — local fallback
+          const pages = splitIntoPages(raw);
+          markdown = pages.map((p, i) => `## Page ${i + 1}\n\n${p}`).join('\n\n');
+          pageCount = pages.length;
+        }
+
+        if (!markdown || !pageCount) {
+          setStatus('No readable pages were found in the pasted text.');
+          showStage('upload');
+          return;
+        }
+
+        setProgress(75, 'Saving to device', `${pageCount} pages created`);
+        const record = {
+          id, title,
+          createdAt: Date.now(),
+          sourceName: 'Pasted Text',
+          importKind: 'text',
+          byteSize: raw.length,
+          pageCount,
+          markdown,
+        };
+
         if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
         else if (typeof localBookPut === 'function') await localBookPut(record);
-        setProgress(100, 'Import complete', `${pages.length} pages created`);
-        await completeImportAndReturn(`${pages.length} pages created`);
+
+        // Durable usage consume post-commit
+        try { await window.rcUsage.consume('import'); } catch (_) {}
+
+        setProgress(100, 'Import complete', `${pageCount} pages created`);
+        await completeImportAndReturn(`${pageCount} pages created`);
       } catch (e) {
         console.error('Text import error:', e);
         setProgress(100, 'Import failed', 'Try again with different text.');
@@ -509,6 +553,27 @@
       setStatus(msg);
       try { if (typeof openModal === 'function') openModal('pricing-modal'); } catch (_) {}
       return { ok: false, snapshot, message: msg };
+    }
+
+    async function requestServerPageBreak(sections, { breakByPageNumber = true, pageSize = 'medium' } = {}) {
+      const endpoint = typeof apiUrl === 'function' ? apiUrl('/api/content?action=page-break') : '/api/content?action=page-break';
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ kind: 'sections', sections, breakByPageNumber, pageSize }),
+        cache: 'no-store',
+      });
+      if (!resp.ok) throw new Error(`Page break failed (${resp.status})`);
+      const data = await resp.json();
+      if (!data.markdown) throw new Error('Page break response missing markdown');
+      return data; // { markdown, pageCount, ... }
+    }
+
+    function _describeUsageConsumeVerdict(v) {
+      if (!v) return '';
+      if (v.allowed === false && v.reason === 'daily_limit_reached') return `Daily usage limit reached (${v.remaining ?? 0} units remaining).`;
+      if (v.remaining != null) return `Usage: ${v.totalSpent ?? '?'}/${v.limit ?? '?'} units today.`;
+      return '';
     }
 
     function describeCapacity(snapshot) {
@@ -933,11 +998,11 @@
         const total = selectedIds.size;
         let createdPages = 0;
 
-        // Build markdown
-        // keepParasChk is currently informational; paragraph preservation is the default behavior.
+        // Extract sections (epubToMarkdownFromSelected now returns sections, not markdown)
         const cleanupHeadings = !!cleanupHeadingsChk?.checked;
+        const breakByPageNumber = breakByPageNumberChk ? !!breakByPageNumberChk.checked : true;
 
-        const md = await epubToMarkdownFromSelected(
+        const sections = await epubToMarkdownFromSelected(
           _zip,
           _tocItems,
           selectedIds,
@@ -946,14 +1011,29 @@
             cleanupHeadings,
             bookTitle: title,
             onProgress: ({ done, total }) => {
-              const pct = total ? Math.round((done / total) * 80) : 0;
-              setProgress(pct, `Extracting sections (${done}/${total})`, `${createdPages} pages created`);
+              const pct = total ? Math.round((done / total) * 70) : 0;
+              setProgress(pct, `Extracting sections (${done}/${total})`, '');
             }
           }
         );
 
-        // Estimate page count by counting H2
-        createdPages = (md.match(/^\s*##\s+/gm) || []).length;
+        // Send sections to server for page-breaking (crown-jewel algorithm server-side)
+        setProgress(75, 'Breaking into pages…', `${sections.length} sections`);
+        let md;
+        try {
+          const breakResult = await requestServerPageBreak(sections, { breakByPageNumber });
+          md = breakResult.markdown;
+          createdPages = breakResult.pageCount || (md.match(/^\s*##\s+/gm) || []).length;
+        } catch (_) {
+          // Server unavailable — local fallback (flat page-per-block)
+          md = sections.map(sec => {
+            const lines = [`# ${sec.title || 'Untitled'}`, ''];
+            (sec.blocks || []).forEach((b, i) => { lines.push(`## Page ${i + 1}`, '', b, ''); });
+            return lines.join('\n');
+          }).join('\n');
+          createdPages = (md.match(/^\s*##\s+/gm) || []).length;
+        }
+
         setProgress(92, 'Saving to device', `${createdPages} pages created`);
 
         const record = {
@@ -968,6 +1048,9 @@
           markdown: md
         };
         await localBookPut(record);
+
+        // Durable usage consume post-commit
+        try { await window.rcUsage.consume('import'); } catch (_) {}
 
         setProgress(100, 'Import complete', `${createdPages} pages created`);
         await completeImportAndReturn(`${createdPages} pages created`);

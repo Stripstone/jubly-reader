@@ -12,13 +12,14 @@ function getAction(req) {
 
 const HANDLERS = {
   'book-import': () => import('../../server/lib/content-book-import.js'),
+  'page-break': () => import('../../server/lib/content-page-break.js'),
 };
 
 export default async function handler(req, res) {
   const action = getAction(req) || 'book-import';
   const loader = HANDLERS[action];
   if (!loader) {
-    return json(res, 400, { error: 'Unknown content action.', expected: ['book-import'] });
+    return json(res, 400, { error: 'Unknown content action.', expected: ['book-import','page-break'] });
   }
   const mod = await loader();
   return mod.default(req, res);

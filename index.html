@@ -11,6 +11,7 @@
     <!-- Supabase: UMD bundle exposes window.supabase — required by js/auth.js (Pass 4) -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <link rel="stylesheet" href="css/shell.css">
+    <link rel="stylesheet" href="css/themeExplorer.css">
 </head>
 <body class="bg-white auth-hydrating">
 
@@ -51,8 +52,6 @@
                 <span class="settings-mode-label">Mode</span>
                 <select id="modeSelect" class="settings-mode-select">
                     <option value="reading" selected>Reading</option>
-                    <option value="comprehension">Comprehension</option>
-                    <option value="research">Research</option>
                 </select>
             </div>
             <div class="rs-simple-row">
@@ -189,6 +188,15 @@
                 </div>
             </div>
 
+            <div class="rs-theme-section">
+                <p class="rs-section-label">App appearance</p>
+                <p class="rs-section-sub">Light and dark mode stay available while reading.</p>
+                <div class="appearance-mode-group rs-appearance-group">
+                    <button id="rs-appearance-light-btn" type="button" class="appearance-mode-btn active" onclick="window.rcAppearance?.set('light')">&#9728; Light</button>
+                    <button id="rs-appearance-dark-btn" type="button" class="appearance-mode-btn" onclick="window.rcAppearance?.set('dark')">&#9790; Dark</button>
+                </div>
+            </div>
+
             <div id="rs-themes-empty" class="rs-themes-empty" style="display:none;">
                 This theme has no extra customization yet.
             </div>
@@ -277,6 +285,7 @@
                                     <label for="importPageSize">Page size</label>
                                     <select id="importPageSize"><option value="1200">Small (~1200 chars)</option><option value="1600" selected>Medium (~1600 chars)</option><option value="2000">Large (~2000 chars)</option></select>
                                 </div>
+                                <div class="import-adv-row"><label class="import-adv-check"><input id="importBreakByPageNumber" type="checkbox" checked> Break by source page number</label></div>
                                 <div class="import-adv-row"><label class="import-adv-check"><input id="importKeepParagraphs" type="checkbox" checked> Keep paragraphs together</label></div>
                                 <div class="import-adv-row"><label class="import-adv-check"><input id="importCleanupHeadings" type="checkbox" checked> Cleanup decorative headings</label></div>
                             </div>
