@@ -162,15 +162,7 @@
       // In reading mode there is no textarea — advance to the next page regardless.
       if (appMode === 'reading' || isEditable) {
         pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        if (appMode === 'reading') {
-          activatePageCard(pageEl, j);
-          try {
-            const autoplay = (typeof getAutoplayStatus === 'function') ? getAutoplayStatus() : null;
-            if (autoplay && autoplay.enabled && typeof startFocusedPageTts === 'function') {
-              setTimeout(() => { try { startFocusedPageTts(); } catch (_) {} }, 40);
-            }
-          } catch (_) {}
-        }
+        if (appMode === 'reading') activatePageCard(pageEl, j);
         if (isEditable) ta.focus();
         return;
       }
@@ -338,7 +330,7 @@
         throw new Error(rawText);
       }
       // Spend 2 tokens for AI evaluation (display/diagnostics tracking only).
-      try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('evaluate'); else if (typeof tokenSpend === 'function') tokenSpend('evaluate'); } catch(_) {}
+      try { if (typeof tokenSpend === 'function') tokenSpend('evaluate'); } catch(_) {}
 
       const data = JSON.parse(rawText || "{}");
       lastAIDiagnostics = {

@@ -1482,7 +1482,7 @@ async function ttsSpeakQueue(key, parts) {
             }
           } catch (_) {} // server unreachable: proceed (safe degraded behavior)
         }
-        try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
+        try { if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
       }
       const tts = await cloudFetchUrl(queue[i], { sentenceMarks: wantMarks });
       if (TTS_STATE.activeSessionId !== sessionId) return;
