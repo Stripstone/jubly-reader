@@ -275,7 +275,7 @@ That seam exists so Supabase can later wrap or replace durable persistence witho
 ## Current CSS note
 The intended long-term split is still:
 - structure in `components.css`
-- Explorer reading-theme appearance in `themeExplorer.css`
+- appearance in `theme.css`
 
 But the live implementation surface today is:
 - `css/shell.css`

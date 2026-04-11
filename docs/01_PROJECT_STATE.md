@@ -133,7 +133,7 @@ See:
 
 ### Still transitional
 - `css/shell.css` is the live shell CSS surface today
-- `css/components.css` and `css/themeExplorer.css` reflect the live reading-theme separation.
+- `css/components.css` and `css/theme.css` still reflect intended separation more than live implementation
 - `js/music.js` is valid supporting JS but the broader local-asset subsystem is not yet generalized
 - some shell behavior still overlaps runtime-facing presentation glue even after the ownership cleanup
 - some older documents may still describe target state more strongly than current code supports if they have not been synchronized yet
@@ -167,7 +167,7 @@ See:
 ## Logged transitional debt from the theme pass
 1. CSS surface alignment is still deferred.
    - live theme work landed in `css/shell.css`
-   - reading-theme split now lives across `components.css` and `themeExplorer.css`.
+   - intended split across `components.css` and `theme.css` is not yet live
 2. Wallpaper asset localization is still deferred.
    - the current wallpaper path should eventually become a clean local asset/reference in the live scaffold
 3. Theme/music support files are still narrow utilities.
