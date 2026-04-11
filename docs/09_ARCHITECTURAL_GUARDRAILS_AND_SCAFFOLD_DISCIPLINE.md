@@ -59,6 +59,9 @@ Examples:
 
 If two layers appear to own the same truth, treat that as a defect or logged temporary bridge.
 
+The same discipline applies to user-visible surfaces that settle after hydration.
+If one surface element is expected to render one piece of truth, avoid multiple functions competing to write or toggle that same element unless the handoff is explicit and bounded.
+
 ### 2. The scaffold is an authority surface
 Current scaffold shape is part of the implementation contract.
 
@@ -99,6 +102,9 @@ Do not use:
 - mirrored shell variables as playback or reading truth
 - cosmetic UI state as entitlement truth
 
+Do not treat a fallback getter, a derived summary, or a cached cosmetic value as proof that hydration or server confirmation has completed.
+Use an explicit readiness or hydration seam instead when the surface depends on durable truth.
+
 ### 6. Protected logic must move without breaking responsiveness
 Server-protected production hardening is required, but not at the cost of local reading correctness.
 
@@ -115,6 +121,9 @@ Backend should own where feasible:
 - provider policy
 - prompts and non-obvious orchestration
 - evaluation and import-conversion policy
+
+For user-facing transitions, the safe local UI state should appear before slow verification whenever local knowledge is sufficient to present it honestly.
+That means a pending state, hidden state, or locked-action state may appear immediately while server-backed verification continues in the background.
 
 ### 7. Broad refactors must be decomposed into bounded authority moves
 A safe refactor is not “move everything.”
@@ -171,6 +180,11 @@ These require explicit justification or removal.
 - restore truth attached to content identity instead of owned-book identity
 - delete lifecycle split between local UI and remote durable truth
 - playback controls claiming success when runtime state did not change
+- multiple writers fighting over one visible subtitle, status line, or similar surface
+- applying a pending/hidden safe state only after an awaited network roundtrip
+- delaying a modal shell itself when only the actions inside it need verification
+- leaving gated actions clickable before required verification completes
+- retry chains or visibility gates that can hang the whole page if a promise never resolves
 
 ### Scaffold anti-patterns
 - patching from an older scaffold while current docs declare a new one
@@ -182,6 +196,14 @@ These require explicit justification or removal.
 - moving code server-side purely for secrecy while harming responsiveness
 - leaving prototype shortcuts in place after the runtime owner exists
 - continuing to add bridges without defining their retirement
+
+### Responsive cache discipline
+When cache is used to improve responsiveness:
+- cache may provide last-safe display projection
+- cache may hold dirty unconfirmed user intent
+- cache must not become durable authority by itself
+- only server-confirmed data may advance the confirmed baseline
+- refresh replay should target dirty unconfirmed mutations, not blindly resend every cached value
 
 ### Deployment-limit consolidation rule
 When platform limits require fewer backend entrypoints:

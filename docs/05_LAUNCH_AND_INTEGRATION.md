@@ -171,6 +171,11 @@ Examples of launch-failing patterns:
 - showing a believable but wrong usage value before account truth loads
 - showing a setting change immediately and then snapping back unexpectedly
 - leaving stale signed-in or continue state visible after sign-out
+- showing stale content before a pending state or hidden state is applied
+- delaying a modal shell until server verification returns
+- allowing gated actions before required verification has settled
+- showing intermediate dashboard/library states before hydration knows enough to choose the right one
+- letting late subtitle or status text shift nearby headings or controls
 
 
 ### Reading continuity
@@ -190,11 +195,17 @@ Examples of launch-failing patterns:
 - close clears staged state
 - dismiss clears staged state if supported
 - reopen shows clean state
+- modal shell opens immediately when the user requests it
+- server-backed capacity or permission checks do not delay the modal shell itself
+- gated action buttons stay locked until verification settles
+- repeated clicks cannot start duplicate scans or duplicate imports
 
 ### Layout
 - footer stays below content
 - library/profile do not clip or overlay
 - reading controls remain reachable at narrow widths
+- subtitles and similar late-hydrating labels do not shift nearby headings or controls
+- the page does not visibly shake when durable text replaces placeholders
 
 ### Themes / appearance
 - switching theme preserves reading layout stability
@@ -221,6 +232,9 @@ Examples of launch-failing patterns:
 - compact metrics do not overwrite restore truth
 - deleting a book removes or invalidates matching restore truth for that owned item
 - durable prefs restore without trying to sync heavy local-only assets blindly
+- last-safe cached values may improve immediate display without becoming durable authority
+- dirty unconfirmed preference changes survive refresh and replay cleanly
+- cache never blindly overwrites fresher server-confirmed truth
 
 ## Open integration questions
 - when should signed-in users bypass landing friction?

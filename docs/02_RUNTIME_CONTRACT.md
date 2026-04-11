@@ -80,6 +80,41 @@ Chapter, page, continue reading, and restore behavior: responsive or unresponsiv
 
 **Must not happen:** no flash of page 1 while catching up to server, no snap from the wrong page to the right page after the user already saw the wrong one, no stale old-book or old-chapter restore, no restore path that only works from one special entry path.
 
+## Responsiveness patterns required by this contract
+
+These are implementation-neutral user-experience rules.
+They exist so the app feels immediate without lying about durable truth.
+
+### Render the safe state before slow work
+If a transition needs a pending, hidden, or locked safe state, that state must appear before any await or network roundtrip that could stall the visible surface.
+
+Examples:
+- reading entry should hide stale pages before any progress flush or restore fetch that could take time
+- dashboard/library surfaces should not expose intermediate signed-out, empty, or stale states while account-backed truth is still resolving
+- a modal shell may open immediately while server-backed verification continues in the background
+
+### Open fast, lock actions, verify in background
+When local knowledge is enough to present a safe shell, open the surface immediately.
+If the action itself depends on server-backed truth, keep the relevant action controls locked until verification settles.
+
+Examples:
+- importer modal may open from local state immediately
+- import / scan / submit actions may stay disabled until capacity or permission checks are confirmed
+
+### Use hydration or confirmation seams, not guessed readiness
+A surface that depends on account-backed durable truth should gate on an explicit hydration or confirmation signal when needed.
+Do not treat a derived getter or a fallback value as proof that server-backed data is actually ready.
+
+### Cache may improve responsiveness, not replace authority
+Last-safe cached values may be used for immediate display.
+Dirty local intent may be replayed after refresh.
+But the cache must not become a second durable authority or blindly overwrite fresher server truth.
+
+### Visible surfaces should not jump while truth settles
+If a label, subtitle, status line, or similar surface is expected to change after hydration, reserve its space or otherwise stabilize its placement so the page does not shake or shift while text updates.
+
+**Must not happen:** no form-submission feel for routine UI transitions, no buffering-video feel for reading entry, no modal that appears late because its shell waited on verification, no visible layout shake caused by late-arriving subtitle or status text.
+
 ## How to use this during testing
 
 When runtime testing:

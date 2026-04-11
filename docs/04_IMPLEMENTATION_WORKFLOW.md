@@ -52,6 +52,18 @@ Diagnostics must be:
 - aimed at one failing case end-to-end
 - removed after proof is collected
 
+### 3.5 Responsiveness-first interaction rules
+When a pass touches a user-visible transition, apply these rules by default:
+
+- render the safe pending or hidden state before any await that could stall the visible surface
+- open modal shells immediately when local knowledge is enough to present them safely
+- keep gated action buttons locked until server-backed checks settle instead of delaying the whole surface
+- gate account-backed rendering on explicit hydration or confirmation seams, not inferred readiness
+- when using cache for responsiveness, treat it as projection only; replay only dirty unconfirmed mutations rather than blindly resending all cached values
+- if a visible surface will update after hydration, reserve its layout space or stabilize its position so late text does not shake the page
+
+These rules exist to prevent the app from feeling like a form submission, a buffering video, or a glitchy catch-up UI.
+
 ### 4. Create one canonical patch artifact
 The default deliverable for an implementation pass is one scoped `.diff` file.
 
@@ -84,6 +96,14 @@ For each category, note:
 Do not mark a behavior acceptable merely because it corrected itself later.
 If runtime first shows a believable wrong state, treat that as a failure unless the contract explicitly allows that transition.
 
+During runtime testing, call out these failure shapes explicitly when they occur:
+- stale content visible before a pending state appears
+- a modal shell delayed by server verification instead of opening immediately
+- action controls left interactable before required verification settles
+- intermediate dashboard or library states flashing before hydration completes
+- layout shifts caused by late subtitle or status text
+- a visibility gate that can hang indefinitely because a retry chain or promise never settles
+
 ### 6. Revise or reclassify
 - same pass → revise the same diff
 - new pass → create a new diff
@@ -115,6 +135,16 @@ Scaffold mismatch invalidates the pass base.
 ### Anti-pattern rule
 Do not use a pass to normalize bad architecture by accident.
 If the pass would legitimize duplicate truth, reclassify it and fix ownership first.
+
+### Responsive persistence rule
+For settings and similar durable preferences, prefer this model:
+- confirmed server baseline
+- immediate local projection of user intent
+- dirty tracking for unconfirmed fields
+- replay of dirty unconfirmed mutations after refresh
+
+Do not rely on a debounce timer alone as the only protection for user intent.
+Do not let cache become the confirmed baseline unless the server actually confirmed it.
 
 ## Patch-safety rules
 - do not move runtime truth into shell
