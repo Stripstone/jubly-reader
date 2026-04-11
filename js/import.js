@@ -1006,7 +1006,7 @@ setProgress(0, 'Preparing', '');
         // keepParasChk is currently informational; paragraph preservation is the default behavior.
         const cleanupHeadings = !!cleanupHeadingsChk?.checked;
 
-        const sections = await epubExtractSelectedSections(
+        const sections = await epubToMarkdownFromSelected(
           _zip,
           _tocItems,
           selectedIds,
