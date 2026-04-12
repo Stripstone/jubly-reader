@@ -2736,6 +2736,7 @@ function _installScrollPageTracker() {
   window.__rcScrollPageTrackerInstalled = true;
   var raf = 0;
   var prevIdx = -1;
+  var settleTimer = 0;
 
   function reconcileVisiblePage(reason) {
     if (raf) return;
@@ -2745,12 +2746,12 @@ function _installScrollPageTracker() {
         if (!Array.isArray(pages) || !pages.length) return;
         const pageEls = Array.from(document.querySelectorAll('.page'));
         if (!pageEls.length) return;
-        const doc = document.documentElement;
-        const viewportBottom = window.scrollY + window.innerHeight;
-        const docBottom = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
         let bestEl = null;
         let bestIdx = -1;
-        if ((docBottom - viewportBottom) <= 4) {
+        const nearBottom = (typeof window.isReadingViewportNearBottom === 'function')
+          ? !!window.isReadingViewportNearBottom()
+          : false;
+        if (nearBottom) {
           bestEl = pageEls[pageEls.length - 1];
           bestIdx = parseInt(bestEl?.dataset?.pageIndex || String(pageEls.length - 1), 10);
         } else {
@@ -2781,9 +2782,18 @@ function _installScrollPageTracker() {
     });
   }
 
+  function reconcileVisiblePageAfterSettle(reason) {
+    reconcileVisiblePage(reason);
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(function () {
+      settleTimer = 0;
+      reconcileVisiblePage(reason + '-settled');
+    }, 160);
+  }
+
   window.addEventListener('scroll', function () { reconcileVisiblePage('scroll-tracker'); }, { passive: true });
-  window.addEventListener('resize', function () { reconcileVisiblePage('resize-reconcile'); }, { passive: true });
-  window.addEventListener('fullscreenchange', function () { reconcileVisiblePage('fullscreen-reconcile'); }, { passive: true });
+  window.addEventListener('resize', function () { reconcileVisiblePageAfterSettle('resize-reconcile'); }, { passive: true });
+  window.addEventListener('fullscreenchange', function () { reconcileVisiblePageAfterSettle('fullscreen-reconcile'); }, { passive: true });
 }
 
 

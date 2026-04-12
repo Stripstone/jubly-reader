@@ -218,16 +218,26 @@ function ttsAutoplayScheduleNext(pageIndex) {
     AUTOPLAY_STATE.countdownSec -= 1;
     if (AUTOPLAY_STATE.countdownSec <= 0) {
       ttsAutoplayCancelCountdown();
-      const nextPageEl = pageEls[nextIndex];
-      if (nextPageEl) nextPageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const focusResult = (typeof window.focusReadingPage === 'function')
+        ? window.focusReadingPage(nextIndex, { behavior: 'smooth' })
+        : { ok: false };
+      if (!focusResult || focusResult.ok === false) {
+        const nextPageEl = pageEls[nextIndex];
+        if (nextPageEl) nextPageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
       setTimeout(() => {
         const text = (typeof pages !== 'undefined' && pages[nextIndex]) ? pages[nextIndex] : '';
-        if (text) {
+        if (!text) return;
+        if (!focusResult || focusResult.ok === false) {
           const _cur = window.__rcReadingTarget || {};
           if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _cur.sourceType || '', bookId: _cur.bookId || '', chapterIndex: _cur.chapterIndex != null ? _cur.chapterIndex : -1, pageIndex: nextIndex });
-          ttsSpeakQueue((typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${nextIndex}`, [text]);
         }
-      }, 400);
+        const activeTarget = window.__rcReadingTarget || {};
+        const nextKey = (typeof readingTargetToKey === 'function')
+          ? readingTargetToKey(activeTarget)
+          : `page-${nextIndex}`;
+        ttsSpeakQueue(nextKey, [text]);
+      }, 280);
     } else { updateBtn(); }
   }, 1000);
 }

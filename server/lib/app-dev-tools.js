@@ -64,22 +64,47 @@ function inferImportKind(storageRef, patch = {}) {
   return 'embedded';
 }
 
+const ALLOWED_SETTINGS_FIELDS = [
+  'user_id',
+  'theme_id',
+  'font_id',
+  'tts_voice_id',
+  'tts_volume',
+  'autoplay_enabled',
+  'music_enabled',
+  'particles_enabled',
+  'daily_goal_minutes',
+  'created_at',
+  'updated_at',
+];
+
+function sanitizeSettingsRow(row = null) {
+  if (!row || typeof row !== 'object') return null;
+  const sanitized = {};
+  for (const key of ALLOWED_SETTINGS_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(row, key) && row[key] !== undefined) {
+      sanitized[key] = row[key];
+    }
+  }
+  return sanitized;
+}
+
 function canonicalizeSettingsRow(existing = {}, patch = {}) {
-  return {
-    user_id: String(existing.user_id || patch.user_id || '').trim(),
-    theme_id: toText(patch.theme_id, toText(existing.theme_id, 'default')),
-    font_id: toText(patch.font_id, toText(existing.font_id, 'Lora')),
-    tts_speed: Number.isFinite(Number(patch.tts_speed)) ? Number(patch.tts_speed) : (Number.isFinite(Number(existing.tts_speed)) ? Number(existing.tts_speed) : 1.00),
-    tts_voice_id: toText(patch.tts_voice_id, toText(existing.tts_voice_id, null)),
-    tts_volume: Number.isFinite(Number(patch.tts_volume)) ? Number(patch.tts_volume) : (Number.isFinite(Number(existing.tts_volume)) ? Number(existing.tts_volume) : 0.50),
-    autoplay_enabled: patch.autoplay_enabled == null ? toBool(existing.autoplay_enabled, false) : toBool(patch.autoplay_enabled, false),
-    music_enabled: patch.music_enabled == null ? toBool(existing.music_enabled, true) : toBool(patch.music_enabled, true),
-    particles_enabled: patch.particles_enabled == null ? toBool(existing.particles_enabled, true) : toBool(patch.particles_enabled, true),
-    use_source_page_numbers: patch.use_source_page_numbers == null ? toBool(existing.use_source_page_numbers, false) : toBool(patch.use_source_page_numbers, false),
-    appearance_mode: toText(patch.appearance_mode, toText(existing.appearance_mode, 'light')),
-    daily_goal_minutes: Math.max(5, Math.min(300, toInt(patch.daily_goal_minutes, toInt(existing.daily_goal_minutes, 15)))),
+  const current = sanitizeSettingsRow(existing) || {};
+  const next = {
+    user_id: String(current.user_id || patch.user_id || '').trim(),
+    theme_id: toText(patch.theme_id, toText(current.theme_id, 'default')),
+    font_id: toText(patch.font_id, toText(current.font_id, 'Lora')),
+    tts_voice_id: toText(patch.tts_voice_id, toText(current.tts_voice_id, null)),
+    tts_volume: Number.isFinite(Number(patch.tts_volume)) ? Number(patch.tts_volume) : (Number.isFinite(Number(current.tts_volume)) ? Number(current.tts_volume) : 0.50),
+    autoplay_enabled: patch.autoplay_enabled == null ? toBool(current.autoplay_enabled, false) : toBool(patch.autoplay_enabled, false),
+    music_enabled: patch.music_enabled == null ? toBool(current.music_enabled, true) : toBool(patch.music_enabled, true),
+    particles_enabled: patch.particles_enabled == null ? toBool(current.particles_enabled, true) : toBool(patch.particles_enabled, true),
+    daily_goal_minutes: Math.max(5, Math.min(300, toInt(patch.daily_goal_minutes, toInt(current.daily_goal_minutes, 15)))),
     updated_at: new Date().toISOString(),
   };
+  if (current.created_at) next.created_at = current.created_at;
+  return next;
 }
 
 async function getUsersRow(userId) {
@@ -93,7 +118,7 @@ async function getSettingsRow(userId) {
   const data = await supabaseRest(`/rest/v1/user_settings?user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`, {
     method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
   }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : null;
+  return sanitizeSettingsRow(Array.isArray(data) && data[0] ? data[0] : null);
 }
 
 async function upsertSettings(userId, patch) {
@@ -102,7 +127,7 @@ async function upsertSettings(userId, patch) {
   const data = await supabaseRest('/rest/v1/user_settings?on_conflict=user_id', {
     method: 'POST', asService: true, headers: { Prefer: 'resolution=merge-duplicates,return=representation' }, body: payload,
   }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : payload;
+  return sanitizeSettingsRow(Array.isArray(data) && data[0] ? data[0] : payload);
 }
 
 async function clearSettings(userId) {

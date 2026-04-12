@@ -369,12 +369,9 @@ function getPageMetaEntry(index) {
 }
 
 function usesSourcePageNumbers() {
-  try {
-    const prefs = (window.rcPrefs && typeof window.rcPrefs.loadThemePrefs === 'function') ? window.rcPrefs.loadThemePrefs() : loadThemePrefs();
-    return prefs?.use_source_page_numbers !== false;
-  } catch (_) {
-    return true;
-  }
+  // Page numbering is fixed runtime behavior when source metadata exists.
+  // Retired legacy prefs must not re-enter as a client-side gate.
+  return true;
 }
 
 function getDisplayPageNumber(index) {
@@ -605,15 +602,33 @@ async function stableHashText(text) {
   let intervals = [];
   let lastFocusedPageIndex = -1; // for keyboard navigation
 
+  function getReadingViewportBottomGap() {
+    try {
+      const doc = document.documentElement;
+      const docBottom = Math.max(Number(doc?.scrollHeight || 0), Number(document.body?.scrollHeight || 0));
+      const viewportBottom = Number(window.scrollY || 0) + Number(window.innerHeight || 0);
+      if (!Number.isFinite(docBottom) || !Number.isFinite(viewportBottom)) return Infinity;
+      return Math.max(0, docBottom - viewportBottom);
+    } catch (_) {
+      return Infinity;
+    }
+  }
+
+  function isReadingViewportNearBottom(thresholdPx) {
+    const dynamicThreshold = Math.max(24, Math.min(120, Math.round((Number(window.innerHeight || 0) || 0) * 0.08)));
+    const threshold = Number.isFinite(Number(thresholdPx)) ? Number(thresholdPx) : dynamicThreshold;
+    return getReadingViewportBottomGap() <= Math.max(0, threshold);
+  }
+
+  try { window.getReadingViewportBottomGap = getReadingViewportBottomGap; } catch (_) {}
+  try { window.isReadingViewportNearBottom = isReadingViewportNearBottom; } catch (_) {}
+
   function inferCurrentPageIndex() {
     const pageEls = Array.from(document.querySelectorAll('.page'));
     if (!pageEls.length) return -1;
 
     try {
-      const doc = document.documentElement;
-      const viewportBottom = window.scrollY + window.innerHeight;
-      const docBottom = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
-      if ((docBottom - viewportBottom) <= 4) {
+      if (isReadingViewportNearBottom()) {
         const lastPage = pageEls[pageEls.length - 1];
         const idx = parseInt(lastPage?.dataset?.pageIndex || String(pageEls.length - 1), 10);
         if (!Number.isNaN(idx)) return idx;
