@@ -1,144 +1,128 @@
-# Jubly Reader — Documentation Package
+# Jubly Reader — Reduced Authoritative Documentation Stack
 
-This is the active documentation set for the current project state.
+This is the reduced active documentation package for the current project state.
 
-The goal is to keep the package small, current, and reliable during patching and major refactors.
+The goal of this package is to keep project authority small, current, and usable during patching, reconciliation, launch work, and compliance audit.
+
+This package defines required policy, not helpful suggestions.
+A patch that violates scaffold authority, ownership boundaries, or duplicate-truth rules is non-compliant and must be rejected even if it appears to pass runtime acceptance criteria.
 
 ## Read in this order
 1. `01_PROJECT_STATE.md`
-2. `02_RUNTIME_CONTRACT.md`
-3. `03_ARCHITECTURE_MAP.md`
-4. `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
-5. `04_IMPLEMENTATION_WORKFLOW.md`
-6. `05_LAUNCH_AND_INTEGRATION.md`
+2. `03_ARCHITECTURE_AND_GUARDRAILS.md`
+3. `02_RUNTIME_CONTRACT.md`
+4. `05_PRODUCT_LAUNCH_AND_INTEGRATION.md`
+5. `06_SUPABASE_SCHEMA_REFERENCE.md`
+6. `04_IMPLEMENTATION_WORKFLOW.md`
 
-## Core authority docs
+## What changed in this reduction
+The prior stack had too many overlapping docs with partial duplication across:
+- architecture and guardrails
+- workflow and git patch operations
+- launch, business surfaces, auth/billing wiring, and code-protection policy
+- schema reference and one-time replacement procedure
+
+This reduced stack merges those overlaps into one authority path per subject.
+
+## Active authority docs
 
 ### `01_PROJECT_STATE.md`
 What exists right now.
 
-Use this before changing code.
+Use this before changing code or reviewing a build.
+
+### `03_ARCHITECTURE_AND_GUARDRAILS.md`
+Who owns what, what scaffold shape is authoritative, and what patterns are forbidden.
+
+Use this first during audits, refactors, shell/runtime cleanup, scaffold verification, and protected-logic redistribution. This is the structural compliance gate.
 
 ### `02_RUNTIME_CONTRACT.md`
 What the user should experience.
 
-Use this to judge behavior and reject regressions.
-It also contains the runtime experience evaluation lens used during runtime testing.
-
-### `03_ARCHITECTURE_MAP.md`
-Who owns what.
-
-Use this to decide whether a fix belongs in shell, runtime, backend, persistence, or protected-server logic.
-
-### `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
-What architectural behavior is forbidden, what scaffold discipline is non-negotiable, and how prototype conveniences must be retired.
-
-Use this during refactors, scaffold changes, ownership cleanup, and any pass that risks introducing duplicate truth.
+Use this to judge runtime behavior and reject regressions after the structural compliance gate passes. Runtime acceptance does not legalize an ownership breach.
 
 ### `04_IMPLEMENTATION_WORKFLOW.md`
-Current approach to implementing features.
+Required development loop for bounded implementation passes.
 
-Use this as guidelines.
+Use this after policy documents determine what is correct. It governs owner identification, proof-first debugging, patch artifact discipline, and diff-driven cleanup, but it does not override higher-order policy.
 
-### `05_LAUNCH_AND_INTEGRATION.md`
-What must be true before launch and how external integration fits.
+### `05_PRODUCT_LAUNCH_AND_INTEGRATION.md`
+Product flow, auth/billing wiring, launch gate, and browser-vs-backend protection policy.
 
-Use this for launch gating, browser-vs-backend protection decisions, and Supabase/integration planning.
+Use this when the pass touches acquisition flow, signed-in behavior, entitlement resolution, pricing, billing, or code-exposure decisions.
 
-## Supporting policy and planning docs
+### `06_SUPABASE_SCHEMA_REFERENCE.md`
+Canonical pre-launch durable schema and the replacement procedure.
+
+Use this for table roles, durable ownership, replacement sequencing, and post-reset validation.
+
+## Non-authority companion artifacts
+
+### Operational reference
+- `ops/ENVIRONMENT_VARIABLES_REFERENCE.md`
+
+This is useful during setup, but it is not a project truth document.
+
+### Audit note
+- `notes/jubly-reader-nonCompliant-compliance-assessment-v2.md`
+
+This remains an audit note only.
+It does not override the active authority stack unless its findings are deliberately promoted into the docs above.
+
+### SQL companion
+- `app_tables_canonical.sql`
+
+This is the canonical SQL companion to `06_SUPABASE_SCHEMA_REFERENCE.md`.
+Treat the SQL and schema reference as a pair.
+
+## Reduction map
+The previous stack was reduced as follows:
+
+- `03_ARCHITECTURE_MAP.md`
+- `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
+- `API_ROUTE_MAP.md`
+
+→ merged into `03_ARCHITECTURE_AND_GUARDRAILS.md`
+
+- `04_IMPLEMENTATION_WORKFLOW.md`
+- `git_workflow_cheatsheet.md`
+
+→ merged into `04_IMPLEMENTATION_WORKFLOW.md`
+
+- `05_LAUNCH_AND_INTEGRATION.md`
 - `06_BUSINESS_SURFACES_AND_FUNCTIONALITY.md`
 - `07_AUTH_BILLING_WIRING_GUIDELINE.md`
 - `08_IP_AND_CODE_PROTECTION_POLICY.md`
 
-Use these when the pass touches business flows, billing/auth wiring, or browser-vs-backend code exposure decisions.
+→ merged into `05_PRODUCT_LAUNCH_AND_INTEGRATION.md`
 
-`08_IP_AND_CODE_PROTECTION_POLICY.md` is now an active launch companion, not an optional side note.
+- `SUPABASE_TABLES_REFERENCE.md`
+- `SUPABASE_RESET_AND_REBUILD.md`
 
-## Implementation workflow
-The preferred implementation workflow is now **scoped diff-driven patching** once the owner layer is known.
+→ merged into `06_SUPABASE_SCHEMA_REFERENCE.md`
 
-Default rules:
-- one bounded pass at a time
-- one canonical `.diff` per active pass
-- runtime feedback revises that same diff in place
-- do not stack forward diffs for the same pass
-- create a `.zip` alongside the diff only when new files or assets make that necessary
+## Current authority clarifications locked by this reduction
+- Pre-account users may read the sample book.
+- `appearance_mode` is client-cache only, not a durable synced setting.
+- `tts_speed` is not part of the durable settings contract.
+- `use_source_page_numbers` is retired as a configurable and replaced by fixed runtime page-number behavior.
+- diagnostics preferences and devtools-only toggles are not durable product truth.
+- the non-compliance assessment remains an audit note, not a policy doc.
 
-See:
-- `IMPLEMENTATION_WORKFLOW.md`
-- `git_workflow_cheatsheet.md`
-
-## Important clarification
-The app web root is now the repository root.
-
-For the current codebase, the shell layer includes:
-- `index.html`
-- `js/shell.js`
-- live shell-facing CSS in `css/`
-
-That does **not** change ownership.
-It only clarifies where current shell behavior lives.
-Runtime still owns reading entry, active page truth, TTS, restore, importer state, countdown truth, theme truth, appearance truth, and reading exit cleanup.
-
-## Architectural standards note
-The project now treats scaffold shape and architectural discipline as first-class authority.
-
-That means:
-- folder scaffolding is part of architecture, not cosmetic organization
-- mixed-era scaffolds must not silently steer implementation
-- prototype conveniences must be marked, bounded, and retired deliberately
-- shell bridges are temporary unless explicitly promoted and documented
-- duplicate truth across shell/runtime/backend is a defect, not an implementation style
-
-See:
-- `03_ARCHITECTURE_MAP.md`
-- `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
-- `IMPLEMENTATION_WORKFLOW.md`
-
-## Current documentation note
-The theme enhancement is now implemented.
-
-That means the docs now treat these as current reality:
-- runtime-owned theme state exists
-- runtime-owned appearance state exists
-- Explorer customization lives in Reading Settings → Themes
-- Profile Appearance is global Light/Dark only
-- custom music is device-local and separate from durable preferences
-
-The CSS surface is still slightly transitional:
-- `css/shell.css` is the live shell CSS patch surface today
-- `css/components.css` and `css/theme.css` still describe the intended split, but they are not the live implementation surface yet
-
-Treat that as logged debt, not as a reason to patch against dormant CSS files by default.
-
-## Archive note
-`archive/CLAUDE_DEVELOPMENT_LOOP.md` is retained only as archived tool-specific history.
-It is not a core process authority.
-The active process truth lives in the agent-neutral implementation workflow and the core docs above.
-
-## Rules for keeping this package accurate
+## Package maintenance rules
 - Update `01_PROJECT_STATE.md` when code reality changes.
 - Update `02_RUNTIME_CONTRACT.md` when user-facing behavior changes.
-- Update `03_ARCHITECTURE_MAP.md` when ownership boundaries change.
-- Update `04_EXECUTION_BACKLOG.md` after implementation or validation status changes.
-- Update `05_LAUNCH_AND_INTEGRATION.md` when launch gates or integration scope changes.
-- Update `08_IP_AND_CODE_PROTECTION_POLICY.md` when browser-vs-backend protection policy changes.
-- Update `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md` when architectural discipline or scaffold rules change.
-- Update `IMPLEMENTATION_WORKFLOW.md` when the default development loop changes.
-- Update `git_workflow_cheatsheet.md` when the patch artifact commands or naming standards change.
+- Update `03_ARCHITECTURE_AND_GUARDRAILS.md` when ownership or scaffold rules change.
+- Update `04_IMPLEMENTATION_WORKFLOW.md` when the default implementation loop changes.
+- Update `05_PRODUCT_LAUNCH_AND_INTEGRATION.md` when product flow, launch gate, or protection policy changes.
+- Update `06_SUPABASE_SCHEMA_REFERENCE.md` and `app_tables_canonical.sql` together when durable schema changes.
 
-## During major refactors
-If a document is clearly out of sync with the live scaffold shape or ownership model:
-- do not quietly keep using it as authority
-- either rewrite it into sync
-- or archive it explicitly
+## Audit and implementation gate order
+1. verify the current scaffold and artifact base
+2. identify the owner layer and forbidden authority surfaces
+3. reject structural breaches before judging runtime comfort
+4. confirm runtime behavior in served testing
+5. decide whether the next move is proof, a bounded patch, or diff-driven cleanup
 
-Do not let mixed-era docs silently steer implementation.
-
-## Before an implementation pass
-Before handing a large objective to any agent:
-1. runtime-test enough to identify the real user failure
-2. write the request using explicit runtime success and failure conditions
-3. decide whether the next move is proof instrumentation, a bounded patch pass, or diff-driven cleanup
-
-Do not send a large pass based only on code suspicion.
+Do not send broad implementation work based only on code suspicion.
+Do not treat runtime comfort as permission to ignore architectural non-compliance.

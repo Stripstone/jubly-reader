@@ -3,12 +3,11 @@
 ## Summary
 Jubly Reader is a static frontend plus serverless backend with a global-script runtime.
 
-The current build is still a transitional shell/runtime hybrid, but the isolated theme system is implemented and in an acceptable safe state.
 Treat the current codebase as the patch target.
-Do not treat older builds or older notes as implementation truth.
+Do not treat older builds, older notes, or mixed-era scaffolds as implementation truth.
 
-The app web root now lives at repository root.
-The `docs/` directory is now for project markdown docs, not the app shell.
+The app web root lives at repository root.
+The `docs/` directory is documentation only.
 
 ## Current code shape
 
@@ -25,8 +24,8 @@ Current role:
 - library/profile presentation
 - footer/layout behavior
 - settings tabs and presentation controls
-- theme/appearance control surfaces
-- shell-side bridge calls into runtime APIs
+- theme and appearance control surfaces
+- shell-safe bridge calls into runtime APIs
 
 ### Runtime scaffold
 Loaded by `js/app.js` in this order:
@@ -41,15 +40,16 @@ Loaded by `js/app.js` in this order:
 
 Current role:
 - reading state
-- TTS
-- importer
+- active page truth
+- TTS lifecycle
+- importer lifecycle
 - library loading and rendering
 - evaluation flow
 - runtime UI rules
-- restore and reading continuity logic
+- restore and reading continuity
 - runtime-owned theme truth
 - runtime-owned appearance truth
-- runtime-owned entitlement checks for theme/music gating
+- runtime-owned entitlement checks for feature gating
 
 ### Supporting JS outside the loader
 Loaded before the scaffold:
@@ -90,70 +90,57 @@ Current role:
 - Boot order matters.
 - Runtime owns actual reading behavior.
 - Shell still contains presentation plus transitional bridge logic.
-- Current code should be treated as the patch target.
-- The isolated theme system is implemented and should now be treated as real code, not planned architecture.
-- The app is now served from root with `/api/*` alongside it.
-- `docs/` is now documentation only.
-
+- The app is served from repository root with `/api/*` alongside it.
+- `docs/` is documentation only.
+- The isolated theme system is implemented and should be treated as real code, not a plan.
 
 ### Durable persistence status
-The current validated runtime artifact still reflects a transitional durable model that is being retired before launch.
+The durable model is still pre-launch transitional and should be treated as patch debt rather than launch-ready architecture.
 
-Canonical pre-launch replacement direction:
-- `user_library_items` becomes the owned-book identity table
-- `user_progress` becomes one-row-per-owned-item restore truth
-- `user_book_metrics` and `user_daily_stats` replace default append-only session history for product-facing summaries
-- `user_sessions` is no longer treated as canonical launch persistence
+Canonical pre-launch durable direction:
+- `user_library_items` = owned-book identity
+- `user_progress` = one-row-per-owned-item restore truth
+- `user_book_metrics` = compact per-book summary
+- `user_daily_stats` = compact per-day summary
+- `user_sessions` is retired from the canonical launch model
 
-Until the replacement SQL and follow-up code pass land, treat durable table drift as known pre-launch debt rather than launch-ready architecture.
+### Current local vs durable intent
+Runtime owns theme truth and appearance truth.
 
-### Architectural discipline now treated as active project state
-- folder scaffolding is part of architecture and must be treated as an authority surface
-- the repository-root web app shape is intentional, not a cosmetic preference
-- mixed-era scaffolds are a real regression risk and must be rejected before patching
-- temporary shell bridges are allowed only when the runtime replacement does not yet exist
-- prototype conveniences must not silently become production authority
-- duplicate truth across shell/runtime/backend is treated as architectural debt or a defect
+Persistence intent in the current authority stack:
+- `appearance_mode` = client-cache only
+- dismissed local UI affordances = client-cache only when appropriate
+- diagnostics preferences = not durable product truth
+- devtools-only toggles = not durable product truth
+- `tts_speed` = not part of the durable settings contract
+- `use_source_page_numbers` = retired legacy gate, not part of the durable settings contract
 
-See:
-- `03_ARCHITECTURE_MAP.md`
-- `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md`
-- `IMPLEMENTATION_WORKFLOW.md`
+Page-number behavior intent:
+- displayed page numbers preserve source or actual document numbering when that metadata exists
+- page numbering is fixed runtime behavior, not a user preference
+- devtools must not present source-page numbering as an active behavioral switch
 
-### Theme system now implemented
-- selected theme state belongs to runtime
-- appearance state belongs to runtime
-- shell controls call runtime APIs for theme/appearance/settings changes
-- Explorer customization lives in Reading Settings → Themes
-- Profile → Settings → Appearance is global Light/Dark only
-- Explorer visuals are scoped to reading content only
-- Explorer background modes now exist: Plain, Texture, Wallpaper
-- custom music is bounded to Explorer Themes, stored device-local, and kept separate from durable preferences
-- runtime owns the theme/music access checks; shell reflects locked/unlocked state
+Heavy device-local assets remain local for now:
+- uploaded custom music blobs
+- browser caches
+- other user-provided binary assets
 
-### Still transitional
-- `css/shell.css` is the live shell CSS surface today
-- `css/components.css` and `css/theme.css` still reflect intended separation more than live implementation
-- `js/music.js` is valid supporting JS but the broader local-asset subsystem is not yet generalized
-- some shell behavior still overlaps runtime-facing presentation glue even after the ownership cleanup
-- some older documents may still describe target state more strongly than current code supports if they have not been synchronized yet
-
-### Recent validated changes
-- The chapter-change continuity bug is resolved in the runtime layer.
-- The isolated theme enhancement is implemented in a safe bounded state.
-- Explorer now behaves as a reading-only theme surface rather than a whole-app recolor.
-- The app web root has moved from `docs/` to repository root.
-- Silent Polly synthesis fallback has been removed from cloud TTS behavior.
+### Current product-flow intent
+- Pre-account users may read the sample book.
+- Ownership and expansion actions should prompt account creation.
+- Signed-in users should bypass unnecessary public friction.
+- Billing and entitlement truth should resolve through backend and durable records, not cosmetic UI state.
 
 ## What a new engineer should assume
+For compliance audit, start with scaffold reality and file responsibility before judging runtime comfort.
+
 - Preserve the current UI direction unless the bug is caused by it.
 - Prefer runtime-owned fixes over new shell logic.
-- Do not infer truth from the DOM if runtime can own it.
+- Do not infer launch-critical truth from the DOM.
 - Do not remove shell bridge code until the runtime replacement exists.
 - Validate important behavior in a served environment.
-- Do not wake up dormant CSS files just to satisfy the aspirational scaffold unless the pass is explicitly a CSS-surface redistribution pass.
+- Treat scaffold verification as a precondition to implementation, not cleanup after patching.
 - Treat browser-delivered code as inspectable and move crown-jewel decision logic backend-side when feasible.
-- Treat scaffold verification as a precondition to implementation, not a cleanup step after patching.
 
 ## Current priority areas
 1. restore continuity
@@ -161,23 +148,18 @@ See:
 3. importer lifecycle
 4. exit cleanup
 5. shell layout stability
-6. lean client + protected-logic redistribution
-7. signed-in persistence/integration after runtime behavior is stable
+6. lean client plus protected-logic redistribution
+7. signed-in persistence and integration after runtime behavior is stable
 
-## Logged transitional debt from the theme pass
-1. CSS surface alignment is still deferred.
-   - live theme work landed in `css/shell.css`
-   - intended split across `components.css` and `theme.css` is not yet live
-2. Wallpaper asset localization is still deferred.
-   - the current wallpaper path should eventually become a clean local asset/reference in the live scaffold
-3. Theme/music support files are still narrow utilities.
-   - `music.js` and `embers.js` are acceptable, but not yet part of a broader cleaned supporting-asset subsystem
-4. Some shell bridge behavior still needs deliberate retirement.
-   - these bridges must be tracked as temporary architecture, not accepted as permanent truth layers
+## Transitional debt still logged
+1. Shell bridge retirement is not complete.
+2. CSS surface redistribution is still deferred.
+3. Durable sync is not fully aligned to the launch schema.
+4. Some documents and audits from earlier passes remain useful history, but they are not implementation truth unless promoted into this reduced stack.
 
 ## What this project is not yet
 It is not yet:
-- a thin shell over a fully cleaned scaffold
+- a fully cleaned thin shell
 - a fully integrated Supabase client app
 - a finalized monetization/billing system
 - a fully redistributed final CSS surface
