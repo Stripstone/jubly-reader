@@ -97,6 +97,7 @@ window.rcSync = (function () {
   const RC_DURABLE_CACHE_PREFIX = 'rc_durable_snapshot_v1:';
 
   const WATCHED_SETTING_IDS = new Set([
+    'shell-speed',
     'voiceFemaleSelect',
     'voiceMaleSelect',
     'autoplayToggle',
@@ -198,6 +199,7 @@ window.rcSync = (function () {
     const theme = _currentThemePrefs();
     const profile = _currentProfilePrefs();
     const themeSettings = (theme.theme_settings && typeof theme.theme_settings === 'object') ? theme.theme_settings : {};
+    const speedEl = document.getElementById('shell-speed');
     const voiceVolumeEl = document.getElementById('vol_voice');
     const autoplayToggle = document.getElementById('autoplayToggle');
     const selectedVoice = (() => {
@@ -207,6 +209,7 @@ window.rcSync = (function () {
     const row = {
       theme_id: String(theme.theme_id || 'default'),
       font_id: themeSettings.font ? String(themeSettings.font) : null,
+      tts_speed: speedEl && speedEl.value !== '' ? Number(speedEl.value) : null,
       tts_voice_id: selectedVoice || null,
       tts_volume: voiceVolumeEl && voiceVolumeEl.value !== '' ? Number(voiceVolumeEl.value) : null,
       autoplay_enabled: autoplayToggle ? !!autoplayToggle.checked : null,
@@ -283,7 +286,11 @@ window.rcSync = (function () {
         } catch (_) {}
       }
 
-
+      if (row.tts_speed != null) {
+        const speedEl = document.getElementById('shell-speed');
+        if (speedEl) speedEl.value = String(row.tts_speed);
+        try { if (typeof window.shellSetSpeed === 'function') window.shellSetSpeed(row.tts_speed); } catch (_) {}
+      }
 
       if (row.tts_voice_id) {
         try { window.__rcSessionVoiceSelection = String(row.tts_voice_id); } catch (_) {}
