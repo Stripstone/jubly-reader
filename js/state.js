@@ -608,6 +608,20 @@ async function stableHashText(text) {
   let lastFocusedPageIndex = -1; // for keyboard navigation
 
   function inferCurrentPageIndex() {
+    const pageEls = Array.from(document.querySelectorAll('.page'));
+    if (!pageEls.length) return -1;
+
+    try {
+      const doc = document.documentElement;
+      const viewportBottom = window.scrollY + window.innerHeight;
+      const docBottom = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
+      if ((docBottom - viewportBottom) <= 4) {
+        const lastPage = pageEls[pageEls.length - 1];
+        const idx = parseInt(lastPage?.dataset?.pageIndex || String(pageEls.length - 1), 10);
+        if (!Number.isNaN(idx)) return idx;
+      }
+    } catch (_) {}
+
     // 1) Active element within a page
     const active = document.activeElement;
     if (active) {
@@ -619,8 +633,6 @@ async function stableHashText(text) {
     }
 
     // 2) Page closest to top of viewport
-    const pageEls = Array.from(document.querySelectorAll(".page"));
-    if (!pageEls.length) return -1;
     let bestIdx = -1;
     let bestDist = Infinity;
     for (const el of pageEls) {
@@ -1224,13 +1236,11 @@ function applyAppearance() {
 
 function setAppearance(mode) {
   appAppearance = String(mode || 'light') === 'dark' ? 'dark' : 'light';
-  saveAppearancePrefs({ appearance: appAppearance });
   return applyAppearance();
 }
 
 function loadAppearance() {
-  const stored = loadAppearancePrefs() || {};
-  appAppearance = stored.appearance === 'dark' ? 'dark' : 'light';
+  appAppearance = 'light';
   return applyAppearance();
 }
 

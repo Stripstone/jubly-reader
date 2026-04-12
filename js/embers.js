@@ -60,10 +60,8 @@
   function refreshCanvasBounds(resetParticles) {
     var parent = canvas.parentElement || document.querySelector('#reading-mode .reading-content');
     var rect = parent ? parent.getBoundingClientRect() : null;
-    var parentScrollWidth = parent ? parent.scrollWidth : 0;
-    var parentScrollHeight = parent ? parent.scrollHeight : 0;
-    var nextW = Math.max(1, Math.round(Math.max((rect && rect.width) || 0, parentScrollWidth || 0, canvas.clientWidth || 0, window.innerWidth || 0)));
-    var nextH = Math.max(1, Math.round(Math.max((rect && rect.height) || 0, parentScrollHeight || 0, canvas.clientHeight || 0, window.innerHeight || 0)));
+    var nextW = Math.max(1, Math.round(Math.max((rect && rect.width) || 0, canvas.clientWidth || 0, window.innerWidth || 0)));
+    var nextH = Math.max(1, Math.round(Math.max(canvas.clientHeight || 0, window.innerHeight || 0)));
     ww = nextW;
     wh = nextH;
     canvas.width = ww;

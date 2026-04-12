@@ -222,6 +222,29 @@ async function requestServerPageBreak(payload) {
       if (textImportBtn) textImportBtn.disabled = locked || !(textBodyInput && String(textBodyInput.value || '').trim());
     }
 
+    function getSelectedFileStatus(fileRef = _file) {
+      if (!fileRef) return '';
+      const ext = (String(fileRef.name || '').match(/\.([^.]+)$/i) || [])[1]?.toLowerCase() || '';
+      const fileType = (_inputFormat || ext || 'Unknown').toUpperCase();
+      return `Selected: ${fileRef.name} (${Math.round((Number(fileRef.size || 0)) / 1024)} KB) — ${fileType}`;
+    }
+
+    function syncIdleStatus(snapshot = null) {
+      if (_inputMode === 'file' && _file) {
+        setStatus(getSelectedFileStatus(_file));
+        return;
+      }
+      if (_inputMode === 'text') {
+        syncTextImportState();
+        return;
+      }
+      if (snapshot) {
+        setStatus(describeCapacity(snapshot));
+        return;
+      }
+      setStatus('');
+    }
+
     function resetImporterState(opts = {}) {
       const keepModalOpen = !!opts.keepModalOpen;
       _file = null;
@@ -255,6 +278,7 @@ async function requestServerPageBreak(payload) {
       if (doImportBtn) doImportBtn.disabled = true;
       if (textTitleInput) textTitleInput.value = '';
       if (textBodyInput) textBodyInput.value = '';
+      if (breakByPageNumberChk) breakByPageNumberChk.checked = false;
       _inputMode = 'file';
       syncInputMode();
       if (!keepModalOpen) {
@@ -279,7 +303,7 @@ async function requestServerPageBreak(payload) {
       syncImportEntryState(localSnapshot);
       _capacityVerified = false;
       resetImporterState({ keepModalOpen: true });
-      setStatus(describeCapacity(localSnapshot));
+      syncIdleStatus(localSnapshot);
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
       _setActionButtonsLocked(true);
@@ -287,7 +311,7 @@ async function requestServerPageBreak(payload) {
       try { document.body.classList.remove('import-drop-pending'); } catch (_) {}
       guardImportCapacity().then(guard => {
         if (modal.style.display === 'none') return;
-        setStatus(describeCapacity(guard.snapshot));
+        syncIdleStatus(guard.snapshot);
         if (!guard.ok) {
           resetImporterState({ keepModalOpen: false });
         } else {
@@ -384,7 +408,7 @@ async function requestServerPageBreak(payload) {
           kind: 'text',
           raw,
           options: {
-            breakByPageNumber: !(breakByPageNumberChk && breakByPageNumberChk.checked === false),
+            breakByPageNumber: !!(breakByPageNumberChk && breakByPageNumberChk.checked),
           },
         });
         const pages = Array.isArray(pageBreak?.pages) ? pageBreak.pages : [];
@@ -442,7 +466,7 @@ async function requestServerPageBreak(payload) {
       syncImportEntryState(localSnapshot);
       resetImporterState({ keepModalOpen: true });
       _capacityVerified = false;
-      setStatus(describeCapacity(localSnapshot));
+      syncIdleStatus(localSnapshot);
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
       syncInputMode();
@@ -452,7 +476,7 @@ async function requestServerPageBreak(payload) {
 
       guardImportCapacity().then(guard => {
         if (modal.style.display === 'none') return;
-        setStatus(describeCapacity(guard.snapshot));
+        syncIdleStatus(guard.snapshot);
         if (!guard.ok) {
           // Server denied — close modal (guardImportCapacity already set status and
           // may have opened the pricing modal).
@@ -732,8 +756,7 @@ async function requestServerPageBreak(payload) {
       if (!scanBtn) return;
       if (!_file) { scanBtn.disabled = true; setStatus(''); return; }
       scanBtn.disabled = false;
-      const fileType = _inputFormat.toUpperCase() || 'Unknown';
-      setStatus(`Selected: ${_file.name} (${Math.round((_file.size || 0) / 1024)} KB) — ${fileType}`);
+      setStatus(getSelectedFileStatus(_file));
     }
 
     async function scanContents() {
@@ -952,7 +975,11 @@ async function requestServerPageBreak(payload) {
 
     async function doImportSelected() {
       if (!_file || !_zip || _importInProgress || !_capacityVerified) return;
-      const selectedIds = new Set(_tocItems.filter(x => x.selected).map(x => x.id));
+      const selectedFile = _file;
+      const selectedZip = _zip;
+      const selectedTocItems = Array.isArray(_tocItems) ? _tocItems.slice() : [];
+      const selectedSpineHrefs = Array.isArray(_spineHrefs) ? _spineHrefs.slice() : [];
+      const selectedIds = new Set(selectedTocItems.filter(x => x.selected).map(x => x.id));
       if (selectedIds.size === 0) return;
       // Lock immediately — before any await — so rapid clicks cannot trigger concurrent imports.
       _importInProgress = true;
@@ -973,11 +1000,11 @@ async function requestServerPageBreak(payload) {
         doneBtn.style.display = 'none';
         setProgress(0, 'Preparing', '');
 
-        const buf = await _file.arrayBuffer();
+        const buf = await selectedFile.arrayBuffer();
         const bookHash = await hashArrayBufferSha256(buf);
 
         const id = generateLocalImportId('upl');
-        const title = _file.name.replace(/\.[^.]+$/, '').trim();
+        const title = selectedFile.name.replace(/\.[^.]+$/, '').trim();
 
         const total = selectedIds.size;
         let createdPages = 0;
@@ -987,10 +1014,10 @@ async function requestServerPageBreak(payload) {
         const cleanupHeadings = !!cleanupHeadingsChk?.checked;
 
         const sections = await epubToMarkdownFromSelected(
-          _zip,
-          _tocItems,
+          selectedZip,
+          selectedTocItems,
           selectedIds,
-          _spineHrefs,
+          selectedSpineHrefs,
           {
             cleanupHeadings,
             bookTitle: title,
@@ -1006,7 +1033,7 @@ async function requestServerPageBreak(payload) {
           kind: 'sections',
           sections,
           options: {
-            breakByPageNumber: !(breakByPageNumberChk && breakByPageNumberChk.checked === false),
+            breakByPageNumber: !!(breakByPageNumberChk && breakByPageNumberChk.checked),
           },
         });
         const md = String(pageBreak?.markdown || '').trim();
@@ -1017,10 +1044,10 @@ async function requestServerPageBreak(payload) {
           id,
           title,
           createdAt: Date.now(),
-          sourceName: _file.name,
+          sourceName: selectedFile.name,
           contentFingerprint: bookHash,
           importKind: (_inputFormat || 'epub').toLowerCase(),
-          byteSize: _file.size || 0,
+          byteSize: selectedFile.size || 0,
           pageCount: createdPages,
           markdown: md
         };

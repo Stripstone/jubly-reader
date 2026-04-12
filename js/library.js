@@ -259,6 +259,15 @@
     return true;
   }
 
+  async function permanentlyDeleteAllLocalBooks(ids = []) {
+    const uniqueIds = Array.from(new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean)));
+    for (const id of uniqueIds) {
+      await localDeletedBookDelete(id);
+      queueRemoteLibraryItemState(`local:${id}`, { purge: true });
+    }
+    return true;
+  }
+
   window.__rcLocalBookGet = localBookGet;
   window.__rcLocalBookPut = localBookPut;
   window.__rcLocalBooksGetAll = localBooksGetAll;
@@ -1487,6 +1496,20 @@
   return pages;
     }
 
+    function getSequentialChapterPages(chapterIndex) {
+      const idx = Number(chapterIndex);
+      const pagesForChapter = parsePagesWithTitles((Number.isFinite(idx) && idx >= 0 && chapterList[idx]) ? chapterList[idx].raw : getCurrentChapterRaw());
+      if (!Number.isFinite(idx) || idx <= 0) return pagesForChapter;
+      let offset = 0;
+      for (let i = 0; i < idx; i++) {
+        offset += parsePagesWithTitles(chapterList[i]?.raw || '').length;
+      }
+      return pagesForChapter.map((page, localIdx) => ({
+        ...page,
+        sourcePageNumber: offset + localIdx + 1,
+      }));
+    }
+
     function setSelectOptions(selectEl, options, placeholder) {
       selectEl.innerHTML = "";
       if (placeholder) {
@@ -1551,7 +1574,7 @@
         // Await render completion so the restore scroll finishes before the caller
         // removes reading-restore-pending and reveals pages to the user.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
-        if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true });
+        if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true, pageMeta: bookPages });
         return;
       }
 
@@ -1562,12 +1585,12 @@
       chapterSelect.value = String(nextChapterIndex);
       currentChapterIndex = nextChapterIndex;
 
-      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
+      const chapterPages = getSequentialChapterPages(nextChapterIndex);
       populatePagesSelect(chapterPages);
       try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, chapterPages.length - 1)); } catch (_) {}
       // Await render completion before resolving.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true });
+      if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
     }
 
     async function loadManifest() {
@@ -1712,7 +1735,7 @@
       const selectedIdx = idx;
       currentChapterIndex = selectedIdx;
 
-      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
+      const chapterPages = getSequentialChapterPages(selectedIdx);
       populatePagesSelect(chapterPages);
 
       // Immediately replace rendered page cards with the new chapter's content.
@@ -1721,7 +1744,7 @@
       // closes the race window between chapter assignment and card DOM update —
       // no Load button click required, no timing assumption.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      applySelectionToBulkInput(chapterText, { append: false });
+      applySelectionToBulkInput(chapterText, { append: false, pageMeta: chapterPages });
     });
 
     // Keep end >= start
@@ -1750,12 +1773,12 @@
       const s = Math.max(0, parseInt(pageStart.value || "0", 10));
       const e = Math.max(s, parseInt(pageEnd.value || String(s), 10));
 
-      const slice = currentPages
-        .slice(s, e + 1)
+      const pageSlice = currentPages.slice(s, e + 1);
+      const slice = pageSlice
         .map((p) => p.text)
         .filter(Boolean);
       // Keep delimiter in a single JS string line (prevents accidental raw-newline parse errors)
-      applySelectionToBulkInput(slice.join("\n---\n"), { append: false });
+      applySelectionToBulkInput(slice.join("\n---\n"), { append: false, pageMeta: pageSlice });
     });
 
     appendBtn.addEventListener("click", () => {
@@ -1772,12 +1795,12 @@
       const s = Math.max(0, parseInt(pageStart.value || "0", 10));
       const e = Math.max(s, parseInt(pageEnd.value || String(s), 10));
 
-      const slice = currentPages
-        .slice(s, e + 1)
+      const pageSlice = currentPages.slice(s, e + 1);
+      const slice = pageSlice
         .map((p) => p.text)
         .filter(Boolean);
 
-      applySelectionToBulkInput(slice.join("\n---\n"), { append: true });
+      applySelectionToBulkInput(slice.join("\n---\n"), { append: true, pageMeta: pageSlice });
     });
 
     async function populateBookSelectWithLocal() {
@@ -2595,6 +2618,30 @@
         await renderDeletedCount();
         return;
       }
+      const topActions = document.createElement('div');
+      topActions.className = 'library-row-actions';
+      topActions.style.margin = '0 0 12px 0';
+      const deleteAll = document.createElement('button');
+      deleteAll.className = 'btn-danger';
+      deleteAll.type = 'button';
+      deleteAll.textContent = 'Delete All';
+      deleteAll.addEventListener('click', async () => {
+        const ok = confirm(`Permanently delete all ${deleted.length} deleted file${deleted.length === 1 ? '' : 's'}?
+
+This removes them from Deleted Files and frees the device storage.`);
+        if (!ok) return;
+        try {
+          await permanentlyDeleteAllLocalBooks(deleted.map((entry) => entry.id));
+          emitDeletedChanged();
+          await renderDeletedCount();
+          renderDeleted();
+        } catch (_) {
+          alert('Delete all failed.');
+        }
+      });
+      topActions.appendChild(deleteAll);
+      deletedListEl.appendChild(topActions);
+
       deleted
         .slice()
         .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0))
@@ -2689,47 +2736,54 @@ function _installScrollPageTracker() {
   window.__rcScrollPageTrackerInstalled = true;
   var raf = 0;
   var prevIdx = -1;
-  window.addEventListener('scroll', function () {
+
+  function reconcileVisiblePage(reason) {
     if (raf) return;
     raf = requestAnimationFrame(function () {
       raf = 0;
       try {
         if (!Array.isArray(pages) || !pages.length) return;
-        // Measure the visible page by viewport proximity ONLY.
-        // inferCurrentPageIndex() is intentionally not used here: it prioritises
-        // document.activeElement, which stays on the last-clicked element (e.g. a
-        // "Read Page" button inside a .page card) after release. That causes the
-        // tracker to keep reporting the wrong page index even after the user has
-        // manually scrolled to a different page.
         const pageEls = Array.from(document.querySelectorAll('.page'));
         if (!pageEls.length) return;
-        let bestEl = null, bestIdx = -1, bestDist = Infinity;
-        for (const el of pageEls) {
-          const rect = el.getBoundingClientRect();
-          if (rect.height <= 0) continue; // skip hidden / collapsed pages
-          const dataIdx = parseInt(el.dataset.pageIndex || '-1', 10);
-          if (Number.isNaN(dataIdx) || dataIdx < 0) continue;
-          const dist = Math.abs(rect.top);
-          if (dist < bestDist) { bestDist = dist; bestIdx = dataIdx; bestEl = el; }
+        const doc = document.documentElement;
+        const viewportBottom = window.scrollY + window.innerHeight;
+        const docBottom = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
+        let bestEl = null;
+        let bestIdx = -1;
+        if ((docBottom - viewportBottom) <= 4) {
+          bestEl = pageEls[pageEls.length - 1];
+          bestIdx = parseInt(bestEl?.dataset?.pageIndex || String(pageEls.length - 1), 10);
+        } else {
+          let bestDist = Infinity;
+          for (const el of pageEls) {
+            const rect = el.getBoundingClientRect();
+            if (rect.height <= 0) continue;
+            const dataIdx = parseInt(el.dataset.pageIndex || '-1', 10);
+            if (Number.isNaN(dataIdx) || dataIdx < 0) continue;
+            const dist = Math.abs(rect.top);
+            if (dist < bestDist) { bestDist = dist; bestIdx = dataIdx; bestEl = el; }
+          }
         }
         if (!bestEl || !Number.isFinite(bestIdx) || bestIdx < 0) return;
-        // Guard: skip if the winning element is in a hidden section (double-check).
         if (bestEl.getBoundingClientRect().height <= 0) return;
         lastFocusedPageIndex = bestIdx;
+        try { currentPageIndex = bestIdx; } catch (_) {}
         updateReadingMetricsPage(bestIdx);
-        // Keep reading target in sync so bottom-bar Play speaks the scrolled-to page.
         try {
           const _ctx = window.getReadingTargetContext();
           if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
         } catch (_) {}
-        // Queue progress sync only when the page actually changed.
         if (bestIdx !== prevIdx) {
           prevIdx = bestIdx;
-          try { queueCurrentReadingProgress('scroll-tracker'); } catch (_) {}
+          try { queueCurrentReadingProgress(reason || 'scroll-tracker'); } catch (_) {}
         }
       } catch (_) {}
     });
-  }, { passive: true });
+  }
+
+  window.addEventListener('scroll', function () { reconcileVisiblePage('scroll-tracker'); }, { passive: true });
+  window.addEventListener('resize', function () { reconcileVisiblePage('resize-reconcile'); }, { passive: true });
+  window.addEventListener('fullscreenchange', function () { reconcileVisiblePage('fullscreen-reconcile'); }, { passive: true });
 }
 
 
@@ -2861,6 +2915,28 @@ window.stepReadingPage = function stepReadingPage(delta, options = {}) {
   const current = getFocusedOrInferredReadingPageIndex();
   const next = ((current + Number(delta || 0)) % total + total) % total;
   return window.focusReadingPage(next, options);
+};
+
+window.ttsAdvancePageSession = function ttsAdvancePageSession(delta) {
+  const step = Number(delta || 0);
+  if (!step) return false;
+  const total = Array.isArray(pages) ? pages.length : 0;
+  if (!total) return false;
+  let playback = { active: false, paused: false };
+  try { if (typeof getPlaybackStatus === 'function') playback = getPlaybackStatus() || playback; } catch (_) {}
+  if (playback.active) {
+    if (playback.paused) {
+      try { if (typeof ttsJumpPagePreserve === 'function') return !!ttsJumpPagePreserve(step); } catch (_) {}
+      return false;
+    }
+    try { if (typeof ttsJumpPage === 'function') return !!ttsJumpPage(step); } catch (_) {}
+    return false;
+  }
+  try { if (typeof ttsAutoplayCancelCountdown === 'function') ttsAutoplayCancelCountdown(); } catch (_) {}
+  const current = getFocusedOrInferredReadingPageIndex();
+  const next = ((current + step) % total + total) % total;
+  const result = window.focusReadingPage(next, { behavior: 'smooth' });
+  return !!result?.ok;
 };
 
 window.startFocusedPageTts = function startFocusedPageTts() {

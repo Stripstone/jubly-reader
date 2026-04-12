@@ -920,6 +920,13 @@
         try {
             const pageEls = Array.from(document.querySelectorAll('.page'));
             if (pageEls.length) {
+                const doc = document.documentElement;
+                const viewportBottom = window.scrollY + window.innerHeight;
+                const docBottom = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
+                if ((docBottom - viewportBottom) <= 4) {
+                    const lastIdx = parseInt(pageEls[pageEls.length - 1]?.dataset?.pageIndex || String(pageEls.length - 1), 10);
+                    if (!Number.isNaN(lastIdx) && lastIdx >= 0) return lastIdx;
+                }
                 let bestIdx = -1;
                 let bestDist = Infinity;
                 for (const el of pageEls) {
@@ -1145,10 +1152,12 @@
         };
         let moved = false;
         let route = 'unavailable';
-        try { if (typeof ttsJumpSentence === 'function') { moved = !!ttsJumpSentence(delta); if (moved) route = 'sentence-jump'; } } catch (_) {}
-        if (!moved) {
-            try { if (typeof ttsJumpPage === 'function') { moved = !!ttsJumpPage(delta); if (moved) route = 'page-jump'; } } catch (_) {}
-        }
+        try {
+            if (typeof ttsAdvancePageSession === 'function') {
+                moved = !!ttsAdvancePageSession(delta);
+                if (moved) route = 'page-session-transition';
+            }
+        } catch (_) {}
         syncShellPlaybackControls();
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
         if (moved && afterPlayback?.active && !afterPlayback.paused) {

@@ -168,13 +168,12 @@ window.rcSync = (function () {
   }
 
   function _currentAppearancePrefs() {
-    const stored = _readLocalJson(RC_APPEARANCE_PREFS_KEY);
     try {
       if (window.rcAppearance && typeof window.rcAppearance.get === 'function') {
         return { appearance: window.rcAppearance.get() };
       }
     } catch (_) {}
-    return stored;
+    return {};
   }
 
   function _currentProfilePrefs() {
@@ -218,7 +217,6 @@ window.rcSync = (function () {
       music_enabled: typeof themeSettings.music === 'string' ? themeSettings.music !== 'off' : (_remoteSettingsRow && typeof _remoteSettingsRow.music_enabled === 'boolean' ? !!_remoteSettingsRow.music_enabled : true),
       particles_enabled: typeof themeSettings.embersOn === 'boolean' ? !!themeSettings.embersOn : (_remoteSettingsRow && typeof _remoteSettingsRow.particles_enabled === 'boolean' ? !!_remoteSettingsRow.particles_enabled : true),
       use_source_page_numbers: typeof theme.use_source_page_numbers === 'boolean' ? !!theme.use_source_page_numbers : (_remoteSettingsRow && typeof _remoteSettingsRow.use_source_page_numbers === 'boolean' ? !!_remoteSettingsRow.use_source_page_numbers : false),
-      appearance_mode: appearance && appearance.appearance ? String(appearance.appearance) : (_remoteSettingsRow && _remoteSettingsRow.appearance_mode ? String(_remoteSettingsRow.appearance_mode) : 'light'),
       daily_goal_minutes: Number.isFinite(Number(profile.dailyGoalMinutes)) ? Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes)))) : (_remoteSettingsRow && Number.isFinite(Number(_remoteSettingsRow.daily_goal_minutes)) ? Math.max(5, Math.min(300, Math.round(Number(_remoteSettingsRow.daily_goal_minutes)))) : 15),
       updated_at: new Date().toISOString(),
     };
@@ -282,16 +280,6 @@ window.rcSync = (function () {
       _writeLocalJson(RC_THEME_PREFS_KEY, nextTheme);
       try { if (window.rcTheme && typeof window.rcTheme.load === 'function') window.rcTheme.load(); } catch (_) {}
 
-      if (row.appearance_mode) {
-        try {
-          if (window.rcPrefs && typeof window.rcPrefs.saveAppearancePrefs === 'function') {
-            window.rcPrefs.saveAppearancePrefs({ appearance: String(row.appearance_mode) });
-          } else {
-            _writeLocalJson(RC_APPEARANCE_PREFS_KEY, { appearance: String(row.appearance_mode) });
-          }
-        } catch (_) {}
-        try { if (window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load(); } catch (_) {}
-      }
 
       if (row.daily_goal_minutes != null) {
         try {
