@@ -12,6 +12,34 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <link rel="stylesheet" href="css/shell.css">
     <link rel="stylesheet" href="css/themeExplorer.css">
+    <script>
+      (function() {
+        try {
+          var raw = localStorage.getItem('rc_appearance_prefs');
+          var mode = 'light';
+          if (raw) {
+            var parsed = JSON.parse(raw) || {};
+            var value = parsed.appearance_mode != null ? parsed.appearance_mode : (parsed.mode != null ? parsed.mode : parsed.appearance);
+            mode = String(value || 'light') === 'dark' ? 'dark' : 'light';
+          } else {
+            var cookieMatch = String(document.cookie || '').match(/(?:^|; )rc_appearance_mode=([^;]+)/);
+            if (cookieMatch && cookieMatch[1]) mode = decodeURIComponent(cookieMatch[1]) === 'dark' ? 'dark' : 'light';
+          }
+          try {
+            document.documentElement.classList.remove('app-light', 'app-dark');
+            document.documentElement.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
+            document.documentElement.setAttribute('data-app-appearance', mode);
+          } catch (_) {}
+          document.addEventListener('DOMContentLoaded', function() {
+            try {
+              document.body.classList.remove('app-light', 'app-dark');
+              document.body.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
+              document.body.setAttribute('data-app-appearance', mode);
+            } catch (_) {}
+          }, { once: true });
+        } catch (_) {}
+      })();
+    </script>
 </head>
 <body class="bg-white auth-hydrating">
 

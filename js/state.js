@@ -1220,8 +1220,15 @@ function loadTheme() {
 }
 
 function applyAppearance() {
+  const modeClass = appAppearance === 'dark' ? 'app-dark' : 'app-light';
+  try {
+    document.documentElement.classList.remove('app-light', 'app-dark');
+    document.documentElement.classList.add(modeClass);
+    document.documentElement.setAttribute('data-app-appearance', appAppearance);
+  } catch (_) {}
   document.body.classList.remove('app-light', 'app-dark');
-  document.body.classList.add(appAppearance === 'dark' ? 'app-dark' : 'app-light');
+  document.body.classList.add(modeClass);
+  try { document.body.setAttribute('data-app-appearance', appAppearance); } catch (_) {}
   syncAppearanceButtons();
   return appAppearance;
 }
@@ -1230,18 +1237,44 @@ function normalizeAppearanceMode(value) {
   return String(value || 'light') === 'dark' ? 'dark' : 'light';
 }
 
+function writeAppearanceModeToLocal(mode) {
+  const safeMode = normalizeAppearanceMode(mode);
+  try { localStorage.setItem(RC_APPEARANCE_PREFS_KEY, JSON.stringify({ appearance_mode: safeMode })); } catch (_) {}
+  try { document.cookie = 'rc_appearance_mode=' + encodeURIComponent(safeMode) + '; path=/; max-age=31536000; SameSite=Lax'; } catch (_) {}
+  return safeMode;
+}
+
+function readAppearanceModeFromLocal() {
+  try {
+    const raw = localStorage.getItem(RC_APPEARANCE_PREFS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const value = parsed && typeof parsed === 'object'
+        ? (parsed.appearance_mode ?? parsed.mode ?? parsed.appearance)
+        : null;
+      if (value != null && value !== '') return normalizeAppearanceMode(value);
+    }
+  } catch (_) {}
+  try {
+    const match = String(document.cookie || '').match(/(?:^|; )rc_appearance_mode=([^;]+)/);
+    if (match && match[1]) return normalizeAppearanceMode(decodeURIComponent(match[1]));
+  } catch (_) {}
+  const stored = loadAppearancePrefs();
+  const storedMode = stored && typeof stored === 'object'
+    ? (stored.appearance_mode ?? stored.mode ?? stored.appearance)
+    : null;
+  return normalizeAppearanceMode(storedMode);
+}
+
 function setAppearance(mode) {
   appAppearance = normalizeAppearanceMode(mode);
+  writeAppearanceModeToLocal(appAppearance);
   saveAppearancePrefs({ appearance_mode: appAppearance });
   return applyAppearance();
 }
 
 function loadAppearance() {
-  const stored = loadAppearancePrefs();
-  const storedMode = stored && typeof stored === 'object'
-    ? (stored.appearance_mode ?? stored.mode ?? stored.appearance)
-    : null;
-  appAppearance = normalizeAppearanceMode(storedMode);
+  appAppearance = readAppearanceModeFromLocal();
   return applyAppearance();
 }
 

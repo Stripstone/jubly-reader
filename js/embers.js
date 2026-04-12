@@ -18,6 +18,7 @@
 
   var ww = 1;
   var wh = 1;
+  var renderScale = 1;
   var particles = [];
   var emberColorArray = ['#FF2200', '#FF6600', '#FFA500'];
   var animationFrame = 0;
@@ -60,14 +61,20 @@
   function refreshCanvasBounds(resetParticles) {
     var parent = canvas.parentElement || document.querySelector('#reading-mode .reading-content');
     var rect = parent ? parent.getBoundingClientRect() : null;
-    var nextW = Math.max(1, Math.round(Math.max((rect && rect.width) || 0, canvas.clientWidth || 0, window.innerWidth || 0)));
-    var nextH = Math.max(1, Math.round(Math.max(canvas.clientHeight || 0, window.innerHeight || 0)));
-    ww = nextW;
-    wh = nextH;
-    canvas.width = ww;
-    canvas.height = wh;
-    canvas.style.width = ww + 'px';
-    canvas.style.height = wh + 'px';
+    var parentScrollWidth = parent ? parent.scrollWidth : 0;
+    var parentScrollHeight = parent ? parent.scrollHeight : 0;
+    var styleW = Math.max(1, Math.round(Math.max((rect && rect.width) || 0, parentScrollWidth || 0, canvas.clientWidth || 0, window.innerWidth || 0)));
+    var styleH = Math.max(1, Math.round(Math.max((rect && rect.height) || 0, parentScrollHeight || 0, canvas.clientHeight || 0, window.innerHeight || 0)));
+    var maxPixels = 2400000;
+    var area = styleW * styleH;
+    renderScale = area > maxPixels ? Math.max(0.35, Math.sqrt(maxPixels / area)) : 1;
+    ww = styleW;
+    wh = styleH;
+    canvas.width = Math.max(1, Math.round(styleW * renderScale));
+    canvas.height = Math.max(1, Math.round(styleH * renderScale));
+    canvas.style.width = styleW + 'px';
+    canvas.style.height = styleH + 'px';
+    try { ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0); } catch (_) {}
     if (resetParticles) reseedParticles();
   }
 
