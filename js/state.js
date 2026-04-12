@@ -369,12 +369,9 @@ function getPageMetaEntry(index) {
 }
 
 function usesSourcePageNumbers() {
-  try {
-    const prefs = (window.rcPrefs && typeof window.rcPrefs.loadThemePrefs === 'function') ? window.rcPrefs.loadThemePrefs() : loadThemePrefs();
-    return prefs?.use_source_page_numbers !== false;
-  } catch (_) {
-    return true;
-  }
+  // Page numbering is fixed runtime behavior when source metadata exists.
+  // Retired legacy prefs must not re-enter as a client-side gate.
+  return true;
 }
 
 function getDisplayPageNumber(index) {

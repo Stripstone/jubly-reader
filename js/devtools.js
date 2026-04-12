@@ -236,11 +236,8 @@ window.rcDevTools = (function () {
           <strong style="display:block; margin-bottom:8px; font-size:13px;">Settings</strong>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <label style="font-size:12px;">Daily goal<input id="devSettingsGoal" type="number" min="5" max="300" style="width:100%; margin-top:4px;" /></label>
-            <label style="font-size:12px;">Appearance<select id="devSettingsAppearance" style="width:100%; margin-top:4px;"><option value="light">light</option><option value="dark">dark</option></select></label>
             <label style="font-size:12px;">Theme<input id="devSettingsTheme" type="text" style="width:100%; margin-top:4px;" /></label>
-            <label style="font-size:12px;">TTS speed<input id="devSettingsTtsSpeed" type="number" min="0.5" max="3" step="0.1" style="width:100%; margin-top:4px;" /></label>
             <label style="font-size:12px; display:flex; align-items:end; gap:8px;"><input id="devSettingsAutoplay" type="checkbox" /> autoplay</label>
-            <label style="font-size:12px; display:flex; align-items:end; gap:8px;"><input id="devSettingsSourcePages" type="checkbox" /> source page numbers</label>
           </div>
           <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:8px;">
             <button type="button" id="devSettingsClearBtn">Clear settings</button>
@@ -336,11 +333,8 @@ window.rcDevTools = (function () {
     panel.querySelector('#devSettingsSaveBtn').addEventListener('click', async () => {
       await doAction('set_settings', {
         daily_goal_minutes: num('devSettingsGoal'),
-        appearance_mode: value('devSettingsAppearance'),
         theme_id: value('devSettingsTheme') || null,
-        tts_speed: num('devSettingsTtsSpeed'),
         autoplay_enabled: checked('devSettingsAutoplay'),
-        use_source_page_numbers: checked('devSettingsSourcePages'),
       });
     });
     panel.querySelector('#devSettingsClearBtn').addEventListener('click', async () => {
@@ -433,11 +427,8 @@ window.rcDevTools = (function () {
     setValue('devSessionMode', latestSession.mode || 'reading');
     setChecked('devSessionCompleted', !!latestSession.completed);
     setValue('devSettingsGoal', settings.daily_goal_minutes == null ? ((client.profile && client.profile.dailyGoalMinutes) || 15) : settings.daily_goal_minutes);
-    setValue('devSettingsAppearance', settings.appearance_mode || 'light');
     setValue('devSettingsTheme', settings.theme_id || 'default');
-    setValue('devSettingsTtsSpeed', settings.tts_speed == null ? '' : settings.tts_speed);
     setChecked('devSettingsAutoplay', !!settings.autoplay_enabled);
-    setChecked('devSettingsSourcePages', !!settings.use_source_page_numbers);
     if (statusEl) {
       const sessionSummary = snapshot.sessions || {};
       const plan = entitlement.tier === 'paid' ? 'Pro' : entitlement.tier === 'premium' ? 'Premium' : 'Free';
