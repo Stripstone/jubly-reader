@@ -854,10 +854,7 @@ function loadAppearancePrefs() {
 }
 
 function saveAppearancePrefs(payload) {
-  const result = getPrefsAdapter().saveAppearancePrefs(payload);
-  // Pass 4: same as saveThemePrefs — notify sync seam.
-  try { document.dispatchEvent(new CustomEvent('rc:prefs-changed', { detail: { source: 'appearance' } })); } catch (_) {}
-  return result;
+  return getPrefsAdapter().saveAppearancePrefs(payload);
 }
 
 function loadDiagnosticsPrefs() {
@@ -1229,19 +1226,22 @@ function applyAppearance() {
   return appAppearance;
 }
 
-function clearAppearancePersistence() {
-  try { localStorage.removeItem(RC_APPEARANCE_PREFS_KEY); } catch (_) {}
+function normalizeAppearanceMode(value) {
+  return String(value || 'light') === 'dark' ? 'dark' : 'light';
 }
 
 function setAppearance(mode) {
-  clearAppearancePersistence();
-  appAppearance = String(mode || 'light') === 'dark' ? 'dark' : 'light';
+  appAppearance = normalizeAppearanceMode(mode);
+  saveAppearancePrefs({ appearance_mode: appAppearance });
   return applyAppearance();
 }
 
 function loadAppearance() {
-  clearAppearancePersistence();
-  appAppearance = 'light';
+  const stored = loadAppearancePrefs();
+  const storedMode = stored && typeof stored === 'object'
+    ? (stored.appearance_mode ?? stored.mode ?? stored.appearance)
+    : null;
+  appAppearance = normalizeAppearanceMode(storedMode);
   return applyAppearance();
 }
 
