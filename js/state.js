@@ -380,17 +380,15 @@ function usesSourcePageNumbers() {
 function getDisplayPageNumber(index) {
   const idx = Number(index);
   const meta = getPageMetaEntry(idx);
-  if (usesSourcePageNumbers() && meta && Number.isFinite(Number(meta.sourcePageNumber))) return Number(meta.sourcePageNumber);
+  if (meta && Number.isFinite(Number(meta.sourcePageNumber))) return Number(meta.sourcePageNumber);
   return idx + 1;
 }
 
 function getDisplayPageTotal(totalCount) {
   const total = Number(totalCount);
   if (!Number.isFinite(total) || total <= 0) return 0;
-  if (usesSourcePageNumbers()) {
-    const lastMeta = getPageMetaEntry(total - 1);
-    if (lastMeta && Number.isFinite(Number(lastMeta.sourcePageNumber))) return Number(lastMeta.sourcePageNumber);
-  }
+  const lastMeta = getPageMetaEntry(total - 1);
+  if (lastMeta && Number.isFinite(Number(lastMeta.sourcePageNumber))) return Number(lastMeta.sourcePageNumber);
   return total;
 }
 
@@ -1141,13 +1139,11 @@ function applyThemeSettings() {
 }
 
 function persistThemeState() {
-  const existing = loadThemePrefs();
   return saveThemePrefs({
     theme_id: appTheme,
     theme_settings: Object.assign({}, appThemeSettings || {}),
     diagnostics_mode: diagnosticsPrefs.mode || 'off',
-    diagnostics_enabled: !!diagnosticsPrefs.enabled,
-    use_source_page_numbers: typeof existing.use_source_page_numbers === 'boolean' ? existing.use_source_page_numbers : true
+    diagnostics_enabled: !!diagnosticsPrefs.enabled
   });
 }
 
@@ -1213,7 +1209,6 @@ function loadTheme() {
   const themeDiagPrefs = {};
   appTheme = String(stored.theme_id || 'default');
   appThemeSettings = (stored.theme_settings && typeof stored.theme_settings === 'object') ? stored.theme_settings : {};
-  if (typeof stored.use_source_page_numbers !== 'boolean') stored.use_source_page_numbers = true;
   if (typeof stored.diagnostics_enabled === 'boolean') themeDiagPrefs.enabled = stored.diagnostics_enabled;
   if (typeof stored.diagnostics_mode === 'string') themeDiagPrefs.mode = stored.diagnostics_mode;
   diagnosticsPrefs = Object.assign({ enabled: false, mode: 'off' }, storedDiagPrefs, themeDiagPrefs);
@@ -1234,12 +1229,18 @@ function applyAppearance() {
   return appAppearance;
 }
 
+function clearAppearancePersistence() {
+  try { localStorage.removeItem(RC_APPEARANCE_PREFS_KEY); } catch (_) {}
+}
+
 function setAppearance(mode) {
+  clearAppearancePersistence();
   appAppearance = String(mode || 'light') === 'dark' ? 'dark' : 'light';
   return applyAppearance();
 }
 
 function loadAppearance() {
+  clearAppearancePersistence();
   appAppearance = 'light';
   return applyAppearance();
 }

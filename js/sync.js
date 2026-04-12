@@ -197,7 +197,6 @@ window.rcSync = (function () {
 
   function _collectSettingsRow() {
     const theme = _currentThemePrefs();
-    const appearance = _currentAppearancePrefs();
     const profile = _currentProfilePrefs();
     const themeSettings = (theme.theme_settings && typeof theme.theme_settings === 'object') ? theme.theme_settings : {};
     const speedEl = document.getElementById('shell-speed');
@@ -216,7 +215,6 @@ window.rcSync = (function () {
       autoplay_enabled: autoplayToggle ? !!autoplayToggle.checked : null,
       music_enabled: typeof themeSettings.music === 'string' ? themeSettings.music !== 'off' : (_remoteSettingsRow && typeof _remoteSettingsRow.music_enabled === 'boolean' ? !!_remoteSettingsRow.music_enabled : true),
       particles_enabled: typeof themeSettings.embersOn === 'boolean' ? !!themeSettings.embersOn : (_remoteSettingsRow && typeof _remoteSettingsRow.particles_enabled === 'boolean' ? !!_remoteSettingsRow.particles_enabled : true),
-      use_source_page_numbers: typeof theme.use_source_page_numbers === 'boolean' ? !!theme.use_source_page_numbers : (_remoteSettingsRow && typeof _remoteSettingsRow.use_source_page_numbers === 'boolean' ? !!_remoteSettingsRow.use_source_page_numbers : false),
       daily_goal_minutes: Number.isFinite(Number(profile.dailyGoalMinutes)) ? Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes)))) : (_remoteSettingsRow && Number.isFinite(Number(_remoteSettingsRow.daily_goal_minutes)) ? Math.max(5, Math.min(300, Math.round(Number(_remoteSettingsRow.daily_goal_minutes)))) : 15),
       updated_at: new Date().toISOString(),
     };
@@ -276,7 +274,6 @@ window.rcSync = (function () {
       if (row.font_id) nextTheme.theme_settings.font = String(row.font_id);
       if (typeof row.music_enabled === 'boolean' && !row.music_enabled) nextTheme.theme_settings.music = 'off';
       if (typeof row.particles_enabled === 'boolean') nextTheme.theme_settings.embersOn = !!row.particles_enabled;
-      if (typeof row.use_source_page_numbers === 'boolean') nextTheme.use_source_page_numbers = !!row.use_source_page_numbers;
       _writeLocalJson(RC_THEME_PREFS_KEY, nextTheme);
       try { if (window.rcTheme && typeof window.rcTheme.load === 'function') window.rcTheme.load(); } catch (_) {}
 
