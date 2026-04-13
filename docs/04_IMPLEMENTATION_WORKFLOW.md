@@ -192,6 +192,45 @@ For one active pass:
 - do not stack forward diffs for the same pass
 - start a new diff only when the work becomes a new pass
 
+### Diff application hygiene
+A git diff is only valid against a specific base. Most diff failures in this project are base-selection failures, not code failures.
+
+Required rules:
+- archive the original base
+- identify the current accepted artifact before applying any diff
+- apply all already-accepted prerequisite diffs first
+- use a fresh workspace for application
+- run `git apply --check <diff>` before applying
+- if the check fails, stop and determine whether the base is wrong before changing code
+- never "fix" a failed diff by manually editing around it unless the pass is being intentionally rebuilt
+- never generate a new engineer diff against an older pre-acceptance base
+- if a diff contains already-accepted hunks, regenerate it from the updated active artifact
+
+Safe workflow:
+1. keep the original base archived
+2. treat **base + all accepted diffs** as the new active artifact
+3. apply the next engineer diff to that active artifact
+4. verify only the expected files changed
+5. generate the next diff from that updated state, not from the untouched old base
+
+Validation commands:
+```bat
+git apply --check GroupX.diff
+git apply GroupX.diff
+git diff --name-only
+```
+
+Stop signals:
+- the diff reintroduces already-accepted hunks
+- the diff fails to apply cleanly
+- the diff touches files outside the approved lane
+- the engineer says the code is right but the diff only works against an older base
+
+Project-specific rule:
+For reconciliation work, the active artifact is not the original zip once accepted groups exist. The active artifact is always:
+
+**current base + all accepted group diffs**
+
 ### Repo entry
 ```bat
 cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
