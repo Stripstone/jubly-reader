@@ -1227,8 +1227,13 @@ function loadTheme() {
   if (typeof stored.diagnostics_mode === 'string') themeDiagPrefs.mode = stored.diagnostics_mode;
   diagnosticsPrefs = Object.assign({ enabled: false, mode: 'off' }, storedDiagPrefs, themeDiagPrefs);
   if (!canUseTheme(appTheme)) {
+    // Theme access can be policy-gated. On cold boot, runtime policy may still be
+    // unresolved when we first read persisted prefs. Display the safe default, but
+    // do not overwrite the saved durable theme until a resolved runtime policy has
+    // actually confirmed the theme is disallowed.
+    const hasResolvedRuntimePolicy = !!(runtimePolicy && typeof runtimePolicy === 'object');
     appTheme = 'default';
-    persistThemeState();
+    if (hasResolvedRuntimePolicy) persistThemeState();
   }
   applyThemeClass(appTheme);
   applyThemeSettings();
