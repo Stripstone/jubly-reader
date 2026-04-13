@@ -97,7 +97,6 @@ window.rcSync = (function () {
   const RC_DURABLE_CACHE_PREFIX = 'rc_durable_snapshot_v1:';
 
   const WATCHED_SETTING_IDS = new Set([
-    'shell-speed',
     'voiceFemaleSelect',
     'voiceMaleSelect',
     'autoplayToggle',
@@ -168,13 +167,12 @@ window.rcSync = (function () {
   }
 
   function _currentAppearancePrefs() {
-    const stored = _readLocalJson(RC_APPEARANCE_PREFS_KEY);
     try {
       if (window.rcAppearance && typeof window.rcAppearance.get === 'function') {
         return { appearance: window.rcAppearance.get() };
       }
     } catch (_) {}
-    return stored;
+    return {};
   }
 
   function _currentProfilePrefs() {
@@ -198,10 +196,8 @@ window.rcSync = (function () {
 
   function _collectSettingsRow() {
     const theme = _currentThemePrefs();
-    const appearance = _currentAppearancePrefs();
     const profile = _currentProfilePrefs();
     const themeSettings = (theme.theme_settings && typeof theme.theme_settings === 'object') ? theme.theme_settings : {};
-    const speedEl = document.getElementById('shell-speed');
     const voiceVolumeEl = document.getElementById('vol_voice');
     const autoplayToggle = document.getElementById('autoplayToggle');
     const selectedVoice = (() => {
@@ -211,14 +207,11 @@ window.rcSync = (function () {
     const row = {
       theme_id: String(theme.theme_id || 'default'),
       font_id: themeSettings.font ? String(themeSettings.font) : null,
-      tts_speed: speedEl && speedEl.value !== '' ? Number(speedEl.value) : null,
       tts_voice_id: selectedVoice || null,
       tts_volume: voiceVolumeEl && voiceVolumeEl.value !== '' ? Number(voiceVolumeEl.value) : null,
       autoplay_enabled: autoplayToggle ? !!autoplayToggle.checked : null,
       music_enabled: typeof themeSettings.music === 'string' ? themeSettings.music !== 'off' : (_remoteSettingsRow && typeof _remoteSettingsRow.music_enabled === 'boolean' ? !!_remoteSettingsRow.music_enabled : true),
       particles_enabled: typeof themeSettings.embersOn === 'boolean' ? !!themeSettings.embersOn : (_remoteSettingsRow && typeof _remoteSettingsRow.particles_enabled === 'boolean' ? !!_remoteSettingsRow.particles_enabled : true),
-      use_source_page_numbers: typeof theme.use_source_page_numbers === 'boolean' ? !!theme.use_source_page_numbers : (_remoteSettingsRow && typeof _remoteSettingsRow.use_source_page_numbers === 'boolean' ? !!_remoteSettingsRow.use_source_page_numbers : false),
-      appearance_mode: appearance && appearance.appearance ? String(appearance.appearance) : (_remoteSettingsRow && _remoteSettingsRow.appearance_mode ? String(_remoteSettingsRow.appearance_mode) : 'light'),
       daily_goal_minutes: Number.isFinite(Number(profile.dailyGoalMinutes)) ? Math.max(5, Math.min(300, Math.round(Number(profile.dailyGoalMinutes)))) : (_remoteSettingsRow && Number.isFinite(Number(_remoteSettingsRow.daily_goal_minutes)) ? Math.max(5, Math.min(300, Math.round(Number(_remoteSettingsRow.daily_goal_minutes)))) : 15),
       updated_at: new Date().toISOString(),
     };
@@ -278,20 +271,9 @@ window.rcSync = (function () {
       if (row.font_id) nextTheme.theme_settings.font = String(row.font_id);
       if (typeof row.music_enabled === 'boolean' && !row.music_enabled) nextTheme.theme_settings.music = 'off';
       if (typeof row.particles_enabled === 'boolean') nextTheme.theme_settings.embersOn = !!row.particles_enabled;
-      if (typeof row.use_source_page_numbers === 'boolean') nextTheme.use_source_page_numbers = !!row.use_source_page_numbers;
       _writeLocalJson(RC_THEME_PREFS_KEY, nextTheme);
       try { if (window.rcTheme && typeof window.rcTheme.load === 'function') window.rcTheme.load(); } catch (_) {}
 
-      if (row.appearance_mode) {
-        try {
-          if (window.rcPrefs && typeof window.rcPrefs.saveAppearancePrefs === 'function') {
-            window.rcPrefs.saveAppearancePrefs({ appearance: String(row.appearance_mode) });
-          } else {
-            _writeLocalJson(RC_APPEARANCE_PREFS_KEY, { appearance: String(row.appearance_mode) });
-          }
-        } catch (_) {}
-        try { if (window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load(); } catch (_) {}
-      }
 
       if (row.daily_goal_minutes != null) {
         try {
@@ -301,11 +283,7 @@ window.rcSync = (function () {
         } catch (_) {}
       }
 
-      if (row.tts_speed != null) {
-        const speedEl = document.getElementById('shell-speed');
-        if (speedEl) speedEl.value = String(row.tts_speed);
-        try { if (typeof window.shellSetSpeed === 'function') window.shellSetSpeed(row.tts_speed); } catch (_) {}
-      }
+
 
       if (row.tts_voice_id) {
         try { window.__rcSessionVoiceSelection = String(row.tts_voice_id); } catch (_) {}

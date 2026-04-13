@@ -113,15 +113,14 @@
     // - Evaluation phase: DO NOT focus the textarea; scroll to the next page block instead.
     // currentIndex is the page index the user is "on" (0-based). Use -1 to start from the beginning.
 
-    // Reading-mode navigation is explicit intent to leave the current spoken page.
-    // Stop active narration/countdown before advancing so the next page action
-    // does not keep speaking from the previous page in the background.
+    // Reading-mode navigation must go through the runtime-owned page-session
+    // transition path. This preserves active narration onto the next page, keeps
+    // silent Next silent, and avoids the old stop-then-restart/autoplay route.
     if (appMode === 'reading') {
       try {
-        const playback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
-        const countdown = (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null;
-        if ((playback && playback.active) || (countdown && countdown.active)) {
-          if (typeof ttsStop === 'function') ttsStop();
+        if (typeof ttsAdvancePageSession === 'function') {
+          const moved = !!ttsAdvancePageSession(1);
+          if (moved) return;
         }
       } catch (_) {}
     }
@@ -162,7 +161,9 @@
       // In reading mode there is no textarea — advance to the next page regardless.
       if (appMode === 'reading' || isEditable) {
         pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        if (appMode === 'reading') activatePageCard(pageEl, j);
+        if (appMode === 'reading') {
+          activatePageCard(pageEl, j);
+        }
         if (isEditable) ta.focus();
         return;
       }
@@ -330,7 +331,7 @@
         throw new Error(rawText);
       }
       // Spend 2 tokens for AI evaluation (display/diagnostics tracking only).
-      try { if (typeof tokenSpend === 'function') tokenSpend('evaluate'); } catch(_) {}
+      try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('evaluate'); else if (typeof tokenSpend === 'function') tokenSpend('evaluate'); } catch(_) {}
 
       const data = JSON.parse(rawText || "{}");
       lastAIDiagnostics = {

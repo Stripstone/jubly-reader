@@ -11,8 +11,23 @@
     <!-- Supabase: UMD bundle exposes window.supabase — required by js/auth.js (Pass 4) -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <link rel="stylesheet" href="css/shell.css">
+    <link rel="stylesheet" href="css/themeExplorer.css">
+    <style>
+        body.boot-pending > :not(#boot-scrim) { visibility: hidden !important; }
+        #boot-scrim {
+            position: fixed;
+            inset: 0;
+            z-index: 2147483647;
+            pointer-events: none;
+            background: radial-gradient(circle at top, #1e293b 0%, #0f172a 68%);
+            opacity: 1;
+            transition: opacity 0.16s ease;
+        }
+        body:not(.boot-pending) #boot-scrim { opacity: 0; }
+    </style>
 </head>
-<body class="bg-white auth-hydrating">
+<body class="auth-hydrating boot-pending">
+<div id="boot-scrim" aria-hidden="true"></div>
 
 <!-- ═══════════════════════════════════════════════════════════
      APP INFRASTRUCTURE — required by app JS, not part of shell UI
@@ -51,9 +66,7 @@
                 <span class="settings-mode-label">Mode</span>
                 <select id="modeSelect" class="settings-mode-select">
                     <option value="reading" selected>Reading</option>
-                    <option value="comprehension">Comprehension</option>
-                    <option value="research">Research</option>
-                </select>
+                                    </select>
             </div>
             <div class="rs-simple-row">
                 <div>
@@ -89,6 +102,15 @@
         </div>
 
         <div class="rs-panel" id="rs-panel-themes" style="display:none;">
+            <div class="rs-theme-section">
+                <p class="rs-section-label">App appearance</p>
+                <p class="rs-section-sub">Light and dark mode stay available while reading.</p>
+                <div class="appearance-mode-group rs-appearance-group">
+                    <button id="rs-appearance-light-btn" type="button" class="appearance-mode-btn active" onclick="setAppAppearance('light')">☀ Light</button>
+                    <button id="rs-appearance-dark-btn" type="button" class="appearance-mode-btn" onclick="setAppAppearance('dark')">☾ Dark</button>
+                </div>
+            </div>
+
             <div class="rs-theme-section">
                 <p class="rs-section-label">Reading theme</p>
                 <p class="rs-section-sub">Themes only affect the reading experience.</p>
@@ -273,12 +295,9 @@
                         <div id="importAdvancedPanel" class="import-advanced-panel" style="display:none;">
                             <div class="import-advanced-title">Advanced</div>
                             <div class="import-advanced-body">
-                                <div class="import-adv-row">
-                                    <label for="importPageSize">Page size</label>
-                                    <select id="importPageSize"><option value="1200">Small (~1200 chars)</option><option value="1600" selected>Medium (~1600 chars)</option><option value="2000">Large (~2000 chars)</option></select>
-                                </div>
                                 <div class="import-adv-row"><label class="import-adv-check"><input id="importKeepParagraphs" type="checkbox" checked> Keep paragraphs together</label></div>
                                 <div class="import-adv-row"><label class="import-adv-check"><input id="importCleanupHeadings" type="checkbox" checked> Cleanup decorative headings</label></div>
+                                <div class="import-adv-row"><label class="import-adv-check"><input id="importBreakByPageNumber" type="checkbox"> Break by page number</label></div>
                             </div>
                         </div>
                         <div class="import-footerbar">

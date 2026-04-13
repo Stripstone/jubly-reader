@@ -259,6 +259,15 @@
     return true;
   }
 
+  async function permanentlyDeleteAllLocalBooks(ids = []) {
+    const uniqueIds = Array.from(new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean)));
+    for (const id of uniqueIds) {
+      await localDeletedBookDelete(id);
+      queueRemoteLibraryItemState(`local:${id}`, { purge: true });
+    }
+    return true;
+  }
+
   window.__rcLocalBookGet = localBookGet;
   window.__rcLocalBookPut = localBookPut;
   window.__rcLocalBooksGetAll = localBooksGetAll;
@@ -490,8 +499,21 @@
     if (!root) return [];
 
     const blocks = [];
-    const candidates = root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li');
-    candidates.forEach((el) => {
+    let lastMarker = null;
+    const nodes = root.querySelectorAll('[id],[name],h1,h2,h3,h4,h5,h6,p,li');
+    nodes.forEach((el) => {
+      try {
+        const rawMarker = el.getAttribute('id') || el.getAttribute('name') || '';
+        const markerMatch = String(rawMarker).match(/^page[_-]?(\d+)$/i);
+        if (markerMatch) {
+          const marker = `## Page ${Number(markerMatch[1])}`;
+          if (marker !== lastMarker) {
+            blocks.push(marker);
+            lastMarker = marker;
+          }
+        }
+      } catch (_) {}
+      if (!/^(H[1-6]|P|LI)$/i.test(el.tagName || '')) return;
       const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
       if (!txt) return;
       if (txt.length < 2) return;
@@ -506,6 +528,10 @@
 
   function escapeRegExp(s) {
     return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function isExplicitImportedPageMarker(text) {
+    return /^(?:##\s*)?Page\s+\d+\s*$/i.test(String(text || '').trim());
   }
 
   function titleArtifactVariants(title) {
@@ -633,6 +659,10 @@
       if (out.length === 0) { out.push(cur); continue; }
 
       const prev = out[out.length - 1];
+      if (isExplicitImportedPageMarker(prev) || isExplicitImportedPageMarker(cur)) {
+        out.push(cur);
+        continue;
+      }
       // Always keep blocks separate when the PREV looks like a section heading —
       // it should stand alone.  Only gate on CUR being a heading when prev has
       // already ended cleanly (strong stop); if prev is a fragment, a heading-
@@ -970,23 +1000,10 @@
     }
     return merged;
   }
-  function buildMarkdownBookFromSections(sections) {
-    const out = [];
-    (sections || []).forEach((sec) => {
-      const title = (sec?.title || 'Untitled Section').trim();
-      out.push(`# ${title}`);
-      out.push('');
-      const pages = chunkBlocksToPages(sec?.blocks || []);
-      pages.forEach((p, idx) => {
-        out.push(`## Page ${idx + 1}`);
-        out.push('');
-        out.push(p);
-        out.push('');
-      });
-      out.push('');
-    });
-    return out.join('\n');
-  }
+  // Page-breaking for imported books now lives behind the server content route
+  // (/api/content?action=page-break) so the crown-jewel chunking logic does not
+  // ship to the client. The EPUB import pipeline extracts cleaned section blocks
+  // here, then sends them to the backend for page construction.
 
   function _normEpubHref(href) {
     return String(href || '')
@@ -1291,7 +1308,7 @@
         const href = spine[s];
         const html = await zipReadText(zip, href);
         let cleaned = extractTextBlocksFromHtml(html)
-          .map(b => cleanImportedBlock(b, { bookTitle, artifactTitles: toc.map(x => x.title) }))
+          .map(b => isExplicitImportedPageMarker(b) ? String(b || '').trim() : cleanImportedBlock(b, { bookTitle, artifactTitles: toc.map(x => x.title) }))
           .filter(b => b && (!cleanupHeadings || !isDecorativeSpacedHeading(b)));
         cleaned = mergeFragmentedBlocks(cleaned);
         cleaned = cleaned.filter(b => b && (!cleanupHeadings || !isDecorativeSpacedHeading(b)));
@@ -1318,7 +1335,7 @@
       if (typeof onProgress === 'function') onProgress({ done, total: chosen.length });
     }
 
-    return buildMarkdownBookFromSections(sections);
+    return sections;
   }
 
   async function initBookImporter() {
@@ -1399,6 +1416,15 @@
       return count;
     }
 
+    function parseSourcePageNumber(title, fallbackIndex = 0) {
+      const match = String(title || "").match(/(?:\bpage\s+|\bp\.\s*)(\d+)\b/i);
+      if (match) {
+        const num = Number(match[1]);
+        if (Number.isFinite(num) && num > 0) return num;
+      }
+      return Number(fallbackIndex) + 1;
+    }
+
     function parsePagesWithTitles(raw) {
       const text = String(raw || "");
       const lines = text.split(/\r?\n/);
@@ -1413,7 +1439,7 @@
           .filter(l => l && !/^\s{0,3}#{1,6}\s+/.test(l) && !/^\s*[—-]{2,}\s*$/.test(l));
 
         const body = cleaned.join(" ").trim();
-        if (body) pages.push({ title: cur.title, text: body });
+        if (body) pages.push({ title: cur.title, text: body, sourcePageNumber: parseSourcePageNumber(cur.title, pages.length) });
       }
 
       for (const line of lines) {
@@ -1439,7 +1465,7 @@
               .map(l => l.trim())
               .filter(l => l && !/^\s{0,3}#{1,6}\s+/.test(l) && !/^\s*[—-]{2,}\s*$/.test(l));
             const body = cleaned.join(" ").trim();
-            if (body) out.push({ title: `Page ${out.length + 1}`, text: body });
+            if (body) out.push({ title: `Page ${out.length + 1}`, text: body, sourcePageNumber: out.length + 1 });
           });
           return out.length ? out : pages;
         }
@@ -1461,12 +1487,27 @@
     if (blocks.length > 1) {
       pages = blocks.map((b, i) => ({
         title: `Page ${i + 1}`,
-        text: b.replace(/\s+/g, " ").trim()
+        text: b.replace(/\s+/g, " ").trim(),
+        sourcePageNumber: i + 1
       }));
     }
   }
 
   return pages;
+    }
+
+    function getSequentialChapterPages(chapterIndex) {
+      const idx = Number(chapterIndex);
+      const pagesForChapter = parsePagesWithTitles((Number.isFinite(idx) && idx >= 0 && chapterList[idx]) ? chapterList[idx].raw : getCurrentChapterRaw());
+      if (!Number.isFinite(idx) || idx <= 0) return pagesForChapter;
+      let offset = 0;
+      for (let i = 0; i < idx; i++) {
+        offset += parsePagesWithTitles(chapterList[i]?.raw || '').length;
+      }
+      return pagesForChapter.map((page, localIdx) => ({
+        ...page,
+        sourcePageNumber: offset + localIdx + 1,
+      }));
     }
 
     function setSelectOptions(selectEl, options, placeholder) {
@@ -1493,10 +1534,12 @@
         return;
       }
 
-      const opts = currentPages.map((p, idx) => ({
-        value: idx,
-        label: `${idx + 1}. ${p.title || `Page ${idx + 1}`}`
-      }));
+      const opts = currentPages.map((p, idx) => {
+        const sourcePageNumber = Number(p?.sourcePageNumber);
+        const title = p?.title || `Page ${idx + 1}`;
+        const numericLabel = Number.isFinite(sourcePageNumber) && sourcePageNumber > 0 ? `Page ${sourcePageNumber}` : `Page ${idx + 1}`;
+        return { value: idx, label: title && title !== numericLabel ? `${numericLabel} — ${title}` : numericLabel };
+      });
 
       setSelectOptions(pageStart, opts, "Start page…");
       setSelectOptions(pageEnd, opts, "End page…");
@@ -1531,7 +1574,7 @@
         // Await render completion so the restore scroll finishes before the caller
         // removes reading-restore-pending and reveals pages to the user.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
-        if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true });
+        if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true, pageMeta: bookPages });
         return;
       }
 
@@ -1542,12 +1585,12 @@
       chapterSelect.value = String(nextChapterIndex);
       currentChapterIndex = nextChapterIndex;
 
-      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
+      const chapterPages = getSequentialChapterPages(nextChapterIndex);
       populatePagesSelect(chapterPages);
       try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, chapterPages.length - 1)); } catch (_) {}
       // Await render completion before resolving.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true });
+      if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
     }
 
     async function loadManifest() {
@@ -1663,10 +1706,10 @@
     // reading-entry path can await full render completion before revealing pages.
     // Fire-and-forget callers (chapter select, page slice controls) simply ignore
     // the returned promise, which is safe — they don't use the restore path.
-    function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false } = {}) {
+    function applySelectionToBulkInput(text, { append = false, preservePendingRestore = false, pageMeta = null } = {}) {
       bulkInput.value = String(text || "").trim();
-      if (append) return appendPages();
-      return addPages({ preservePendingRestore });
+      if (append) return appendPages({ pageMeta });
+      return addPages({ preservePendingRestore, pageMeta });
     }
 
     // Events
@@ -1692,7 +1735,7 @@
       const selectedIdx = idx;
       currentChapterIndex = selectedIdx;
 
-      const chapterPages = parsePagesWithTitles(getCurrentChapterRaw());
+      const chapterPages = getSequentialChapterPages(selectedIdx);
       populatePagesSelect(chapterPages);
 
       // Immediately replace rendered page cards with the new chapter's content.
@@ -1701,7 +1744,7 @@
       // closes the race window between chapter assignment and card DOM update —
       // no Load button click required, no timing assumption.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      applySelectionToBulkInput(chapterText, { append: false });
+      applySelectionToBulkInput(chapterText, { append: false, pageMeta: chapterPages });
     });
 
     // Keep end >= start
@@ -1730,12 +1773,12 @@
       const s = Math.max(0, parseInt(pageStart.value || "0", 10));
       const e = Math.max(s, parseInt(pageEnd.value || String(s), 10));
 
-      const slice = currentPages
-        .slice(s, e + 1)
+      const pageSlice = currentPages.slice(s, e + 1);
+      const slice = pageSlice
         .map((p) => p.text)
         .filter(Boolean);
       // Keep delimiter in a single JS string line (prevents accidental raw-newline parse errors)
-      applySelectionToBulkInput(slice.join("\n---\n"), { append: false });
+      applySelectionToBulkInput(slice.join("\n---\n"), { append: false, pageMeta: pageSlice });
     });
 
     appendBtn.addEventListener("click", () => {
@@ -1752,12 +1795,12 @@
       const s = Math.max(0, parseInt(pageStart.value || "0", 10));
       const e = Math.max(s, parseInt(pageEnd.value || String(s), 10));
 
-      const slice = currentPages
-        .slice(s, e + 1)
+      const pageSlice = currentPages.slice(s, e + 1);
+      const slice = pageSlice
         .map((p) => p.text)
         .filter(Boolean);
 
-      applySelectionToBulkInput(slice.join("\n---\n"), { append: true });
+      applySelectionToBulkInput(slice.join("\n---\n"), { append: true, pageMeta: pageSlice });
     });
 
     async function populateBookSelectWithLocal() {
@@ -1843,7 +1886,10 @@
     // Split pasted text into pages using paragraph breaks (blank lines).
     // Still supports legacy delimiters (--- / "## Page X") if present.
     const newPages = splitIntoPages(input);
-    for (const pageText of newPages) {
+    const incomingMeta = Array.isArray(options.pageMeta) ? options.pageMeta : [];
+    const nextPageMeta = (typeof getPageMetaSnapshot === "function") ? getPageMetaSnapshot() : [];
+    for (let pageIdx = 0; pageIdx < newPages.length; pageIdx++) {
+      const pageText = newPages[pageIdx];
       const pageHash = await stableHashText(pageText);
       let consolidation = "";
       let rating = 0;
@@ -1867,7 +1913,9 @@
         }
       } catch (_) {}
 
+      const assignedIndex = pages.length;
       pages.push(pageText);
+      nextPageMeta.push({ title: incomingMeta[pageIdx]?.title || `Page ${assignedIndex + 1}`, sourcePageNumber: Number.isFinite(Number(incomingMeta[pageIdx]?.sourcePageNumber)) ? Number(incomingMeta[pageIdx].sourcePageNumber) : (assignedIndex + 1) });
       pageData.push({
         text: pageText,
         consolidation,
@@ -1888,6 +1936,7 @@
     }
 
     document.getElementById("bulkInput").value = "";
+    try { if (typeof setPageMeta === "function") setPageMeta(nextPageMeta); } catch (_) {}
     schedulePersistSession();
     render();
     checkSubmitButton();
@@ -1895,14 +1944,17 @@
 
   // Append pages to the existing session (does NOT clear pages/timers/ratings).
   // Uses the same splitting rules as addPages().
-  async function appendPages() {
+  async function appendPages(options = {}) {
     const input = document.getElementById("bulkInput").value;
     goalTime = parseInt(document.getElementById("goalTimeInput").value);
     goalCharCount = parseInt(document.getElementById("goalCharInput").value);
     if (!input || !input.trim()) return;
 
     const newPages = splitIntoPages(input);
-    for (const pageText of newPages) {
+    const incomingMeta = Array.isArray(options.pageMeta) ? options.pageMeta : [];
+    const nextPageMeta = (typeof getPageMetaSnapshot === "function") ? getPageMetaSnapshot() : [];
+    for (let pageIdx = 0; pageIdx < newPages.length; pageIdx++) {
+      const pageText = newPages[pageIdx];
       const pageHash = await stableHashText(pageText);
       let consolidation = "";
       let rating = 0;
@@ -1926,7 +1978,9 @@
         }
       } catch (_) {}
 
+      const assignedIndex = pages.length;
       pages.push(pageText);
+      nextPageMeta.push({ title: incomingMeta[pageIdx]?.title || `Page ${assignedIndex + 1}`, sourcePageNumber: Number.isFinite(Number(incomingMeta[pageIdx]?.sourcePageNumber)) ? Number(incomingMeta[pageIdx].sourcePageNumber) : (assignedIndex + 1) });
       pageData.push({
         text: pageText,
         consolidation,
@@ -1947,6 +2001,8 @@
     }
 
     document.getElementById("bulkInput").value = "";
+    try { if (typeof setPageMeta === "function") setPageMeta(nextPageMeta); } catch (_) {}
+    schedulePersistSession();
     render();
     checkSubmitButton();
   }
@@ -1959,6 +2015,7 @@
     }
     pages = [];
     pageData = [];
+    try { if (typeof setPageMeta === "function") setPageMeta([]); } catch (_) {}
     timers = [];
     intervals.forEach(i => clearInterval(i));
     intervals = [];
@@ -2010,7 +2067,7 @@
       // in reading mode. applyModeVisibility() handles display toggling when
       // mode changes, but in reading mode these elements simply do not exist.
       page.innerHTML = `
-        <div class="page-header">Page ${i + 1}</div>
+        <div class="page-header">${(typeof getDisplayPageLabel === "function") ? getDisplayPageLabel(i) : `Page ${i + 1}`}</div>
         <div class="page-text">${escapeHtml(text)}</div>
 
         ${_isReadingMode ? '' : `
@@ -2561,6 +2618,30 @@
         await renderDeletedCount();
         return;
       }
+      const topActions = document.createElement('div');
+      topActions.className = 'library-row-actions';
+      topActions.style.margin = '0 0 12px 0';
+      const deleteAll = document.createElement('button');
+      deleteAll.className = 'btn-danger';
+      deleteAll.type = 'button';
+      deleteAll.textContent = 'Delete All';
+      deleteAll.addEventListener('click', async () => {
+        const ok = confirm(`Permanently delete all ${deleted.length} deleted file${deleted.length === 1 ? '' : 's'}?
+
+This removes them from Deleted Files and frees the device storage.`);
+        if (!ok) return;
+        try {
+          await permanentlyDeleteAllLocalBooks(deleted.map((entry) => entry.id));
+          emitDeletedChanged();
+          await renderDeletedCount();
+          renderDeleted();
+        } catch (_) {
+          alert('Delete all failed.');
+        }
+      });
+      topActions.appendChild(deleteAll);
+      deletedListEl.appendChild(topActions);
+
       deleted
         .slice()
         .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0))
@@ -2655,47 +2736,64 @@ function _installScrollPageTracker() {
   window.__rcScrollPageTrackerInstalled = true;
   var raf = 0;
   var prevIdx = -1;
-  window.addEventListener('scroll', function () {
+  var settleTimer = 0;
+
+  function reconcileVisiblePage(reason) {
     if (raf) return;
     raf = requestAnimationFrame(function () {
       raf = 0;
       try {
         if (!Array.isArray(pages) || !pages.length) return;
-        // Measure the visible page by viewport proximity ONLY.
-        // inferCurrentPageIndex() is intentionally not used here: it prioritises
-        // document.activeElement, which stays on the last-clicked element (e.g. a
-        // "Read Page" button inside a .page card) after release. That causes the
-        // tracker to keep reporting the wrong page index even after the user has
-        // manually scrolled to a different page.
         const pageEls = Array.from(document.querySelectorAll('.page'));
         if (!pageEls.length) return;
-        let bestEl = null, bestIdx = -1, bestDist = Infinity;
-        for (const el of pageEls) {
-          const rect = el.getBoundingClientRect();
-          if (rect.height <= 0) continue; // skip hidden / collapsed pages
-          const dataIdx = parseInt(el.dataset.pageIndex || '-1', 10);
-          if (Number.isNaN(dataIdx) || dataIdx < 0) continue;
-          const dist = Math.abs(rect.top);
-          if (dist < bestDist) { bestDist = dist; bestIdx = dataIdx; bestEl = el; }
+        let bestEl = null;
+        let bestIdx = -1;
+        const nearBottom = (typeof window.isReadingViewportNearBottom === 'function')
+          ? !!window.isReadingViewportNearBottom()
+          : false;
+        if (nearBottom) {
+          bestEl = pageEls[pageEls.length - 1];
+          bestIdx = parseInt(bestEl?.dataset?.pageIndex || String(pageEls.length - 1), 10);
+        } else {
+          let bestDist = Infinity;
+          for (const el of pageEls) {
+            const rect = el.getBoundingClientRect();
+            if (rect.height <= 0) continue;
+            const dataIdx = parseInt(el.dataset.pageIndex || '-1', 10);
+            if (Number.isNaN(dataIdx) || dataIdx < 0) continue;
+            const dist = Math.abs(rect.top);
+            if (dist < bestDist) { bestDist = dist; bestIdx = dataIdx; bestEl = el; }
+          }
         }
         if (!bestEl || !Number.isFinite(bestIdx) || bestIdx < 0) return;
-        // Guard: skip if the winning element is in a hidden section (double-check).
         if (bestEl.getBoundingClientRect().height <= 0) return;
         lastFocusedPageIndex = bestIdx;
+        try { currentPageIndex = bestIdx; } catch (_) {}
         updateReadingMetricsPage(bestIdx);
-        // Keep reading target in sync so bottom-bar Play speaks the scrolled-to page.
         try {
           const _ctx = window.getReadingTargetContext();
           if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
         } catch (_) {}
-        // Queue progress sync only when the page actually changed.
         if (bestIdx !== prevIdx) {
           prevIdx = bestIdx;
-          try { queueCurrentReadingProgress('scroll-tracker'); } catch (_) {}
+          try { queueCurrentReadingProgress(reason || 'scroll-tracker'); } catch (_) {}
         }
       } catch (_) {}
     });
-  }, { passive: true });
+  }
+
+  function reconcileVisiblePageAfterSettle(reason) {
+    reconcileVisiblePage(reason);
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(function () {
+      settleTimer = 0;
+      reconcileVisiblePage(reason + '-settled');
+    }, 160);
+  }
+
+  window.addEventListener('scroll', function () { reconcileVisiblePage('scroll-tracker'); }, { passive: true });
+  window.addEventListener('resize', function () { reconcileVisiblePageAfterSettle('resize-reconcile'); }, { passive: true });
+  window.addEventListener('fullscreenchange', function () { reconcileVisiblePageAfterSettle('fullscreen-reconcile'); }, { passive: true });
 }
 
 
@@ -2827,6 +2925,37 @@ window.stepReadingPage = function stepReadingPage(delta, options = {}) {
   const current = getFocusedOrInferredReadingPageIndex();
   const next = ((current + Number(delta || 0)) % total + total) % total;
   return window.focusReadingPage(next, options);
+};
+
+window.ttsAdvancePageSession = function ttsAdvancePageSession(delta) {
+  const step = Number(delta || 0);
+  if (!step) return false;
+  const total = Array.isArray(pages) ? pages.length : 0;
+  if (!total) return false;
+  let playback = { active: false, paused: false };
+  try { if (typeof getPlaybackStatus === 'function') playback = getPlaybackStatus() || playback; } catch (_) {}
+  if (playback.active) {
+    if (playback.paused) {
+      try {
+        if (typeof ttsClearPausedSessionForManualPageAdvance === 'function') {
+          ttsClearPausedSessionForManualPageAdvance(step, { route: 'ttsAdvancePageSession' });
+        } else if (typeof ttsStop === 'function') {
+          ttsStop();
+        }
+      } catch (_) {}
+      const current = getFocusedOrInferredReadingPageIndex();
+      const next = ((current + step) % total + total) % total;
+      const result = window.focusReadingPage(next, { behavior: 'smooth' });
+      return !!result?.ok;
+    }
+    try { if (typeof ttsJumpPage === 'function') return !!ttsJumpPage(step); } catch (_) {}
+    return false;
+  }
+  try { if (typeof ttsAutoplayCancelCountdown === 'function') ttsAutoplayCancelCountdown(); } catch (_) {}
+  const current = getFocusedOrInferredReadingPageIndex();
+  const next = ((current + step) % total + total) % total;
+  const result = window.focusReadingPage(next, { behavior: 'smooth' });
+  return !!result?.ok;
 };
 
 window.startFocusedPageTts = function startFocusedPageTts() {

@@ -218,16 +218,26 @@ function ttsAutoplayScheduleNext(pageIndex) {
     AUTOPLAY_STATE.countdownSec -= 1;
     if (AUTOPLAY_STATE.countdownSec <= 0) {
       ttsAutoplayCancelCountdown();
-      const nextPageEl = pageEls[nextIndex];
-      if (nextPageEl) nextPageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const focusResult = (typeof window.focusReadingPage === 'function')
+        ? window.focusReadingPage(nextIndex, { behavior: 'smooth' })
+        : { ok: false };
+      if (!focusResult || focusResult.ok === false) {
+        const nextPageEl = pageEls[nextIndex];
+        if (nextPageEl) nextPageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
       setTimeout(() => {
         const text = (typeof pages !== 'undefined' && pages[nextIndex]) ? pages[nextIndex] : '';
-        if (text) {
+        if (!text) return;
+        if (!focusResult || focusResult.ok === false) {
           const _cur = window.__rcReadingTarget || {};
           if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _cur.sourceType || '', bookId: _cur.bookId || '', chapterIndex: _cur.chapterIndex != null ? _cur.chapterIndex : -1, pageIndex: nextIndex });
-          ttsSpeakQueue((typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${nextIndex}`, [text]);
         }
-      }, 400);
+        const activeTarget = window.__rcReadingTarget || {};
+        const nextKey = (typeof readingTargetToKey === 'function')
+          ? readingTargetToKey(activeTarget)
+          : `page-${nextIndex}`;
+        ttsSpeakQueue(nextKey, [text]);
+      }, 280);
     } else { updateBtn(); }
   }, 1000);
 }
@@ -1005,6 +1015,49 @@ function toggleAutoplay(force) {
 
 // ─── Core controls ────────────────────────────────────────────────────────────
 
+
+function ttsClearPausedSessionForManualPageAdvance(delta, context = {}) {
+  const step = Number(delta || 0);
+  const before = {
+    playback: getPlaybackStatus(),
+    session: ttsSessionSnapshot(),
+    controls: getPlaybackControlEligibility(),
+  };
+  const wasPaused = !!before.playback.active && !!before.playback.paused;
+  if (!wasPaused) {
+    const payload = {
+      success: false,
+      cleared: false,
+      reason: 'no-active-paused-session',
+      delta: step,
+      context,
+      before,
+      after: before,
+    };
+    ttsDiagPush('manual-page-advance-clear-paused-session', payload);
+    return payload;
+  }
+
+  ttsStop();
+
+  const after = {
+    playback: getPlaybackStatus(),
+    session: ttsSessionSnapshot(),
+    controls: getPlaybackControlEligibility(),
+  };
+  const payload = {
+    success: true,
+    cleared: true,
+    reason: 'cleared-paused-session-for-manual-page-advance',
+    delta: step,
+    context,
+    before,
+    after,
+  };
+  ttsDiagPush('manual-page-advance-clear-paused-session', payload);
+  return payload;
+}
+
 function ttsStop() {
   try { document.querySelectorAll('.tts-btn[data-tts="page"].tts-active').forEach(btn => btn.classList.remove('tts-active')); } catch (_) {}
   try { if (TTS_STATE.activeKey) ttsSetHintButton(TTS_STATE.activeKey, false); } catch (_) {}
@@ -1482,7 +1535,7 @@ async function ttsSpeakQueue(key, parts) {
             }
           } catch (_) {} // server unreachable: proceed (safe degraded behavior)
         }
-        try { if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
+        try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
       }
       const tts = await cloudFetchUrl(queue[i], { sentenceMarks: wantMarks });
       if (TTS_STATE.activeSessionId !== sessionId) return;
@@ -1864,4 +1917,5 @@ window.restartLastSpokenPageTts = restartLastSpokenPageTts;
 window.ttsStop                  = ttsStop;
 window.ttsPause                 = ttsPause;
 window.ttsResume                = ttsResume;
+window.ttsClearPausedSessionForManualPageAdvance = ttsClearPausedSessionForManualPageAdvance;
 window.ttsSpeakQueue            = ttsSpeakQueue;

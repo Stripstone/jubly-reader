@@ -15,6 +15,7 @@ const HANDLERS = {
   'runtime-config': () => import('../../server/lib/app-runtime-config.js'),
   'health': () => import('../../server/lib/app-health.js'),
   'usage-check': () => import('../../server/lib/app-usage-check.js'),
+  'usage-consume': () => import('../../server/lib/app-usage-consume.js'),
   'import-capacity': () => import('../../server/lib/app-import-capacity.js'),
   'dev-tools': () => import('../../server/lib/app-dev-tools.js'),
   'durable-sync': () => import('../../server/lib/app-durable-sync.js'),

@@ -1,5 +1,5 @@
 -- Jubly Reader — canonical pre-launch app tables
--- Replacement SQL
+-- Reduced authority version aligned to 06_SUPABASE_SCHEMA_REFERENCE.md
 --
 -- WARNING:
 -- This script intentionally replaces the current app-owned durable tables.
@@ -9,10 +9,6 @@
 begin;
 
 create extension if not exists pgcrypto;
-
--- ------------------------------------------------------------------
--- Shared helpers
--- ------------------------------------------------------------------
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -24,16 +20,7 @@ begin
 end;
 $$;
 
--- ------------------------------------------------------------------
--- Drop current app-owned tables in dependency-safe order
--- ------------------------------------------------------------------
-
--- Retired / replaced launch tables first
--- user_sessions is intentionally retired from the canonical launch model.
 drop table if exists public.user_sessions cascade;
-
--- Replacement launch tables / old drifted tables
--- Drop children before parents.
 drop table if exists public.user_usage cascade;
 drop table if exists public.user_entitlements cascade;
 drop table if exists public.user_daily_stats cascade;
@@ -42,10 +29,6 @@ drop table if exists public.user_progress cascade;
 drop table if exists public.user_library_items cascade;
 drop table if exists public.user_settings cascade;
 drop table if exists public.users cascade;
-
--- ------------------------------------------------------------------
--- 1. users
--- ------------------------------------------------------------------
 
 create table public.users (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -61,22 +44,17 @@ create trigger trg_users_set_updated_at
 before update on public.users
 for each row execute function public.set_updated_at();
 
--- ------------------------------------------------------------------
--- 2. user_settings
--- ------------------------------------------------------------------
-
+-- user_settings intentionally excludes local-only, retired, and devtools-only fields.
+-- In particular, do not reintroduce appearance_mode, tts_speed, or use_source_page_numbers here.
 create table public.user_settings (
   user_id uuid primary key references public.users(id) on delete cascade,
   theme_id text not null default 'default',
   font_id text not null default 'Lora',
-  tts_speed numeric(4,2) not null default 1.00 check (tts_speed >= 0.50 and tts_speed <= 3.00),
   tts_voice_id text,
   tts_volume numeric(4,2) not null default 0.50 check (tts_volume >= 0.00 and tts_volume <= 1.00),
   autoplay_enabled boolean not null default false,
   music_enabled boolean not null default true,
   particles_enabled boolean not null default true,
-  use_source_page_numbers boolean not null default false,
-  appearance_mode text not null default 'light' check (appearance_mode in ('light', 'dark')),
   daily_goal_minutes integer not null default 15 check (daily_goal_minutes >= 5 and daily_goal_minutes <= 300),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -85,10 +63,6 @@ create table public.user_settings (
 create trigger trg_user_settings_set_updated_at
 before update on public.user_settings
 for each row execute function public.set_updated_at();
-
--- ------------------------------------------------------------------
--- 3. user_library_items
--- ------------------------------------------------------------------
 
 create table public.user_library_items (
   id uuid primary key default gen_random_uuid(),
@@ -129,11 +103,6 @@ create trigger trg_user_library_items_set_updated_at
 before update on public.user_library_items
 for each row execute function public.set_updated_at();
 
--- ------------------------------------------------------------------
--- 4. user_progress
--- one row per owned library item
--- ------------------------------------------------------------------
-
 create table public.user_progress (
   library_item_id uuid primary key,
   user_id uuid not null references public.users(id) on delete cascade,
@@ -156,11 +125,6 @@ create index idx_user_progress_user_last_read
 create trigger trg_user_progress_set_updated_at
 before update on public.user_progress
 for each row execute function public.set_updated_at();
-
--- ------------------------------------------------------------------
--- 5. user_book_metrics
--- one compact summary row per owned library item
--- ------------------------------------------------------------------
 
 create table public.user_book_metrics (
   library_item_id uuid primary key,
@@ -186,11 +150,6 @@ create trigger trg_user_book_metrics_set_updated_at
 before update on public.user_book_metrics
 for each row execute function public.set_updated_at();
 
--- ------------------------------------------------------------------
--- 6. user_daily_stats
--- one compact row per user + date
--- ------------------------------------------------------------------
-
 create table public.user_daily_stats (
   user_id uuid not null references public.users(id) on delete cascade,
   stat_date date not null,
@@ -208,11 +167,6 @@ create index idx_user_daily_stats_user_date_desc
 create trigger trg_user_daily_stats_set_updated_at
 before update on public.user_daily_stats
 for each row execute function public.set_updated_at();
-
--- ------------------------------------------------------------------
--- 7. user_entitlements
--- one resolved entitlement row per user
--- ------------------------------------------------------------------
 
 create table public.user_entitlements (
   user_id uuid primary key references public.users(id) on delete cascade,
@@ -235,11 +189,6 @@ create trigger trg_user_entitlements_set_updated_at
 before update on public.user_entitlements
 for each row execute function public.set_updated_at();
 
--- ------------------------------------------------------------------
--- 8. user_usage
--- one current usage window row per user
--- ------------------------------------------------------------------
-
 create table public.user_usage (
   user_id uuid primary key references public.users(id) on delete cascade,
   window_start timestamptz not null,
@@ -259,12 +208,6 @@ create trigger trg_user_usage_set_updated_at
 before update on public.user_usage
 for each row execute function public.set_updated_at();
 
--- ------------------------------------------------------------------
--- RLS
--- authenticated users may read only their own rows
--- direct client writes are intentionally not granted here
--- ------------------------------------------------------------------
-
 alter table public.users enable row level security;
 alter table public.user_settings enable row level security;
 alter table public.user_library_items enable row level security;
@@ -275,52 +218,28 @@ alter table public.user_entitlements enable row level security;
 alter table public.user_usage enable row level security;
 
 create policy users_select_own
-  on public.users
-  for select
-  to authenticated
-  using (auth.uid() = id);
+  on public.users for select to authenticated using (auth.uid() = id);
 
 create policy user_settings_select_own
-  on public.user_settings
-  for select
-  to authenticated
-  using (auth.uid() = user_id);
+  on public.user_settings for select to authenticated using (auth.uid() = user_id);
 
 create policy user_library_items_select_own
-  on public.user_library_items
-  for select
-  to authenticated
-  using (auth.uid() = user_id);
+  on public.user_library_items for select to authenticated using (auth.uid() = user_id);
 
 create policy user_progress_select_own
-  on public.user_progress
-  for select
-  to authenticated
-  using (auth.uid() = user_id);
+  on public.user_progress for select to authenticated using (auth.uid() = user_id);
 
 create policy user_book_metrics_select_own
-  on public.user_book_metrics
-  for select
-  to authenticated
-  using (auth.uid() = user_id);
+  on public.user_book_metrics for select to authenticated using (auth.uid() = user_id);
 
 create policy user_daily_stats_select_own
-  on public.user_daily_stats
-  for select
-  to authenticated
-  using (auth.uid() = user_id);
+  on public.user_daily_stats for select to authenticated using (auth.uid() = user_id);
 
 create policy user_entitlements_select_own
-  on public.user_entitlements
-  for select
-  to authenticated
-  using (auth.uid() = user_id);
+  on public.user_entitlements for select to authenticated using (auth.uid() = user_id);
 
 create policy user_usage_select_own
-  on public.user_usage
-  for select
-  to authenticated
-  using (auth.uid() = user_id);
+  on public.user_usage for select to authenticated using (auth.uid() = user_id);
 
 revoke all on table public.users from anon, authenticated;
 revoke all on table public.user_settings from anon, authenticated;
@@ -339,11 +258,6 @@ grant select on table public.user_book_metrics to authenticated;
 grant select on table public.user_daily_stats to authenticated;
 grant select on table public.user_entitlements to authenticated;
 grant select on table public.user_usage to authenticated;
-
--- ------------------------------------------------------------------
--- Helper RPCs / maintenance functions
--- server-side paths only
--- ------------------------------------------------------------------
 
 create or replace function public.consume_user_usage(
   p_user_id uuid,

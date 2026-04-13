@@ -21,6 +21,96 @@
     let _shellAuthBootstrapped = false;
 
 
+    let _bootReleaseComplete = false;
+
+    function isRuntimeAppearanceReady() {
+        try {
+            if (window.rcAppearance && typeof window.rcAppearance.hasApplied === 'function' && window.rcAppearance.hasApplied()) return true;
+        } catch (_) {}
+        try {
+            return !!(document.body && document.body.getAttribute('data-appearance-ready') === 'true');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function isRuntimeAppearancePainted() {
+        try {
+            return !!(document.body && document.body.getAttribute('data-appearance-painted') === 'true');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function waitForRuntimeAppearanceReady() {
+        return new Promise((resolve) => {
+            if (isRuntimeAppearanceReady()) {
+                resolve();
+                return;
+            }
+            const onApplied = () => {
+                cleanup();
+                resolve();
+            };
+            const cleanup = () => {
+                try { document.removeEventListener('rc:appearance-applied', onApplied); } catch (_) {}
+            };
+            try { document.addEventListener('rc:appearance-applied', onApplied); } catch (_) {}
+            if (isRuntimeAppearanceReady()) {
+                cleanup();
+                resolve();
+            }
+        });
+    }
+
+    function waitForRuntimeAppearancePainted() {
+        return new Promise((resolve) => {
+            if (isRuntimeAppearancePainted()) {
+                resolve();
+                return;
+            }
+            const onPainted = () => {
+                cleanup();
+                resolve();
+            };
+            const cleanup = () => {
+                try { document.removeEventListener('rc:appearance-painted', onPainted); } catch (_) {}
+            };
+            try { document.addEventListener('rc:appearance-painted', onPainted); } catch (_) {}
+            if (isRuntimeAppearancePainted()) {
+                cleanup();
+                resolve();
+            }
+        });
+    }
+
+    function waitForBootRevealFrame() {
+        return new Promise((resolve) => {
+            if (!(window && typeof window.requestAnimationFrame === 'function')) {
+                setTimeout(resolve, 0);
+                return;
+            }
+            window.requestAnimationFrame(() => {
+                window.requestAnimationFrame(resolve);
+            });
+        });
+    }
+
+    function releaseBootPending() {
+        if (_bootReleaseComplete) return;
+        _bootReleaseComplete = true;
+        try { document.body.classList.remove('boot-pending'); } catch (_) {}
+        try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
+        const scrim = document.getElementById('boot-scrim');
+        if (!scrim) return;
+        try {
+            scrim.setAttribute('aria-hidden', 'true');
+            window.setTimeout(() => {
+                try { scrim.remove(); } catch (_) {}
+            }, 180);
+        } catch (_) {}
+    }
+
     let SHELL_DEBUG = {
         seq: 0,
         lastPlaybackSync: null,
@@ -568,7 +658,12 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
         installOwnershipGuards();
-        try { document.body.classList.add('auth-hydrating'); } catch (_) {}
+        try {
+            document.body.classList.add('auth-hydrating');
+            document.body.classList.add('boot-pending');
+        } catch (_) {}
+        const appearanceReady = waitForRuntimeAppearanceReady();
+        const appearancePainted = Promise.resolve(appearanceReady).then(() => waitForRuntimeAppearancePainted());
         try {
             if (window.rcAuth && typeof window.rcAuth.init === 'function') {
                 await window.rcAuth.init();
@@ -579,17 +674,21 @@
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
         // Await the section's async work (e.g. refreshLibrary on dashboard) before
-        // removing auth-hydrating, so the correct state is rendered before the
-        // section becomes visible — preventing flash of intermediate states.
-        // Race against a hard 500ms cap: auth-hydrating must never permanently
-        // block the page regardless of what happens in library init.
+        // releasing the boot hold, so the correct section is chosen before any
+        // visible shell surface appears.
+        // Race section settlement against a hard 500ms cap: the closeout is about
+        // wrong first paint, not widening into deeper runtime boot redesign.
         try {
-            await Promise.race([
-                showSection(settledSection, { historyMode: 'replace' }),
-                new Promise(resolve => setTimeout(resolve, 500))
+            await Promise.all([
+                Promise.race([
+                    showSection(settledSection, { historyMode: 'replace' }),
+                    new Promise(resolve => setTimeout(resolve, 500))
+                ]),
+                appearancePainted
             ]);
+            await waitForBootRevealFrame();
         } catch (_) {}
-        try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
+        releaseBootPending();
     });
     // ── Profile tabs ─────────────────────────────────────────────
     function switchTab(tabId) {
@@ -920,6 +1019,13 @@
         try {
             const pageEls = Array.from(document.querySelectorAll('.page'));
             if (pageEls.length) {
+                const doc = document.documentElement;
+                const viewportBottom = window.scrollY + window.innerHeight;
+                const docBottom = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
+                if ((docBottom - viewportBottom) <= 4) {
+                    const lastIdx = parseInt(pageEls[pageEls.length - 1]?.dataset?.pageIndex || String(pageEls.length - 1), 10);
+                    if (!Number.isNaN(lastIdx) && lastIdx >= 0) return lastIdx;
+                }
                 let bestIdx = -1;
                 let bestDist = Infinity;
                 for (const el of pageEls) {
@@ -1145,10 +1251,13 @@
         };
         let moved = false;
         let route = 'unavailable';
-        try { if (typeof ttsJumpSentence === 'function') { moved = !!ttsJumpSentence(delta); if (moved) route = 'sentence-jump'; } } catch (_) {}
-        if (!moved) {
-            try { if (typeof ttsJumpPage === 'function') { moved = !!ttsJumpPage(delta); if (moved) route = 'page-jump'; } } catch (_) {}
-        }
+        try {
+            if (typeof ttsJumpSentence === 'function') {
+                moved = !!ttsJumpSentence(delta);
+                if (moved) route = 'block-session-transition';
+                else route = 'block-session-unavailable';
+            }
+        } catch (_) {}
         syncShellPlaybackControls();
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
         if (moved && afterPlayback?.active && !afterPlayback.paused) {
@@ -1479,7 +1588,9 @@
         const cur   = (playback.active && !playback.paused)
                         ? Math.max(0, getActivePlaybackPageIndex(playback))
                         : Math.max(0, getVisibleReadingPageIndex());
-        prog.textContent = total > 0 ? `Page ${cur + 1} / ${total}` : '—';
+        const currentLabel = (typeof getDisplayPageNumber === 'function') ? getDisplayPageNumber(cur) : (cur + 1);
+        const totalLabel = (typeof getDisplayPageTotal === 'function') ? getDisplayPageTotal(total) : total;
+        prog.textContent = total > 0 ? `Page ${currentLabel} / ${totalLabel}` : '—';
         shellDebugRemember('lastProgressSnapshot', { type: 'progress', visible: true, label: prog.textContent, current: cur, total });
     }
 

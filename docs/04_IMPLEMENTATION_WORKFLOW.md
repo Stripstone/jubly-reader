@@ -1,11 +1,11 @@
 # Jubly Reader — Implementation Workflow
 
-This document defines the default development loop for implementation work.
+This document defines the required development loop for implementation work.
 
-It is agent-neutral.
 Use it whether the work is produced by OpenAI, Claude, or a human.
 
-Read `09_ARCHITECTURAL_GUARDRAILS_AND_SCAFFOLD_DISCIPLINE.md` alongside this workflow when a pass touches scaffold shape, ownership cleanup, or prototype-to-production migration.
+This workflow is subordinate to project policy. It cannot be used to justify a patch that violates `03_ARCHITECTURE_AND_GUARDRAILS.md`, `02_RUNTIME_CONTRACT.md`, `05_PRODUCT_LAUNCH_AND_INTEGRATION.md`, or `06_SUPABASE_SCHEMA_REFERENCE.md`.
+Read `03_ARCHITECTURE_AND_GUARDRAILS.md` alongside this workflow when a pass touches scaffold shape, ownership cleanup, or prototype-to-production migration.
 
 ## Core workflow
 
@@ -18,6 +18,9 @@ Before planning or editing:
 
 If the base is wrong, discard the pass and restart from the correct state.
 
+### 0.25 Structural compliance gate
+Before judging whether a patch "works," confirm that it does not violate scaffold authority, file responsibility, ownership boundaries, or duplicate-truth rules.
+If it does, the patch is disqualified even when runtime smoke testing looks good.
 
 ### 0.5 Schema-replacement sequencing rule
 When a pass is replacing a drifted durable schema before launch:
@@ -31,7 +34,8 @@ Do not finalize a runtime continuity patch against a schema that is about to be 
 A pass should cover one coherent runtime-owned system or one contained follow-up inside that system.
 
 ### 2. Identify the owner layer
-Use the architecture map, guardrails, and runtime contract to decide where truth belongs.
+Use the architecture doc, guardrails, and runtime contract to decide where truth belongs.
+Architecture and guardrails decide whether the patch is structurally legal before runtime validation decides whether the user experience is correct.
 
 Rule:
 - upstream authority first
@@ -54,15 +58,12 @@ Diagnostics must be:
 
 ### 3.5 Responsiveness-first interaction rules
 When a pass touches a user-visible transition, apply these rules by default:
-
 - render the safe pending or hidden state before any await that could stall the visible surface
 - open modal shells immediately when local knowledge is enough to present them safely
 - keep gated action buttons locked until server-backed checks settle instead of delaying the whole surface
 - gate account-backed rendering on explicit hydration or confirmation seams, not inferred readiness
-- when using cache for responsiveness, treat it as projection only; replay only dirty unconfirmed mutations rather than blindly resending all cached values
-- if a visible surface will update after hydration, reserve its layout space or stabilize its position so late text does not shake the page
-
-These rules exist to prevent the app from feeling like a form submission, a buffering video, or a glitchy catch-up UI.
+- when using cache for responsiveness, treat it as projection only
+- reserve layout space when late hydration text would otherwise shake the page
 
 ### 4. Create one canonical patch artifact
 The default deliverable for an implementation pass is one scoped `.diff` file.
@@ -75,10 +76,9 @@ Rules:
 - if new files are introduced, apply the current version-marker rule for the target artifact
 
 ### 5. Runtime test
-Served runtime results decide status.
+Served runtime results decide runtime status only after the structural compliance gate passes.
 Do not mark behavior fixed from code inspection alone.
-
-Runtime testing should use the runtime experience evaluation lens in `02_RUNTIME_CONTRACT.md`.
+Do not mark a patch acceptable merely because runtime looks good if the patch is structurally non-compliant.
 
 At minimum, record observations in these categories:
 - state transitions
@@ -93,16 +93,7 @@ For each category, note:
 - later truth
 - must not happen
 
-Do not mark a behavior acceptable merely because it corrected itself later.
-If runtime first shows a believable wrong state, treat that as a failure unless the contract explicitly allows that transition.
-
-During runtime testing, call out these failure shapes explicitly when they occur:
-- stale content visible before a pending state appears
-- a modal shell delayed by server verification instead of opening immediately
-- action controls left interactable before required verification settles
-- intermediate dashboard or library states flashing before hydration completes
-- layout shifts caused by late subtitle or status text
-- a visibility gate that can hang indefinitely because a retry chain or promise never settles
+Do not mark behavior acceptable merely because it corrected itself later.
 
 ### 6. Revise or reclassify
 - same pass → revise the same diff
@@ -138,7 +129,7 @@ If the pass would legitimize duplicate truth, reclassify it and fix ownership fi
 
 ### Responsive persistence rule
 For settings and similar durable preferences, prefer this model:
-- confirmed server baseline
+- confirmed server baseline when the setting is actually durable
 - immediate local projection of user intent
 - dirty tracking for unconfirmed fields
 - replay of dirty unconfirmed mutations after refresh
@@ -152,7 +143,9 @@ Do not let cache become the confirmed baseline unless the server actually confir
 - do not widen a pass casually
 - do not let one fix silently redefine ownership
 - do not mix unrelated cleanup into a bounded pass
-- do not treat scaffold changes as harmless file moves; they are architectural changes
+- do not treat scaffold changes as harmless file moves
+- do not accept "good enough because it works" as a patch rationale
+- do not let runtime comfort override structural disqualification
 
 ## Deliverables policy
 Every patch handoff should return:
@@ -160,6 +153,8 @@ Every patch handoff should return:
 2. exact behavior change
 3. main regression risk
 4. concise runtime validation path
+5. structural compliance verdict against `03_ARCHITECTURE_AND_GUARDRAILS.md`
+6. any explicit temporary debt still present, with owner and retirement condition
 
 Every active diff handoff should also say:
 - current objective
@@ -187,11 +182,126 @@ Stop using broad implementation passes and switch to diff-driven cleanup when:
 - runtime feedback is now about correction, refinement, or one remaining behavior
 - the pass is no longer discovering new architecture truth
 
-## Tooling note
-Implementation agent is interchangeable.
-The project authority lives in:
-- runtime observation
-- the core docs
-- the current patch artifact
+## Diff and git appendix
 
-Not in the habits of any one model.
+### Canonical diff lifecycle
+For one active pass:
+- create one canonical diff
+- runtime-test it
+- revise that same diff in place after feedback
+- do not stack forward diffs for the same pass
+- start a new diff only when the work becomes a new pass
+
+### Diff application hygiene
+A git diff is only valid against a specific base. Most diff failures in this project are base-selection failures, not code failures.
+
+Required rules:
+- archive the original base
+- identify the current accepted artifact before applying any diff
+- apply all already-accepted prerequisite diffs first
+- use a fresh workspace for application
+- run `git apply --check <diff>` before applying
+- if the check fails, stop and determine whether the base is wrong before changing code
+- never "fix" a failed diff by manually editing around it unless the pass is being intentionally rebuilt
+- never generate a new engineer diff against an older pre-acceptance base
+- if a diff contains already-accepted hunks, regenerate it from the updated active artifact
+
+Safe workflow:
+1. keep the original base archived
+2. treat **base + all accepted diffs** as the new active artifact
+3. apply the next engineer diff to that active artifact
+4. verify only the expected files changed
+5. generate the next diff from that updated state, not from the untouched old base
+
+Validation commands:
+```bat
+git apply --check GroupX.diff
+git apply GroupX.diff
+git diff --name-only
+```
+
+Stop signals:
+- the diff reintroduces already-accepted hunks
+- the diff fails to apply cleanly
+- the diff touches files outside the approved lane
+- the engineer says the code is right but the diff only works against an older base
+
+Project-specific rule:
+For reconciliation work, the active artifact is not the original zip once accepted groups exist. The active artifact is always:
+
+**current base + all accepted group diffs**
+
+### Repo entry
+```bat
+cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
+```
+
+### Check state before patching
+```bat
+git status
+```
+
+Before editing, also verify:
+- root `index.html` exists
+- root `js/` exists
+- root `css/` exists if current docs expect it
+- `docs/` contains docs only
+
+### Export a scoped diff
+```bat
+git diff -- <file1> <file2> <file3> > quick_patch.diff
+```
+
+Example:
+```bat
+git diff -- index.html css/shell.css js/evaluation.js js/shell.js > quick_patch.diff
+```
+
+### Validate the diff
+```bat
+git apply --check quick_patch.diff
+```
+
+### Open the diff
+```bat
+notepad quick_patch.diff
+```
+
+### Standard review block
+```bat
+cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
+git status
+git diff -- <file1> <file2> <file3> > quick_patch.diff
+git apply --check quick_patch.diff
+notepad quick_patch.diff
+```
+
+### Show changed file names only
+```bat
+git diff --name-only
+```
+
+### Stage only pass files
+```bat
+git add <file1> <file2> <file3>
+```
+
+### Commit
+```bat
+git commit -m "Polish reading playback follow-up"
+```
+
+### Show latest commit
+```bat
+git log --oneline -1
+```
+
+### Export the last commit
+```bat
+git show --stat --patch HEAD > last-commit.txt
+```
+
+### Compare current branch against main
+```bat
+git diff main...HEAD > branch-vs-main.diff
+```
