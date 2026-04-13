@@ -21,6 +21,55 @@
     let _shellAuthBootstrapped = false;
 
 
+    let _bootReleaseComplete = false;
+
+    function isRuntimeAppearanceReady() {
+        try {
+            if (window.rcAppearance && typeof window.rcAppearance.hasApplied === 'function' && window.rcAppearance.hasApplied()) return true;
+        } catch (_) {}
+        try {
+            return !!(document.body && document.body.getAttribute('data-appearance-ready') === 'true');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function waitForRuntimeAppearanceReady() {
+        return new Promise((resolve) => {
+            if (isRuntimeAppearanceReady()) {
+                resolve();
+                return;
+            }
+            const onApplied = () => {
+                cleanup();
+                resolve();
+            };
+            const cleanup = () => {
+                try { document.removeEventListener('rc:appearance-applied', onApplied); } catch (_) {}
+            };
+            try { document.addEventListener('rc:appearance-applied', onApplied); } catch (_) {}
+            if (isRuntimeAppearanceReady()) {
+                cleanup();
+                resolve();
+            }
+        });
+    }
+
+    function releaseBootPending() {
+        if (_bootReleaseComplete) return;
+        _bootReleaseComplete = true;
+        try { document.body.classList.remove('boot-pending'); } catch (_) {}
+        try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
+        const scrim = document.getElementById('boot-scrim');
+        if (!scrim) return;
+        try {
+            scrim.setAttribute('aria-hidden', 'true');
+            window.setTimeout(() => {
+                try { scrim.remove(); } catch (_) {}
+            }, 180);
+        } catch (_) {}
+    }
+
     let SHELL_DEBUG = {
         seq: 0,
         lastPlaybackSync: null,
@@ -568,7 +617,11 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
         installOwnershipGuards();
-        try { document.body.classList.add('auth-hydrating'); } catch (_) {}
+        try {
+            document.body.classList.add('auth-hydrating');
+            document.body.classList.add('boot-pending');
+        } catch (_) {}
+        const appearanceReady = waitForRuntimeAppearanceReady();
         try {
             if (window.rcAuth && typeof window.rcAuth.init === 'function') {
                 await window.rcAuth.init();
@@ -579,17 +632,20 @@
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
         // Await the section's async work (e.g. refreshLibrary on dashboard) before
-        // removing auth-hydrating, so the correct state is rendered before the
-        // section becomes visible — preventing flash of intermediate states.
-        // Race against a hard 500ms cap: auth-hydrating must never permanently
-        // block the page regardless of what happens in library init.
+        // releasing the boot hold, so the correct section is chosen before any
+        // visible shell surface appears.
+        // Race section settlement against a hard 500ms cap: the closeout is about
+        // wrong first paint, not widening into deeper runtime boot redesign.
         try {
-            await Promise.race([
-                showSection(settledSection, { historyMode: 'replace' }),
-                new Promise(resolve => setTimeout(resolve, 500))
+            await Promise.all([
+                Promise.race([
+                    showSection(settledSection, { historyMode: 'replace' }),
+                    new Promise(resolve => setTimeout(resolve, 500))
+                ]),
+                appearanceReady
             ]);
         } catch (_) {}
-        try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
+        releaseBootPending();
     });
     // ── Profile tabs ─────────────────────────────────────────────
     function switchTab(tabId) {

@@ -2936,8 +2936,17 @@ window.ttsAdvancePageSession = function ttsAdvancePageSession(delta) {
   try { if (typeof getPlaybackStatus === 'function') playback = getPlaybackStatus() || playback; } catch (_) {}
   if (playback.active) {
     if (playback.paused) {
-      try { if (typeof ttsJumpPagePreserve === 'function') return !!ttsJumpPagePreserve(step); } catch (_) {}
-      return false;
+      try {
+        if (typeof ttsClearPausedSessionForManualPageAdvance === 'function') {
+          ttsClearPausedSessionForManualPageAdvance(step, { route: 'ttsAdvancePageSession' });
+        } else if (typeof ttsStop === 'function') {
+          ttsStop();
+        }
+      } catch (_) {}
+      const current = getFocusedOrInferredReadingPageIndex();
+      const next = ((current + step) % total + total) % total;
+      const result = window.focusReadingPage(next, { behavior: 'smooth' });
+      return !!result?.ok;
     }
     try { if (typeof ttsJumpPage === 'function') return !!ttsJumpPage(step); } catch (_) {}
     return false;

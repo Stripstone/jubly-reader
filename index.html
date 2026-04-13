@@ -12,8 +12,22 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <link rel="stylesheet" href="css/shell.css">
     <link rel="stylesheet" href="css/themeExplorer.css">
+    <style>
+        body.boot-pending > :not(#boot-scrim) { visibility: hidden !important; }
+        #boot-scrim {
+            position: fixed;
+            inset: 0;
+            z-index: 2147483647;
+            pointer-events: none;
+            background: radial-gradient(circle at top, #1e293b 0%, #0f172a 68%);
+            opacity: 1;
+            transition: opacity 0.16s ease;
+        }
+        body:not(.boot-pending) #boot-scrim { opacity: 0; }
+    </style>
 </head>
-<body class="bg-white auth-hydrating">
+<body class="auth-hydrating boot-pending">
+<div id="boot-scrim" aria-hidden="true"></div>
 
 <!-- ═══════════════════════════════════════════════════════════
      APP INFRASTRUCTURE — required by app JS, not part of shell UI

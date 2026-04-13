@@ -759,6 +759,7 @@ const RC_PROFILE_PREFS_KEY = 'rc_profile_prefs';
 let appTheme = 'default';
 let appThemeSettings = {};
 let appAppearance = 'light';
+let appearanceAppliedOnce = false;
 let diagnosticsPrefs = { enabled: false, mode: 'off' };
 
 const EXPLORER_PRESET = {
@@ -1240,11 +1241,17 @@ function applyAppearance() {
     document.documentElement.classList.remove('app-light', 'app-dark');
     document.documentElement.classList.add(modeClass);
     document.documentElement.setAttribute('data-app-appearance', appAppearance);
+    document.documentElement.setAttribute('data-appearance-ready', 'true');
   } catch (_) {}
   document.body.classList.remove('app-light', 'app-dark');
   document.body.classList.add(modeClass);
-  try { document.body.setAttribute('data-app-appearance', appAppearance); } catch (_) {}
+  try {
+    document.body.setAttribute('data-app-appearance', appAppearance);
+    document.body.setAttribute('data-appearance-ready', 'true');
+  } catch (_) {}
+  appearanceAppliedOnce = true;
   syncAppearanceButtons();
+  try { document.dispatchEvent(new CustomEvent('rc:appearance-applied', { detail: { appearance: appAppearance } })); } catch (_) {}
   return appAppearance;
 }
 
@@ -1362,6 +1369,7 @@ window.rcAppearance = {
   set: setAppearance,
   load: loadAppearance,
   apply: applyAppearance,
+  hasApplied: () => appearanceAppliedOnce,
   syncButtons: syncAppearanceButtons,
   // Transitional alias for current shell button handlers.
   save: setAppearance

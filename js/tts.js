@@ -1015,6 +1015,49 @@ function toggleAutoplay(force) {
 
 // ─── Core controls ────────────────────────────────────────────────────────────
 
+
+function ttsClearPausedSessionForManualPageAdvance(delta, context = {}) {
+  const step = Number(delta || 0);
+  const before = {
+    playback: getPlaybackStatus(),
+    session: ttsSessionSnapshot(),
+    controls: getPlaybackControlEligibility(),
+  };
+  const wasPaused = !!before.playback.active && !!before.playback.paused;
+  if (!wasPaused) {
+    const payload = {
+      success: false,
+      cleared: false,
+      reason: 'no-active-paused-session',
+      delta: step,
+      context,
+      before,
+      after: before,
+    };
+    ttsDiagPush('manual-page-advance-clear-paused-session', payload);
+    return payload;
+  }
+
+  ttsStop();
+
+  const after = {
+    playback: getPlaybackStatus(),
+    session: ttsSessionSnapshot(),
+    controls: getPlaybackControlEligibility(),
+  };
+  const payload = {
+    success: true,
+    cleared: true,
+    reason: 'cleared-paused-session-for-manual-page-advance',
+    delta: step,
+    context,
+    before,
+    after,
+  };
+  ttsDiagPush('manual-page-advance-clear-paused-session', payload);
+  return payload;
+}
+
 function ttsStop() {
   try { document.querySelectorAll('.tts-btn[data-tts="page"].tts-active').forEach(btn => btn.classList.remove('tts-active')); } catch (_) {}
   try { if (TTS_STATE.activeKey) ttsSetHintButton(TTS_STATE.activeKey, false); } catch (_) {}
@@ -1874,4 +1917,5 @@ window.restartLastSpokenPageTts = restartLastSpokenPageTts;
 window.ttsStop                  = ttsStop;
 window.ttsPause                 = ttsPause;
 window.ttsResume                = ttsResume;
+window.ttsClearPausedSessionForManualPageAdvance = ttsClearPausedSessionForManualPageAdvance;
 window.ttsSpeakQueue            = ttsSpeakQueue;
