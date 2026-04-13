@@ -1288,3 +1288,64 @@ body.auth-hydrating #profile-page {
   opacity: 0.6;
   pointer-events: none;
 }
+
+
+/* Final review dark-mode contrast corrections */
+body.app-dark #devToolsPanel,
+body.app-dark #devToolsPanel * {
+  color: #111827 !important;
+}
+body.app-dark #devToolsPanel {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+}
+body.app-dark #devToolsTopBar,
+body.app-dark #devToolsContent section {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+}
+body.app-dark #devToolsPanel input,
+body.app-dark #devToolsPanel select,
+body.app-dark #devToolsPanel textarea {
+  background: #ffffff !important;
+  color: #111827 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+body.app-dark #devToolsPanel button {
+  background: #f8fafc !important;
+  color: #111827 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+body.app-dark #devToolsPanel button:hover {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+body.app-dark .profile-tab-btn:hover {
+  background: #1e293b !important;
+  color: #f8fafc !important;
+}
+body.app-dark .profile-tab-btn.active {
+  background-color: #1e293b;
+  color: #c4b5fd !important;
+}
+body.app-dark #profile-page .hover\:bg-accent-soft:hover,
+body.app-dark #profile-page .hover\:bg-slate-50:hover,
+body.app-dark #profile-page .hover\:bg-slate-100:hover {
+  color: #f8fafc !important;
+}
+
+body.app-dark #bookshelfList > div:hover {
+  background: #1e293b !important;
+}
+body.app-dark #bookshelfList > div:hover p.font-semibold,
+body.app-dark #bookshelfList > div:hover .text-slate-800,
+body.app-dark #bookshelfList > div:hover .text-slate-500,
+body.app-dark #bookshelfList > div:hover .text-slate-400,
+body.app-dark #bookshelfList > div:hover .text-slate-300 {
+  color: #f8fafc !important;
+}
+body.app-dark #bookshelfList > div:hover span.text-slate-500 {
+  background: #334155 !important;
+  color: #f8fafc !important;
+}
