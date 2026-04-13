@@ -760,6 +760,7 @@ let appTheme = 'default';
 let appThemeSettings = {};
 let appAppearance = 'light';
 let appearanceAppliedOnce = false;
+let appearancePaintSignalSeq = 0;
 let diagnosticsPrefs = { enabled: false, mode: 'off' };
 
 const EXPLORER_PRESET = {
@@ -1237,21 +1238,37 @@ function loadTheme() {
 
 function applyAppearance() {
   const modeClass = appAppearance === 'dark' ? 'app-dark' : 'app-light';
+  const paintSeq = ++appearancePaintSignalSeq;
   try {
     document.documentElement.classList.remove('app-light', 'app-dark');
     document.documentElement.classList.add(modeClass);
     document.documentElement.setAttribute('data-app-appearance', appAppearance);
     document.documentElement.setAttribute('data-appearance-ready', 'true');
+    document.documentElement.setAttribute('data-appearance-painted', 'false');
   } catch (_) {}
   document.body.classList.remove('app-light', 'app-dark');
   document.body.classList.add(modeClass);
   try {
     document.body.setAttribute('data-app-appearance', appAppearance);
     document.body.setAttribute('data-appearance-ready', 'true');
+    document.body.setAttribute('data-appearance-painted', 'false');
   } catch (_) {}
   appearanceAppliedOnce = true;
   syncAppearanceButtons();
   try { document.dispatchEvent(new CustomEvent('rc:appearance-applied', { detail: { appearance: appAppearance } })); } catch (_) {}
+  const dispatchPainted = () => {
+    if (paintSeq !== appearancePaintSignalSeq) return;
+    try { document.documentElement.setAttribute('data-appearance-painted', 'true'); } catch (_) {}
+    try { document.body.setAttribute('data-appearance-painted', 'true'); } catch (_) {}
+    try { document.dispatchEvent(new CustomEvent('rc:appearance-painted', { detail: { appearance: appAppearance } })); } catch (_) {}
+  };
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(dispatchPainted);
+    });
+  } else {
+    setTimeout(dispatchPainted, 0);
+  }
   return appAppearance;
 }
 

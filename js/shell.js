@@ -34,6 +34,14 @@
         }
     }
 
+    function isRuntimeAppearancePainted() {
+        try {
+            return !!(document.body && document.body.getAttribute('data-appearance-painted') === 'true');
+        } catch (_) {
+            return false;
+        }
+    }
+
     function waitForRuntimeAppearanceReady() {
         return new Promise((resolve) => {
             if (isRuntimeAppearanceReady()) {
@@ -52,6 +60,39 @@
                 cleanup();
                 resolve();
             }
+        });
+    }
+
+    function waitForRuntimeAppearancePainted() {
+        return new Promise((resolve) => {
+            if (isRuntimeAppearancePainted()) {
+                resolve();
+                return;
+            }
+            const onPainted = () => {
+                cleanup();
+                resolve();
+            };
+            const cleanup = () => {
+                try { document.removeEventListener('rc:appearance-painted', onPainted); } catch (_) {}
+            };
+            try { document.addEventListener('rc:appearance-painted', onPainted); } catch (_) {}
+            if (isRuntimeAppearancePainted()) {
+                cleanup();
+                resolve();
+            }
+        });
+    }
+
+    function waitForBootRevealFrame() {
+        return new Promise((resolve) => {
+            if (!(window && typeof window.requestAnimationFrame === 'function')) {
+                setTimeout(resolve, 0);
+                return;
+            }
+            window.requestAnimationFrame(() => {
+                window.requestAnimationFrame(resolve);
+            });
         });
     }
 
@@ -622,6 +663,7 @@
             document.body.classList.add('boot-pending');
         } catch (_) {}
         const appearanceReady = waitForRuntimeAppearanceReady();
+        const appearancePainted = Promise.resolve(appearanceReady).then(() => waitForRuntimeAppearancePainted());
         try {
             if (window.rcAuth && typeof window.rcAuth.init === 'function') {
                 await window.rcAuth.init();
@@ -642,8 +684,9 @@
                     showSection(settledSection, { historyMode: 'replace' }),
                     new Promise(resolve => setTimeout(resolve, 500))
                 ]),
-                appearanceReady
+                appearancePainted
             ]);
+            await waitForBootRevealFrame();
         } catch (_) {}
         releaseBootPending();
     });
@@ -1209,9 +1252,10 @@
         let moved = false;
         let route = 'unavailable';
         try {
-            if (typeof ttsAdvancePageSession === 'function') {
-                moved = !!ttsAdvancePageSession(delta);
-                if (moved) route = 'page-session-transition';
+            if (typeof ttsJumpSentence === 'function') {
+                moved = !!ttsJumpSentence(delta);
+                if (moved) route = 'block-session-transition';
+                else route = 'block-session-unavailable';
             }
         } catch (_) {}
         syncShellPlaybackControls();
