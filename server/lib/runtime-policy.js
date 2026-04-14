@@ -38,7 +38,6 @@ function normalizeEntitlementSnapshot(row) {
   return {
     userId: row.user_id || null,
     provider: row.provider || null,
-    planId: row.plan_id || null,
     tier: resolveRuntimeTier(row.tier || 'free'),
     status: row.status || null,
     stripeCustomerId: row.stripe_customer_id || null,

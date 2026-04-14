@@ -35,7 +35,6 @@ async function applyEntitlementFromSubscription(subscription, fallback = {}) {
   return upsertEntitlement({
     user_id: userId,
     provider: 'stripe',
-    plan_id: planId,
     tier,
     status: entitlementFromStripeStatus(subscription.status),
     stripe_customer_id: customerId,

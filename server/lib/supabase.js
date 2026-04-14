@@ -60,7 +60,7 @@ export async function getActiveEntitlement(userId) {
   const id = String(userId || '').trim();
   if (!id) return null;
   const data = await supabaseRest(
-    `/rest/v1/user_entitlements?user_id=eq.${encodeURIComponent(id)}&select=user_id,provider,plan_id,tier,status,stripe_customer_id,stripe_subscription_id,period_start,period_end,updated_at&order=updated_at.desc&limit=1`,
+    `/rest/v1/user_entitlements?user_id=eq.${encodeURIComponent(id)}&select=user_id,provider,tier,status,stripe_customer_id,stripe_subscription_id,period_start,period_end,updated_at&order=updated_at.desc&limit=1`,
     {
       method: 'GET',
       asService: true,
@@ -78,7 +78,7 @@ export async function getEntitlementByStripeRefs({ customerId = '', subscription
   const filters = [];
   if (subscription) filters.push(`stripe_subscription_id=eq.${encodeURIComponent(subscription)}`);
   if (customer) filters.push(`stripe_customer_id=eq.${encodeURIComponent(customer)}`);
-  const query = `/rest/v1/user_entitlements?or=(${filters.join(',')})&select=user_id,provider,plan_id,tier,status,stripe_customer_id,stripe_subscription_id,period_start,period_end,updated_at&order=updated_at.desc&limit=1`;
+  const query = `/rest/v1/user_entitlements?or=(${filters.join(',')})&select=user_id,provider,tier,status,stripe_customer_id,stripe_subscription_id,period_start,period_end,updated_at&order=updated_at.desc&limit=1`;
   const data = await supabaseRest(query, {
     method: 'GET',
     asService: true,
