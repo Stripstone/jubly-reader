@@ -179,7 +179,7 @@ window.rcSync = (function () {
     if (!policy || typeof policy !== 'object') return false;
     try {
       if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
-        window.rcPolicy.apply(policy);
+        window.rcPolicy.apply(policy, null, { transient: !!options.fromCache });
         _recordSync('snapshot', options.fromCache ? 'cache-policy-projected' : 'policy-projected', {
           policyTier: String(policy.tier || ''),
           source: options.fromCache ? 'server-cache' : 'server-sync',
