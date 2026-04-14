@@ -56,42 +56,18 @@ export async function supabaseRest(path, opts = {}) {
   return data;
 }
 
-const ENTITLEMENT_SELECT = 'user_id,provider,tier,status,stripe_customer_id,stripe_subscription_id,period_start,period_end,created_at,updated_at';
-const ENTITLEMENT_FIELDS = [
-  'user_id',
-  'provider',
-  'tier',
-  'status',
-  'stripe_customer_id',
-  'stripe_subscription_id',
-  'period_start',
-  'period_end',
-  'created_at',
-  'updated_at',
-];
-
-function sanitizeEntitlementRow(row) {
-  if (!row || typeof row !== 'object') return null;
-  const out = {};
-  for (const key of ENTITLEMENT_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(row, key) && row[key] !== undefined) out[key] = row[key];
-  }
-  return out;
-}
-
 export async function getActiveEntitlement(userId) {
   const id = String(userId || '').trim();
   if (!id) return null;
   const data = await supabaseRest(
-    `/rest/v1/user_entitlements?user_id=eq.${encodeURIComponent(id)}&select=${encodeURIComponent(ENTITLEMENT_SELECT)}&order=updated_at.desc&limit=1`,
+    `/rest/v1/user_entitlements?user_id=eq.${encodeURIComponent(id)}&select=user_id,provider,plan_id,tier,status,stripe_customer_id,stripe_subscription_id,period_start,period_end,updated_at&order=updated_at.desc&limit=1`,
     {
       method: 'GET',
       asService: true,
       headers: { Prefer: 'count=exact' },
     }
   ).catch(() => null);
-  const row = Array.isArray(data) && data[0] ? data[0] : null;
-  return sanitizeEntitlementRow(row);
+  return Array.isArray(data) && data[0] ? data[0] : null;
 }
 
 export async function getEntitlementByStripeRefs({ customerId = '', subscriptionId = '' } = {}) {
@@ -102,18 +78,17 @@ export async function getEntitlementByStripeRefs({ customerId = '', subscription
   const filters = [];
   if (subscription) filters.push(`stripe_subscription_id=eq.${encodeURIComponent(subscription)}`);
   if (customer) filters.push(`stripe_customer_id=eq.${encodeURIComponent(customer)}`);
-  const query = `/rest/v1/user_entitlements?or=(${filters.join(',')})&select=${encodeURIComponent(ENTITLEMENT_SELECT)}&order=updated_at.desc&limit=1`;
+  const query = `/rest/v1/user_entitlements?or=(${filters.join(',')})&select=user_id,provider,plan_id,tier,status,stripe_customer_id,stripe_subscription_id,period_start,period_end,updated_at&order=updated_at.desc&limit=1`;
   const data = await supabaseRest(query, {
     method: 'GET',
     asService: true,
     headers: { Prefer: 'count=exact' },
   }).catch(() => null);
-  const row = Array.isArray(data) && data[0] ? data[0] : null;
-  return sanitizeEntitlementRow(row);
+  return Array.isArray(data) && data[0] ? data[0] : null;
 }
 
 export async function upsertEntitlement(row) {
-  const payload = sanitizeEntitlementRow({ ...row, updated_at: row?.updated_at || new Date().toISOString() }) || {};
+  const payload = { ...row, updated_at: row?.updated_at || new Date().toISOString() };
   const data = await supabaseRest('/rest/v1/user_entitlements?on_conflict=user_id', {
     method: 'POST',
     asService: true,
@@ -121,8 +96,8 @@ export async function upsertEntitlement(row) {
       Prefer: 'resolution=merge-duplicates,return=representation',
     },
     body: payload,
-  });
-  return Array.isArray(data) && data[0] ? sanitizeEntitlementRow(data[0]) : sanitizeEntitlementRow(data);
+  }).catch(() => null);
+  return Array.isArray(data) && data[0] ? data[0] : data;
 }
 
 

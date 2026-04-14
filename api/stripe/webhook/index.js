@@ -27,6 +27,7 @@ async function applyEntitlementFromSubscription(subscription, fallback = {}) {
   const customerId = subscription.customer || fallback.customerId || null;
   const subscriptionId = subscription.id || fallback.subscriptionId || null;
   const existing = await getEntitlementByStripeRefs({ customerId, subscriptionId }).catch(() => null);
+  const planId = metadata.plan_id || fallback.planId || pricePlan?.planId || existing?.plan_id || null;
   const tier = metadata.tier || fallback.tier || pricePlan?.tier || existing?.tier || 'basic';
   const userId = metadata.user_id || fallback.userId || fallback.clientReferenceId || existing?.user_id || null;
   if (!userId) return null;
@@ -34,6 +35,7 @@ async function applyEntitlementFromSubscription(subscription, fallback = {}) {
   return upsertEntitlement({
     user_id: userId,
     provider: 'stripe',
+    plan_id: planId,
     tier,
     status: entitlementFromStripeStatus(subscription.status),
     stripe_customer_id: customerId,
@@ -69,6 +71,7 @@ export default async function handler(req, res) {
           await applyEntitlementFromSubscription(subscription, {
             userId: session.client_reference_id || session.metadata?.user_id || null,
             customerId: session.customer || null,
+            planId: session.metadata?.plan_id || null,
             tier: session.metadata?.tier || null,
             subscriptionId: session.subscription,
           });
