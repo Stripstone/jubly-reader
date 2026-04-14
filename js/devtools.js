@@ -183,7 +183,7 @@ window.rcDevTools = (function () {
           <strong style="display:block; margin-bottom:8px; font-size:13px;">Plan</strong>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <label style="font-size:12px;">Tier<select id="devPlanTier" style="width:100%; margin-top:4px;"><option value="basic">Basic</option><option value="pro">Pro</option><option value="premium">Premium</option></select></label>
-            <label style="font-size:12px;">Status<select id="devPlanStatus" style="width:100%; margin-top:4px;"><option value="active">active</option><option value="trialing">trialing</option><option value="inactive">inactive</option><option value="past_due">past_due</option></select></label>
+            <label style="font-size:12px;">Status<select id="devPlanStatus" style="width:100%; margin-top:4px;"><option value="active">active</option><option value="trialing">trialing</option><option value="canceled">canceled</option><option value="past_due">past_due</option></select></label>
           </div>
           <div style="display:flex; justify-content:flex-end; margin-top:8px;"><button type="button" id="devPlanSaveBtn">Save plan</button></div>
         </section>
@@ -412,7 +412,7 @@ window.rcDevTools = (function () {
     const resolvedPageCount = clientRestore && clientRestore.pageCount ? clientRestore.pageCount : (latestProgress.page_count == null ? 0 : latestProgress.page_count);
     const entitlementTier = String(entitlement?.tier || '').trim().toLowerCase();
     setValue('devPlanTier', entitlementTier === 'premium' ? 'premium' : entitlementTier === 'paid' ? 'pro' : entitlementTier === 'free' ? 'basic' : (entitlementTier || 'basic'));
-    setValue('devPlanStatus', (String(entitlement.status || '').trim().toLowerCase() === 'canceled' ? 'inactive' : (entitlement.status || 'active')));
+    setValue('devPlanStatus', entitlement.status || 'active');
     setValue('devUsageRemaining', usage.remaining == null ? '' : usage.remaining);
     setValue('devUsageUnits', usage.row && usage.row.used_units != null ? usage.row.used_units : (usage.used_units == null ? 0 : usage.used_units));
     setValue('devUsageCalls', usage.usedApiCalls == null ? (usage.used_api_calls == null ? 0 : usage.used_api_calls) : usage.usedApiCalls);

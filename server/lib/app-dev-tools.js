@@ -23,21 +23,6 @@ function toBool(value, fallback = false) {
   return fallback;
 }
 
-
-const VALID_ENTITLEMENT_PROVIDERS = new Set(['system', 'stripe']);
-const VALID_ENTITLEMENT_STATUSES = new Set(['active', 'trialing', 'past_due', 'inactive']);
-
-function normalizeEntitlementProvider(value, fallback = 'system') {
-  const raw = String(value == null ? '' : value).trim().toLowerCase();
-  return VALID_ENTITLEMENT_PROVIDERS.has(raw) ? raw : fallback;
-}
-
-function normalizeEntitlementStatus(value, fallback = 'active') {
-  const raw = String(value == null ? '' : value).trim().toLowerCase();
-  const mapped = raw === 'canceled' || raw === 'cancelled' ? 'inactive' : raw;
-  return VALID_ENTITLEMENT_STATUSES.has(mapped) ? mapped : fallback;
-}
-
 function utcWindow(now = new Date()) {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
@@ -524,14 +509,14 @@ async function buildSnapshot(req, user) {
 async function setPlan(userId, payload) {
   const tierInput = String(payload?.tier || 'basic').trim().toLowerCase();
   const tier = tierInput === 'free' ? 'basic' : tierInput === 'paid' ? 'pro' : tierInput;
+  const planId = toText(payload?.plan_id, tier === 'premium' ? 'premium' : tier === 'pro' ? 'pro' : 'basic');
+  const status = toText(payload?.status, 'active');
   const existing = await getActiveEntitlement(userId).catch(() => null);
-  const defaultProvider = tier === 'basic' ? 'system' : 'stripe';
-  const provider = normalizeEntitlementProvider(payload?.provider, normalizeEntitlementProvider(existing?.provider, defaultProvider));
-  const status = normalizeEntitlementStatus(payload?.status, normalizeEntitlementStatus(existing?.status, 'active'));
   return upsertEntitlement({
     ...(existing || {}),
     user_id: userId,
-    provider,
+    provider: toText(payload?.provider, existing?.provider || 'debug'),
+    plan_id: planId,
     tier,
     status,
     stripe_customer_id: existing?.stripe_customer_id || null,
