@@ -474,7 +474,7 @@
             const remaining = usageSnapshot && usageSnapshot.remaining != null ? usageSnapshot.remaining : (remoteUsageSummary && remoteUsageSummary.remaining != null ? remoteUsageSummary.remaining : '—');
             const allowance = usageSnapshot && usageSnapshot.allowance != null ? usageSnapshot.allowance : (remoteUsageSummary && remoteUsageSummary.limit != null ? remoteUsageSummary.limit : null);
             return {
-              tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
+              tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'unknown',
               remaining,
               allowance,
               authoritative: !!(usageSnapshot && usageSnapshot.authoritative),
@@ -660,8 +660,8 @@
 
   const VALID_TIERS = ['basic', 'pro', 'premium'];
 
-  // Restore persisted tier
-  select.value = appTier;
+  // Seed display from current resolved policy
+  select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
 
   function applyTierSimulationUi() {
     const policyApi = window.rcPolicy || {};
@@ -680,13 +680,12 @@
 
   async function syncTierPolicy(nextTier) {
     const targetTier = VALID_TIERS.includes(String(nextTier || '').toLowerCase()) ? String(nextTier).toLowerCase() : 'basic';
-    appTier = targetTier;
     if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
       try { await window.rcPolicy.refreshForTier(targetTier); } catch (_) {}
     } else {
       try { if (typeof tokenReset === 'function') tokenReset(); } catch (_) {}
     }
-    select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : appTier;
+    select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
     applyTierSimulationUi();
     applyTierAccess();
     try { if (typeof window.populateBrowserVoicePicker === 'function') window.populateBrowserVoicePicker(); } catch (_) {}
@@ -699,20 +698,21 @@
       return;
     }
     const newTier = select.value;
-    if (!VALID_TIERS.includes(newTier) || newTier === appTier) return;
+    const currentTier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
+    if (!VALID_TIERS.includes(newTier) || newTier === currentTier) return;
     syncTierPolicy(newTier);
   });
 
   document.addEventListener('rc:runtime-policy-changed', () => {
     try {
-      select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : appTier;
+      select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
       applyTierSimulationUi();
       applyTierAccess();
     } catch (_) {}
   });
 
-  // Apply on boot
-  syncTierPolicy(appTier);
+  // Apply on boot using current resolved policy tier
+  syncTierPolicy((window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic');
 
   function applyTierAccess() {
     const policyApi = window.rcPolicy || {};

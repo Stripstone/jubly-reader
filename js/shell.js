@@ -701,7 +701,7 @@
         if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
     }
 
-    // ── Tier — drives #tierSelect so ui.js applyTierAccess() fires ──
+    // ── Tier simulation (dev/localhost only, gated by canSimulateTierSelection) ──
     function canSimulateTierSelection() {
         return !!(window.rcPolicy && typeof window.rcPolicy.canSimulateTier === 'function' && window.rcPolicy.canSimulateTier());
     }
@@ -709,7 +709,7 @@
     function syncTierButtonState() {
         const current = (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function')
             ? window.rcEntitlements.getTier()
-            : ((typeof appTier !== 'undefined' && appTier) ? appTier : 'basic');
+            : ((window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic');
         const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' };
         document.querySelectorAll('.tier-btn').forEach((btn) => {
             const next = map[current] || 'Basic';
@@ -727,30 +727,28 @@
         btn.classList.add('active');
         const map = { 'Basic': 'basic', 'Pro': 'pro', 'Premium': 'premium' };
         const value = map[btn.textContent.trim()] || 'basic';
-        const sel = document.getElementById('tierSelect');
-        if (sel && sel.value !== value) { sel.value = value; sel.dispatchEvent(new Event('change')); }
-        const pill = document.getElementById('reading-tier-pill');
-        if (pill) pill.textContent = btn.textContent.trim();
+        // Call the runtime policy API directly — do not dispatch through #tierSelect DOM element.
+        if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
+            window.rcPolicy.refreshForTier(value).catch(() => {});
+        }
         updateExplorerSwatchState();
-        try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
         try { syncExplorerMusicSource(); } catch (_) {}
     }
 
     function updateTierPill() {
-        const sel  = document.getElementById('tierSelect');
+        const tier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
         const pill = document.getElementById('reading-tier-pill');
-        if (!sel || !pill) return;
-        const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' };
-        pill.textContent = map[sel.value] || 'Basic';
+        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' }; pill.textContent = map[tier] || 'Basic'; }
     }
 
     function getCurrentTier() {
         if (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function') {
             try { return window.rcEntitlements.getTier(); } catch (_) {}
         }
-        const sel = document.getElementById('tierSelect');
-        if (sel && sel.value) return sel.value;
-        return (typeof appTier !== 'undefined' && appTier) ? appTier : 'basic';
+        if (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') {
+            try { return window.rcPolicy.getTier(); } catch (_) {}
+        }
+        return 'basic';
     }
 
     // ── Theme ────────────────────────────────────────────────────

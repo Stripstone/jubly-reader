@@ -84,16 +84,16 @@ window.rcDevTools = (function () {
   }
 
   async function rehydrate() {
-    try {
-      if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
-        await window.rcPolicy.refreshForTier();
-      }
-    } catch (_) {}
+    // Apply usage snapshot immediately from the dev-tools response so the UI
+    // reflects the change before the durable-sync round-trip completes.
     try {
       if (window.rcUsage && typeof window.rcUsage.applySnapshot === 'function' && state.snapshot && state.snapshot.usage) {
         window.rcUsage.applySnapshot({ remaining: state.snapshot.usage.remaining, limit: state.snapshot.usage.limit });
       }
     } catch (_) {}
+    // rehydrateDurableData fetches a fresh server snapshot which includes
+    // runtimePolicy — _applySnapshot will project the updated policy from there.
+    // A separate refreshForTier() call is not needed and races against this path.
     try {
       if (window.rcSync && typeof window.rcSync.rehydrateDurableData === 'function') {
         await window.rcSync.rehydrateDurableData();
