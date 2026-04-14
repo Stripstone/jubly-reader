@@ -709,8 +709,8 @@
     function syncTierButtonState() {
         const current = (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function')
             ? window.rcEntitlements.getTier()
-            : ((typeof appTier !== 'undefined' && appTier) ? appTier : 'free');
-        const map = { free: 'Basic', paid: 'Pro', premium: 'Premium' };
+            : ((typeof appTier !== 'undefined' && appTier) ? appTier : 'basic');
+        const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' };
         document.querySelectorAll('.tier-btn').forEach((btn) => {
             const next = map[current] || 'Basic';
             btn.classList.toggle('active', btn.textContent.trim() === next);
@@ -725,8 +725,8 @@
         if (!canSimulateTierSelection()) return;
         document.querySelectorAll('.tier-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        const map = { 'Basic': 'free', 'Pro': 'paid', 'Premium': 'premium' };
-        const value = map[btn.textContent.trim()] || 'free';
+        const map = { 'Basic': 'basic', 'Pro': 'pro', 'Premium': 'premium' };
+        const value = map[btn.textContent.trim()] || 'basic';
         const sel = document.getElementById('tierSelect');
         if (sel && sel.value !== value) { sel.value = value; sel.dispatchEvent(new Event('change')); }
         const pill = document.getElementById('reading-tier-pill');
@@ -740,7 +740,7 @@
         const sel  = document.getElementById('tierSelect');
         const pill = document.getElementById('reading-tier-pill');
         if (!sel || !pill) return;
-        const map = { free: 'Basic', paid: 'Pro', premium: 'Premium' };
+        const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' };
         pill.textContent = map[sel.value] || 'Basic';
     }
 
@@ -750,7 +750,7 @@
         }
         const sel = document.getElementById('tierSelect');
         if (sel && sel.value) return sel.value;
-        return (typeof appTier !== 'undefined' && appTier) ? appTier : 'free';
+        return (typeof appTier !== 'undefined' && appTier) ? appTier : 'basic';
     }
 
     // ── Theme ────────────────────────────────────────────────────

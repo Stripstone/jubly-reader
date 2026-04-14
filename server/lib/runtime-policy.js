@@ -1,6 +1,7 @@
 import { getActiveEntitlement, getUserFromAccessToken } from './supabase.js';
 
-const VALID_TIERS = new Set(['free', 'paid', 'premium']);
+const VALID_TIERS = new Set(['basic', 'pro', 'premium']);
+const LEGACY_TIER_ALIASES = new Map([['free', 'basic'], ['paid', 'pro']]);
 const CANONICAL_PRODUCTION_HOSTS = new Set(['jubly-reader.vercel.app']);
 
 function normalizeHost(value) {
@@ -33,13 +34,27 @@ function getAuthorizationBearer(req) {
   return match ? match[1].trim() : '';
 }
 
+function normalizeTierAlias(value) {
+  const tier = String(value || '').trim().toLowerCase();
+  return LEGACY_TIER_ALIASES.get(tier) || tier;
+}
+
+function normalizeEntitlementTier(row) {
+  if (!row || typeof row !== 'object') return 'basic';
+  const directTier = resolveRuntimeTier(row.tier, '');
+  if (directTier) return directTier;
+  const mappedPlanTier = resolveRuntimeTier(row.plan_id, '');
+  if (mappedPlanTier) return mappedPlanTier;
+  return 'basic';
+}
+
 function normalizeEntitlementSnapshot(row) {
   if (!row || typeof row !== 'object') return null;
   return {
     userId: row.user_id || null,
     provider: row.provider || null,
     planId: row.plan_id || null,
-    tier: resolveRuntimeTier(row.tier || 'free'),
+    tier: normalizeEntitlementTier(row),
     status: row.status || null,
     stripeCustomerId: row.stripe_customer_id || null,
     stripeSubscriptionId: row.stripe_subscription_id || null,
@@ -49,9 +64,9 @@ function normalizeEntitlementSnapshot(row) {
   };
 }
 
-export function resolveRuntimeTier(value) {
-  const tier = String(value || '').trim().toLowerCase();
-  return VALID_TIERS.has(tier) ? tier : 'free';
+export function resolveRuntimeTier(value, fallback = 'basic') {
+  const tier = normalizeTierAlias(value);
+  return VALID_TIERS.has(tier) ? tier : fallback;
 }
 
 export function isRuntimeTierSimulationAllowed(req) {
@@ -62,13 +77,13 @@ export function isRuntimeTierSimulationAllowed(req) {
 }
 
 export function getDefaultRuntimeTier() {
-  return resolveRuntimeTier(process.env.RUNTIME_DEFAULT_TIER || 'free');
+  return resolveRuntimeTier(process.env.RUNTIME_DEFAULT_TIER || 'basic');
 }
 
 function getDeveloperOverrideTier(req) {
   if (!isRuntimeTierSimulationAllowed(req)) return '';
   const value = String(process.env.DEVELOPER_TIER_OVERRIDE || '').trim().toLowerCase();
-  return VALID_TIERS.has(value) ? value : '';
+  return resolveRuntimeTier(value, '');
 }
 
 
@@ -94,23 +109,23 @@ export function getRequestedRuntimeTier(req) {
     const url = new URL(req.url, 'http://localhost');
     return resolveRuntimeTier(url.searchParams.get('tier'));
   } catch (_) {
-    return 'free';
+    return 'basic';
   }
 }
 
-export function buildRuntimePolicy(inputTier = 'free') {
+export function buildRuntimePolicy(inputTier = 'basic') {
   const tier = resolveRuntimeTier(inputTier);
-  const elevated = tier !== 'free';
+  const elevated = tier !== 'basic';
 
   const usageDailyLimit = tier === 'premium'
     ? 10000
-    : tier === 'paid'
+    : tier === 'pro'
       ? 1000
       : 100;
 
   const importSlotLimit = tier === 'premium'
     ? null
-    : tier === 'paid'
+    : tier === 'pro'
       ? 5
       : 2;
 

@@ -104,6 +104,14 @@
         body.app-dark #shell-speed:hover,
         body.app-dark .reading-top-settings-btn:hover,
         body.app-dark .reading-top-exit:hover { background: #1e293b; border-color: #475569; color: #f8fafc; }
+        body.app-dark #devToolsPanel,
+        body.app-dark #diagPanel { color: #1e293b; }
+        body.app-dark #devToolsPanel input,
+        body.app-dark #devToolsPanel select,
+        body.app-dark #devToolsPanel textarea,
+        body.app-dark #diagPanel textarea { background: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; }
+        body.app-dark #devToolsPanel button,
+        body.app-dark #diagPanel button { color: #1e293b; }
 
         /* Utility classes for consistent brand/theme color usage */
         .text-brand      { color: var(--jubly-purple); }

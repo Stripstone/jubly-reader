@@ -423,6 +423,7 @@
       diagPanel.style.border = '2px solid var(--border)';
       diagPanel.style.borderRadius = '10px';
       diagPanel.style.background = 'var(--secondary-bg)';
+      diagPanel.style.color = 'var(--text-primary)';
       diagPanel.style.boxShadow = '0 8px 28px rgba(0,0,0,0.22)';
       diagPanel.innerHTML = `
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
@@ -657,7 +658,7 @@
   const select = document.getElementById('tierSelect');
   if (!select) return;
 
-  const VALID_TIERS = ['free', 'paid', 'premium'];
+  const VALID_TIERS = ['basic', 'pro', 'premium'];
 
   // Restore persisted tier
   select.value = appTier;
@@ -678,7 +679,7 @@
   }
 
   async function syncTierPolicy(nextTier) {
-    const targetTier = VALID_TIERS.includes(String(nextTier || '').toLowerCase()) ? String(nextTier).toLowerCase() : 'free';
+    const targetTier = VALID_TIERS.includes(String(nextTier || '').toLowerCase()) ? String(nextTier).toLowerCase() : 'basic';
     appTier = targetTier;
     if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
       try { await window.rcPolicy.refreshForTier(targetTier); } catch (_) {}
@@ -694,7 +695,7 @@
   select.addEventListener('change', () => {
     const policyApi = window.rcPolicy || {};
     if (typeof policyApi.canSimulateTier === 'function' && !policyApi.canSimulateTier()) {
-      select.value = typeof policyApi.getTier === 'function' ? policyApi.getTier() : 'free';
+      select.value = typeof policyApi.getTier === 'function' ? policyApi.getTier() : 'basic';
       return;
     }
     const newTier = select.value;

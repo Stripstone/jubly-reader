@@ -40,9 +40,9 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   let appMode = 'reading';   // default mode
   let thesisText = ''; // research mode input — coming soon
 
-  // Current subscription tier: 'free', 'paid', 'premium'
-  // During prototype: controls feature access in UI but does not enforce usage limits.
-  let appTier = 'free';
+  // Current resolved runtime tier: 'basic', 'pro', 'premium'.
+  // Legacy aliases like 'free' / 'paid' are normalized at the policy seam.
+  let appTier = 'basic';
   let runtimePolicy = null;
 
   // ---- Token Tracking ----
@@ -66,7 +66,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
 
   const SAFE_FALLBACK_POLICY = Object.freeze({
     version: 1,
-    tier: 'free',
+    tier: 'basic',
     simulationAllowed: false,
     usageDailyLimit: 100,
     importSlotLimit: 2,
@@ -87,20 +87,22 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   });
 
 
-  function normalizeAppTier(value) {
+  function normalizeAppTier(value, fallback = 'basic') {
     const tier = String(value || '').trim().toLowerCase();
-    return ['free', 'paid', 'premium'].includes(tier) ? tier : 'free';
+    if (tier === 'free') return 'basic';
+    if (tier === 'paid') return 'pro';
+    return ['basic', 'pro', 'premium'].includes(tier) ? tier : fallback;
   }
 
   function getFallbackRuntimePolicy(tierInput) {
-    // PASS3: Fallback is always the minimum safe free-tier policy.
+    // PASS3: Fallback is always the minimum safe basic-tier policy.
     // tierInput is accepted for callers that pass a hint, but it NEVER elevates
-    // features above free-tier when the server is unreachable.
+    // features above basic-tier when the server is unreachable.
     // simulationAllowed is never granted from client-side host inference:
     //   - it was previously set from canSimulateTierOnCurrentHost(), which let the
     //     client grant itself simulation capability when the server was down.
     //   - now it is always false; simulation capability comes from the server only.
-    const tier = normalizeAppTier(tierInput);
+    const tier = normalizeAppTier(tierInput, 'basic');
     return {
       version: SAFE_FALLBACK_POLICY.version,
       tier,
@@ -145,7 +147,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       // resolutionMode: consumed from server meta (passed in via applyResolvedRuntimePolicy).
       // 'production'    — server default tier, client request ignored.
       // 'simulation'    — preview/local only, client ?tier= honored.
-      // 'client-fallback' — server unreachable, safe free-tier only.
+      // 'client-fallback' — server unreachable, safe basic-tier only.
       resolutionMode: typeof source.resolutionMode === 'string' ? source.resolutionMode : (fallback.resolutionMode || 'client-fallback'),
       usageDailyLimit: Number.isFinite(usageDailyLimit) && usageDailyLimit > 0
         ? usageDailyLimit
@@ -248,14 +250,14 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       const resolvedTierHint = payload?.meta?.effectiveTier || tier;
       return applyResolvedRuntimePolicy(policyWithMeta, resolvedTierHint);
     } catch (_) {
-      // Server unreachable. Apply minimum safe free-tier fallback only.
+      // Server unreachable. Apply minimum safe basic-tier fallback only.
       // PASS3: Do not preserve the requested tier (even on localhost) when the
       // server is down. The previous path used canSimulateTierOnCurrentHost() to
       // grant the requested tier in fallback — that made the client a second policy
-      // engine when the server failed. Now the fallback is always safe-free.
+      // engine when the server failed. Now the fallback is always safe-basic.
       // When the server becomes reachable, the next refreshForTier call will fetch
       // the correct server-resolved policy.
-      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('free'), 'free');
+      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic');
     }
   }
 
@@ -1073,9 +1075,9 @@ function getRuntimeTier() {
   // refreshForTier (ui.js owns #tierSelect → syncTierPolicy → refreshForTier),
   // which fetches from the server and sets runtimePolicy directly.
   try {
-    return normalizeAppTier(runtimePolicy?.tier || 'free');
+    return normalizeAppTier(runtimePolicy?.tier || 'basic');
   } catch (_) {
-    return 'free';
+    return 'basic';
   }
 }
 
@@ -1227,8 +1229,13 @@ function loadTheme() {
   if (typeof stored.diagnostics_mode === 'string') themeDiagPrefs.mode = stored.diagnostics_mode;
   diagnosticsPrefs = Object.assign({ enabled: false, mode: 'off' }, storedDiagPrefs, themeDiagPrefs);
   if (!canUseTheme(appTheme)) {
+    // Theme access can be policy-gated. On cold boot, runtime policy may still be
+    // unresolved when we first read persisted prefs. Display the safe default, but
+    // do not overwrite the saved durable theme until a resolved runtime policy has
+    // actually confirmed the theme is disallowed.
+    const hasResolvedRuntimePolicy = !!(runtimePolicy && typeof runtimePolicy === 'object');
     appTheme = 'default';
-    persistThemeState();
+    if (hasResolvedRuntimePolicy) persistThemeState();
   }
   applyThemeClass(appTheme);
   applyThemeSettings();

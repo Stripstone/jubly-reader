@@ -95,6 +95,13 @@ window.rcBilling = (function () {
     return normalized;
   }
 
+  function normalizeRuntimeTier(tier) {
+    const normalized = String(tier || '').trim().toLowerCase();
+    if (normalized === 'free') return 'basic';
+    if (normalized === 'paid') return 'pro';
+    return ['basic', 'pro', 'premium'].includes(normalized) ? normalized : 'basic';
+  }
+
   function openPricingForSignup() {
     clearPendingPlan();
     if (typeof closeModal === 'function') closeModal('ownership-modal');
@@ -131,7 +138,7 @@ window.rcBilling = (function () {
     const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
     const snapshot = await fetchRuntimeSnapshot();
     const entitlement = snapshot?.meta?.entitlement || null;
-    const currentTier = String(entitlement?.tier || snapshot?.tier || 'free').toLowerCase();
+    const currentTier = normalizeRuntimeTier(entitlement?.tier || snapshot?.meta?.effectiveTier || snapshot?.policy?.tier || snapshot?.tier || 'basic');
     const plans = config?.stripe?.plans || {};
     const freeBtn = document.getElementById('pricing-free-btn');
     const proBtn = document.getElementById('pricing-pro-btn');
@@ -153,8 +160,8 @@ window.rcBilling = (function () {
       return;
     }
 
-    applyPlanButtonState(freeBtn, currentTier === 'free' ? 'Current Plan' : 'Free Plan', () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); }, currentTier === 'free');
-    applyPlanButtonState(proBtn, currentTier === 'paid' ? 'Current Plan' : 'Upgrade to Pro', () => startCheckout('pro'), !plans?.pro?.available || currentTier === 'paid');
+    applyPlanButtonState(freeBtn, currentTier === 'basic' ? 'Current Plan' : 'Free Plan', () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); }, currentTier === 'basic');
+    applyPlanButtonState(proBtn, currentTier === 'pro' ? 'Current Plan' : 'Upgrade to Pro', () => startCheckout('pro'), !plans?.pro?.available || currentTier === 'pro');
     applyPlanButtonState(premiumBtn, currentTier === 'premium' ? 'Current Plan' : 'Upgrade to Premium', () => startCheckout('premium'), !plans?.premium?.available || currentTier === 'premium');
   }
 
@@ -213,7 +220,8 @@ window.rcBilling = (function () {
     }
 
     if (entitlement && (entitlement.status === 'active' || entitlement.status === 'trialing')) {
-      const tierLabel = entitlement.tier === 'premium' ? 'Premium' : entitlement.tier === 'paid' ? 'Pro' : 'Free';
+      const resolvedTier = normalizeRuntimeTier(entitlement?.tier);
+      const tierLabel = resolvedTier === 'premium' ? 'Premium' : resolvedTier === 'pro' ? 'Pro' : 'Free';
       const renewsAt = entitlement.renewsAt || entitlement.periodEnd || null;
       const renewsLabel = renewsAt
         ? new Date(renewsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })

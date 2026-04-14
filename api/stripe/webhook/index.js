@@ -28,7 +28,7 @@ async function applyEntitlementFromSubscription(subscription, fallback = {}) {
   const subscriptionId = subscription.id || fallback.subscriptionId || null;
   const existing = await getEntitlementByStripeRefs({ customerId, subscriptionId }).catch(() => null);
   const planId = metadata.plan_id || fallback.planId || pricePlan?.planId || existing?.plan_id || null;
-  const tier = metadata.tier || fallback.tier || pricePlan?.tier || existing?.tier || 'free';
+  const tier = metadata.tier || fallback.tier || pricePlan?.tier || existing?.tier || 'basic';
   const userId = metadata.user_id || fallback.userId || fallback.clientReferenceId || existing?.user_id || null;
   if (!userId) return null;
 

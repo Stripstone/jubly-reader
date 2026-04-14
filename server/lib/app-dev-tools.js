@@ -500,16 +500,16 @@ async function buildSnapshot(req, user) {
     sessions,
     policy: resolved?.policy || null,
     policyMeta: {
-      effectiveTier: resolved?.effectiveTier || 'free',
+      effectiveTier: resolved?.effectiveTier || 'basic',
       resolutionMode: resolved?.resolutionMode || 'production',
     },
   };
 }
 
 async function setPlan(userId, payload) {
-  const tierInput = String(payload?.tier || 'free').trim().toLowerCase();
-  const tier = tierInput === 'pro' ? 'paid' : tierInput;
-  const planId = toText(payload?.plan_id, tier === 'premium' ? 'premium' : tier === 'paid' ? 'pro' : 'free');
+  const tierInput = String(payload?.tier || 'basic').trim().toLowerCase();
+  const tier = tierInput === 'free' ? 'basic' : tierInput === 'paid' ? 'pro' : tierInput;
+  const planId = toText(payload?.plan_id, tier === 'premium' ? 'premium' : tier === 'pro' ? 'pro' : 'basic');
   const status = toText(payload?.status, 'active');
   const existing = await getActiveEntitlement(userId).catch(() => null);
   return upsertEntitlement({
