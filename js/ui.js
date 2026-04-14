@@ -678,6 +678,13 @@
     });
   }
 
+  function syncTierUiFromCurrentPolicy() {
+    select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
+    applyTierSimulationUi();
+    applyTierAccess();
+    try { if (typeof window.populateBrowserVoicePicker === 'function') window.populateBrowserVoicePicker(); } catch (_) {}
+  }
+
   async function syncTierPolicy(nextTier) {
     const targetTier = VALID_TIERS.includes(String(nextTier || '').toLowerCase()) ? String(nextTier).toLowerCase() : 'basic';
     if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
@@ -685,10 +692,7 @@
     } else {
       try { if (typeof tokenReset === 'function') tokenReset(); } catch (_) {}
     }
-    select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
-    applyTierSimulationUi();
-    applyTierAccess();
-    try { if (typeof window.populateBrowserVoicePicker === 'function') window.populateBrowserVoicePicker(); } catch (_) {}
+    syncTierUiFromCurrentPolicy();
   }
 
   select.addEventListener('change', () => {
@@ -705,14 +709,12 @@
 
   document.addEventListener('rc:runtime-policy-changed', () => {
     try {
-      select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
-      applyTierSimulationUi();
-      applyTierAccess();
+      syncTierUiFromCurrentPolicy();
     } catch (_) {}
   });
 
-  // Apply on boot using current resolved policy tier
-  syncTierPolicy((window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic');
+  // Reflect current resolved policy on boot without creating a second-owner refresh path.
+  syncTierUiFromCurrentPolicy();
 
   function applyTierAccess() {
     const policyApi = window.rcPolicy || {};

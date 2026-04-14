@@ -1312,43 +1312,62 @@
     function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     let libraryRefreshRetryTimer = null;
     let _loggedFirstLocalLibraryRead = false;
+    let _libraryInitialResolutionComplete = false;
+    let _libraryRefreshSequence = 0;
+
+    function setLibrarySurfaceState(state) {
+        const pendingEl = document.getElementById('library-pending');
+        const popEl = document.getElementById('library-populated');
+        const emptyEl = document.getElementById('library-empty');
+        const sampleEl = document.getElementById('library-public-sample');
+        if (pendingEl) pendingEl.classList.toggle('hidden-section', state !== 'pending');
+        if (popEl) popEl.classList.toggle('hidden-section', state !== 'populated');
+        if (emptyEl) emptyEl.classList.toggle('hidden-section', state !== 'empty');
+        if (sampleEl) sampleEl.classList.toggle('hidden-section', state !== 'sample');
+        const dashboardEl = document.getElementById('dashboard');
+        if (dashboardEl) dashboardEl.setAttribute('data-library-state', state);
+    }
 
     async function refreshLibrary(reason = 'unknown') {
         const rowsEl  = document.getElementById('library-rows');
-        const popEl   = document.getElementById('library-populated');
-        const emptyEl = document.getElementById('library-empty');
-        const sampleEl = document.getElementById('library-public-sample');
         // NOTE: #dashboard-subtitle is NOT owned by refreshLibrary.
         // renderLibrarySubtitle() is the single owner of that element.
         // CSS min-height on #dashboard-subtitle ensures it never causes layout shift.
         if (!rowsEl) return;
+        const authed = !!isAuthedUser();
+        const hasLocalLibraryOwner = typeof localBooksGetAll === 'function';
         shellTrailPush('dashboard-library-refresh', {
             reason,
             section: getCurrentVisibleSection(),
-            authed: !!isAuthedUser(),
-            hasLocalLibraryOwner: typeof localBooksGetAll === 'function'
+            authed,
+            hasLocalLibraryOwner,
+            initialResolved: _libraryInitialResolutionComplete
         });
 
-        // Hide all library states at the very start — the correct state is revealed
-        // only when we actually know what to show. This prevents flash of stale data
-        // on navigation and prevents intermediate DOM states being visible during
-        // async resolution. On boot, auth-hydrating covers this; on navigation it does not.
-        if (popEl) popEl.classList.add('hidden-section');
-        if (emptyEl) emptyEl.classList.add('hidden-section');
-        if (sampleEl) sampleEl.classList.add('hidden-section');
-
-        if (!isAuthedUser()) {
-            if (sampleEl) sampleEl.classList.remove('hidden-section');
+        if (!authed) {
+            _libraryInitialResolutionComplete = false;
+            if (libraryRefreshRetryTimer) {
+                clearTimeout(libraryRefreshRetryTimer);
+                libraryRefreshRetryTimer = null;
+            }
+            setLibrarySurfaceState('sample');
             return;
         }
 
-        // Keep the library surface honest during boot. Until runtime book storage is
-        // actually available, do not imply an empty library by showing the empty/import CTA.
-        // Return a promise that resolves after one retry tick so DOMContentLoaded's
-        // auth-hydrating removal is delayed until the retry has had a chance to render.
+        // Runtime honesty contract for the dashboard books area:
+        // keep the container visible immediately, keep books truth owned by the
+        // local library runtime, and show a neutral pending state until the first
+        // truthful local-library read resolves to populated vs empty/importer.
+        // After that first truthful read, later refreshes keep the current visible
+        // surface instead of flashing back through pending.
+        if (!_libraryInitialResolutionComplete) setLibrarySurfaceState('pending');
+
+        // Until runtime book storage is actually available, do not imply an empty
+        // library and do not leave a blank gap. Keep the pending surface visible
+        // and retry owner discovery.
         // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
         // or successive unavailability creates an infinite chain that hangs the page.
-        if (typeof localBooksGetAll !== 'function') {
+        if (!hasLocalLibraryOwner) {
             shellTrailPush('dashboard-library-owner-pending', { reason, retryDelayMs: 120 });
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
             return new Promise(resolve => {
@@ -1359,18 +1378,20 @@
                 }, 120);
             });
         }
+        const refreshSeq = ++_libraryRefreshSequence;
         let books = [];
         try { books = await localBooksGetAll(); } catch(_) { books = []; }
+        if (refreshSeq !== _libraryRefreshSequence) return;
         shellTrailPush('dashboard-library-local-read', {
             reason,
             count: Array.isArray(books) ? books.length : 0,
             firstSuccess: !_loggedFirstLocalLibraryRead
         });
         _loggedFirstLocalLibraryRead = true;
+        _libraryInitialResolutionComplete = true;
         const has = books.length > 0;
-        if (popEl)   popEl.classList.toggle('hidden-section', !has);
-        if (emptyEl) emptyEl.classList.toggle('hidden-section', has);
         if (!has) {
+            setLibrarySurfaceState('empty');
             try { renderSubscriptionSurface([]); } catch (_) {}
             return;
         }
@@ -1392,6 +1413,7 @@
                 <div class="w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
+        setLibrarySurfaceState('populated');
         try { renderSubscriptionSurface(books); } catch (_) {}
 
     }

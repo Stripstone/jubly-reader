@@ -1065,6 +1065,134 @@
   display: block;
 }
 
+#dashboard[data-library-state="pending"] #library-toolbar {
+  opacity: 1;
+}
+
+.library-pending-card {
+  border: 1px solid #e2e8f0;
+  padding: 22px 24px;
+}
+
+.library-pending-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.library-pending-label {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.library-pending-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.library-pending-copy {
+  margin: 8px 0 0;
+  max-width: 40rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: #64748b;
+}
+
+.library-pending-list {
+  margin-top: 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.library-pending-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 92px 108px;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.library-pending-row:last-child {
+  border-bottom: 0;
+}
+
+.library-pending-icon,
+.library-pending-line,
+.library-pending-pill,
+.library-pending-time {
+  display: block;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f8fafc 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: libraryPendingPulse 1.4s ease-in-out infinite;
+}
+
+.library-pending-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+}
+
+.library-pending-lines {
+  min-width: 0;
+}
+
+.library-pending-line {
+  border-radius: 999px;
+}
+
+.library-pending-line-title {
+  width: min(280px, 72%);
+  height: 13px;
+}
+
+.library-pending-line-meta {
+  width: min(180px, 48%);
+  height: 10px;
+  margin-top: 10px;
+}
+
+.library-pending-pill {
+  width: 74px;
+  height: 24px;
+  border-radius: 999px;
+}
+
+.library-pending-time {
+  width: 88px;
+  height: 12px;
+  border-radius: 999px;
+}
+
+@keyframes libraryPendingPulse {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@media (max-width: 760px) {
+  .library-pending-card {
+    padding: 18px;
+  }
+
+  .library-pending-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .library-pending-pill,
+  .library-pending-time {
+    display: none;
+  }
+}
+
 /* Auth hydration gate: avoid flashing signed-out landing/profile truth before
    Supabase session restore resolves on page load. */
 body.auth-hydrating nav,

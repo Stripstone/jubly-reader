@@ -585,6 +585,47 @@
         </div>
     </section>
 
+    <div id="library-pending" class="hidden-section" aria-live="polite" aria-busy="true">
+        <div class="glass-card shadow-sm library-pending-card">
+            <div class="library-pending-head">
+                <div>
+                    <p class="library-pending-label">Loading Library</p>
+                    <h3 class="library-pending-title">Checking this device for your books</h3>
+                    <p class="library-pending-copy">The Library area stays in a neutral pending state until the local library runtime can truthfully resolve books or empty/import guidance.</p>
+                </div>
+            </div>
+            <div class="library-pending-list" aria-hidden="true">
+                <div class="library-pending-row">
+                    <div class="library-pending-icon"></div>
+                    <div class="library-pending-lines">
+                        <span class="library-pending-line library-pending-line-title"></span>
+                        <span class="library-pending-line library-pending-line-meta"></span>
+                    </div>
+                    <span class="library-pending-pill"></span>
+                    <span class="library-pending-time"></span>
+                </div>
+                <div class="library-pending-row">
+                    <div class="library-pending-icon"></div>
+                    <div class="library-pending-lines">
+                        <span class="library-pending-line library-pending-line-title"></span>
+                        <span class="library-pending-line library-pending-line-meta"></span>
+                    </div>
+                    <span class="library-pending-pill"></span>
+                    <span class="library-pending-time"></span>
+                </div>
+                <div class="library-pending-row">
+                    <div class="library-pending-icon"></div>
+                    <div class="library-pending-lines">
+                        <span class="library-pending-line library-pending-line-title"></span>
+                        <span class="library-pending-line library-pending-line-meta"></span>
+                    </div>
+                    <span class="library-pending-pill"></span>
+                    <span class="library-pending-time"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- POPULATED STATE — rows injected by refreshLibrary() after import -->
     <div id="library-populated" class="hidden-section">
         <div class="glass-card overflow-hidden shadow-sm">

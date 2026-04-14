@@ -48,11 +48,15 @@ const TTS_STATE = {
   browserIntentionalCancelUntil: 0,
   browserIntentionalCancelReason: null,
   browserIntentionalCancelMeta: null,
+  browserRestartTimerId: 0,
+  browserRestartRequestId: 0,
+  browserExpectedEntryBlockIndex: -1,
 
   playbackBlockedReason: '',
   pendingCloudSeekKey: null,
   pendingCloudSeekSessionId: 0,
   pendingCloudSeekBlockIndex: -1,
+  pendingCloudSeekLeadMs: 0,
 
   highlightPageKey: null,
   highlightPageEl: null,
@@ -204,16 +208,38 @@ const AUTOPLAY_STATE = {
 
 const AUTOPLAY_NEXT_DELAY_MS = 3000;
 
-function queuePendingCloudSeek(key, sessionId, blockIdx) {
+function queuePendingCloudSeek(key, sessionId, blockIdx, leadMs = 0) {
   TTS_STATE.pendingCloudSeekKey = String(key || '');
   TTS_STATE.pendingCloudSeekSessionId = Number(sessionId || 0) || 0;
   TTS_STATE.pendingCloudSeekBlockIndex = Number.isFinite(Number(blockIdx)) ? Number(blockIdx) : -1;
+  TTS_STATE.pendingCloudSeekLeadMs = Number.isFinite(Number(leadMs)) ? Math.max(0, Number(leadMs)) : 0;
 }
 
 function clearPendingCloudSeek() {
   TTS_STATE.pendingCloudSeekKey = null;
   TTS_STATE.pendingCloudSeekSessionId = 0;
   TTS_STATE.pendingCloudSeekBlockIndex = -1;
+  TTS_STATE.pendingCloudSeekLeadMs = 0;
+}
+
+function clearPendingBrowserRestartTimer() {
+  const timerId = Number(TTS_STATE.browserRestartTimerId || 0);
+  if (timerId > 0) {
+    try { clearTimeout(timerId); } catch (_) {}
+  }
+  TTS_STATE.browserRestartTimerId = 0;
+}
+
+function resetBrowserRestartOwnership() {
+  clearPendingBrowserRestartTimer();
+  TTS_STATE.browserRestarting = false;
+  TTS_STATE.browserRestartRequestId = 0;
+  TTS_STATE.browserExpectedEntryBlockIndex = -1;
+}
+
+function isBrowserStaleEntryBlock(blockIdx) {
+  const expected = Number(TTS_STATE.browserExpectedEntryBlockIndex);
+  return Number.isFinite(expected) && expected >= 0 && Number(blockIdx) !== expected;
 }
 
 function isRecoverablePlaybackFailure(err) {
@@ -233,9 +259,9 @@ function applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason) {
   const target = Number(TTS_STATE.pendingCloudSeekBlockIndex);
   const marks = TTS_STATE.highlightMarks;
   if (!Array.isArray(marks) || !marks.length || !Number.isFinite(target) || target < 0 || target >= marks.length) return false;
-  const CLIP_GUARD_MS = 60;
+  const leadMs = Number.isFinite(Number(TTS_STATE.pendingCloudSeekLeadMs)) ? Math.max(0, Number(TTS_STATE.pendingCloudSeekLeadMs)) : 0;
   const rawTimeS = Number(marks[target].time || 0) / 1000;
-  const seekTime = Math.max(0, rawTimeS - CLIP_GUARD_MS / 1000);
+  const seekTime = Math.max(0, rawTimeS - leadMs / 1000);
   try {
     audio.currentTime = seekTime;
     TTS_STATE.activeBlockIndex = target;
@@ -245,7 +271,7 @@ function applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason) {
       TTS_STATE.pausedPageKey = key;
     }
     clearPendingCloudSeek();
-    ttsDiagPush('cloud-seek-applied', { key, sessionId, blockIndex: target, seekTime, reason: reason || 'media-ready' });
+    ttsDiagPush('cloud-seek-applied', { key, sessionId, blockIndex: target, seekTime, leadMs, reason: reason || 'media-ready' });
     return true;
   } catch (_) {
     return false;
@@ -624,6 +650,7 @@ function browserTtsStop() {
   TTS_STATE.browserIntentionalCancelUntil = Date.now() + 1200;
   TTS_STATE.browserIntentionalCancelReason = 'stop-or-replace';
   TTS_STATE.browserIntentionalCancelMeta = { sessionId: TTS_STATE.activeSessionId, key: TTS_STATE.activeKey || null };
+  clearPendingBrowserRestartTimer();
   window.speechSynthesis.cancel();
 }
 
@@ -704,6 +731,7 @@ function browserSpeakQueue(key, parts, opts = {}) {
 
   const sessionId = ++TTS_STATE.activeSessionId;
   clearPendingCloudSeek();
+  resetBrowserRestartOwnership();
   TTS_STATE.activeKey = key;
   TTS_STATE.lastPageKey = key;
   TTS_STATE.browserPaused = startPaused;
@@ -764,7 +792,7 @@ function browserSpeakQueue(key, parts, opts = {}) {
     } catch (_) {}
   }
 
-  function speakFromBlock(blockIdx) {
+  function speakFromBlock(blockIdx, opts = {}) {
     if (TTS_STATE.activeSessionId !== sessionId) return;
     if (TTS_STATE.activeKey !== key) return;
 
@@ -801,16 +829,79 @@ function browserSpeakQueue(key, parts, opts = {}) {
       return;
     }
 
+    const requestId = Number.isFinite(Number(opts.restartRequestId)) ? Number(opts.restartRequestId) : 0;
+    const entryReason = String(opts.reason || (requestId > 0 ? 'restart-from-block' : 'queue-progress'));
     const r = ranges[blockIdx];
     const sentenceText = text.slice(r.start, r.end);
     const utter = new SpeechSynthesisUtterance(sentenceText);
     utter.lang = 'en-US';
     utter.onstart = () => {
       const startPreview = ttsGetBlockPreview(key, blockIdx);
+      if (TTS_STATE.activeSessionId !== sessionId || TTS_STATE.activeKey !== key) {
+        ttsDiagPush('browser-stale-utterance-start', {
+          key,
+          blockIdx,
+          sessionId,
+          requestId,
+          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
+          activeSessionId: TTS_STATE.activeSessionId,
+          activeKey: TTS_STATE.activeKey || null,
+          pageIndex: startPreview?.pageIndex ?? -1,
+          excerpt: startPreview?.excerpt || ttsExcerptText(sentenceText),
+          reason: 'session-or-page-replaced',
+        });
+        try {
+          markIntentionalBrowserCancel('discard-stale-utterance-start-session-replaced', { key, staleBlock: blockIdx, expectedBlock: TTS_STATE.browserExpectedEntryBlockIndex, requestId });
+          window.speechSynthesis.cancel();
+        } catch (_) {}
+        return;
+      }
+      if (requestId > 0 && Number(TTS_STATE.browserRestartRequestId || 0) !== requestId) {
+        ttsDiagPush('browser-stale-utterance-start', {
+          key,
+          blockIdx,
+          sessionId,
+          requestId,
+          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
+          activeRestartRequestId: TTS_STATE.browserRestartRequestId,
+          pageIndex: startPreview?.pageIndex ?? -1,
+          excerpt: startPreview?.excerpt || ttsExcerptText(sentenceText),
+          reason: 'superseded-by-newer-request',
+        });
+        try {
+          markIntentionalBrowserCancel('discard-stale-utterance-start-superseded', { key, staleBlock: blockIdx, expectedBlock: TTS_STATE.browserExpectedEntryBlockIndex, requestId });
+          window.speechSynthesis.cancel();
+        } catch (_) {}
+        return;
+      }
+      if (isBrowserStaleEntryBlock(blockIdx)) {
+        ttsDiagPush('browser-stale-utterance-start', {
+          key,
+          blockIdx,
+          sessionId,
+          requestId,
+          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
+          highlightBlockIndex: TTS_STATE.activeBlockIndex,
+          pageIndex: startPreview?.pageIndex ?? -1,
+          excerpt: startPreview?.excerpt || ttsExcerptText(sentenceText),
+          reason: entryReason,
+        });
+        try {
+          markIntentionalBrowserCancel('discard-stale-utterance-start', { key, staleBlock: blockIdx, expectedBlock: TTS_STATE.browserExpectedEntryBlockIndex, requestId });
+          window.speechSynthesis.cancel();
+        } catch (_) {}
+        return;
+      }
+      if (requestId > 0 && Number(TTS_STATE.browserRestartRequestId || 0) === requestId) {
+        TTS_STATE.browserRestarting = false;
+      }
+      TTS_STATE.browserExpectedEntryBlockIndex = blockIdx;
       ttsDiagPush('browser-utterance-start', {
         key,
         blockIdx,
         sessionId,
+        requestId,
+        reason: entryReason,
         highlightBlockIndex: TTS_STATE.activeBlockIndex,
         browserCurrentSentenceIndex: TTS_STATE.browserCurrentSentenceIndex,
         pageIndex: startPreview?.pageIndex ?? -1,
@@ -829,18 +920,31 @@ function browserSpeakQueue(key, parts, opts = {}) {
       if (TTS_STATE.activeSessionId !== sessionId) return;
       if (TTS_STATE.activeKey !== key) return;
       if (TTS_STATE.browserPaused) return; // pause captured this slot
-      speakFromBlock(blockIdx + 1);
+      if (isIntentionalBrowserCancelForSession(sessionId)) {
+        ttsDiagPush('browser-end-transition', {
+          key, blockIdx, sessionId, requestId,
+          reason: TTS_STATE.browserIntentionalCancelReason || 'intentional-cancel',
+        });
+        return;
+      }
+      if (blockIdx !== TTS_STATE.activeBlockIndex && TTS_STATE.activeBlockIndex >= 0) {
+        ttsDiagPush('browser-stale-block-end', {
+          key, blockIdx, activeBlockIndex: TTS_STATE.activeBlockIndex, sessionId, requestId,
+          note: 'onend on stale block — discarding',
+        });
+        return;
+      }
+      speakFromBlock(blockIdx + 1, { reason: 'queue-progress' });
     };
 
     utter.onerror = (evt) => {
       if (TTS_STATE.activeSessionId !== sessionId) return;
       // Guard 1: intentional cancel (pause, skip, resume, stop-or-replace).
-      // Covers the deferred-speak race: the cancel window is 1200ms, long
-      // enough for the 0ms defer in browserSpeakPageFromSentence to flush.
-      if (isIntentionalBrowserCancelForSession(sessionId) || TTS_STATE.browserRestarting) {
+      // Covers the deferred restart window while cancel() flushes old speech.
+      if (isIntentionalBrowserCancelForSession(sessionId) || (TTS_STATE.browserRestarting && isBrowserStaleEntryBlock(blockIdx))) {
         ttsDiagPush('browser-cancel-transition', {
           key, blockIdx, sessionId,
-          reason: TTS_STATE.browserIntentionalCancelReason || 'browser-restarting',
+          reason: TTS_STATE.browserIntentionalCancelReason || 'browser-restarting-stale-entry',
         });
         return;
       }
@@ -883,7 +987,8 @@ function browserSpeakQueue(key, parts, opts = {}) {
   }
 
   TTS_STATE.browserSpeakFromBlock = speakFromBlock;
-  if (!startPaused) speakFromBlock(0);
+  TTS_STATE.browserExpectedEntryBlockIndex = startPaused ? pausedBlockIndex : 0;
+  if (!startPaused) speakFromBlock(0, { reason: 'initial-start' });
 }
 
 // Monotonically-incrementing speak-generation counter.
@@ -892,6 +997,7 @@ function browserSpeakQueue(key, parts, opts = {}) {
 // preventing double-speak when rapid Skip/Resume calls overlap within the
 // one-tick defer window.
 let _browserSpeakGen = 0;
+const BROWSER_RESTART_FLUSH_MS = 32;
 
 // Resume or skip to a specific block within the current browser session.
 //
@@ -900,7 +1006,7 @@ let _browserSpeakGen = 0;
 // event-loop tick causes the new utterance to be silently cancelled and
 // fire onerror before it starts — observed consistently as a 2-3ms gap
 // between skip/pause and browser-utterance-error in production diagnostics.
-// Fix: defer speak() by one event-loop tick so cancel fully flushes first.
+// Fix: defer restart long enough for cancel() to flush before the authoritative block may speak.
 function browserSpeakPageFromSentence(key, blockIdx, reason) {
   if (!TTS_STATE.browserSpeakFromBlock) return false;
   if (TTS_STATE.activeKey !== key) return false;
@@ -911,8 +1017,13 @@ function browserSpeakPageFromSentence(key, blockIdx, reason) {
   const sessionId = TTS_STATE.activeSessionId;
   const entryReason = reason || 'skip-or-resume';
   // Claim this speak generation. A later call (rapid double-skip) increments
-  // this before our setTimeout fires, so our deferred call self-aborts.
+  // this before our deferred restart fires, so the older request self-aborts.
   const gen = ++_browserSpeakGen;
+  const requestId = Number(TTS_STATE.browserRestartRequestId || 0) + 1;
+  TTS_STATE.browserRestartRequestId = requestId;
+  TTS_STATE.browserExpectedEntryBlockIndex = target;
+  TTS_STATE.browserRestarting = true;
+  clearPendingBrowserRestartTimer();
 
   // Mark intent and cancel synchronously so onerror on the outgoing
   // utterance is recognised as intentional within the 2000ms window.
@@ -926,7 +1037,7 @@ function browserSpeakPageFromSentence(key, blockIdx, reason) {
 
   const reentryPreview = ttsGetBlockPreview(key, target);
   ttsDiagPush('browser-re-entry', {
-    key, blockIdx: target, gen, reason: entryReason,
+    key, blockIdx: target, gen, requestId, reason: entryReason,
     outcomeClass: entryReason === 'speed-change' ? 'live-mutate' : 'preserved-re-entry',
     sessionId,
     highlightBlockIndex: TTS_STATE.activeBlockIndex,
@@ -939,27 +1050,31 @@ function browserSpeakPageFromSentence(key, blockIdx, reason) {
   // Advance state synchronously so getPlaybackStatus() and highlight
   // reflect the target block immediately (before the deferred speak).
   TTS_STATE.browserPaused = false;
-  TTS_STATE.browserRestarting = false;
   TTS_STATE.browserCurrentSentenceIndex = target;
   TTS_STATE.activeBlockIndex = target;
   try { ttsHighlightBlock(target); } catch (_) {}
 
-  // Defer speak by one event-loop tick so cancel() fully flushes.
+  // Defer speak long enough for cancel() to flush so stale audio/utterance
+  // entry cannot survive behind the newly landed block.
   // Four guards ensure only the authoritative call executes:
   //   1. Session must not have been replaced (stop, new Read Page)
   //   2. Active key must still be this page
   //   3. The speak function must not have been replaced (new session)
   //   4. This must be the latest speak generation (rapid double-skip)
-  setTimeout(() => {
+  TTS_STATE.browserRestartTimerId = setTimeout(() => {
+    TTS_STATE.browserRestartTimerId = 0;
     const guardBase = {
       key,
       requestedBlockIdx: target,
       gen,
+      requestId,
       sessionId,
       activeSessionId: TTS_STATE.activeSessionId,
       activeKey: TTS_STATE.activeKey || null,
       highlightBlockIndex: TTS_STATE.activeBlockIndex,
       browserCurrentSentenceIndex: TTS_STATE.browserCurrentSentenceIndex,
+      expectedEntryBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
+      activeRestartRequestId: TTS_STATE.browserRestartRequestId,
     };
     if (_browserSpeakGen !== gen) {
       ttsDiagPush('browser-re-entry-suppressed', { ...guardBase, reason: 'superseded-by-newer-generation', latestGen: _browserSpeakGen });
@@ -977,8 +1092,12 @@ function browserSpeakPageFromSentence(key, blockIdx, reason) {
       ttsDiagPush('browser-re-entry-suppressed', { ...guardBase, reason: 'speak-function-replaced' });
       return;
     }
-    speakFn(target);
-  }, 0);
+    if (Number(TTS_STATE.browserRestartRequestId || 0) !== requestId) {
+      ttsDiagPush('browser-re-entry-suppressed', { ...guardBase, reason: 'superseded-by-newer-request' });
+      return;
+    }
+    speakFn(target, { restartRequestId: requestId, reason: entryReason });
+  }, BROWSER_RESTART_FLUSH_MS);
 
   return true;
 }
@@ -1166,7 +1285,7 @@ function ttsReconcileAfterRuntimeError(kind, details = {}) {
   TTS_STATE.browserSentenceRanges = null;
   TTS_STATE.browserSpeakFromBlock = null;
   TTS_STATE.browserPaused = false;
-  TTS_STATE.browserRestarting = false;
+  resetBrowserRestartOwnership();
   TTS_STATE.browserIntentionalCancelUntil = 0;
   TTS_STATE.browserIntentionalCancelReason = null;
   TTS_STATE.browserIntentionalCancelMeta = null;
@@ -1319,7 +1438,7 @@ function ttsStop() {
   TTS_STATE.browserSpeakFromBlock = null;
   TTS_STATE.activeBrowserVoiceName = null;
   TTS_STATE.browserPaused = false;
-  TTS_STATE.browserRestarting = false;
+  resetBrowserRestartOwnership();
   TTS_STATE.browserIntentionalCancelUntil = 0;
   TTS_STATE.browserIntentionalCancelReason = null;
   TTS_STATE.browserIntentionalCancelMeta = null;
@@ -1838,7 +1957,8 @@ async function ttsSpeakQueue(key, parts) {
 //
 // Operates on TTS_STATE.activeBlockIndex. Not on vague currentTime offsets.
 // At page boundaries: next crosses to next page; prev restarts block 0.
-// Clipping protection: 60ms before target block start time on the cloud-audio path.
+// Cloud skip entry must start from the landed block itself so audible entry
+// cannot trail behind the visible block after a skip.
 // Browser path: no clip risk (each utterance starts from char 0 of sentence).
 
 function isRuntimePausedForContract() {
@@ -1970,9 +2090,9 @@ function ttsJumpSentence(delta) {
       return moved;
     }
 
-    const CLIP_GUARD_MS = 60;
+    const leadMs = 0;
     const rawTimeS = Number(marks[target].time || 0) / 1000;
-    const seekTime = Math.max(0, rawTimeS - CLIP_GUARD_MS / 1000);
+    const seekTime = Math.max(0, rawTimeS - leadMs / 1000);
     const mediaSeekReady = Number(audio.readyState || 0) >= 1;
     const targetPreview = ttsGetBlockPreview(key, target);
 
@@ -2002,8 +2122,8 @@ function ttsJumpSentence(delta) {
     }
 
     if (!mediaSeekReady) {
-      queuePendingCloudSeek(key, TTS_STATE.activeSessionId, target);
-      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek-deferred-not-ready', clippingProtection: true, clipGuardMs: CLIP_GUARD_MS, sessionId: TTS_STATE.activeSessionId };
+      queuePendingCloudSeek(key, TTS_STATE.activeSessionId, target, leadMs);
+      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek-deferred-not-ready', clippingProtection: leadMs > 0, leadMs, sessionId: TTS_STATE.activeSessionId };
       TTS_DEBUG.lastSkip = skipResult;
       ttsDiagPush('skip-block', skipResult);
       return true;
@@ -2014,14 +2134,14 @@ function ttsJumpSentence(delta) {
       clearPendingCloudSeek();
       if (!pausedForContract) ttsStartHighlightLoop(audio);
     } catch (_) {
-      queuePendingCloudSeek(key, TTS_STATE.activeSessionId, target);
-      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek-deferred-after-error', clippingProtection: true, clipGuardMs: CLIP_GUARD_MS, sessionId: TTS_STATE.activeSessionId };
+      queuePendingCloudSeek(key, TTS_STATE.activeSessionId, target, leadMs);
+      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek-deferred-after-error', clippingProtection: leadMs > 0, leadMs, sessionId: TTS_STATE.activeSessionId };
       TTS_DEBUG.lastSkip = skipResult;
       ttsDiagPush('skip-block', skipResult);
       return true;
     }
 
-    const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek', clippingProtection: true, clipGuardMs: CLIP_GUARD_MS, seekTime, blockTimeMs: Number(marks[target].time || 0), sessionId: TTS_STATE.activeSessionId };
+    const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek', clippingProtection: leadMs > 0, leadMs, seekTime, blockTimeMs: Number(marks[target].time || 0), sessionId: TTS_STATE.activeSessionId };
     TTS_DEBUG.lastSkip = skipResult;
     ttsDiagPush('skip-block', skipResult);
     return true;
@@ -2050,7 +2170,9 @@ function ttsJumpSentence(delta) {
         markIntentionalBrowserCancel('skip-reposition-while-paused', { key, targetBlock: target });
         window.speechSynthesis.cancel();
       } catch (_) {}
+      clearPendingBrowserRestartTimer();
       TTS_STATE.browserPaused = true;
+      TTS_STATE.browserExpectedEntryBlockIndex = target;
       TTS_STATE.browserCurrentSentenceIndex = target;
       TTS_STATE.activeBlockIndex = target;
       TTS_STATE.pausedBlockIndex = target;

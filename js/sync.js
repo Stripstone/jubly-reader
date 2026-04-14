@@ -53,6 +53,8 @@ window.rcSync = (function () {
   let _requestSeq = 0;
   let _appliedSeq = 0;
   let _applyingRemoteSettings = false;
+  let _pendingRuntimePolicyProjection = null;
+  let _pendingRuntimePolicyFlushTimer = null;
 
   // Dirty settings: field-level record of user mutations not yet confirmed by the server.
   // Persisted to localStorage so uncommitted changes survive page refresh.
@@ -137,6 +139,9 @@ window.rcSync = (function () {
     return _syncDiagnostics[kind];
   }
 
+  document.addEventListener('rc:runtime-policy-changed', () => { try { _flushPendingRuntimePolicyProjection('runtime-policy-changed'); } catch (_) {} });
+  try { window.addEventListener('load', () => { try { _flushPendingRuntimePolicyProjection('window-load'); } catch (_) {} }); } catch (_) {}
+
   function _normalizeUsageValue(value) {
     if (value == null || value === '') return null;
     const num = Number(value);
@@ -197,15 +202,69 @@ window.rcSync = (function () {
     try {
       if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
         window.rcPolicy.apply(policy, null, { transient: !!options.fromCache });
-        _pushEvent('policy-projected', { tier: String(policy.tier || ''), fromCache: !!options.fromCache, explorer: !!(policy.features?.themes?.explorer) });
+        _pushEvent('policy-projected', {
+          tier: String(policy.tier || ''),
+          fromCache: !!options.fromCache,
+          explorer: !!(policy.features?.themes?.explorer),
+          replayed: !!options.replayed,
+          replayReason: String(options.replayReason || ''),
+        });
         _recordSync('snapshot', options.fromCache ? 'cache-policy-projected' : 'policy-projected', {
           policyTier: String(policy.tier || ''),
           source: options.fromCache ? 'server-cache' : 'server-sync',
+          replayed: !!options.replayed,
         });
         return true;
       }
     } catch (_) {}
     return false;
+  }
+
+  function _schedulePendingRuntimePolicyFlush() {
+    if (_pendingRuntimePolicyFlushTimer || !_pendingRuntimePolicyProjection) return;
+    _pendingRuntimePolicyFlushTimer = setTimeout(() => {
+      _pendingRuntimePolicyFlushTimer = null;
+      _flushPendingRuntimePolicyProjection('owner-ready-retry');
+    }, 50);
+  }
+
+  function _stageRuntimePolicyProjection(policy, options = {}) {
+    if (!policy || typeof policy !== 'object') return false;
+    _pendingRuntimePolicyProjection = {
+      policy,
+      options: {
+        fromCache: !!options.fromCache,
+      },
+    };
+    _pushEvent('policy-projection-staged', {
+      tier: String(policy.tier || ''),
+      fromCache: !!options.fromCache,
+      explorer: !!(policy.features?.themes?.explorer),
+    });
+    _recordSync('snapshot', options.fromCache ? 'cache-policy-staged' : 'policy-staged', {
+      policyTier: String(policy.tier || ''),
+      source: options.fromCache ? 'server-cache' : 'server-sync',
+    });
+    _schedulePendingRuntimePolicyFlush();
+    return true;
+  }
+
+  function _flushPendingRuntimePolicyProjection(reason = 'owner-ready') {
+    if (!_pendingRuntimePolicyProjection) return false;
+    if (!(window.rcPolicy && typeof window.rcPolicy.apply === 'function')) {
+      _schedulePendingRuntimePolicyFlush();
+      return false;
+    }
+    const pending = _pendingRuntimePolicyProjection;
+    _pendingRuntimePolicyProjection = null;
+    if (_pendingRuntimePolicyFlushTimer) {
+      clearTimeout(_pendingRuntimePolicyFlushTimer);
+      _pendingRuntimePolicyFlushTimer = null;
+    }
+    return _applyRuntimePolicyProjection(pending.policy, Object.assign({}, pending.options, {
+      replayed: true,
+      replayReason: reason,
+    }));
   }
 
   function _cacheKey(userId) {
@@ -425,7 +484,9 @@ window.rcSync = (function () {
     // settings so hydration does not downgrade a valid saved theme back to default
     // simply because the runtime policy has not been projected yet.
     if (snap.runtimePolicy && typeof snap.runtimePolicy === 'object') {
-      _applyRuntimePolicyProjection(snap.runtimePolicy, options);
+      if (!_applyRuntimePolicyProjection(snap.runtimePolicy, options)) {
+        _stageRuntimePolicyProjection(snap.runtimePolicy, options);
+      }
     }
     if (_remoteSettingsRow) _applyRemoteSettingsRow(_remoteSettingsRow);
     else _deriveRemoteProfileMetrics();
