@@ -446,9 +446,13 @@ window.rcSync = (function () {
       }
 
       if (typeof row.autoplay_enabled === 'boolean') {
-        const autoplayToggle = document.getElementById('autoplayToggle');
-        if (autoplayToggle) autoplayToggle.checked = !!row.autoplay_enabled;
-        try { localStorage.setItem('rc_autoplay', row.autoplay_enabled ? '1' : '0'); } catch (_) {}
+        if (window.applyAutoplayRuntimePreference && typeof window.applyAutoplayRuntimePreference === 'function') {
+          try { window.applyAutoplayRuntimePreference(!!row.autoplay_enabled, { source: 'durable-settings-sync' }); } catch (_) {}
+        } else {
+          const autoplayToggle = document.getElementById('autoplayToggle');
+          if (autoplayToggle) autoplayToggle.checked = !!row.autoplay_enabled;
+          try { localStorage.setItem('rc_autoplay', row.autoplay_enabled ? '1' : '0'); } catch (_) {}
+        }
       }
     } finally {
       _applyingRemoteSettings = false;
