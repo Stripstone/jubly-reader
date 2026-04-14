@@ -48,7 +48,10 @@ export async function supabaseRest(path, opts = {}) {
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
   if (!response.ok) {
-    const error = new Error(`Supabase REST ${response.status}`);
+    const detail = (data && typeof data === 'object')
+      ? (data.message || data.hint || data.details || data.error || JSON.stringify(data))
+      : (typeof data === 'string' ? data : '');
+    const error = new Error(`Supabase REST ${response.status}${detail ? ` – ${detail}` : ''}`);
     error.status = response.status;
     error.data = data;
     throw error;
