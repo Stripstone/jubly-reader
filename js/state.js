@@ -258,14 +258,13 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
         : payload;
       const resolvedTierHint = payload?.meta?.effectiveTier || tier;
       return applyResolvedRuntimePolicy(policyWithMeta, resolvedTierHint);
-    } catch (_) {
-      // Server unreachable. Apply minimum safe basic-tier fallback only.
-      // PASS3: Do not preserve the requested tier (even on localhost) when the
-      // server is down. The previous path used canSimulateTierOnCurrentHost() to
-      // grant the requested tier in fallback — that made the client a second policy
-      // engine when the server failed. Now the fallback is always safe-basic.
-      // When the server becomes reachable, the next refreshForTier call will fetch
-      // the correct server-resolved policy.
+    } catch (err) {
+      // Server unreachable. If we already hold a confirmed non-basic policy (from a
+      // prior successful fetch or durable-sync cache projection), preserve it — a
+      // transient network failure must not strip access the user legitimately holds.
+      // Only fall back to safe-basic when there is no confirmed policy in place.
+      _trailPush('policy-fetch-failed', { tier: runtimePolicy && runtimePolicy.tier, reason: String(err?.message || err || 'unknown') });
+      if (runtimePolicy && runtimePolicy.tier && runtimePolicy.tier !== 'basic') return runtimePolicy;
       return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic');
     }
   }

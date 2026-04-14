@@ -326,7 +326,12 @@ window.rcBilling = (function () {
         return;
       }
     }
-    await refreshRuntimeFromAccount();
+    // Do NOT call refreshRuntimeFromAccount() here. Policy is owned by sync.js;
+    // calling refreshForTier() on every auth event (including tab-return token
+    // refreshes) races against the durable-sync cache projection and can
+    // transiently apply a basic fallback, stripping access mid-session.
+    // renderSubscriptionUi / renderPricingUi each call fetchRuntimeSnapshot()
+    // internally and do not need a prior global policy refresh.
     await renderSubscriptionUi();
     await renderPricingUi();
   }
