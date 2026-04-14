@@ -150,6 +150,7 @@ const AUTOPLAY_STATE = {
   countdownPageIndex: -1,
   countdownSec: 0,
   countdownTimerId: null,
+  countdownDeadlineTs: 0,
 };
 
 const AUTOPLAY_NEXT_DELAY_MS = 900;
@@ -237,6 +238,7 @@ function ttsAutoplayCancelCountdown() {
   const idx = AUTOPLAY_STATE.countdownPageIndex;
   if (AUTOPLAY_STATE.countdownTimerId) clearInterval(AUTOPLAY_STATE.countdownTimerId);
   AUTOPLAY_STATE.countdownTimerId = null;
+  AUTOPLAY_STATE.countdownDeadlineTs = 0;
   AUTOPLAY_STATE.countdownPageIndex = -1;
   AUTOPLAY_STATE.countdownSec = 0;
   try {
@@ -248,48 +250,110 @@ function ttsAutoplayCancelCountdown() {
   } catch (_) {}
 }
 
-function ttsAutoplayScheduleNext(pageIndex) {
+function ttsBuildPageHandoffTarget(input = {}) {
+  const raw = (typeof input === 'number') ? { pageIndex: input } : (input || {});
+  const baseFromKey = (typeof readingTargetFromKey === 'function' && raw.key) ? readingTargetFromKey(String(raw.key)) : null;
+  const baseFromTarget = raw.targetContext && typeof raw.targetContext === 'object' ? raw.targetContext : null;
+  const baseFromReading = window.__rcReadingTarget || null;
+  const base = baseFromKey || baseFromTarget || baseFromReading || {};
+  const currentIndex = Number.isFinite(Number(raw.pageIndex)) ? Number(raw.pageIndex) : Number(base.pageIndex);
+  const delta = Number.isFinite(Number(raw.delta)) ? Number(raw.delta) : 1;
+  const nextIndex = Number.isFinite(currentIndex) ? currentIndex + (delta < 0 ? -1 : 1) : NaN;
+  if (!Number.isFinite(nextIndex) || nextIndex < 0) return null;
+  if (typeof pages === 'undefined' || !pages[nextIndex]) return null;
+  return {
+    currentIndex: Number.isFinite(currentIndex) ? currentIndex : -1,
+    nextIndex,
+    sourceType: base.sourceType || '',
+    bookId: base.bookId || '',
+    chapterIndex: base.chapterIndex != null ? base.chapterIndex : -1,
+    text: pages[nextIndex],
+    targetBlockIndex: Number.isFinite(Number(raw.targetBlockIndex)) ? Number(raw.targetBlockIndex) : 0,
+    behavior: raw.behavior || 'smooth',
+    reason: raw.reason || '',
+  };
+}
+
+function ttsRunPageHandoff(input = {}) {
+  const mode = String(input.mode || 'speak');
+  const resolved = ttsBuildPageHandoffTarget(input);
+  if (!resolved) return false;
+  const { currentIndex, nextIndex, sourceType, bookId, chapterIndex, text, targetBlockIndex, behavior, reason } = resolved;
+  const focusResult = (typeof window.focusReadingPage === 'function')
+    ? window.focusReadingPage(nextIndex, { behavior })
+    : { ok: false };
+  if ((!focusResult || focusResult.ok === false) && behavior) {
+    try {
+      const pageEls = document.querySelectorAll('.page');
+      const nextPageEl = pageEls[nextIndex];
+      if (nextPageEl) nextPageEl.scrollIntoView({ behavior, block: 'start' });
+    } catch (_) {}
+  }
+  if (typeof setReadingTarget === 'function') {
+    setReadingTarget({ sourceType, bookId, chapterIndex, pageIndex: nextIndex });
+  }
+  const nextTarget = window.__rcReadingTarget || { sourceType, bookId, chapterIndex, pageIndex: nextIndex };
+  const nextKey = (typeof readingTargetToKey === 'function') ? readingTargetToKey(nextTarget) : `page-${nextIndex}`;
+  TTS_STATE.playbackBlockedReason = '';
+  clearPendingCloudSeek();
+
+  if (mode === 'paused') {
+    if (TTS_STATE.audio) {
+      void ttsPreparePausedCloudPage(nextIndex);
+    } else {
+      browserSpeakQueue(nextKey, [text], { startPaused: true, pausedBlockIndex: targetBlockIndex });
+    }
+  } else if (mode === 'speak') {
+    try { ttsKeepWarmForAutoplay(); } catch (_) {}
+    ttsSpeakQueue(nextKey, [text]);
+  }
+
+  TTS_DEBUG.lastSkip = {
+    at: new Date().toISOString(),
+    type: 'page',
+    resolved: 'page-handoff',
+    sourcePageIndex: currentIndex,
+    targetPageIndex: nextIndex,
+    mode,
+    reason: reason || '',
+    activeKey: TTS_STATE.activeKey || null,
+  };
+  ttsDiagPush('page-handoff', TTS_DEBUG.lastSkip);
+  return true;
+}
+
+function ttsAutoplayScheduleNext(pageInfo) {
   if (!AUTOPLAY_STATE.enabled) return;
+  const resolved = ttsBuildPageHandoffTarget(typeof pageInfo === 'number' ? { pageIndex: pageInfo, reason: 'autoplay-countdown' } : { ...(pageInfo || {}), reason: (pageInfo && pageInfo.reason) || 'autoplay-countdown' });
+  if (!resolved) return;
   const pageEls = document.querySelectorAll('.page');
-  const nextIndex = pageIndex + 1;
-  if (nextIndex >= pageEls.length) return;
-  const currentPageEl = pageEls[pageIndex];
+  const currentPageEl = pageEls[resolved.currentIndex];
   if (!currentPageEl) return;
   const btn = currentPageEl.querySelector('.tts-btn[data-tts="page"]');
   if (!btn) return;
-  AUTOPLAY_STATE.countdownPageIndex = pageIndex;
+  ttsAutoplayCancelCountdown();
+  AUTOPLAY_STATE.countdownPageIndex = resolved.currentIndex;
+  AUTOPLAY_STATE.countdownDeadlineTs = Date.now() + AUTOPLAY_NEXT_DELAY_MS;
   AUTOPLAY_STATE.countdownSec = Math.max(1, Math.ceil(AUTOPLAY_NEXT_DELAY_MS / 1000));
   btn.classList.add('tts-active');
-  function updateBtn() { if (btn) btn.textContent = `⏸ Next in ${AUTOPLAY_STATE.countdownSec}…`; }
+  const updateBtn = () => { try { btn.textContent = `⏸ Next in ${AUTOPLAY_STATE.countdownSec}…`; } catch (_) {} };
   updateBtn();
   AUTOPLAY_STATE.countdownTimerId = setInterval(() => {
-    AUTOPLAY_STATE.countdownSec -= 1;
-    if (AUTOPLAY_STATE.countdownSec <= 0) {
+    const remainingMs = Math.max(0, Number(AUTOPLAY_STATE.countdownDeadlineTs || 0) - Date.now());
+    AUTOPLAY_STATE.countdownSec = Math.max(0, Math.ceil(remainingMs / 1000));
+    if (remainingMs <= 0) {
       ttsAutoplayCancelCountdown();
-      const focusResult = (typeof window.focusReadingPage === 'function')
-        ? window.focusReadingPage(nextIndex, { behavior: 'smooth' })
-        : { ok: false };
-      if (!focusResult || focusResult.ok === false) {
-        const nextPageEl = pageEls[nextIndex];
-        if (nextPageEl) nextPageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-      const handoff = () => {
-        const text = (typeof pages !== 'undefined' && pages[nextIndex]) ? pages[nextIndex] : '';
-        if (!text) return;
-        if (!focusResult || focusResult.ok === false) {
-          const _cur = window.__rcReadingTarget || {};
-          if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _cur.sourceType || '', bookId: _cur.bookId || '', chapterIndex: _cur.chapterIndex != null ? _cur.chapterIndex : -1, pageIndex: nextIndex });
-        }
-        const activeTarget = window.__rcReadingTarget || {};
-        const nextKey = (typeof readingTargetToKey === 'function')
-          ? readingTargetToKey(activeTarget)
-          : `page-${nextIndex}`;
-        ttsSpeakQueue(nextKey, [text]);
-      };
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(handoff));
-      else setTimeout(handoff, 16);
-    } else { updateBtn(); }
-  }, AUTOPLAY_NEXT_DELAY_MS);
+      ttsRunPageHandoff({
+        pageIndex: resolved.currentIndex,
+        targetContext: { sourceType: resolved.sourceType, bookId: resolved.bookId, chapterIndex: resolved.chapterIndex, pageIndex: resolved.currentIndex },
+        mode: 'speak',
+        behavior: 'smooth',
+        reason: 'autoplay-countdown-complete',
+      });
+    } else {
+      updateBtn();
+    }
+  }, 100);
 }
 
 // ─── Sentence / block utilities ───────────────────────────────────────────────
@@ -662,7 +726,7 @@ function browserSpeakQueue(key, parts, opts = {}) {
       if (isPageRead) {
         const _pp = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
         const pageIndex = _pp ? _pp.pageIndex : -1;
-        if (Number.isFinite(pageIndex) && pageIndex >= 0) ttsAutoplayScheduleNext(pageIndex);
+        if (Number.isFinite(pageIndex) && pageIndex >= 0) ttsAutoplayScheduleNext({ pageIndex, key, reason: 'page-complete' });
       }
       ttsDiagPush('browser-speak-complete', { key, blockCount: ranges.length, sessionId });
       return;
@@ -1627,7 +1691,7 @@ async function ttsSpeakQueue(key, parts) {
     if (optsForKeySentenceMarks(key)) {
       const _cp = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
       const pageIndex = _cp ? _cp.pageIndex : -1;
-      if (Number.isFinite(pageIndex) && pageIndex >= 0) { ttsKeepWarmForAutoplay(); ttsAutoplayScheduleNext(pageIndex); }
+      if (Number.isFinite(pageIndex) && pageIndex >= 0) { ttsKeepWarmForAutoplay(); ttsAutoplayScheduleNext({ pageIndex, key, reason: 'page-complete' }); }
     }
     ttsDiagPush('speak-action', { action: 'completed', route: 'cloud', key, before, after: ttsBlockSnapshot() });
 
@@ -1667,29 +1731,14 @@ function isRuntimePausedForContract() {
 }
 
 function ttsJumpPagePreserve(delta) {
-  const key = String(TTS_STATE.activeKey || '');
-  const parsedKey = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
-  if (!parsedKey) return false;
-  const currentIndex = parsedKey.pageIndex;
-  const nextIndex = currentIndex + (delta < 0 ? -1 : 1);
-  if (!Number.isFinite(nextIndex) || nextIndex < 0) return false;
-  if (typeof pages === 'undefined' || !pages[nextIndex]) return false;
-
-  try { if (typeof window.focusReadingPage === 'function') window.focusReadingPage(nextIndex, { behavior: 'smooth' }); } catch (_) {}
-
-  // Advance reading target to next page (preserving source/chapter context).
-  if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: parsedKey.sourceType, bookId: parsedKey.bookId, chapterIndex: parsedKey.chapterIndex, pageIndex: nextIndex });
-  const nextKey = (typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${nextIndex}`;
-  const nextText = pages[nextIndex];
-
-  // If we're on cloud (active audio exists), prepare next page audio in paused mode.
-  if (TTS_STATE.audio) {
-    void ttsPreparePausedCloudPage(nextIndex);
-  } else {
-    // Browser path: prepare page highlights and resume hook without unpausing.
-    browserSpeakQueue(nextKey, [nextText], { startPaused: true, pausedBlockIndex: 0 });
-  }
-  return true;
+  return ttsRunPageHandoff({
+    key: String(TTS_STATE.activeKey || ''),
+    delta,
+    mode: 'paused',
+    targetBlockIndex: 0,
+    behavior: 'smooth',
+    reason: 'paused-page-preserve',
+  });
 }
 
 async function ttsPreparePausedCloudPage(pageIndex) {
@@ -1876,21 +1925,23 @@ function ttsJumpPage(delta) {
   if (isRuntimePausedForContract()) {
     return ttsJumpPagePreserve(delta);
   }
-
-  const key = String(TTS_STATE.activeKey || '');
-  const _parsedJp = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
-  if (!_parsedJp) return false;
-  const currentIndex = _parsedJp.pageIndex;
-  const nextIndex = currentIndex + (delta < 0 ? -1 : 1);
-  if (!Number.isFinite(nextIndex) || nextIndex < 0) return false;
-  if (typeof pages === 'undefined' || !pages[nextIndex]) return false;
-  try { if (typeof window.focusReadingPage === 'function') window.focusReadingPage(nextIndex, { behavior: 'smooth' }); } catch (_) {}
-  // Advance reading target to next page before deriving key.
-  if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _parsedJp.sourceType, bookId: _parsedJp.bookId, chapterIndex: _parsedJp.chapterIndex, pageIndex: nextIndex });
-  ttsSpeakQueue((typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${nextIndex}`, [pages[nextIndex]]);
-  TTS_DEBUG.lastSkip = { at: new Date().toISOString(), type: 'page', delta, resolved: 'page-jump', sourcePageIndex: currentIndex, targetPageIndex: nextIndex, activeKey: TTS_STATE.activeKey || null };
-  ttsDiagPush('skip-page', TTS_DEBUG.lastSkip);
-  return true;
+  const moved = ttsRunPageHandoff({
+    key: String(TTS_STATE.activeKey || ''),
+    delta,
+    mode: 'speak',
+    behavior: 'smooth',
+    reason: 'active-page-continue',
+  });
+  if (moved) {
+    ttsDiagPush('skip-page', {
+      at: new Date().toISOString(),
+      delta,
+      resolved: 'page-jump',
+      reason: 'active-page-continue',
+      activeKey: TTS_STATE.activeKey || null,
+    });
+  }
+  return moved;
 }
 
 function ttsRestartPage(pageIndex, targetContext) {
