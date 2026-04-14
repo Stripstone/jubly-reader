@@ -1,5 +1,7 @@
 # -----------------------------
 # PLAN / BILLING BEHAVIOR
+# Canonical entitlement vocabulary: basic / pro / premium
+# Stripe-backed paid plans: pro / premium
 # -----------------------------
 PLAN_REQUIRE_CARD = false # Whether paid plan checkout should require a payment method up front
 PLAN_TRIAL_MISSING_PAYMENT_METHOD_BEHAVIOR = cancel # What to do when a trial ends without a payment method (for example: cancel or pause)
@@ -8,8 +10,8 @@ PLAN_LIMIT_ONE_SUBSCRIPTION = true # Whether to block users from starting a seco
 
 PLAN_PRO_MONTHLY_USD_CENTS = 900 # Display/reference monthly price for the Pro plan in USD cents ($9.00)
 PLAN_PREMIUM_MONTHLY_USD_CENTS = 1700 # Display/reference monthly price for the Premium plan in USD cents ($17.00)
-PLAN_PRO_TRIAL_DAYS = 3 # Number of free trial days for the Pro plan
-PLAN_PREMIUM_TRIAL_DAYS = 0 # Number of free trial days for the Premium plan
+PLAN_PRO_TRIAL_DAYS = 3 # Number of trial days for the Pro plan
+PLAN_PREMIUM_TRIAL_DAYS = 0 # Number of trial days for the Premium plan
 
 # -----------------------------
 # STRIPE

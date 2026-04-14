@@ -208,12 +208,11 @@ Compact daily profile and activity summary.
 ## 7. user_entitlements
 
 ### Purpose
-Billing, plan, and feature truth.
+Billing, entitlement, and feature-gate truth.
 
 ### Canonical columns
 - `user_id`
 - `provider`
-- `plan_id`
 - `tier`
 - `status`
 - `stripe_customer_id`
@@ -223,9 +222,16 @@ Billing, plan, and feature truth.
 - `created_at`
 - `updated_at`
 
+### Canonical meanings
+- `tier` = the canonical runtime feature-gate vocabulary and must use only `basic`, `pro`, or `premium`
+- `provider` = entitlement source, currently `system` for the Basic baseline and `stripe` for subscription-backed Pro/Premium entitlements
+- `status` = current entitlement lifecycle state, currently `active`, `trialing`, `past_due`, or `inactive`
+
 ### Key rules
 - one current resolved entitlement row per user
-- runtime consumes resolved entitlement truth from here rather than reconstructing Stripe logic in the browser
+- runtime feature gating resolves from `tier`, not from guessed client plan state
+- `provider` and `status` support billing/source interpretation but must not replace `tier` as the canonical feature gate
+- `plan_id` is not canonical durable truth in the reduced launch model
 
 ## 8. user_usage
 
@@ -306,7 +312,7 @@ Replace drifted app tables with one canonical schema before launch.
 - confirm `user_usage` updates correctly and does not regress to fake or local values
 
 #### Entitlements
-- confirm runtime policy resolves from `user_entitlements`, not from guessed client plan state
+- confirm runtime policy resolves from `user_entitlements.tier`, not from guessed client plan state or legacy plan labels
 
 ## If something still resets after replacement
 Treat it in this order:

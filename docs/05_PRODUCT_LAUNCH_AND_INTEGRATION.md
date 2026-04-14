@@ -29,7 +29,7 @@ Launch is honest only when a user can:
 3. Account-backed continuity is the real ownership promise.
 4. Pricing should appear early, once, then get out of the way.
 5. There is no throwaway guest-session business path.
-6. Free, Pro, and Premium remain visible user-facing plans.
+6. Basic, Pro, and Premium remain visible user-facing plans.
 7. Usage exhaustion should fall back gracefully rather than destroy progress.
 8. Tier loss should reduce capability and defaults, not delete user history.
 9. Billing and account surfaces should feel like quiet support systems, not a second product.
@@ -60,9 +60,9 @@ Account creation should be prompted by:
 - importing books
 - expanding the library beyond the sample
 - actions that imply durable ownership or synced continuity
-- paid-only or account-only feature paths
+- non-basic or account-only feature paths
 
-### Signed-in Free user
+### Signed-in Basic user
 Should have:
 - durable account identity
 - 2 book import slots
@@ -75,7 +75,7 @@ Should have:
 - 5 book import slots
 - some cloud voices
 - some themes
-- more daily usage than Free
+- more daily usage than Basic
 
 ### Signed-in Premium user
 Should have:
@@ -108,11 +108,11 @@ Premium remains intentional and visible even if packaging evolves later.
 2. Sees sample book and Login / Sign Up
 3. May open the sample and read
 4. When ready to own or expand, chooses Sign Up
-5. Pricing presents Free, Pro trial, or Premium
+5. Pricing presents Basic, Pro trial, or Premium
 6. User chooses plan
 7. User completes signup
-8. If selected plan is Free, user enters `/app` immediately
-9. If selected plan is paid, backend initiates Stripe checkout as needed
+8. If selected plan is Basic, user enters `/app` immediately
+9. If selected plan is Pro or Premium, backend initiates Stripe checkout as needed
 10. Runtime boots with account and entitlement truth
 
 ### Returning user flow
@@ -147,7 +147,7 @@ Premium remains intentional and visible even if packaging evolves later.
 ## Surface wiring rules
 
 ### Public surfaces
-- `Try it free` is acceptable as copy, but it must feed the canonical Sign Up → pricing path
+- avoid `free` as canonical plan vocabulary; marketing copy may invite trial, but product/runtime language must stay `basic / pro / premium`
 - `Sign Up` is the canonical public acquisition action
 - `Login` is the canonical returning-user entry
 - `Continue with Google` and Email/Password should preserve selected plan intent
@@ -205,18 +205,22 @@ Premium remains intentional and visible even if packaging evolves later.
 
 ## Plan and feature resolution model
 Public plan labels:
-- Free
+- Basic
 - Pro
 - Premium
 
 At runtime boot, derive one resolved entitlement object such as:
-- `plan_id`
+- `tier`
+- `status`
+- `provider`
 - `import_slot_limit`
 - `usage_daily_limit`
 - `cloud_voice_access`
 - `theme_access`
 - `premium_feature_flags`
 
+`tier` is the canonical runtime feature-gate vocabulary and must use only `basic / pro / premium`.
+`provider` and `status` support billing/source interpretation, but must not replace `tier` as the feature gate.
 Shell and runtime should consume resolved entitlement truth.
 Do not scatter plan logic across many DOM checks or cosmetic UI states.
 
@@ -383,6 +387,6 @@ Remove or hide from production:
 
 Replace with real flows:
 - login scaffold → Supabase auth
-- local tier simulation → resolved entitlement object
+- local entitlement simulation → resolved entitlement object
 - static subscription summary → durable subscription truth
 - pricing modal-only thinking → route-backed pricing surface

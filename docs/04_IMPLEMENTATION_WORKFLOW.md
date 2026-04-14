@@ -56,6 +56,47 @@ Diagnostics must be:
 - aimed at one failing case end-to-end
 - removed after proof is collected
 
+### 3.25 Careful development rule
+When implementation work encounters a discrepancy between:
+- active documentation
+- canonical SQL or schema
+- runtime behavior
+- diagnostics
+- accepted prior patches
+
+the developer must stop and flag the discrepancy before continuing if it could change:
+- ownership
+- entitlement truth
+- persistence truth
+- runtime gating
+- scaffold authority
+- accepted base assumptions
+
+Do not pick the most likely meaning and continue coding.
+Do not normalize conflicting terms into a local convenience interpretation.
+Do not produce a patch that silently resolves ambiguity by mutation.
+
+Required best practice in this project is:
+- stop
+- state the discrepancy clearly
+- identify the affected owner, path, or field
+- request clarification or escalation
+- resume only after the discrepancy is resolved or the pass is explicitly re-scoped
+
+A developer is expected to be careful, not merely productive.
+A patch that works by mutating unresolved truth is not a successful patch.
+
+### 3.3 Mutation prevention rule
+Treat any of the following as a stop signal:
+- two fields appear to represent the same truth
+- user-facing terminology and durable terminology differ
+- SQL and active docs define different canonical values
+- a fix requires a layer to temporarily own truth that it does not normally own
+- a patch only works when compared against an older or mixed base
+- runtime truth and diagnostics disagree in a way that changes implementation meaning
+
+When one of these appears, do not continue implementation until it is flagged.
+
 ### 3.5 Responsiveness-first interaction rules
 When a pass touches a user-visible transition, apply these rules by default:
 - render the safe pending or hidden state before any await that could stall the visible surface
@@ -191,45 +232,6 @@ For one active pass:
 - revise that same diff in place after feedback
 - do not stack forward diffs for the same pass
 - start a new diff only when the work becomes a new pass
-
-### Diff application hygiene
-A git diff is only valid against a specific base. Most diff failures in this project are base-selection failures, not code failures.
-
-Required rules:
-- archive the original base
-- identify the current accepted artifact before applying any diff
-- apply all already-accepted prerequisite diffs first
-- use a fresh workspace for application
-- run `git apply --check <diff>` before applying
-- if the check fails, stop and determine whether the base is wrong before changing code
-- never "fix" a failed diff by manually editing around it unless the pass is being intentionally rebuilt
-- never generate a new engineer diff against an older pre-acceptance base
-- if a diff contains already-accepted hunks, regenerate it from the updated active artifact
-
-Safe workflow:
-1. keep the original base archived
-2. treat **base + all accepted diffs** as the new active artifact
-3. apply the next engineer diff to that active artifact
-4. verify only the expected files changed
-5. generate the next diff from that updated state, not from the untouched old base
-
-Validation commands:
-```bat
-git apply --check GroupX.diff
-git apply GroupX.diff
-git diff --name-only
-```
-
-Stop signals:
-- the diff reintroduces already-accepted hunks
-- the diff fails to apply cleanly
-- the diff touches files outside the approved lane
-- the engineer says the code is right but the diff only works against an older base
-
-Project-specific rule:
-For reconciliation work, the active artifact is not the original zip once accepted groups exist. The active artifact is always:
-
-**current base + all accepted group diffs**
 
 ### Repo entry
 ```bat

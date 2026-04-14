@@ -170,10 +170,9 @@ for each row execute function public.set_updated_at();
 
 create table public.user_entitlements (
   user_id uuid primary key references public.users(id) on delete cascade,
-  provider text not null default 'manual',
-  plan_id text not null default 'free',
-  tier text not null default 'free' check (tier in ('free', 'paid', 'premium')),
-  status text not null default 'inactive',
+  provider text not null default 'system' check (provider in ('system', 'stripe')),
+  tier text not null default 'basic' check (tier in ('basic', 'pro', 'premium')),
+  status text not null default 'active' check (status in ('active', 'trialing', 'past_due', 'inactive')),
   stripe_customer_id text,
   stripe_subscription_id text,
   period_start timestamptz,
