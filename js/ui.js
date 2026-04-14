@@ -774,20 +774,16 @@
 (function initAutoplayToggle() {
   const checkbox = document.getElementById('autoplayToggle');
   if (!checkbox) return;
-  const bootEnabled = (() => {
-    try { return localStorage.getItem('rc_autoplay') === '1'; } catch (_) { return !!checkbox.checked; }
-  })();
-  if (window.applyAutoplayRuntimePreference && typeof window.applyAutoplayRuntimePreference === 'function') {
-    try { window.applyAutoplayRuntimePreference(bootEnabled, { source: 'ui-init', syncControl: true, persist: false }); } catch (_) {}
-  } else {
-    checkbox.checked = !!bootEnabled;
+  try {
+    checkbox.checked = localStorage.getItem('rc_autoplay') === '1';
+    AUTOPLAY_STATE.enabled = checkbox.checked;
+  } catch (_) {
+    checkbox.checked = !!AUTOPLAY_STATE.enabled;
   }
   checkbox.addEventListener('change', () => {
-    if (window.applyAutoplayRuntimePreference && typeof window.applyAutoplayRuntimePreference === 'function') {
-      try { window.applyAutoplayRuntimePreference(!!checkbox.checked, { source: 'ui-change', syncControl: true, persist: true }); } catch (_) {}
-    } else {
-      try { localStorage.setItem('rc_autoplay', checkbox.checked ? '1':'0'); } catch (_) {}
-    }
+    AUTOPLAY_STATE.enabled = checkbox.checked;
+    try { localStorage.setItem('rc_autoplay', checkbox.checked ? '1':'0'); } catch (_) {}
+    if (!AUTOPLAY_STATE.enabled) ttsAutoplayCancelCountdown();
   });
 })();
 
