@@ -315,76 +315,6 @@ window.rcSync = (function () {
     _deriveRemoteProfileMetrics();
   }
 
-
-  function _readLocalUsageSnapshot() {
-    try {
-      return (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
-        ? (window.rcUsage.getSnapshot() || null)
-        : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function _composeResolvedUsageSummary(localSnapshot = null, remoteSummary = null) {
-    const local = (localSnapshot && typeof localSnapshot === 'object') ? localSnapshot : null;
-    const remote = (remoteSummary && typeof remoteSummary === 'object') ? remoteSummary : null;
-    const localRemaining = Number(local?.remaining);
-    const localAllowance = Number(local?.allowance ?? local?.limit);
-    const remoteRemaining = Number(remote?.remaining);
-    const remoteAllowance = Number(remote?.allowance ?? remote?.limit);
-    const localHasValue = Number.isFinite(localRemaining) || Number.isFinite(localAllowance);
-    const remoteHasValue = Number.isFinite(remoteRemaining) || Number.isFinite(remoteAllowance);
-    const localAuthoritative = !!(local?.authoritative && localHasValue);
-    const remoteAuthoritative = !!(remote?.authoritative && remoteHasValue);
-
-    let primary = null;
-    let source = null;
-    if (localAuthoritative) {
-      primary = local;
-      source = local?.source || 'local-authoritative';
-    } else if (remoteAuthoritative) {
-      primary = remote;
-      source = remote?.source || 'remote-authoritative';
-    } else if (localHasValue) {
-      primary = local;
-      source = local?.source || 'local-projected';
-    } else if (remoteHasValue) {
-      primary = remote;
-      source = remote?.source || 'remote-projected';
-    }
-
-    const primaryRemaining = Number(primary?.remaining);
-    const primaryAllowance = Number(primary?.allowance ?? primary?.limit);
-    return {
-      remaining: Number.isFinite(primaryRemaining) ? Math.max(0, primaryRemaining) : null,
-      allowance: Number.isFinite(primaryAllowance) ? Math.max(0, primaryAllowance) : null,
-      authoritative: localAuthoritative || remoteAuthoritative,
-      source,
-      local,
-      remote,
-    };
-  }
-
-  function _getResolvedUsageSummary() {
-    return _composeResolvedUsageSummary(_readLocalUsageSnapshot(), _remoteUsageSummary);
-  }
-
-  function _applyRuntimePolicyProjection(policy, options = {}) {
-    if (!policy || typeof policy !== 'object') return false;
-    try {
-      if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
-        window.rcPolicy.apply(policy);
-        _recordSync('snapshot', options.fromCache ? 'cache-policy-projected' : 'policy-projected', {
-          policyTier: String(policy.tier || ''),
-          source: options.fromCache ? 'server-cache' : 'server-sync',
-        });
-        return true;
-      }
-    } catch (_) {}
-    return false;
-  }
-
   // Bulk-apply a server snapshot to all in-memory state. Rejects stale responses
   // via seq ordering. Persists to localStorage as last-confirmed projection.
   function _applySnapshot(snapshot, options = {}) {
@@ -408,13 +338,6 @@ window.rcSync = (function () {
     // _confirmedSettingsRow is the baseline for dirty-field diffing and is never
     // overwritten by optimistic projection — only by actual server ACKs.
     if (!options.fromCache && _remoteSettingsRow) _confirmedSettingsRow = _remoteSettingsRow;
-    // Theme access can be policy-gated (Explorer). Apply the last-confirmed or
-    // fresh server runtime policy projection before reloading persisted theme
-    // settings so hydration does not downgrade a valid saved theme back to default
-    // simply because the runtime policy has not been projected yet.
-    if (snap.runtimePolicy && typeof snap.runtimePolicy === 'object') {
-      _applyRuntimePolicyProjection(snap.runtimePolicy, options);
-    }
     if (_remoteSettingsRow) _applyRemoteSettingsRow(_remoteSettingsRow);
     else _deriveRemoteProfileMetrics();
     // Replay any dirty user mutations on top of the server-confirmed settings so
@@ -431,10 +354,20 @@ window.rcSync = (function () {
         });
       }
     } catch (_) {}
-    // runtimePolicy was already projected before settings hydration above so
-    // policy-gated persisted settings (like Explorer theme) reload against the
-    // same truth surface that produced the snapshot. The next fresh server snapshot
-    // still wins if a cached projection was stale.
+    // Apply server-resolved runtime policy from snapshot.
+    // buildSnapshot() on the server already resolves the correct policy for this user.
+    // Applying it here keeps tier/entitlement state current after every durable sync —
+    // not only on auth events (which refresh policy via billing.js separately).
+    // Guard: skip cached snapshots to avoid applying a potentially stale tier from storage.
+    // The rc:runtime-policy-changed event dispatched by applyResolvedRuntimePolicy()
+    // triggers shell UI updates (tier pill, explorer gating, etc.) automatically.
+    if (!options.fromCache && snap.runtimePolicy && typeof snap.runtimePolicy === 'object') {
+      try {
+        if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
+          window.rcPolicy.apply(snap.runtimePolicy);
+        }
+      } catch (_) {}
+    }
     // Persist as last-confirmed display projection (not restore authority).
     try {
       const u = _user();
@@ -975,7 +908,6 @@ window.rcSync = (function () {
     rehydrateDurableData,
     getRemoteUsersRow: () => _remoteUsersRow,
     getRemoteUsageSummary: () => _remoteUsageSummary,
-    getResolvedUsageSummary: () => _getResolvedUsageSummary(),
     getHydrationState: () => ({ ..._hydrationState }),
     getDiagnosticsSnapshot: () => ({
       sync: { ..._syncDiagnostics },
@@ -984,7 +916,6 @@ window.rcSync = (function () {
       usersRow: _remoteUsersRow,
       settingsRow: _remoteSettingsRow,
       usage: _remoteUsageSummary,
-      resolvedUsage: _getResolvedUsageSummary(),
       libraryItemCount: (_remoteLibraryItems || []).length,
       progressCount: (_remoteProgressRows || []).length,
       bookMetricsCount: (_remoteBookMetricsRows || []).length,
