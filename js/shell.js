@@ -1780,34 +1780,9 @@
             pagesEl.addEventListener('focusin', () => updateProgressBar());
         }
 
-        // F2: Autoplay countdown badge — polls AUTOPLAY_STATE every 300ms, shows badge on button.
-        let _countdownInterval = null;
-        function _startCountdownPoll() {
-            if (_countdownInterval) return;
-            _countdownInterval = setInterval(() => {
-                const btn = document.getElementById('shell-next-btn');
-                if (!btn) return;
-                let badge = document.getElementById('shell-countdown-badge');
-                try {
-                    if (!hasActiveReadingCards()) { if (badge) badge.remove(); return; }
-                    const countdown = (typeof getCountdownStatus === 'function') ? getCountdownStatus() : { pageIndex: -1, seconds: 0 };
-                    const idx = countdown.pageIndex;
-                    const sec = countdown.seconds;
-                    if (idx !== -1 && sec > 0) {
-                        if (!badge) {
-                            badge = document.createElement('span');
-                            badge.id = 'shell-countdown-badge';
-                            badge.style.cssText = 'margin-left:4px; font-size:0.65rem; font-weight:800; color:var(--theme-accent); background:var(--theme-accent-soft); border-radius:999px; padding:1px 6px;';
-                            btn.appendChild(badge);
-                        }
-                        badge.textContent = `Next: ${sec}…`;
-                    } else if (badge) {
-                        badge.remove();
-                    }
-                } catch(_) { if (badge) badge.remove(); }
-            }, 300);
-        }
-        _startCountdownPoll();
+        // Countdown ownership stays on the page-level Read button in tts.js.
+        // Do not mirror countdown text into the forward skip button.
+        try { const staleBadge = document.getElementById('shell-countdown-badge'); if (staleBadge) staleBadge.remove(); } catch(_) {}
 
         // F3: Page advance pulse + end-of-book detection via MutationObserver.
         let _sessionCompletePending = false;
