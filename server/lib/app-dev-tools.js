@@ -509,14 +509,12 @@ async function buildSnapshot(req, user) {
 async function setPlan(userId, payload) {
   const tierInput = String(payload?.tier || 'basic').trim().toLowerCase();
   const tier = tierInput === 'free' ? 'basic' : tierInput === 'paid' ? 'pro' : tierInput;
-  const planId = toText(payload?.plan_id, tier === 'premium' ? 'premium' : tier === 'pro' ? 'pro' : 'basic');
   const status = toText(payload?.status, 'active');
   const existing = await getActiveEntitlement(userId).catch(() => null);
   return upsertEntitlement({
     ...(existing || {}),
     user_id: userId,
-    provider: toText(payload?.provider, existing?.provider || 'debug'),
-    plan_id: planId,
+    provider: toText(payload?.provider, existing?.provider || 'manual'),
     tier,
     status,
     stripe_customer_id: existing?.stripe_customer_id || null,
