@@ -41,6 +41,14 @@ window.rcSync = (function () {
   let _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false, usage: false };
   let _lastSyncSnapshotAt = null;
   let _syncDiagnostics = { users: null, settings: null, progress: null, sessions: null, restore: null, snapshot: null };
+  const RC_EVENT_TRAIL_MAX = 40;
+  if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
+  function _pushEvent(tag, data) {
+    const entry = { t: new Date().toISOString(), tag, ...data };
+    window.__rcEventTrail.push(entry);
+    if (window.__rcEventTrail.length > RC_EVENT_TRAIL_MAX) window.__rcEventTrail.shift();
+    try { if (typeof window.updateDiagnostics === 'function') window.updateDiagnostics(); } catch (_) {}
+  }
   let _requestSeq = 0;
   let _appliedSeq = 0;
   let _applyingRemoteSettings = false;
@@ -179,7 +187,8 @@ window.rcSync = (function () {
     if (!policy || typeof policy !== 'object') return false;
     try {
       if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
-        window.rcPolicy.apply(policy);
+        window.rcPolicy.apply(policy, null, { transient: !!options.fromCache });
+        _pushEvent('policy-projected', { tier: String(policy.tier || ''), fromCache: !!options.fromCache, explorer: !!(policy.features?.themes?.explorer) });
         _recordSync('snapshot', options.fromCache ? 'cache-policy-projected' : 'policy-projected', {
           policyTier: String(policy.tier || ''),
           source: options.fromCache ? 'server-cache' : 'server-sync',
@@ -534,6 +543,7 @@ window.rcSync = (function () {
     // Payload: full collected row merged with dirty values (dirty wins).
     // This sends authoritative user intent rather than blindly resending cached values.
     const payload = Object.assign(_collectSettingsRow(), dirtyValues);
+    _pushEvent('settings-sync-start', { theme_id: payload.theme_id, dirtyKeys: [...syncingKeys] });
     _projectCurrentSettingsLocal();
     _recordSync('settings', 'pending', { payload, dirtyFields: [...syncingKeys] });
     try {
@@ -544,6 +554,7 @@ window.rcSync = (function () {
       if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
       // Update confirmed baseline to whatever the server just settled.
       if (_remoteSettingsRow) _confirmedSettingsRow = _remoteSettingsRow;
+      _pushEvent('settings-sync-ok', { theme_id: _remoteSettingsRow?.theme_id });
       _recordSync('settings', 'success', { row: data && data.row ? data.row : null, snapshotAt: _lastSyncSnapshotAt });
       _emitHydrated('settings');
       return data && data.row ? data.row : null;
@@ -920,6 +931,7 @@ window.rcSync = (function () {
   // ── Event handlers ────────────────────────────────────────────────────────
   function _handleAuthChanged(e) {
     const { signedIn, source } = e.detail || {};
+    _pushEvent('auth-changed', { signedIn: !!signedIn, source: source || 'unknown' });
     if (signedIn && source !== 'init-unconfigured' && source !== 'init-client-error') {
       const u = _user();
       _hydrationState = { inFlight: true, users: false, settings: false, progress: false, sessions: false, usage: false };
@@ -937,7 +949,11 @@ window.rcSync = (function () {
     if (_applyingRemoteSettings) return;
     // Record dirty fields before projecting — diff against confirmed server truth,
     // not the projected row (_remoteSettingsRow would include previous projections).
-    try { _recordDirtyFields(_collectSettingsRow()); } catch (_) {}
+    try {
+      const collected = _collectSettingsRow();
+      _pushEvent('prefs-changed', { theme_id: collected.theme_id, applyingRemote: false });
+      _recordDirtyFields(collected);
+    } catch (_) {}
     _projectCurrentSettingsLocal();
     _queueSettingsSync();
   }
@@ -985,6 +1001,7 @@ window.rcSync = (function () {
       bookMetricsCount: (_remoteBookMetricsRows || []).length,
       dailyStatCount: (_remoteDailyStatsRows || []).length,
       sessionCount: (_remoteSessions || []).length,
+      eventTrail: Array.isArray(window.__rcEventTrail) ? window.__rcEventTrail.slice() : [],
     }),
     deleteLibraryItem: async (bookId, options = {}) => {
       if (!_ready()) return null;

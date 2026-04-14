@@ -2,6 +2,15 @@
 // File: state.js
 // Note: This is still global-script architecture (no bundler/modules required).
 
+function _trailPush(tag, data) {
+  try {
+    if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
+    window.__rcEventTrail.push({ t: new Date().toISOString(), tag, ...data });
+    if (window.__rcEventTrail.length > 40) window.__rcEventTrail.shift();
+    if (typeof window.updateDiagnostics === 'function') window.updateDiagnostics();
+  } catch (_) {}
+}
+
 // ===================================
   // READING COMPREHENSION APP
   // ===================================
@@ -1155,6 +1164,7 @@ function applyThemeSettings() {
 }
 
 function persistThemeState() {
+  _trailPush('persist-theme', { theme_id: appTheme });
   return saveThemePrefs({
     theme_id: appTheme,
     theme_settings: Object.assign({}, appThemeSettings || {}),
@@ -1234,6 +1244,7 @@ function loadTheme() {
     // do not overwrite the saved durable theme until a resolved runtime policy has
     // actually confirmed the theme is disallowed.
     const hasResolvedRuntimePolicy = !!(runtimePolicy && typeof runtimePolicy === 'object');
+    _trailPush('load-theme-forced-default', { storedTheme: appTheme, hasResolvedRuntimePolicy, policyTier: runtimePolicy && runtimePolicy.tier });
     appTheme = 'default';
     if (hasResolvedRuntimePolicy) persistThemeState();
   }
@@ -1336,7 +1347,9 @@ function setDiagnosticsPreference(partial) {
 }
 
 function enforceThemeAccess() {
-  if (canUseTheme(appTheme)) return true;
+  const canUse = canUseTheme(appTheme);
+  _trailPush('enforce-theme-access', { appTheme, canUse, policyTier: runtimePolicy && runtimePolicy.tier });
+  if (canUse) return true;
   setThemeRuntime('default');
   return false;
 }
