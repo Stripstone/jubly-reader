@@ -514,7 +514,7 @@ async function setPlan(userId, payload) {
   return upsertEntitlement({
     ...(existing || {}),
     user_id: userId,
-    provider: toText(payload?.provider, existing?.provider || 'manual'),
+    provider: toText(payload?.provider, existing?.provider || 'system'),
     tier,
     status,
     stripe_customer_id: existing?.stripe_customer_id || null,

@@ -41,10 +41,8 @@ export default async function handler(req, res) {
   form.set('line_items[0][quantity]', '1');
   form.set('allow_promotion_codes', 'true');
   form.set('metadata[user_id]', user.id);
-  form.set('metadata[plan_id]', plan.planId);
   form.set('metadata[tier]', plan.tier);
   form.set('subscription_data[metadata][user_id]', user.id);
-  form.set('subscription_data[metadata][plan_id]', plan.planId);
   form.set('subscription_data[metadata][tier]', plan.tier);
   if (existing?.stripe_customer_id) form.set('customer', existing.stripe_customer_id);
   else if (user.email) form.set('customer_email', user.email);

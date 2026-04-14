@@ -58,8 +58,8 @@ window.rcBilling = (function () {
     try {
       const url = new URL(window.location.href);
       const normalized = normalizePlan(plan);
-      if (normalized === 'pro' || normalized === 'premium') url.searchParams.set('plan_id', normalized);
-      else url.searchParams.delete('plan_id');
+      if (normalized === 'pro' || normalized === 'premium') url.searchParams.set('tier', normalized);
+      else url.searchParams.delete('tier');
       window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
     } catch (_) {}
   }
@@ -73,7 +73,7 @@ window.rcBilling = (function () {
   function readPendingPlan() {
     try {
       const url = new URL(window.location.href);
-      const fromUrl = normalizePlan(url.searchParams.get('plan_id') || '');
+      const fromUrl = normalizePlan(url.searchParams.get('tier') || '');
       if (fromUrl) return fromUrl;
     } catch (_) {}
     try { return normalizePlan(sessionStorage.getItem('rc_pending_plan') || ''); } catch (_) { return ''; }
