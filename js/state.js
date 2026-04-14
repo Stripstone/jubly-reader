@@ -277,12 +277,19 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
   };
 
+  function normalizeUsageValue(value) {
+    if (value == null || value === '') return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? Math.max(0, num) : null;
+  }
+
   function tokenSpend(category) {
     const cost = TOKEN_COSTS[category] || 0;
     if (!cost) return;
     sessionTokens.spent[category] = (sessionTokens.spent[category] || 0) + cost;
-    if (!sessionTokens.authoritative && Number.isFinite(Number(sessionTokens.remaining))) {
-      sessionTokens.remaining = Math.max(0, Number(sessionTokens.remaining) - cost);
+    const remaining = normalizeUsageValue(sessionTokens.remaining);
+    if (!sessionTokens.authoritative && remaining != null) {
+      sessionTokens.remaining = Math.max(0, remaining - cost);
     }
   }
 
@@ -1548,20 +1555,24 @@ window.rcUsage = {
     try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: sessionTokens.source || 'client' } })); } catch (_) {}
   },
   getSnapshot: function rcUsageGetSnapshot() {
+    const remaining = normalizeUsageValue(sessionTokens?.remaining);
+    const allowance = normalizeUsageValue(sessionTokens?.allowance);
+    const hasValue = remaining != null || allowance != null;
     return {
-      remaining: Number.isFinite(Number(sessionTokens?.remaining)) ? Math.max(0, Number(sessionTokens.remaining)) : null,
-      allowance: Number.isFinite(Number(sessionTokens?.allowance)) ? Math.max(0, Number(sessionTokens.allowance)) : null,
-      authoritative: typeof sessionTokens?.authoritative === 'boolean' ? sessionTokens.authoritative : Number.isFinite(Number(sessionTokens?.remaining)),
+      remaining,
+      allowance,
+      authoritative: typeof sessionTokens?.authoritative === 'boolean' ? (!!sessionTokens.authoritative && hasValue) : hasValue,
       source: sessionTokens?.source || null,
       spent: { ...(sessionTokens?.spent || {}) },
     };
   },
   applySnapshot: function rcUsageApplySnapshot(snapshot) {
-    const remaining = Number(snapshot?.remaining);
-    const allowance = Number(snapshot?.limit ?? snapshot?.allowance);
-    sessionTokens.allowance = Number.isFinite(allowance) ? Math.max(0, allowance) : null;
-    sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
-    sessionTokens.authoritative = typeof snapshot?.authoritative === 'boolean' ? !!snapshot.authoritative : Number.isFinite(remaining);
+    const remaining = normalizeUsageValue(snapshot?.remaining);
+    const allowance = normalizeUsageValue(snapshot?.limit != null ? snapshot.limit : snapshot?.allowance);
+    const hasValue = remaining != null || allowance != null;
+    sessionTokens.allowance = allowance;
+    sessionTokens.remaining = remaining;
+    sessionTokens.authoritative = typeof snapshot?.authoritative === 'boolean' ? (!!snapshot.authoritative && hasValue) : hasValue;
     sessionTokens.source = snapshot?.source || 'server-sync';
     try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: sessionTokens.source } })); } catch (_) {}
     return this.getSnapshot();

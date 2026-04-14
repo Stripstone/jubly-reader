@@ -125,6 +125,15 @@
         return entry;
     }
 
+    function shellTrailPush(tag, data) {
+        try {
+            if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
+            window.__rcEventTrail.push(Object.assign({ t: new Date().toISOString(), tag }, data || {}));
+            if (window.__rcEventTrail.length > 40) window.__rcEventTrail.shift();
+            if (typeof updateDiagnostics === 'function') updateDiagnostics();
+        } catch (_) {}
+    }
+
     function isAuthedUser() {
         try { return !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()); } catch (_) { return false; }
     }
@@ -296,6 +305,13 @@
         const target = document.getElementById(targetId);
         if (target) target.classList.remove('hidden-section');
         _currentSection = targetId;
+        if (targetId === 'dashboard') {
+            shellTrailPush('dashboard-reveal', {
+                historyMode: options.historyMode || 'push',
+                authed: !!isAuthedUser(),
+                hasLocalLibraryOwner: typeof localBooksGetAll === 'function'
+            });
+        }
 
         const footer = document.getElementById('landing-footer');
         if (footer) footer.classList.toggle('hidden-section', targetId !== 'landing-page');
@@ -328,7 +344,7 @@
 
         syncShellAuthPresentation(targetId);
         let _sectionRefreshPromise = null;
-        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary();
+        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary('show-section-dashboard');
         if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
@@ -370,7 +386,7 @@
         closeModal('pricing-modal');
         closeModal('ownership-modal');
         showSection('dashboard');
-        try { refreshLibrary(); } catch(_) {}
+        try { refreshLibrary('prototype-login'); } catch(_) {}
     }
 
     function continueWithFree() {
@@ -635,12 +651,12 @@
             }
             if (current === 'landing-page' || current === 'login-page') {
                 showSection('dashboard', { historyMode: 'replace' });
-                try { refreshLibrary(); } catch(_) {}
+                try { refreshLibrary('auth-change-dashboard-redirect'); } catch(_) {}
                 return;
             }
             syncShellAuthPresentation(current);
             if (source === 'SIGNED_IN') {
-                try { refreshLibrary(); } catch(_) {}
+                try { refreshLibrary('auth-change-signed-in'); } catch(_) {}
             }
         } else {
             if (current === 'profile-page') showSection('landing-page', { historyMode: 'replace' });
@@ -1295,8 +1311,9 @@
     // ── Library table — populated by __jublyLibraryRefresh hook called from library.js ──
     function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     let libraryRefreshRetryTimer = null;
+    let _loggedFirstLocalLibraryRead = false;
 
-    async function refreshLibrary() {
+    async function refreshLibrary(reason = 'unknown') {
         const rowsEl  = document.getElementById('library-rows');
         const popEl   = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
@@ -1305,6 +1322,12 @@
         // renderLibrarySubtitle() is the single owner of that element.
         // CSS min-height on #dashboard-subtitle ensures it never causes layout shift.
         if (!rowsEl) return;
+        shellTrailPush('dashboard-library-refresh', {
+            reason,
+            section: getCurrentVisibleSection(),
+            authed: !!isAuthedUser(),
+            hasLocalLibraryOwner: typeof localBooksGetAll === 'function'
+        });
 
         // Hide all library states at the very start — the correct state is revealed
         // only when we actually know what to show. This prevents flash of stale data
@@ -1326,17 +1349,24 @@
         // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
         // or successive unavailability creates an infinite chain that hangs the page.
         if (typeof localBooksGetAll !== 'function') {
+            shellTrailPush('dashboard-library-owner-pending', { reason, retryDelayMs: 120 });
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
             return new Promise(resolve => {
                 libraryRefreshRetryTimer = setTimeout(() => {
                     libraryRefreshRetryTimer = null;
-                    try { refreshLibrary(); } catch (_) {}
+                    try { refreshLibrary('owner-retry'); } catch (_) {}
                     resolve();
                 }, 120);
             });
         }
         let books = [];
         try { books = await localBooksGetAll(); } catch(_) { books = []; }
+        shellTrailPush('dashboard-library-local-read', {
+            reason,
+            count: Array.isArray(books) ? books.length : 0,
+            firstSuccess: !_loggedFirstLocalLibraryRead
+        });
+        _loggedFirstLocalLibraryRead = true;
         const has = books.length > 0;
         if (popEl)   popEl.classList.toggle('hidden-section', !has);
         if (emptyEl) emptyEl.classList.toggle('hidden-section', has);
@@ -1378,7 +1408,7 @@
                 if (prev.__jublyWrapped) return;
                 const wrapped = async function() {
                     const out = await prev.apply(this, arguments);
-                    try { await refreshLibrary(); } catch(_) {}
+                    try { await refreshLibrary('book-select-refresh-hook'); } catch(_) {}
                     return out;
                 };
                 wrapped.__jublyWrapped = true;
@@ -1478,7 +1508,7 @@
         const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
             ? window.rcUsage.getSnapshot()
             : { remaining: null, allowance: null, authoritative: false };
-        const remaining = Number(snapshot?.remaining);
+        const remaining = snapshot?.remaining != null ? Number(snapshot.remaining) : null;
         valueEl.textContent = Number.isFinite(remaining) ? `${Math.max(0, remaining)} left today` : 'Usage';
     }
 
@@ -1696,8 +1726,8 @@
             refreshExplorerPanel();
         });
         document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} });
-        document.addEventListener('rc:durable-data-hydrated', () => { const section = getCurrentVisibleSection(); try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (section === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} } if (section === 'dashboard') { try { refreshLibrary(); } catch (_) {} } });
-        window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (getCurrentVisibleSection() === 'dashboard') { try { refreshLibrary(); } catch (_) {} } });
+        document.addEventListener('rc:durable-data-hydrated', (e) => { const section = getCurrentVisibleSection(); const kind = e && e.detail ? String(e.detail.kind || 'sync') : 'sync'; try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (section === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} } if (section === 'dashboard') { try { refreshLibrary(`durable-hydrated:${kind}`); } catch (_) {} } });
+        window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (getCurrentVisibleSection() === 'dashboard') { try { refreshLibrary('local-library-changed'); } catch (_) {} } });
         window.addEventListener('rc:deleted-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
         window.addEventListener('rc:usage-changed', () => { try { renderUsageSurface(); } catch (_) {} });
         try { switchReadingSettingsTab('general'); } catch (_) {}

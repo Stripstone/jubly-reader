@@ -2,6 +2,15 @@
 // File: library.js
 // Note: This is still global-script architecture (no bundler/modules required).
 
+  function libraryTrailPush(tag, data) {
+    try {
+      if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
+      window.__rcEventTrail.push(Object.assign({ t: new Date().toISOString(), tag }, data || {}));
+      if (window.__rcEventTrail.length > 40) window.__rcEventTrail.shift();
+      if (typeof updateDiagnostics === 'function') updateDiagnostics();
+    } catch (_) {}
+  }
+
   // LOCAL LIBRARY (IndexedDB)
   // ===================================
   const LOCAL_DB_NAME = 'rc_local_library_v1';
@@ -272,6 +281,7 @@
   window.__rcLocalBookPut = localBookPut;
   window.__rcLocalBooksGetAll = localBooksGetAll;
   window.__rcLocalDeletedBooksGetAll = localDeletedBooksGetAll;
+  libraryTrailPush('library-owner-available', { hasLocalBooksGetAll: typeof localBooksGetAll === 'function' });
 
   const _bookPreviewCache = new Map();
 

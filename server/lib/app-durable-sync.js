@@ -535,7 +535,7 @@ async function setLibraryItemStatus(userId, storageRef, nextStatus, options = {}
 function summarizeUsage(usageRow, usageDailyLimit) {
   if (usageDailyLimit == null) {
     return {
-      authoritative: true,
+      authoritative: false,
       row: usageRow || null,
       used_units: usageRow ? Math.max(0, toInt(usageRow.used_units, 0)) : 0,
       used_api_calls: usageRow ? Math.max(0, toInt(usageRow.used_api_calls, 0)) : 0,

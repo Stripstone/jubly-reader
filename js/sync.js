@@ -38,6 +38,7 @@ window.rcSync = (function () {
   let _remoteProfileMetrics = null;
   let _remoteUsageSummary = null;
   let _remoteEntitlement = null;
+  const _cachedSnapshotApplyCount = Object.create(null);
   let _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false, usage: false };
   let _lastSyncSnapshotAt = null;
   let _syncDiagnostics = { users: null, settings: null, progress: null, sessions: null, restore: null, snapshot: null };
@@ -125,7 +126,9 @@ window.rcSync = (function () {
   }
 
   function _emitHydrated(kind) {
-    try { document.dispatchEvent(new CustomEvent('rc:durable-data-hydrated', { detail: { kind: String(kind || 'sync') } })); } catch (_) {}
+    const hydratedKind = String(kind || 'sync');
+    _pushEvent('durable-data-hydrated', { kind: hydratedKind });
+    try { document.dispatchEvent(new CustomEvent('rc:durable-data-hydrated', { detail: { kind: hydratedKind } })); } catch (_) {}
   }
 
   function _recordSync(kind, status, detail = {}) {
@@ -134,14 +137,20 @@ window.rcSync = (function () {
     return _syncDiagnostics[kind];
   }
 
-  function _composeResolvedUsageSummary(local, remote) {
-    const localRemaining = Number(local?.remaining);
-    const localAllowance = Number(local?.allowance ?? local?.limit);
-    const remoteRemaining = Number(remote?.remaining);
-    const remoteAllowance = Number(remote?.allowance ?? remote?.limit);
+  function _normalizeUsageValue(value) {
+    if (value == null || value === '') return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? Math.max(0, num) : null;
+  }
 
-    const localHasValue = Number.isFinite(localRemaining) || Number.isFinite(localAllowance);
-    const remoteHasValue = Number.isFinite(remoteRemaining) || Number.isFinite(remoteAllowance);
+  function _composeResolvedUsageSummary(local, remote) {
+    const localRemaining = _normalizeUsageValue(local?.remaining);
+    const localAllowance = _normalizeUsageValue(local?.allowance != null ? local.allowance : local?.limit);
+    const remoteRemaining = _normalizeUsageValue(remote?.remaining);
+    const remoteAllowance = _normalizeUsageValue(remote?.allowance != null ? remote.allowance : remote?.limit);
+
+    const localHasValue = localRemaining != null || localAllowance != null;
+    const remoteHasValue = remoteRemaining != null || remoteAllowance != null;
     const localAuthoritative = !!(local?.authoritative && localHasValue);
     const remoteAuthoritative = !!(remote?.authoritative && remoteHasValue);
 
@@ -161,12 +170,12 @@ window.rcSync = (function () {
       source = remote?.source || 'remote-projected';
     }
 
-    const primaryRemaining = Number(primary?.remaining);
-    const primaryAllowance = Number(primary?.allowance ?? primary?.limit);
+    const primaryRemaining = _normalizeUsageValue(primary?.remaining);
+    const primaryAllowance = _normalizeUsageValue(primary?.allowance != null ? primary.allowance : primary?.limit);
     return {
-      remaining: Number.isFinite(primaryRemaining) ? Math.max(0, primaryRemaining) : null,
-      allowance: Number.isFinite(primaryAllowance) ? Math.max(0, primaryAllowance) : null,
-      authoritative: localAuthoritative || remoteAuthoritative,
+      remaining: primaryRemaining,
+      allowance: primaryAllowance,
+      authoritative: !!((localAuthoritative || remoteAuthoritative) && (primaryRemaining != null || primaryAllowance != null)),
       source,
       local,
       remote,
@@ -450,6 +459,9 @@ window.rcSync = (function () {
   // This is a projection ONLY — it paints the UI without blocking on the server.
   // It must NOT be used as a restore position source.
   function _applyCachedSnapshotForUser(userId) {
+    const key = String(userId || 'unknown');
+    _cachedSnapshotApplyCount[key] = (_cachedSnapshotApplyCount[key] || 0) + 1;
+    _pushEvent('durable-cache-apply', { count: _cachedSnapshotApplyCount[key], hasUserId: !!userId });
     const cached = _readDurableCache(userId);
     if (!cached || !cached.snapshot) return false;
     const applied = _applySnapshot(cached.snapshot, { seq: 0, persist: false, fromCache: true });
