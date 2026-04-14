@@ -48,6 +48,10 @@ const TTS_STATE = {
   browserIntentionalCancelUntil: 0,
   browserIntentionalCancelReason: null,
   browserIntentionalCancelMeta: null,
+  browserHiddenResumePending: false,
+  browserHiddenResumeSessionId: 0,
+  browserHiddenResumeKey: null,
+  browserHiddenResumeBlockIndex: -1,
 
   playbackBlockedReason: '',
   pendingCloudSeekKey: null,
@@ -590,6 +594,68 @@ function isIntentionalBrowserCancelForSession(sessionId) {
   return metaSession === Number(sessionId);
 }
 
+function clearPendingBrowserHiddenResume() {
+  TTS_STATE.browserHiddenResumePending = false;
+  TTS_STATE.browserHiddenResumeSessionId = 0;
+  TTS_STATE.browserHiddenResumeKey = null;
+  TTS_STATE.browserHiddenResumeBlockIndex = -1;
+}
+
+function queuePendingBrowserHiddenResume(sessionId, key, blockIdx, reason) {
+  TTS_STATE.browserHiddenResumePending = true;
+  TTS_STATE.browserHiddenResumeSessionId = Number(sessionId || 0);
+  TTS_STATE.browserHiddenResumeKey = key || null;
+  TTS_STATE.browserHiddenResumeBlockIndex = Number.isFinite(Number(blockIdx)) ? Number(blockIdx) : 0;
+  ttsDiagPush('browser-hidden-resume-queued', {
+    sessionId: Number(sessionId || 0),
+    key: key || null,
+    blockIdx: TTS_STATE.browserHiddenResumeBlockIndex,
+    reason: reason || 'hidden-interruption',
+  });
+}
+
+function isRecoverableBrowserUtteranceError(evt) {
+  const code = String(evt?.error || '').toLowerCase();
+  return code === 'canceled' || code === 'cancelled' || code === 'interrupted' || code === 'audio-busy';
+}
+
+function shouldAutoResumeBrowserAfterVisibilityReturn(evt) {
+  if (!isRecoverableBrowserUtteranceError(evt)) return false;
+  try {
+    if (typeof document === 'undefined') return false;
+    return document.hidden || document.visibilityState !== 'visible';
+  } catch (_) {
+    return false;
+  }
+}
+
+function maybeResumeBrowserAfterVisibilityReturn() {
+  try {
+    if (typeof document !== 'undefined' && (document.hidden || document.visibilityState !== 'visible')) return false;
+  } catch (_) {}
+  if (!TTS_STATE.browserHiddenResumePending) return false;
+  const sessionId = Number(TTS_STATE.browserHiddenResumeSessionId || 0);
+  const key = TTS_STATE.browserHiddenResumeKey || null;
+  const blockIdx = Number.isFinite(Number(TTS_STATE.browserHiddenResumeBlockIndex)) ? Number(TTS_STATE.browserHiddenResumeBlockIndex) : 0;
+  clearPendingBrowserHiddenResume();
+  if (!sessionId || !key) return false;
+  if (Number(TTS_STATE.activeSessionId || 0) !== sessionId) return false;
+  if (TTS_STATE.activeKey !== key) return false;
+  if (!TTS_STATE.browserPaused) return false;
+  if (!TTS_STATE.browserSpeakFromBlock) return false;
+  TTS_STATE.playbackBlockedReason = '';
+  ttsDiagPush('browser-hidden-resume-attempt', { sessionId, key, blockIdx, reason: 'visibility-return' });
+  const ok = browserSpeakPageFromSentence(key, blockIdx, 'visibility-return-auto-resume');
+  if (!ok) {
+    TTS_STATE.browserPaused = true;
+    TTS_STATE.pausedBlockIndex = blockIdx;
+    TTS_STATE.pausedPageKey = key;
+    TTS_STATE.playbackBlockedReason = '';
+    ttsDiagPush('browser-hidden-resume-rejected', { sessionId, key, blockIdx, reason: 'visibility-return' });
+  }
+  return !!ok;
+}
+
 function browserPickVoice() {
   try {
     const voices = window.speechSynthesis.getVoices() || [];
@@ -650,6 +716,7 @@ function browserSpeakQueue(key, parts, opts = {}) {
 
   const sessionId = ++TTS_STATE.activeSessionId;
   clearPendingCloudSeek();
+  clearPendingBrowserHiddenResume();
   TTS_STATE.activeKey = key;
   TTS_STATE.lastPageKey = key;
   TTS_STATE.browserPaused = startPaused;
@@ -749,7 +816,7 @@ function browserSpeakQueue(key, parts, opts = {}) {
       speakFromBlock(blockIdx + 1);
     };
 
-    utter.onerror = () => {
+    utter.onerror = (evt) => {
       if (TTS_STATE.activeSessionId !== sessionId) return;
       // Guard 1: intentional cancel (pause, skip, resume, stop-or-replace).
       // Covers the deferred-speak race: the cancel window is 1200ms, long
@@ -780,10 +847,45 @@ function browserSpeakQueue(key, parts, opts = {}) {
         });
         return;
       }
+      const errorCode = String(evt?.error || '').toLowerCase();
+      const hiddenScreenInterruption = shouldAutoResumeBrowserAfterVisibilityReturn(evt);
+      const recoverable = isRecoverableBrowserUtteranceError(evt);
+      if (recoverable) {
+        const preservedBlockIndex = (Number.isFinite(Number(TTS_STATE.activeBlockIndex)) && TTS_STATE.activeBlockIndex >= 0)
+          ? Number(TTS_STATE.activeBlockIndex)
+          : (Number.isFinite(Number(blockIdx)) ? Number(blockIdx) : 0);
+        TTS_STATE.browserPaused = true;
+        TTS_STATE.pausedBlockIndex = preservedBlockIndex;
+        TTS_STATE.pausedPageKey = key;
+        TTS_STATE.activeBlockIndex = preservedBlockIndex;
+        TTS_STATE.playbackBlockedReason = '';
+        if (hiddenScreenInterruption) queuePendingBrowserHiddenResume(sessionId, key, preservedBlockIndex, errorCode || 'hidden-interruption');
+        else clearPendingBrowserHiddenResume();
+        TTS_DEBUG.lastError = {
+          at: new Date().toISOString(),
+          path: 'browser',
+          key,
+          message: 'recoverable speechSynthesis interruption',
+          error: errorCode || null,
+          blockIdx,
+          recoverable: true,
+          hiddenScreenInterruption,
+        };
+        ttsDiagPush(hiddenScreenInterruption ? 'browser-hidden-interruption-preserved' : 'browser-recoverable-utterance-preserved', {
+          key,
+          blockIdx,
+          preservedBlockIndex,
+          sessionId,
+          error: errorCode || null,
+        });
+        try { ttsDiagPush('control-eligibility', getPlaybackControlEligibility()); } catch (_) {}
+        return;
+      }
+      clearPendingBrowserHiddenResume();
       TTS_STATE.playbackBlockedReason = 'speechSynthesis utterance error';
-      TTS_DEBUG.lastError = { at: new Date().toISOString(), path: 'browser', key, message: 'speechSynthesis utterance error', blockIdx };
-      ttsDiagPush('browser-utterance-error', { key, blockIdx, sessionId });
-      ttsReconcileAfterRuntimeError('browser-utterance-error', { key, blockIdx, sessionId });
+      TTS_DEBUG.lastError = { at: new Date().toISOString(), path: 'browser', key, message: 'speechSynthesis utterance error', error: errorCode || null, blockIdx, recoverable: false };
+      ttsDiagPush('browser-utterance-error', { key, blockIdx, sessionId, error: errorCode || null });
+      ttsReconcileAfterRuntimeError('browser-utterance-error', { key, blockIdx, sessionId, error: errorCode || null });
     };
 
     window.speechSynthesis.speak(utter);
@@ -1186,6 +1288,7 @@ function ttsStop() {
   }
   browserTtsStop();
   ttsClearSentenceHighlight();
+  clearPendingBrowserHiddenResume();
 
   // Increment session ID to invalidate all in-flight async operations.
   TTS_STATE.activeSessionId++;
@@ -1587,12 +1690,12 @@ async function ttsSpeakQueue(key, parts) {
 
   const before = ttsBlockSnapshot();
 
-  // Case: same key, currently PAUSED → resume (not stop, not restart).
-  // This handles "Play → Pause → Read page same page" correctly.
+  // Case: same key, currently PAUSED → stop/deactivate (not resume).
+  // Resume remains owned by the shared playback controls.
   if (TTS_STATE.activeKey === key && (TTS_STATE.browserPaused || (TTS_STATE.audio && TTS_STATE.audio.paused))) {
-    ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'resume-paused-same-key' });
-    ttsResume();
-    ttsDiagPush('speak-action', { action: 'resumed', key, before, after: ttsBlockSnapshot() });
+    ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'toggle-stop-paused-same-key' });
+    ttsStop();
+    ttsDiagPush('speak-action', { action: 'stopped-paused-session', key, before, after: ttsBlockSnapshot() });
     return;
   }
 
@@ -2021,6 +2124,9 @@ if (browserTtsSupported()) {
   window.speechSynthesis.onvoiceschanged = () => { try { window.speechSynthesis.getVoices(); } catch (_) {} };
 }
 try {
+  document.addEventListener('visibilitychange', () => {
+    try { maybeResumeBrowserAfterVisibilityReturn(); } catch (_) {}
+  }, { passive: true });
   window.addEventListener('pagehide', () => ttsStop(), { passive: true });
   window.addEventListener('beforeunload', () => ttsStop(), { passive: true });
 } catch (_) {}
