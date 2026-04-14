@@ -1,7 +1,6 @@
 import { getActiveEntitlement, getUserFromAccessToken } from './supabase.js';
 
-const VALID_TIERS = new Set(['basic', 'pro', 'premium']);
-const LEGACY_TIER_ALIASES = new Map([['free', 'basic'], ['paid', 'pro']]);
+const VALID_TIERS = new Set(['free', 'paid', 'premium']);
 const CANONICAL_PRODUCTION_HOSTS = new Set(['jubly-reader.vercel.app']);
 
 function normalizeHost(value) {
@@ -34,28 +33,13 @@ function getAuthorizationBearer(req) {
   return match ? match[1].trim() : '';
 }
 
-function normalizeTierAlias(value) {
-  const tier = String(value || '').trim().toLowerCase();
-  if (!tier) return '';
-  return LEGACY_TIER_ALIASES.get(tier) || tier;
-}
-
-function normalizeEntitlementTier(row) {
-  if (!row || typeof row !== 'object') return 'basic';
-  const tier = resolveRuntimeTier(row.tier, '');
-  if (tier) return tier;
-  // Legacy compatibility seam only: ingest plan_id once, map it into canonical tier,
-  // and stop there. Runtime gating must consume only the canonical tier.
-  const mappedPlanTier = resolveRuntimeTier(row.plan_id, '');
-  return mappedPlanTier || 'basic';
-}
-
 function normalizeEntitlementSnapshot(row) {
   if (!row || typeof row !== 'object') return null;
   return {
     userId: row.user_id || null,
     provider: row.provider || null,
-    tier: normalizeEntitlementTier(row),
+    planId: row.plan_id || null,
+    tier: resolveRuntimeTier(row.tier || 'free'),
     status: row.status || null,
     stripeCustomerId: row.stripe_customer_id || null,
     stripeSubscriptionId: row.stripe_subscription_id || null,
@@ -65,9 +49,9 @@ function normalizeEntitlementSnapshot(row) {
   };
 }
 
-export function resolveRuntimeTier(value, fallback = 'basic') {
-  const tier = normalizeTierAlias(value);
-  return VALID_TIERS.has(tier) ? tier : fallback;
+export function resolveRuntimeTier(value) {
+  const tier = String(value || '').trim().toLowerCase();
+  return VALID_TIERS.has(tier) ? tier : 'free';
 }
 
 export function isRuntimeTierSimulationAllowed(req) {
@@ -78,7 +62,7 @@ export function isRuntimeTierSimulationAllowed(req) {
 }
 
 export function getDefaultRuntimeTier() {
-  return resolveRuntimeTier(process.env.RUNTIME_DEFAULT_TIER || 'basic');
+  return resolveRuntimeTier(process.env.RUNTIME_DEFAULT_TIER || 'free');
 }
 
 function getDeveloperOverrideTier(req) {
@@ -110,23 +94,23 @@ export function getRequestedRuntimeTier(req) {
     const url = new URL(req.url, 'http://localhost');
     return resolveRuntimeTier(url.searchParams.get('tier'));
   } catch (_) {
-    return 'basic';
+    return 'free';
   }
 }
 
-export function buildRuntimePolicy(inputTier = 'basic') {
+export function buildRuntimePolicy(inputTier = 'free') {
   const tier = resolveRuntimeTier(inputTier);
-  const elevated = tier !== 'basic';
+  const elevated = tier !== 'free';
 
   const usageDailyLimit = tier === 'premium'
     ? 10000
-    : tier === 'pro'
+    : tier === 'paid'
       ? 1000
       : 100;
 
   const importSlotLimit = tier === 'premium'
     ? null
-    : tier === 'pro'
+    : tier === 'paid'
       ? 5
       : 2;
 
