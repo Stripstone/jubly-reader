@@ -44,7 +44,6 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   // Legacy aliases like 'free' / 'paid' are normalized at the policy seam.
   let appTier = 'basic';
   let runtimePolicy = null;
-  let _runtimePolicyIsTransient = false;
 
   // ---- Token Tracking ----
   // Session token counter. Counts consumption per category for diagnostic purposes.
@@ -216,8 +215,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     return !!getRuntimePolicy()?.features?.cloudVoices;
   }
 
-  function applyResolvedRuntimePolicy(policyLike, tierHint, options = {}) {
-    _runtimePolicyIsTransient = !!options.transient;
+  function applyResolvedRuntimePolicy(policyLike, tierHint) {
     runtimePolicy = normalizeRuntimePolicy(policyLike, tierHint);
     appTier = runtimePolicy.tier;
     try { tokenReset(); } catch (_) {}
@@ -1231,11 +1229,13 @@ function loadTheme() {
   if (typeof stored.diagnostics_mode === 'string') themeDiagPrefs.mode = stored.diagnostics_mode;
   diagnosticsPrefs = Object.assign({ enabled: false, mode: 'off' }, storedDiagPrefs, themeDiagPrefs);
   if (!canUseTheme(appTheme)) {
-    // Theme access can be policy-gated. On cold boot or a cache projection, the
-    // runtime policy may be unresolved or stale. Display the safe default but
-    // only persist the downgrade when the policy is confirmed live (not transient).
+    // Theme access can be policy-gated. On cold boot, runtime policy may still be
+    // unresolved when we first read persisted prefs. Display the safe default, but
+    // do not overwrite the saved durable theme until a resolved runtime policy has
+    // actually confirmed the theme is disallowed.
+    const hasResolvedRuntimePolicy = !!(runtimePolicy && typeof runtimePolicy === 'object');
     appTheme = 'default';
-    if (!_runtimePolicyIsTransient && runtimePolicy && typeof runtimePolicy === 'object') persistThemeState();
+    if (hasResolvedRuntimePolicy) persistThemeState();
   }
   applyThemeClass(appTheme);
   applyThemeSettings();
@@ -1337,16 +1337,7 @@ function setDiagnosticsPreference(partial) {
 
 function enforceThemeAccess() {
   if (canUseTheme(appTheme)) return true;
-  if (!_runtimePolicyIsTransient) {
-    setThemeRuntime('default');
-  } else {
-    // Transient policy from a cache projection — visual-only, no persist, no sync.
-    // The fresh server response arriving shortly after will confirm or restore access.
-    appTheme = 'default';
-    applyThemeClass(appTheme);
-    applyThemeSettings();
-    syncThemeShellState();
-  }
+  setThemeRuntime('default');
   return false;
 }
 
