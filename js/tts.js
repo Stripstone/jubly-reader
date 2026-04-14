@@ -649,6 +649,7 @@ function ttsPrepareEstimatedHighlight(key, rawText, audio) {
 function ttsStartHighlightLoop(audio) {
   if (!audio || !TTS_STATE.highlightSpans || !TTS_STATE.highlightMarks) return;
   let lastIdx = -1;
+  let isFirstTick = true;
   const tick = () => {
     if (!TTS_STATE.audio || TTS_STATE.audio !== audio) return;
     if (!TTS_STATE.highlightSpans || !TTS_STATE.highlightMarks) return;
@@ -661,6 +662,17 @@ function ttsStartHighlightLoop(audio) {
       const end = ends[i] ?? Infinity;
       if (t >= start && t < end) { idx = i; break; }
     }
+
+    // First tick after loop restart: log proof surface for seek boundary analysis.
+    if (isFirstTick) {
+      isFirstTick = false;
+      ttsDiagPush('raf-first-tick', {
+        audioCurrentTimeMs: t,
+        computedIdx: idx,
+        markTimeMs: (idx >= 0 && marks[idx]) ? marks[idx].time : null,
+      });
+    }
+
     if (idx !== lastIdx) {
       // Track active block on state — this is what skip and pause read.
       if (idx >= 0) TTS_STATE.activeBlockIndex = idx;
@@ -2195,6 +2207,9 @@ function ttsJumpSentence(delta) {
     activeBlockIndex: Number(TTS_STATE.activeBlockIndex ?? -1),
     pausedBlockIndex: Number(TTS_STATE.pausedBlockIndex ?? -1),
     highlightBlockIndex: Number(TTS_STATE.activeBlockIndex ?? -1),
+    audioCurrentTimeMs: TTS_STATE.audio ? TTS_STATE.audio.currentTime * 1000 : null,
+    committedTarget: (TTS_STATE.postSeekMinBlock ?? -1) >= 0 ? TTS_STATE.postSeekMinBlock : null,
+    activeBlockMarkTimeMs: (marks && Number.isFinite(TTS_STATE.activeBlockIndex) && TTS_STATE.activeBlockIndex >= 0 && marks[TTS_STATE.activeBlockIndex]) ? marks[TTS_STATE.activeBlockIndex].time : null,
     hasAudio: !!TTS_STATE.audio,
     hasBrowserSpeakFromBlock: !!TTS_STATE.browserSpeakFromBlock,
     blockCount,
