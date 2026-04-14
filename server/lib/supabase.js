@@ -60,7 +60,7 @@ export async function getActiveEntitlement(userId) {
   const id = String(userId || '').trim();
   if (!id) return null;
   const data = await supabaseRest(
-    `/rest/v1/user_entitlements?user_id=eq.${encodeURIComponent(id)}&select=user_id,provider,plan_id,tier,status,stripe_customer_id,stripe_subscription_id,period_start,period_end,updated_at&order=updated_at.desc&limit=1`,
+    `/rest/v1/user_entitlements?user_id=eq.${encodeURIComponent(id)}&select=user_id,provider,tier,status,stripe_customer_id,stripe_subscription_id,period_start,period_end,updated_at&order=updated_at.desc&limit=1`,
     {
       method: 'GET',
       asService: true,

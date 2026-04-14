@@ -43,8 +43,6 @@ function normalizeEntitlementTier(row) {
   if (!row || typeof row !== 'object') return 'basic';
   const directTier = resolveRuntimeTier(row.tier, '');
   if (directTier) return directTier;
-  const mappedPlanTier = resolveRuntimeTier(row.plan_id, '');
-  if (mappedPlanTier) return mappedPlanTier;
   return 'basic';
 }
 
@@ -53,7 +51,6 @@ function normalizeEntitlementSnapshot(row) {
   return {
     userId: row.user_id || null,
     provider: row.provider || null,
-    planId: row.plan_id || null,
     tier: normalizeEntitlementTier(row),
     status: row.status || null,
     stripeCustomerId: row.stripe_customer_id || null,

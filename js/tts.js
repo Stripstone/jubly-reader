@@ -172,6 +172,11 @@ function isRecoverablePlaybackFailure(err) {
   return /audio playback failed|notallowederror|interrupted|notsupportederror|mediaerror/i.test(msg);
 }
 
+function isRecoverableBrowserUtteranceError(evt) {
+  const code = String(evt && (evt.error || evt.name || evt.type) ? (evt.error || evt.name || evt.type) : '').toLowerCase();
+  return /interrupted|canceled|cancelled|audio-busy/.test(code);
+}
+
 function applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason) {
   if (!audio || !key) return false;
   if (String(TTS_STATE.pendingCloudSeekKey || '') !== String(key)) return false;
@@ -749,7 +754,7 @@ function browserSpeakQueue(key, parts, opts = {}) {
       speakFromBlock(blockIdx + 1);
     };
 
-    utter.onerror = () => {
+    utter.onerror = (evt) => {
       if (TTS_STATE.activeSessionId !== sessionId) return;
       // Guard 1: intentional cancel (pause, skip, resume, stop-or-replace).
       // Covers the deferred-speak race: the cancel window is 1200ms, long
@@ -780,10 +785,20 @@ function browserSpeakQueue(key, parts, opts = {}) {
         });
         return;
       }
-      TTS_STATE.playbackBlockedReason = 'speechSynthesis utterance error';
-      TTS_DEBUG.lastError = { at: new Date().toISOString(), path: 'browser', key, message: 'speechSynthesis utterance error', blockIdx };
-      ttsDiagPush('browser-utterance-error', { key, blockIdx, sessionId });
-      ttsReconcileAfterRuntimeError('browser-utterance-error', { key, blockIdx, sessionId });
+      const errorCode = String(evt && (evt.error || evt.name || evt.type) ? (evt.error || evt.name || evt.type) : '').toLowerCase();
+      const recoverable = isRecoverableBrowserUtteranceError(evt);
+      TTS_STATE.playbackBlockedReason = recoverable ? '' : 'speechSynthesis utterance error';
+      TTS_DEBUG.lastError = {
+        at: new Date().toISOString(),
+        path: 'browser',
+        key,
+        message: errorCode ? `speechSynthesis utterance ${errorCode}` : 'speechSynthesis utterance error',
+        blockIdx,
+        recoverable,
+      };
+      ttsDiagPush('browser-utterance-error', { key, blockIdx, sessionId, errorCode, recoverable });
+      ttsReconcileAfterRuntimeError('browser-utterance-error', { key, blockIdx, sessionId, errorCode, recoverable });
+      if (recoverable) TTS_STATE.playbackBlockedReason = '';
     };
 
     window.speechSynthesis.speak(utter);
@@ -1587,12 +1602,12 @@ async function ttsSpeakQueue(key, parts) {
 
   const before = ttsBlockSnapshot();
 
-  // Case: same key, currently PAUSED → resume (not stop, not restart).
-  // This handles "Play → Pause → Read page same page" correctly.
+  // Case: same key, currently PAUSED → stop/deactivate (not resume).
+  // Bottom-bar Play/Resume remains the resume owner for the paused session.
   if (TTS_STATE.activeKey === key && (TTS_STATE.browserPaused || (TTS_STATE.audio && TTS_STATE.audio.paused))) {
-    ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'resume-paused-same-key' });
-    ttsResume();
-    ttsDiagPush('speak-action', { action: 'resumed', key, before, after: ttsBlockSnapshot() });
+    ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'toggle-stop-paused-same-key' });
+    ttsStop();
+    ttsDiagPush('speak-action', { action: 'stopped-paused-session', key, before, after: ttsBlockSnapshot() });
     return;
   }
 
