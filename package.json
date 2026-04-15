@@ -5,6 +5,7 @@
     "@aws-sdk/client-s3": "^3.758.0",
     "@aws-sdk/s3-request-presigner": "^3.758.0",
     "express": "^4.21.2",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "microsoft-cognitiveservices-speech-sdk": "^1.46.0"
   }
 }

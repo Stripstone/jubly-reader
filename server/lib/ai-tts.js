@@ -25,6 +25,7 @@ import { S3Client, HeadObjectCommand, PutObjectCommand, GetObjectCommand } from 
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { json, withCors, readJsonBody } from "./http.js";
 import { getAllowedBrowserOrigins } from "./origins.js";
+import speechsdk from "microsoft-cognitiveservices-speech-sdk";
 
 function requiredEnv(name) {
   const v = process.env[name];
@@ -84,6 +85,46 @@ function escapeXml(str) {
     .replace(/'/g, "&apos;");
 }
 
+function splitIntoSentenceRanges(text) {
+  const sentenceRegex = /[^.!?]*[.!?]+["']?\s*/g;
+  const ranges = [];
+  let match;
+  while ((match = sentenceRegex.exec(text)) !== null) {
+    ranges.push({ start: match.index, end: match.index + match[0].length });
+  }
+  if (!ranges.length) ranges.push({ start: 0, end: text.length });
+  return ranges;
+}
+
+function jsIndexToUtf8ByteOffset(str, jsIndex) {
+  return Buffer.byteLength(String(str || "").slice(0, Math.max(0, Number(jsIndex) || 0)), "utf8");
+}
+
+function bookmarkAudioOffsetMs(audioOffsetTicks) {
+  return Math.max(0, Number((Number(audioOffsetTicks || 0) + 5000) / 10000) || 0);
+}
+
+function buildAzureSentencePlan(text) {
+  const source = String(text || "");
+  return splitIntoSentenceRanges(source).map((range, index) => ({
+    index,
+    value: source.slice(range.start, range.end),
+    startJs: range.start,
+    endJs: range.end,
+    startByte: jsIndexToUtf8ByteOffset(source, range.start),
+    endByte: jsIndexToUtf8ByteOffset(source, range.end),
+    bookmark: `s${index}`,
+  })).filter((entry) => entry.endJs > entry.startJs);
+}
+
+function buildAzureSsml(text, voiceName, sentencePlan) {
+  const source = String(text || "");
+  const body = Array.isArray(sentencePlan) && sentencePlan.length
+    ? sentencePlan.map((entry) => `<bookmark mark="${entry.bookmark}"/>${escapeXml(entry.value)}`).join("")
+    : escapeXml(source);
+  return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voiceName}"><prosody rate="0.95">${body}</prosody></voice></speak>`;
+}
+
 function resolveAzureVoiceId(voiceVariant, explicitVoiceId) {
   if (explicitVoiceId) return String(explicitVoiceId).trim();
   const envFemale = requiredEnv("AZURE_VOICE_FEMALE") || "en-US-AriaNeural";
@@ -109,7 +150,7 @@ function resolveCloudPolicy(body, debug) {
     return {
       provider: "azure",
       voiceId: resolveAzureVoiceId(voiceVariant, explicitVoiceId),
-      sentenceMarksMode: "client-estimated",
+      sentenceMarksMode: "provider-sentence-marks-sidecar",
     };
   }
 
@@ -127,46 +168,61 @@ function resolveCloudPolicy(body, debug) {
 }
 
 // ── Azure Neural TTS synthesis ────────────────────────────────────────────────
-// Azure Cognitive Services Speech REST API.
-// Uses SSML for voice selection with slight rate reduction for reading clarity.
-// Returns raw audio/mpeg at 24kHz.
-async function azureSynthesize(text, voiceName) {
+// Azure Speech SDK synthesis with bookmark-driven sentence marks.
+// Audio and marks are cached as paired S3 artifacts so cache-hit sessions keep
+// precise sentence timing instead of falling back to client-estimated marks.
+async function azureSynthesizeArtifact(text, voiceName) {
   const key = requiredEnv("AZURE_SPEECH_KEY");
   const region = requiredEnv("AZURE_SPEECH_REGION");
   if (!key || !region) throw new Error("AZURE_SPEECH_KEY or AZURE_SPEECH_REGION not set");
 
   const voice = voiceName || "en-US-AriaNeural";
-  const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-  <voice name="${voice}">
-    <prosody rate="0.95">${escapeXml(text)}</prosody>
-  </voice>
-</speak>`;
+  const sentencePlan = buildAzureSentencePlan(text);
+  const ssml = buildAzureSsml(text, voice, sentencePlan);
+  const speechConfig = speechsdk.SpeechConfig.fromSubscription(key, region);
+  speechConfig.speechSynthesisOutputFormat = speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3;
 
-  const endpoint = `https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`;
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Ocp-Apim-Subscription-Key": key,
-      "Content-Type": "application/ssml+xml",
-      "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
-      "User-Agent": "JublyReader/1.0",
-    },
-    body: ssml,
-  });
+  const bookmarkOffsets = new Map();
+  let synthesizer = null;
+  try {
+    synthesizer = new speechsdk.SpeechSynthesizer(speechConfig, null);
+    synthesizer.bookmarkReached = (_sender, event) => {
+      const mark = String(event?.text || "");
+      if (mark) bookmarkOffsets.set(mark, bookmarkAudioOffsetMs(event?.audioOffset));
+    };
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Azure TTS error ${res.status}: ${detail}`);
+    const result = await new Promise((resolve, reject) => {
+      synthesizer.speakSsmlAsync(
+        ssml,
+        (synthesisResult) => resolve(synthesisResult),
+        (error) => reject(new Error(String(error || "Azure synthesis failed")))
+      );
+    });
+
+    if (result.reason !== speechsdk.ResultReason.SynthesizingAudioCompleted) {
+      const detail = result.errorDetails || result.properties?.getProperty?.(speechsdk.PropertyId.SpeechServiceResponse_JsonResult) || "Azure synthesis failed";
+      throw new Error(String(detail));
+    }
+
+    const audioBuf = Buffer.from(result.audioData || []);
+    const sentenceMarks = sentencePlan.map((entry) => ({
+      time: bookmarkOffsets.has(entry.bookmark) ? bookmarkOffsets.get(entry.bookmark) : 0,
+      start: entry.startByte,
+      end: entry.endByte,
+      value: entry.value,
+    }));
+
+    if (sentencePlan.length && !sentencePlan.every((entry) => bookmarkOffsets.has(entry.bookmark))) {
+      throw new Error("Azure synthesis returned incomplete bookmark offsets");
+    }
+
+    return { audioBuf, sentenceMarks };
+  } finally {
+    try { synthesizer?.close(); } catch (_) {}
   }
-
-  return Buffer.from(await res.arrayBuffer());
 }
 
 async function synthesizeCloudAudio({ awsRegion, text, policy }) {
-  if (policy.provider === "azure") {
-    return azureSynthesize(text, policy.voiceId);
-  }
-
   const cmd = new SynthesizeSpeechCommand({
     OutputFormat: "mp3",
     Text: text,
@@ -180,6 +236,17 @@ async function synthesizeCloudAudio({ awsRegion, text, policy }) {
 }
 
 async function resolveSentenceMarks({ awsRegion, bucket, cacheHit, nocache, marksKey, policy, s3, text }) {
+  if (policy.provider === "azure") {
+    try {
+      const got = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: marksKey }));
+      const buf = got?.Body ? await streamToBuffer(got.Body) : Buffer.from("[]");
+      const parsed = JSON.parse(buf.toString("utf8"));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return null;
+    }
+  }
+
   if (policy.provider !== "polly") return null;
 
   let marksCacheHit = false;
@@ -254,7 +321,8 @@ export default async function handler(req, res) {
     const policy = resolveCloudPolicy(body, debug);
 
     const prefix = toSafePrefix(requiredEnv("AWS_S3_PREFIX"));
-    const identity = JSON.stringify({ provider: policy.provider, voiceId: policy.voiceId, text });
+    const artifactVersion = "v2-s3-sidecar-sentence-marks";
+    const identity = JSON.stringify({ artifactVersion, provider: policy.provider, voiceId: policy.voiceId, text });
     const hash = sha256Hex(identity);
     const objectKey = `${prefix}${hash}.mp3`;
     const marksKey = `${prefix}${hash}.sentence.json`;
@@ -271,7 +339,38 @@ export default async function handler(req, res) {
       }
     }
 
-    if (!cacheHit) {
+    const shouldMaintainTimedMarks = policy.provider === "azure" || wantSentenceMarks;
+    let marksCacheHit = false;
+    if (shouldMaintainTimedMarks && !nocache) {
+      try {
+        await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: marksKey }));
+        marksCacheHit = true;
+      } catch (_) {
+        marksCacheHit = false;
+      }
+    }
+
+    if (policy.provider === "azure") {
+      if (!cacheHit || !marksCacheHit) {
+        const artifact = await azureSynthesizeArtifact(text, policy.voiceId);
+        await s3.send(new PutObjectCommand({
+          Bucket: bucket,
+          Key: objectKey,
+          Body: artifact.audioBuf,
+          ContentType: "audio/mpeg",
+          CacheControl: "public, max-age=31536000, immutable",
+        }));
+        await s3.send(new PutObjectCommand({
+          Bucket: bucket,
+          Key: marksKey,
+          Body: Buffer.from(JSON.stringify(artifact.sentenceMarks), "utf8"),
+          ContentType: "application/json; charset=utf-8",
+          CacheControl: "public, max-age=31536000, immutable",
+        }));
+        cacheHit = false;
+        marksCacheHit = true;
+      }
+    } else if (!cacheHit) {
       const audioBuf = await synthesizeCloudAudio({ awsRegion, text, policy });
       await s3.send(new PutObjectCommand({
         Bucket: bucket,
@@ -312,6 +411,7 @@ export default async function handler(req, res) {
         textLength: text.length,
         cacheHit,
         sentenceMarksMode: policy.sentenceMarksMode,
+        artifactVersion,
       };
     }
     return json(res, 200, payload);
