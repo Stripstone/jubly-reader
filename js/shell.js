@@ -704,6 +704,11 @@
             ]);
             await waitForBootRevealFrame();
         } catch (_) {}
+        // Books didn't settle within the cap — show pending now, right before reveal.
+        // From this point on, refreshLibrary will also show pending immediately on
+        // subsequent navigations (post-boot behaviour).
+        if (!_libraryInitialResolutionComplete) setLibrarySurfaceState('pending');
+        _shellBootComplete = true;
         releaseBootPending();
     });
     // ── Profile tabs ─────────────────────────────────────────────
@@ -1314,6 +1319,7 @@
     let _loggedFirstLocalLibraryRead = false;
     let _libraryInitialResolutionComplete = false;
     let _libraryRefreshSequence = 0;
+    let _shellBootComplete = false; // set to true once the boot reveal has fired
 
     function setLibrarySurfaceState(state) {
         const pendingEl = document.getElementById('library-pending');
@@ -1360,7 +1366,10 @@
         // truthful local-library read resolves to populated vs empty/importer.
         // After that first truthful read, later refreshes keep the current visible
         // surface instead of flashing back through pending.
-        if (!_libraryInitialResolutionComplete) setLibrarySurfaceState('pending');
+        // Only show pending immediately on post-boot navigations. During boot the
+        // DOMContentLoaded handler decides whether to show pending (after the 1000ms cap),
+        // so we don't stamp it here and risk it appearing before books have had a chance to settle.
+        if (!_libraryInitialResolutionComplete && _shellBootComplete) setLibrarySurfaceState('pending');
 
         // Until runtime book storage is actually available, do not imply an empty
         // library and do not leave a blank gap. Keep the pending surface visible
@@ -1370,11 +1379,13 @@
         if (!hasLocalLibraryOwner) {
             shellTrailPush('dashboard-library-owner-pending', { reason, retryDelayMs: 120 });
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
+            // Chain through the retry so the caller's promise (sectionRevealWork) stays
+            // pending until books actually settle — not just until the next retry fires.
+            // The 1000ms race in DOMContentLoaded will cut this off if the owner never arrives.
             return new Promise(resolve => {
                 libraryRefreshRetryTimer = setTimeout(() => {
                     libraryRefreshRetryTimer = null;
-                    try { refreshLibrary('owner-retry'); } catch (_) {}
-                    resolve();
+                    try { refreshLibrary('owner-retry').then(resolve, resolve); } catch (_) { resolve(); }
                 }, 120);
             });
         }
