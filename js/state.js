@@ -1242,6 +1242,145 @@ function syncThemeShellState() {
   syncAppearanceButtons();
 }
 
+
+const readingEntryAssetCache = new Map();
+let readingEntrySurfaceToken = 0;
+
+function waitForAnimationFrames(count = 2) {
+  const frames = Math.max(1, Number(count) || 1);
+  return new Promise((resolve) => {
+    let remaining = frames;
+    const step = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        resolve(true);
+        return;
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+function delayMs(ms) {
+  const safeMs = Math.max(0, Number(ms) || 0);
+  return new Promise((resolve) => setTimeout(resolve, safeMs));
+}
+
+function parseCssUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const match = raw.match(/^url\((.*)\)$/i);
+  if (!match) return raw.replace(/^['"]|['"]$/g, '');
+  return String(match[1] || '').trim().replace(/^['"]|['"]$/g, '');
+}
+
+function getExplorerWallpaperUrl() {
+  try {
+    const rootStyles = getComputedStyle(document.documentElement);
+    const bodyStyles = getComputedStyle(document.body);
+    const raw = rootStyles.getPropertyValue('--explorer-paper-wallpaper') || bodyStyles.getPropertyValue('--explorer-paper-wallpaper') || '';
+    return parseCssUrl(raw);
+  } catch (_) {
+    return '';
+  }
+}
+
+function preloadReadingEntryAsset(url) {
+  const key = String(url || '').trim();
+  if (!key) return Promise.resolve({ ready: false, status: 'empty', url: '' });
+  const existing = readingEntryAssetCache.get(key);
+  if (existing && existing.promise) return existing.promise;
+
+  let settled = false;
+  const image = new Image();
+  const entry = {
+    url: key,
+    ready: false,
+    status: 'loading',
+    promise: null
+  };
+  entry.promise = new Promise((resolve) => {
+    const finish = (status) => {
+      if (settled) return;
+      settled = true;
+      entry.status = status;
+      entry.ready = status === 'loaded';
+      resolve({ ready: entry.ready, status, url: key });
+    };
+    image.onload = () => finish('loaded');
+    image.onerror = () => finish('error');
+    try {
+      image.decoding = 'async';
+    } catch (_) {}
+    image.src = key;
+    if (image.complete && image.naturalWidth > 0) finish('loaded');
+  });
+  readingEntryAssetCache.set(key, entry);
+  return entry.promise;
+}
+
+async function prepareReadingEntrySurface(options = {}) {
+  const token = ++readingEntrySurfaceToken;
+  const minHoldMs = Math.max(0, Math.min(240, Number(options.minHoldMs) || 90));
+  const wallpaperWaitMs = Math.max(0, Math.min(640, Number(options.wallpaperWaitMs) || 220));
+  const readingModeEl = document.getElementById('reading-mode');
+  const readingContent = document.querySelector('#reading-mode .reading-content');
+  const themeId = String(appTheme || 'default');
+  const settings = getThemeSettings();
+  const bgMode = (themeId === 'explorer' && ['plain', 'texture', 'wallpaper'].includes(settings.backgroundMode)) ? settings.backgroundMode : '';
+  const wallpaperRequested = themeId === 'explorer' && bgMode === 'wallpaper';
+  const wallpaperUrl = wallpaperRequested ? getExplorerWallpaperUrl() : '';
+
+  if (readingModeEl) {
+    readingModeEl.setAttribute('data-entry-theme', themeId);
+    readingModeEl.setAttribute('data-entry-bg-mode', bgMode || '');
+  }
+  if (readingContent) {
+    readingContent.dataset.entryPrepToken = String(token);
+    readingContent.classList.toggle('reading-entry-wallpaper-pending', !!wallpaperRequested);
+  }
+
+  const holdPromise = minHoldMs > 0 ? delayMs(minHoldMs) : Promise.resolve(true);
+  const paintPromise = waitForAnimationFrames(2);
+  let wallpaperReady = !wallpaperRequested || !wallpaperUrl;
+
+  if (wallpaperRequested && wallpaperUrl) {
+    const wallpaperLoadPromise = preloadReadingEntryAsset(wallpaperUrl).then((result) => {
+      try {
+        const activeContent = document.querySelector('#reading-mode .reading-content');
+        if (result.ready && activeContent && activeContent.dataset.entryPrepToken === String(token)) {
+          activeContent.classList.remove('reading-entry-wallpaper-pending');
+        }
+      } catch (_) {}
+      return result;
+    });
+    const fastResult = await Promise.race([
+      wallpaperLoadPromise,
+      delayMs(wallpaperWaitMs).then(() => ({ ready: false, status: 'timeout', url: wallpaperUrl }))
+    ]);
+    wallpaperReady = !!fastResult.ready;
+  } else if (readingContent) {
+    readingContent.classList.remove('reading-entry-wallpaper-pending');
+  }
+
+  await Promise.all([holdPromise, paintPromise]);
+  _trailPush('reading-entry-surface-ready', {
+    themeId,
+    bgMode,
+    wallpaperRequested,
+    wallpaperReady,
+    revealSurface: (wallpaperRequested && !wallpaperReady) ? 'explorer-base' : 'full'
+  });
+  return {
+    themeId,
+    bgMode,
+    wallpaperRequested,
+    wallpaperReady,
+    revealSurface: (wallpaperRequested && !wallpaperReady) ? 'explorer-base' : 'full'
+  };
+}
+
 function loadTheme() {
   const stored = loadThemePrefs() || {};
   const storedDiagPrefs = loadDiagnosticsPrefs() || {};
@@ -1396,6 +1535,7 @@ window.rcTheme = {
   patchSettings: patchThemeSettings,
   resetSettings: resetThemeSettings,
   applySettings: applyThemeSettings,
+  prepareReadingEntrySurface,
   canUseTheme,
   canUseCustomMusic,
   enforceAccess: enforceThemeAccess,

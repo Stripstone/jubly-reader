@@ -31,6 +31,7 @@ body.theme-explorer.reading-active #reading-mode .reading-content::before,
 body.theme-explorer.reading-active #reading-mode .reading-content::after {
   z-index: 0;
   opacity: 0;
+  transition: opacity 0.18s ease;
 }
 
 body.theme-explorer.reading-active #reading-mode .reading-content::before {
@@ -80,3 +81,26 @@ body.theme-explorer #reading-mode .page.page-active { box-shadow: var(--rm-shado
 .explorer-reset-btn { border-color:#c17d4a; color:#9a5a28; }
 .explorer-reset-btn:hover { background:#c17d4a; border-color:#c17d4a; color:#fff; }
 .explorer-panel-row-reset { align-items:flex-start; }
+
+
+body.theme-explorer.reading-active #reading-mode.reading-restore-pending .reading-content {
+  background: linear-gradient(180deg, rgba(235,231,222,0.98) 0%, rgba(223,221,216,0.99) 100%);
+}
+
+body.theme-explorer.reading-active #reading-mode.reading-restore-pending[data-entry-bg-mode="plain"] .reading-content::before {
+  opacity: 0;
+}
+
+body.theme-explorer.reading-active #reading-mode.reading-restore-pending[data-entry-bg-mode="texture"] .reading-content::before,
+body.theme-explorer.reading-active #reading-mode.reading-restore-pending[data-entry-bg-mode="wallpaper"] .reading-content::before {
+  opacity: 0.92;
+}
+
+body.theme-explorer.reading-active #reading-mode.reading-restore-pending .reading-content::after,
+body.theme-explorer.reading-active #reading-mode .reading-content.reading-entry-wallpaper-pending::after {
+  opacity: 0 !important;
+}
+
+body.theme-explorer.reading-active #reading-mode .reading-content.reading-entry-wallpaper-pending::before {
+  opacity: 0.92;
+}
