@@ -2994,31 +2994,6 @@ window.startFocusedPageTts = function startFocusedPageTts() {
 
 window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 
-function ensureReadingEntryStatusNode() {
-  try {
-    const readingContent = document.querySelector('#reading-mode .reading-content');
-    if (!readingContent) return null;
-    let statusNode = readingContent.querySelector('.reading-entry-status');
-    if (!statusNode) {
-      statusNode = document.createElement('div');
-      statusNode.className = 'reading-entry-status';
-      const statusText = document.createElement('span');
-      statusText.className = 'reading-entry-status-text';
-      statusNode.appendChild(statusText);
-      readingContent.insertBefore(statusNode, readingContent.firstChild || null);
-    }
-    return statusNode;
-  } catch (_) { return null; }
-}
-
-function setReadingEntryStatusText(text) {
-  try {
-    const statusNode = ensureReadingEntryStatusNode();
-    const statusText = statusNode && statusNode.querySelector('.reading-entry-status-text');
-    if (statusText) statusText.textContent = text || 'Preparing reading view…';
-  } catch (_) {}
-}
-
 // Runtime-owned reading-entry API.
 // Resolves the book, prepares all page content, and renders page cards.
 // Returns true when reading is ready; shell awaits this rather than polling.
@@ -3032,7 +3007,6 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   const readingModeEl = document.getElementById('reading-mode');
   try {
     if (pagesEl) pagesEl.innerHTML = '';
-    setReadingEntryStatusText('Preparing reading view…');
     if (readingModeEl) {
       readingModeEl.classList.add('reading-restore-pending');
       readingModeEl.setAttribute('data-restore-kind', 'opening');
@@ -3074,7 +3048,6 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   const hasRestore = !!(restore && Number.isFinite(Number(restore.pageIndex)) && Number(restore.pageIndex) > 0);
   try {
     if (readingModeEl) readingModeEl.setAttribute('data-restore-kind', hasRestore ? 'returning' : 'opening');
-    setReadingEntryStatusText(hasRestore ? 'Returning to your place…' : 'Preparing reading view…');
   } catch (_) {}
 
   // Await the runtime-owned book load path. This resolves only after render()

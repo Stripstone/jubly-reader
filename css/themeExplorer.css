@@ -58,20 +58,6 @@ body.theme-explorer.reading-active #reading-mode .reading-content::after {
   filter: brightness(0.84);
 }
 
-body.theme-explorer.reading-active #reading-mode.reading-restore-pending .reading-content::before,
-body.theme-explorer.reading-active #reading-mode.reading-restore-pending .reading-content::after {
-  opacity: 0 !important;
-  transition: none !important;
-}
-
-body.theme-explorer.reading-active #reading-mode.reading-restore-pending .reading-entry-status {
-  background: linear-gradient(180deg, rgba(235,231,222,0.97) 0%, rgba(223,221,216,0.98) 100%);
-}
-
-body.theme-explorer.reading-active #reading-mode.reading-restore-pending #fireCanvas {
-  display: none !important;
-}
-
 /* Temp overridden
 body.theme-explorer.reading-active #reading-mode .reading-content.explorer-bg-texture::before { opacity: 0.92; }
 */
