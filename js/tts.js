@@ -31,6 +31,11 @@ const TTS_STATE = {
   pausedPageKey: null,
   lastPageKey: null,
 
+  backendCapability: null,
+  backendCapabilityKey: null,
+  backendCapabilitySessionId: 0,
+  backendCapabilityAppliedAt: null,
+
   audio: null,
   abort: null,
   volume: 1,
@@ -77,6 +82,7 @@ const TTS_DEBUG = {
   lastError: null,
   lastCloudRequest: null,
   lastCloudResponse: null,
+  lastCapability: null,
   lastPlayRequest: null,
   lastResolvedPath: null,
   lastPauseStrategy: null,
@@ -91,6 +97,119 @@ function ttsDiagPush(event, data = {}) {
   if (TTS_DEBUG.recent.length > 60) TTS_DEBUG.recent.shift();
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
   return entry;
+}
+
+
+function normalizeTtsCapability(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const preciseSeek = raw.preciseSeek && typeof raw.preciseSeek === 'object' ? raw.preciseSeek : {};
+  const marks = raw.marks && typeof raw.marks === 'object' ? raw.marks : {};
+  const cache = raw.cache && typeof raw.cache === 'object' ? raw.cache : {};
+  const artifact = raw.artifact && typeof raw.artifact === 'object' ? raw.artifact : {};
+  return {
+    provider: raw.provider == null ? null : String(raw.provider || ''),
+    preciseSeek: {
+      available: !!preciseSeek.available,
+      reason: preciseSeek.reason == null ? '' : String(preciseSeek.reason || ''),
+      provenance: preciseSeek.provenance == null ? 'none' : String(preciseSeek.provenance || 'none'),
+      includedInResponse: !!preciseSeek.includedInResponse,
+    },
+    marks: {
+      requested: !!marks.requested,
+      includedInResponse: !!marks.includedInResponse,
+      provenance: marks.provenance == null ? 'none' : String(marks.provenance || 'none'),
+      cacheStatus: marks.cacheStatus == null ? null : String(marks.cacheStatus || ''),
+    },
+    cache: {
+      audio: { status: cache && cache.audio ? (cache.audio.status == null ? null : String(cache.audio.status || '')) : null },
+      marks: { status: cache && cache.marks ? (cache.marks.status == null ? null : String(cache.marks.status || '')) : null },
+    },
+    artifact: {
+      version: artifact.version == null ? null : String(artifact.version || ''),
+      hash: artifact.hash == null ? null : String(artifact.hash || ''),
+    },
+  };
+}
+
+function getTtsCapabilityStatus() {
+  const backend = TTS_STATE.backendCapability ? JSON.parse(JSON.stringify(TTS_STATE.backendCapability)) : null;
+  const pageKey = TTS_STATE.backendCapabilityKey || TTS_STATE.activeKey || TTS_STATE.pausedPageKey || null;
+  const sentenceMarksRequested = !!(backend && backend.marks && backend.marks.requested);
+  const marksReturnedCount = Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0;
+  const runtimeHighlight = TTS_STATE.highlightMarksProvenance || 'none';
+  let authority = 'none';
+  let mismatch = null;
+  if (backend) {
+    authority = 'backend-capability';
+    if (backend.preciseSeek.available && sentenceMarksRequested && !backend.marks.includedInResponse) {
+      mismatch = 'precise-seek-available-but-marks-not-included';
+    } else if (!backend.preciseSeek.available && runtimeHighlight === 'timed') {
+      mismatch = 'timed-highlight-without-backend-precise-seek';
+    }
+  } else if (runtimeHighlight !== 'none') {
+    authority = 'legacy-runtime-inference';
+    mismatch = 'backend-capability-missing';
+  }
+  const usingTimedMarks = runtimeHighlight === 'timed';
+  return {
+    authority,
+    pageKey,
+    sessionId: Number(TTS_STATE.backendCapabilitySessionId || TTS_STATE.activeSessionId || 0),
+    appliedAt: TTS_STATE.backendCapabilityAppliedAt || null,
+    backend,
+    runtime: {
+      highlightProvenance: runtimeHighlight,
+      usingTimedMarks,
+      usingEstimatedMarks: runtimeHighlight === 'estimated',
+      marksReturnedCount,
+      preciseSeekReadyNow: !!(backend && backend.preciseSeek && backend.preciseSeek.available && backend.marks && backend.marks.includedInResponse && usingTimedMarks),
+    },
+    mismatch,
+  };
+}
+
+function applyCloudCapabilityForRuntime({ key, sessionId, capability, sentenceMarks } = {}) {
+  const normalized = normalizeTtsCapability(capability);
+  TTS_STATE.backendCapability = normalized;
+  TTS_STATE.backendCapabilityKey = key ? String(key) : null;
+  TTS_STATE.backendCapabilitySessionId = Number(sessionId || 0) || 0;
+  TTS_STATE.backendCapabilityAppliedAt = new Date().toISOString();
+
+  const returnedMarksCount = Array.isArray(sentenceMarks) ? sentenceMarks.length : 0;
+  const summary = {
+    authority: normalized ? 'backend-capability' : 'legacy-runtime-inference',
+    key: key ? String(key) : null,
+    sessionId: Number(sessionId || 0) || 0,
+    provider: normalized?.provider || null,
+    preciseSeekAvailable: !!normalized?.preciseSeek?.available,
+    preciseSeekReason: normalized?.preciseSeek?.reason || (returnedMarksCount > 0 ? 'legacy-sentence-marks-only' : 'backend-capability-missing'),
+    preciseSeekProvenance: normalized?.preciseSeek?.provenance || 'none',
+    marksRequested: !!normalized?.marks?.requested,
+    marksIncludedInResponse: !!normalized?.marks?.includedInResponse,
+    returnedMarksCount,
+    marksProvenance: normalized?.marks?.provenance || 'none',
+    audioCacheStatus: normalized?.cache?.audio?.status || null,
+    marksCacheStatus: normalized?.cache?.marks?.status || null,
+    artifactVersion: normalized?.artifact?.version || null,
+    artifactHash: normalized?.artifact?.hash || null,
+    mismatch: null,
+  };
+  if (summary.preciseSeekAvailable && summary.marksRequested && !summary.marksIncludedInResponse) {
+    summary.mismatch = 'precise-seek-available-but-marks-not-included';
+  } else if (!normalized && returnedMarksCount > 0) {
+    summary.mismatch = 'backend-capability-missing';
+  }
+  TTS_DEBUG.lastCapability = summary;
+  ttsDiagPush('cloud-capability-applied', summary);
+  return summary;
+}
+
+
+function clearTtsBackendCapabilityState() {
+  TTS_STATE.backendCapability = null;
+  TTS_STATE.backendCapabilityKey = null;
+  TTS_STATE.backendCapabilitySessionId = 0;
+  TTS_STATE.backendCapabilityAppliedAt = null;
 }
 
 function ttsBlockSnapshot() {
@@ -545,14 +664,26 @@ function ttsHighlightBlock(blockIdx) {
   // so skip/pause/resume all read from a single source of truth.
   if (blockIdx >= 0) TTS_STATE.activeBlockIndex = blockIdx;
   try {
-    const isMobile = window.matchMedia && window.matchMedia('(max-width: 480px)').matches;
     const pane = TTS_STATE.highlightPageEl;
-    if (isMobile && pane && blockIdx >= 0 && TTS_STATE.highlightSpans[blockIdx]) {
-      const cur = TTS_STATE.highlightSpans[blockIdx];
-      const canScroll = pane.scrollHeight > pane.clientHeight + 4;
-      if (canScroll) {
-        const desired = cur.offsetTop - (pane.clientHeight / 2) + (cur.offsetHeight / 2);
-        pane.scrollTop = Math.max(0, Math.min(desired, pane.scrollHeight - pane.clientHeight));
+    const cur = (pane && blockIdx >= 0) ? TTS_STATE.highlightSpans[blockIdx] : null;
+    if (pane && cur) {
+      const styles = window.getComputedStyle ? window.getComputedStyle(pane) : null;
+      const overflowY = styles ? String(styles.overflowY || '').toLowerCase() : '';
+      const paneIsScrollable = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
+        && (pane.scrollHeight > pane.clientHeight + 4);
+      if (paneIsScrollable) {
+        const viewTop = pane.scrollTop;
+        const viewBottom = viewTop + pane.clientHeight;
+        const blockTop = cur.offsetTop;
+        const blockBottom = blockTop + cur.offsetHeight;
+        const edgePad = Math.max(24, Math.min(96, Math.round(pane.clientHeight * 0.18)));
+        const desiredTop = viewTop + edgePad;
+        const desiredBottom = viewBottom - edgePad;
+        if (blockTop < desiredTop || blockBottom > desiredBottom) {
+          const centered = blockTop - (pane.clientHeight / 2) + (cur.offsetHeight / 2);
+          const maxScroll = Math.max(0, pane.scrollHeight - pane.clientHeight);
+          pane.scrollTop = Math.max(0, Math.min(centered, maxScroll));
+        }
       }
     }
   } catch (_) {}
@@ -786,6 +917,7 @@ function browserSpeakQueue(key, parts, opts = {}) {
   }
 
   const sessionId = ++TTS_STATE.activeSessionId;
+  clearTtsBackendCapabilityState();
   clearPendingCloudSeek();
   clearCloudRestartTransition();
   resetBrowserRestartOwnership();
@@ -1371,6 +1503,7 @@ function getPlaybackStatus() {
     if (TTS_STATE.audio) paused = isCloudRestartTransitionActive() ? false : !!TTS_STATE.audio.paused;
     else if (!TTS_STATE.browserPaused && browserTtsSupported()) paused = !!window.speechSynthesis.paused;
   } catch (_) {}
+  const capability = getTtsCapabilityStatus();
   return {
     active: !!TTS_STATE.activeKey,
     paused,
@@ -1380,6 +1513,7 @@ function getPlaybackStatus() {
     activeBlockIndex: TTS_STATE.activeBlockIndex,
     blockCount: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0,
     cloudRestartInFlight: isCloudRestartTransitionActive(),
+    capability,
   };
 }
 
@@ -1508,6 +1642,7 @@ function ttsStop() {
   TTS_STATE.browserIntentionalCancelMeta = null;
   clearPendingCloudSeek();
   clearCloudRestartTransition();
+  clearTtsBackendCapabilityState();
 
   ttsDiagPush('stop', {
     outcomeClass: 'full-stop',
@@ -1881,9 +2016,27 @@ async function cloudFetchUrl(text, opts = {}) {
     const msg = data?.error ? `${data.error}${detail ? `: ${detail}` : ''}` : `TTS request failed (${res.status})${detail ? `: ${detail}` : ''}`;
     throw new Error(msg);
   }
-  TTS_DEBUG.lastCloudResponse = { ok: true, status: res.status, provider: data?.provider || null, cacheHit: !!data?.cacheHit, debug: data?.debug || null };
-  ttsDiagPush('cloud-response', TTS_DEBUG.lastCloudResponse);
-  return { url: data.url, sentenceMarks: Array.isArray(data.sentenceMarks) ? data.sentenceMarks : null };
+  const capability = normalizeTtsCapability(data?.capability);
+  TTS_DEBUG.lastCloudResponse = {
+    ok: true,
+    status: res.status,
+    provider: (capability && capability.provider) || data?.provider || null,
+    cacheHit: !!data?.cacheHit,
+    capability,
+    debug: data?.debug || null,
+  };
+  ttsDiagPush('cloud-response', {
+    ok: true,
+    status: res.status,
+    provider: TTS_DEBUG.lastCloudResponse.provider,
+    cacheHit: !!data?.cacheHit,
+    preciseSeekAvailable: !!capability?.preciseSeek?.available,
+    preciseSeekReason: capability?.preciseSeek?.reason || '',
+    marksIncludedInResponse: !!capability?.marks?.includedInResponse,
+    marksProvenance: capability?.marks?.provenance || 'none',
+    artifactVersion: capability?.artifact?.version || null,
+  });
+  return { url: data.url, sentenceMarks: Array.isArray(data.sentenceMarks) ? data.sentenceMarks : null, capability };
 }
 
 async function ttsSpeakQueue(key, parts) {
@@ -1933,6 +2086,7 @@ async function ttsSpeakQueue(key, parts) {
   if (!queue.length) return;
 
   const sessionId = ++TTS_STATE.activeSessionId;
+  clearTtsBackendCapabilityState();
   clearPendingCloudSeek();
   clearCloudRestartTransition();
   TTS_STATE.activeKey = key;
@@ -1964,6 +2118,7 @@ async function ttsSpeakQueue(key, parts) {
       }
       const tts = await cloudFetchUrl(queue[i], { sentenceMarks: wantMarks });
       if (TTS_STATE.activeSessionId !== sessionId) return;
+      applyCloudCapabilityForRuntime({ key, sessionId, capability: tts.capability, sentenceMarks: tts.sentenceMarks });
       const url = tts.url;
       if (wantMarks) {
         if (tts.sentenceMarks && tts.sentenceMarks.length) {
@@ -2061,6 +2216,7 @@ async function ttsPreparePausedCloudPage(pageIndex) {
   if (typeof pages === 'undefined' || !pages[pageIndex]) return false;
   const text = pages[pageIndex];
   const sessionId = ++TTS_STATE.activeSessionId;
+  clearTtsBackendCapabilityState();
   clearPendingCloudSeek();
   clearCloudRestartTransition();
 
@@ -2096,6 +2252,7 @@ async function ttsPreparePausedCloudPage(pageIndex) {
   try {
     const tts = await cloudFetchUrl(text, { sentenceMarks: true });
     if (TTS_STATE.activeSessionId !== sessionId) return false;
+    applyCloudCapabilityForRuntime({ key, sessionId, capability: tts.capability, sentenceMarks: tts.sentenceMarks });
     const audio = TTS_AUDIO_ELEMENT;
     try { audio.loop = false; audio.pause(); } catch (_) {}
 
@@ -2451,9 +2608,10 @@ function getTtsDiagnosticsSnapshot() {
     speed: { selected: Number(TTS_STATE.rate || 1), state: Number(TTS_STATE.rate || 1), audio: Number(TTS_AUDIO_ELEMENT.playbackRate || 1) },
     browserSpeech: browserTtsSupported() ? { speaking: !!window.speechSynthesis.speaking, paused: !!window.speechSynthesis.paused, pending: !!window.speechSynthesis.pending, voices: (window.speechSynthesis.getVoices() || []).length, currentSentenceIndex: Number(TTS_STATE.browserCurrentSentenceIndex || 0), currentCharIndex: Number(TTS_STATE.browserCurrentCharIndex || 0), sentenceCount: Number(TTS_STATE.browserSentenceCount || 0) } : null,
     audio: { present: !!TTS_AUDIO_ELEMENT, paused: !!TTS_AUDIO_ELEMENT.paused, currentTime: Number(TTS_AUDIO_ELEMENT.currentTime || 0), playbackRate: Number(TTS_AUDIO_ELEMENT.playbackRate || 1), src: TTS_AUDIO_ELEMENT.getAttribute('src') || null, loop: !!TTS_AUDIO_ELEMENT.loop },
-    highlight: { pageKey: TTS_STATE.highlightPageKey || null, spanCount: Array.isArray(TTS_STATE.highlightSpans) ? TTS_STATE.highlightSpans.length : 0, marksCount: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0, activeBlockIndex: TTS_STATE.activeBlockIndex },
+    highlight: { pageKey: TTS_STATE.highlightPageKey || null, spanCount: Array.isArray(TTS_STATE.highlightSpans) ? TTS_STATE.highlightSpans.length : 0, marksCount: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0, activeBlockIndex: TTS_STATE.activeBlockIndex, provenance: TTS_STATE.highlightMarksProvenance || 'none' },
+    capability: getTtsCapabilityStatus(),
     unlock: { unlocked: !!TTS_AUDIO_UNLOCKED },
-    last: { action: TTS_DEBUG.lastAction, error: TTS_DEBUG.lastError, skip: TTS_DEBUG.lastSkip, playRequest: TTS_DEBUG.lastPlayRequest, cloudRequest: TTS_DEBUG.lastCloudRequest, cloudResponse: TTS_DEBUG.lastCloudResponse, pauseStrategy: TTS_DEBUG.lastPauseStrategy, routeDecision: TTS_DEBUG.lastRouteDecision, resolvedPath: TTS_DEBUG.lastResolvedPath },
+    last: { action: TTS_DEBUG.lastAction, error: TTS_DEBUG.lastError, skip: TTS_DEBUG.lastSkip, playRequest: TTS_DEBUG.lastPlayRequest, cloudRequest: TTS_DEBUG.lastCloudRequest, cloudResponse: TTS_DEBUG.lastCloudResponse, capability: TTS_DEBUG.lastCapability, pauseStrategy: TTS_DEBUG.lastPauseStrategy, routeDecision: TTS_DEBUG.lastRouteDecision, resolvedPath: TTS_DEBUG.lastResolvedPath },
     recentEvents: TTS_DEBUG.recent.slice(-40),
   };
 }
@@ -2476,6 +2634,7 @@ window.getAutoplayStatus        = getAutoplayStatus;
 window.applyAutoplayRuntimePreference = applyAutoplayRuntimePreference;
 window.getCountdownStatus       = getCountdownStatus;
 window.getTtsSupportStatus      = getTtsSupportStatus;
+window.getTtsCapabilityStatus   = getTtsCapabilityStatus;
 window.getTtsDiagnosticsSnapshot = getTtsDiagnosticsSnapshot;
 window.pauseOrResumeReading     = pauseOrResumeReading;
 window.toggleAutoplay           = toggleAutoplay;
