@@ -201,7 +201,7 @@ window.rcSync = (function () {
     if (!policy || typeof policy !== 'object') return false;
     try {
       if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
-        window.rcPolicy.apply(policy, null, { transient: !!options.fromCache });
+        window.rcPolicy.apply(policy, null, { transient: !!options.fromCache, resolved: true });
         _pushEvent('policy-projected', {
           tier: String(policy.tier || ''),
           fromCache: !!options.fromCache,

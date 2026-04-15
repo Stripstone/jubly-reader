@@ -15,9 +15,10 @@
 //
 // Response JSON:
 //   - url (string)        // presigned S3 URL for the mp3
-//   - cacheHit (boolean)
+//   - cacheHit (boolean)  // legacy audio-cache convenience; prefer capability.cache.audio.status
 //   - provider (string)   // 'azure' | 'polly'
-//   - sentenceMarks?      // present only when the active provider returned them
+//   - sentenceMarks?      // present only when requested and included in this response
+//   - capability (object) // backend-owned precise-seek and cache truth for this artifact
 
 import crypto from "node:crypto";
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
@@ -140,6 +141,50 @@ function resolvePollyDefaults(debug) {
   const envMaleStd = requiredEnv("POLLY_VOICE_ID_MALE") || requiredEnv("POLLY_VOICE_ID") || "Matthew";
   const envMaleNeural = requiredEnv("POLLY_VOICE_ID_MALE_2") || envMaleStd;
   return { engine, envFemale, envMaleStd, envMaleNeural };
+}
+
+function buildCapabilityReason({ preciseSeekCapable, policy, wantSentenceMarks, marksAvailable }) {
+  if (preciseSeekCapable) return "timed-marks-sidecar-available";
+  if (policy?.provider === "azure") return "timed-marks-sidecar-unavailable";
+  if (wantSentenceMarks) return marksAvailable ? "timed-marks-sidecar-available" : "timed-marks-requested-but-unavailable";
+  return "timed-marks-not-requested";
+}
+
+function buildCapabilityPayload({
+  artifactVersion,
+  hash,
+  policy,
+  wantSentenceMarks,
+  sentenceMarks,
+  preciseSeekCapable,
+  audioCacheStatus,
+  marksCacheStatus,
+  marksProvenance,
+}) {
+  const marksIncludedInResponse = Array.isArray(sentenceMarks);
+  return {
+    provider: policy?.provider || null,
+    preciseSeek: {
+      available: !!preciseSeekCapable,
+      reason: buildCapabilityReason({ preciseSeekCapable, policy, wantSentenceMarks, marksAvailable: marksIncludedInResponse }),
+      provenance: preciseSeekCapable ? marksProvenance : "none",
+      includedInResponse: marksIncludedInResponse,
+    },
+    marks: {
+      requested: !!wantSentenceMarks,
+      includedInResponse: marksIncludedInResponse,
+      provenance: marksIncludedInResponse || preciseSeekCapable ? marksProvenance : "none",
+      cacheStatus: marksCacheStatus,
+    },
+    cache: {
+      audio: { status: audioCacheStatus },
+      marks: { status: marksCacheStatus },
+    },
+    artifact: {
+      version: artifactVersion,
+      hash,
+    },
+  };
 }
 
 function resolveCloudPolicy(body, debug) {
@@ -338,10 +383,11 @@ export default async function handler(req, res) {
         cacheHit = false;
       }
     }
+    const audioCacheHitInitial = cacheHit;
 
     const shouldMaintainTimedMarks = policy.provider === "azure" || wantSentenceMarks;
     let marksCacheHit = false;
-    if (shouldMaintainTimedMarks && !nocache) {
+    if (!nocache) {
       try {
         await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: marksKey }));
         marksCacheHit = true;
@@ -349,9 +395,16 @@ export default async function handler(req, res) {
         marksCacheHit = false;
       }
     }
+    const marksCacheHitInitial = marksCacheHit;
+
+    let audioCacheStatus = nocache ? "bypass" : (audioCacheHitInitial ? "hit" : "miss");
+    let marksCacheStatus = nocache
+      ? (shouldMaintainTimedMarks ? "bypass" : "not-requested")
+      : (marksCacheHitInitial ? "hit" : (shouldMaintainTimedMarks ? "miss" : "not-requested"));
+    let marksProvenance = (shouldMaintainTimedMarks || marksCacheHitInitial) ? "s3-sidecar" : "none";
 
     if (policy.provider === "azure") {
-      if (!cacheHit || !marksCacheHit) {
+      if (!audioCacheHitInitial || !marksCacheHitInitial) {
         const artifact = await azureSynthesizeArtifact(text, policy.voiceId);
         await s3.send(new PutObjectCommand({
           Bucket: bucket,
@@ -369,8 +422,10 @@ export default async function handler(req, res) {
         }));
         cacheHit = false;
         marksCacheHit = true;
+        audioCacheStatus = audioCacheHitInitial ? "refreshed" : "miss";
+        marksCacheStatus = marksCacheHitInitial ? "hit" : "regenerated";
       }
-    } else if (!cacheHit) {
+    } else if (!audioCacheHitInitial) {
       const audioBuf = await synthesizeCloudAudio({ awsRegion, text, policy });
       await s3.send(new PutObjectCommand({
         Bucket: bucket,
@@ -379,6 +434,7 @@ export default async function handler(req, res) {
         ContentType: "audio/mpeg",
         CacheControl: "public, max-age=31536000, immutable",
       }));
+      audioCacheStatus = "miss";
     }
 
     let sentenceMarks = null;
@@ -393,6 +449,15 @@ export default async function handler(req, res) {
         s3,
         text,
       });
+      if (Array.isArray(sentenceMarks)) {
+        if (policy.provider === "polly") {
+          marksCacheStatus = nocache
+            ? "regenerated"
+            : (marksCacheHitInitial ? "hit" : "regenerated");
+        }
+      } else {
+        marksCacheStatus = wantSentenceMarks ? "unavailable" : marksCacheStatus;
+      }
     }
 
     const url = await getSignedUrl(
@@ -401,7 +466,22 @@ export default async function handler(req, res) {
       { expiresIn: 60 * 60 }
     );
 
-    const payload = { url, cacheHit, provider: policy.provider };
+    const preciseSeekCapable = policy.provider === "azure"
+      ? !!marksCacheHit
+      : (!!marksCacheHitInitial || (Array.isArray(sentenceMarks) && sentenceMarks.length > 0));
+    const capability = buildCapabilityPayload({
+      artifactVersion,
+      hash,
+      policy,
+      wantSentenceMarks,
+      sentenceMarks,
+      preciseSeekCapable,
+      audioCacheStatus,
+      marksCacheStatus,
+      marksProvenance,
+    });
+
+    const payload = { url, cacheHit, provider: policy.provider, capability };
     if (wantSentenceMarks && Array.isArray(sentenceMarks)) payload.sentenceMarks = sentenceMarks;
     if (debug) {
       payload.debug = {
@@ -412,6 +492,7 @@ export default async function handler(req, res) {
         cacheHit,
         sentenceMarksMode: policy.sentenceMarksMode,
         artifactVersion,
+        capability,
       };
     }
     return json(res, 200, payload);

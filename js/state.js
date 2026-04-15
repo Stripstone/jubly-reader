@@ -53,6 +53,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   // Legacy aliases like 'free' / 'paid' are normalized at the policy seam.
   let appTier = 'basic';
   let runtimePolicy = null;
+  let runtimePolicyResolved = false;
 
   // ---- Token Tracking ----
   // Session token counter. Counts consumption per category for diagnostic purposes.
@@ -184,7 +185,12 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   function getRuntimePolicy() {
     if (runtimePolicy && typeof runtimePolicy === 'object') return runtimePolicy;
     runtimePolicy = getFallbackRuntimePolicy(appTier);
+    runtimePolicyResolved = false;
     return runtimePolicy;
+  }
+
+  function isRuntimePolicyResolved() {
+    return !!runtimePolicyResolved;
   }
 
   function getRuntimeUsageAllowance() {
@@ -224,13 +230,14 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     return !!getRuntimePolicy()?.features?.cloudVoices;
   }
 
-  function applyResolvedRuntimePolicy(policyLike, tierHint) {
+  function applyResolvedRuntimePolicy(policyLike, tierHint, options = {}) {
     runtimePolicy = normalizeRuntimePolicy(policyLike, tierHint);
+    runtimePolicyResolved = !!options.resolved;
     appTier = runtimePolicy.tier;
     try { tokenReset(); } catch (_) {}
     try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
     try {
-      const detail = { policy: runtimePolicy };
+      const detail = { policy: runtimePolicy, resolved: runtimePolicyResolved };
       document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
       window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
     } catch (_) {}
@@ -257,7 +264,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
         ? { ...payload.policy, resolutionMode: payload?.meta?.resolutionMode }
         : payload;
       const resolvedTierHint = payload?.meta?.effectiveTier || tier;
-      return applyResolvedRuntimePolicy(policyWithMeta, resolvedTierHint);
+      return applyResolvedRuntimePolicy(policyWithMeta, resolvedTierHint, { resolved: true });
     } catch (err) {
       // Server unreachable. If we already hold a confirmed non-basic policy (from a
       // prior successful fetch or durable-sync cache projection), preserve it — a
@@ -265,7 +272,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       // Only fall back to safe-basic when there is no confirmed policy in place.
       _trailPush('policy-fetch-failed', { tier: runtimePolicy && runtimePolicy.tier, reason: String(err?.message || err || 'unknown') });
       if (runtimePolicy && runtimePolicy.tier && runtimePolicy.tier !== 'basic') return runtimePolicy;
-      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic');
+      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', { resolved: false });
     }
   }
 
@@ -1249,7 +1256,7 @@ function loadTheme() {
     // unresolved when we first read persisted prefs. Display the safe default, but
     // do not overwrite the saved durable theme until a resolved runtime policy has
     // actually confirmed the theme is disallowed.
-    const hasResolvedRuntimePolicy = !!(runtimePolicy && typeof runtimePolicy === 'object');
+    const hasResolvedRuntimePolicy = isRuntimePolicyResolved();
     _trailPush('load-theme-forced-default', { storedTheme: appTheme, hasResolvedRuntimePolicy, policyTier: runtimePolicy && runtimePolicy.tier });
     appTheme = 'default';
     if (hasResolvedRuntimePolicy) persistThemeState();
@@ -1354,7 +1361,7 @@ function setDiagnosticsPreference(partial) {
 
 function enforceThemeAccess() {
   const canUse = canUseTheme(appTheme);
-  _trailPush('enforce-theme-access', { appTheme, canUse, policyTier: runtimePolicy && runtimePolicy.tier });
+  _trailPush('enforce-theme-access', { appTheme, canUse, policyTier: runtimePolicy && runtimePolicy.tier, policyResolved: isRuntimePolicyResolved() });
   if (canUse) return true;
   setThemeRuntime('default');
   return false;
@@ -1587,7 +1594,7 @@ window.rcEntitlements = {
   enforceThemeAccess
 };
 
-applyResolvedRuntimePolicy(getFallbackRuntimePolicy(appTier), appTier);
+applyResolvedRuntimePolicy(getFallbackRuntimePolicy(appTier), appTier, { resolved: false });
 loadAppearance();
 loadTheme();
 

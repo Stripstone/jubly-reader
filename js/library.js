@@ -3007,7 +3007,10 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   const readingModeEl = document.getElementById('reading-mode');
   try {
     if (pagesEl) pagesEl.innerHTML = '';
-    if (readingModeEl) readingModeEl.classList.add('reading-restore-pending');
+    if (readingModeEl) {
+      readingModeEl.classList.add('reading-restore-pending');
+      readingModeEl.setAttribute('data-restore-kind', 'opening');
+    }
   } catch (_) {}
 
   // Fire-and-forget: the current reading target is safe in memory and will be
@@ -3039,13 +3042,13 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     }
   } catch (_) {}
 
-  // Compute restore truth. data-restore-kind is intentionally NOT set — with
-  // the blocking flush removed the render is near-instant, so the overlay text
-  // "Returning to your place…" would only flash for a frame. The hide/reveal
-  // is silent: pages stay invisible via reading-restore-pending until scrolled
-  // to the correct position, then fade in. No visible loading message needed.
+  // Compute restore truth. Keep a visible neutral pending surface while the
+  // runtime-owned load/restore path is unresolved so cold entry never presents
+  // a blank reading view. Returning restores get a more specific label.
   const hasRestore = !!(restore && Number.isFinite(Number(restore.pageIndex)) && Number(restore.pageIndex) > 0);
-  try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
+  try {
+    if (readingModeEl) readingModeEl.setAttribute('data-restore-kind', hasRestore ? 'returning' : 'opening');
+  } catch (_) {}
 
   // Await the runtime-owned book load path. This resolves only after render()
   // and applyPendingReadingRestore() have both completed, so #pages is already
