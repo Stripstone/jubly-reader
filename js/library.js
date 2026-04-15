@@ -205,80 +205,6 @@
     });
   }
 
-  const READING_ENTRY_HOLD_DELAY_MS = 220;
-
-  function ensureReadingEntryStatusNode() {
-    try {
-      const readingContent = document.querySelector('#reading-mode .reading-content');
-      if (!readingContent) return null;
-      let statusEl = readingContent.querySelector('.reading-entry-status');
-      if (!statusEl) {
-        statusEl = document.createElement('div');
-        statusEl.className = 'reading-entry-status';
-        statusEl.setAttribute('aria-hidden', 'true');
-        readingContent.appendChild(statusEl);
-      }
-      return statusEl;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function setReadingEntryStatus(kind) {
-    try {
-      const statusEl = ensureReadingEntryStatusNode();
-      if (!statusEl) return;
-      statusEl.textContent = String(kind || '') === 'returning' ? 'Returning to your place…' : 'Preparing reading view…';
-    } catch (_) {}
-  }
-
-  function detectReadingEntryThemeFamily() {
-    try {
-      const body = document.body;
-      const readingContent = document.querySelector('#reading-mode .reading-content');
-      if (!(body && body.classList.contains('theme-explorer') && readingContent)) return 'plain';
-      if (readingContent.classList.contains('explorer-bg-wallpaper')) return 'wallpaper';
-      if (readingContent.classList.contains('explorer-bg-texture')) return 'texture';
-      return 'plain';
-    } catch (_) {
-      return 'plain';
-    }
-  }
-
-  function beginReadingEntryHold(mode) {
-    const readingModeEl = document.getElementById('reading-mode');
-    if (!readingModeEl) return { revealReady() {}, cancel() {} };
-    const kind = String(mode || '') === 'returning' ? 'returning' : 'opening';
-    let released = false;
-    let timer = 0;
-    try {
-      readingModeEl.classList.add('reading-restore-pending', 'reading-entry-concealed');
-      readingModeEl.classList.remove('reading-entry-hold-visible');
-      readingModeEl.setAttribute('data-restore-kind', kind);
-      readingModeEl.setAttribute('data-entry-bg-mode', detectReadingEntryThemeFamily());
-    } catch (_) {}
-    setReadingEntryStatus(kind);
-    timer = window.setTimeout(() => {
-      if (released) return;
-      try {
-        readingModeEl.classList.remove('reading-entry-concealed');
-        readingModeEl.classList.add('reading-entry-hold-visible');
-      } catch (_) {}
-    }, READING_ENTRY_HOLD_DELAY_MS);
-    const finish = () => {
-      if (released) return;
-      released = true;
-      try { if (timer) clearTimeout(timer); } catch (_) {}
-      timer = 0;
-      try {
-        readingModeEl.classList.remove('reading-entry-concealed', 'reading-entry-hold-visible', 'reading-restore-pending');
-        readingModeEl.removeAttribute('data-restore-kind');
-        readingModeEl.removeAttribute('data-entry-bg-mode');
-      } catch (_) {}
-    };
-    return { revealReady: finish, cancel: finish };
-  }
-
   async function localDeletedBookDelete(id) {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
@@ -3079,10 +3005,12 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   // page content while network calls are in flight.
   const pagesEl = document.getElementById('pages');
   const readingModeEl = document.getElementById('reading-mode');
-  let readingEntryHold = null;
   try {
     if (pagesEl) pagesEl.innerHTML = '';
-    readingEntryHold = beginReadingEntryHold('opening');
+    if (readingModeEl) {
+      readingModeEl.classList.add('reading-restore-pending');
+      readingModeEl.setAttribute('data-restore-kind', 'opening');
+    }
   } catch (_) {}
 
   // Fire-and-forget: the current reading target is safe in memory and will be
@@ -3120,7 +3048,6 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   const hasRestore = !!(restore && Number.isFinite(Number(restore.pageIndex)) && Number(restore.pageIndex) > 0);
   try {
     if (readingModeEl) readingModeEl.setAttribute('data-restore-kind', hasRestore ? 'returning' : 'opening');
-    setReadingEntryStatus(hasRestore ? 'returning' : 'opening');
   } catch (_) {}
 
   // Await the runtime-owned book load path. This resolves only after render()
@@ -3131,9 +3058,10 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   }
   try { await waitForNextPaint(2); } catch (_) {}
 
-  // Release the runtime-owned entry hold only when the reading surface is
-  // ready enough to reveal as one committed state for the active theme family.
-  try { if (readingEntryHold) readingEntryHold.revealReady(); } catch (_) {}
+  // Remove pending state and clean up the restore-kind attribute.
+  // The opacity transition on #pages produces a smooth fade-in from this point.
+  try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
+  try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
   try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}
   return true;
 };

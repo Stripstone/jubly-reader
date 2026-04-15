@@ -1401,44 +1401,27 @@ body.auth-hydrating #profile-page {
   }
 }
 
-/* Restore-pending overlay: keep pages hidden until runtime can reveal one
-   committed reading surface. Fast paths stay concealed briefly so no pending
-   flash is forced; slower paths fall back to one stable full-frame hold. */
+/* Restore-pending overlay: hide pages until restore position is known and applied,
+   but always present a visible neutral pending surface instead of a blank view. */
 #pages {
-  transition: opacity 0.14s ease;
-}
-#reading-mode .reading-entry-status {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 96px 24px 112px;
-  text-align: center;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: var(--rm-text-2, #64748b);
-  background: rgba(246, 243, 236, 0.985);
-  opacity: 0;
-  pointer-events: none;
-  z-index: 4;
   transition: opacity 0.14s ease;
 }
 #reading-mode.reading-restore-pending #pages {
   visibility: hidden;
   opacity: 0;
-  transition: none;
+  transition: none; /* suppress transition while hidden; runs on reveal */
 }
-#reading-mode.reading-restore-pending .page {
-  animation: none !important;
+#reading-mode.reading-restore-pending .reading-content::after {
+  content: 'Preparing reading view…';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  opacity: 0.6;
+  pointer-events: none;
 }
-#reading-mode.reading-restore-pending.reading-entry-concealed .reading-content {
-  visibility: hidden;
-}
-#reading-mode.reading-restore-pending.reading-entry-hold-visible .reading-content {
-  visibility: visible;
-}
-#reading-mode.reading-restore-pending.reading-entry-hold-visible .reading-entry-status {
-  opacity: 0.98;
+#reading-mode.reading-restore-pending[data-restore-kind="returning"] .reading-content::after {
+  content: 'Returning to your place…';
 }
