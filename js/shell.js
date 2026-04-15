@@ -629,8 +629,36 @@
     }
 
     async function shellSignOut() {
-        if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
-            await window.rcAuth.signOut();
+        const logoutBtn = document.querySelector('[onclick="shellSignOut()"]');
+        if (logoutBtn) logoutBtn.disabled = true;
+        try { window.rcInteraction && window.rcInteraction.pending('auth:signout', 'Signing out…'); } catch (_) {}
+        try {
+            if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
+                const result = await window.rcAuth.signOut();
+                if (result && result.ok === false) {
+                    if (logoutBtn) logoutBtn.disabled = false;
+                    try {
+                        window.rcInteraction && window.rcInteraction.error('auth:signout', 'We couldn\'t confirm sign-out yet.', {
+                            actions: [
+                                { label: 'Try again', onClick: shellSignOut },
+                                { label: 'Refresh', onClick: () => window.location.reload() },
+                            ],
+                        });
+                    } catch (_) {}
+                    return;
+                }
+            }
+            try { window.rcInteraction && window.rcInteraction.clear('auth:signout'); } catch (_) {}
+        } catch (_) {
+            if (logoutBtn) logoutBtn.disabled = false;
+            try {
+                window.rcInteraction && window.rcInteraction.error('auth:signout', 'We couldn\'t confirm sign-out yet.', {
+                    actions: [
+                        { label: 'Try again', onClick: shellSignOut },
+                        { label: 'Refresh', onClick: () => window.location.reload() },
+                    ],
+                });
+            } catch (_) {}
         }
     }
 
@@ -1530,7 +1558,13 @@
             ? window.rcUsage.getSnapshot()
             : { remaining: null, allowance: null, authoritative: false };
         const remaining = snapshot?.remaining != null ? Number(snapshot.remaining) : null;
-        valueEl.textContent = Number.isFinite(remaining) ? `${Math.max(0, remaining)} left today` : 'Usage';
+        if (Number.isFinite(remaining)) {
+            valueEl.textContent = `${Math.max(0, remaining)} left today`;
+        } else {
+            // authoritative: false means usage truth is still settling — do not
+            // show a believable number. Show neutral pending copy instead.
+            valueEl.textContent = snapshot?.authoritative === false ? 'Checking…' : 'Usage';
+        }
     }
 
     function renderProfileSurface() {
@@ -1705,9 +1739,12 @@
             setSettingsStatus('', 'success');
             const nextName = String(nameInput?.value || '').trim();
             if (!nextName) { setSettingsStatus('Username is required.', 'error'); return; }
+            const saveBtn = document.getElementById('profile-name-save-btn');
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
             const result = await (window.rcAuth && typeof window.rcAuth.updateDisplayName === 'function'
                 ? window.rcAuth.updateDisplayName(nextName)
                 : Promise.resolve({ error: { message: 'Profile editing is not available.' } }));
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
             if (result?.error) { setSettingsStatus(result.error.message || 'Unable to update username.', 'error'); return; }
             setNameEdit(false);
             syncShellAuthPresentation();
@@ -1719,9 +1756,12 @@
             e.preventDefault();
             setSettingsStatus('', 'success');
             const nextPassword = String(passwordInput?.value || '');
+            const saveBtn = document.getElementById('profile-password-save-btn');
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
             const result = await (window.rcAuth && typeof window.rcAuth.changePassword === 'function'
                 ? window.rcAuth.changePassword(nextPassword)
                 : Promise.resolve({ error: { message: 'Password changes are not available.' } }));
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Password'; }
             if (result?.error) { setSettingsStatus(result.error.message || 'Unable to change password.', 'error'); return; }
             setPasswordEdit(false);
             setSettingsStatus('Password updated.', 'success');

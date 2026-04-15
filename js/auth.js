@@ -148,9 +148,18 @@ window.rcAuth = (function () {
   }
 
   async function signOut() {
-    if (!_client) return;
-    try { await _client.auth.signOut(); } catch (_) {}
+    if (!_client) return { ok: true };
+    let signOutError = null;
+    try {
+      const result = await _client.auth.signOut();
+      if (result && result.error) signOutError = result.error;
+    } catch (e) {
+      signOutError = e;
+    }
     try { if (window.rcHelp && typeof window.rcHelp.shutdown === 'function') window.rcHelp.shutdown(); } catch (_) {}
+    return signOutError
+      ? { ok: false, error: String(signOutError.message || 'Sign-out failed.') }
+      : { ok: true };
   }
 
   async function updateDisplayName(displayName) {

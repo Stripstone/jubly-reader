@@ -134,12 +134,9 @@ window.rcBilling = (function () {
   }
 
   async function renderPricingUi() {
-    const config = await fetchPublicConfig();
-    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
-    const snapshot = await fetchRuntimeSnapshot();
-    const entitlement = snapshot?.meta?.entitlement || null;
-    const currentTier = normalizeRuntimeTier(entitlement?.tier || snapshot?.meta?.effectiveTier || snapshot?.policy?.tier || snapshot?.tier || 'basic');
-    const plans = config?.stripe?.plans || {};
+    // Grab elements before the async gap so we can show neutral pending state
+    // while config and runtime snapshot resolve. Never claim a plan until truth
+    // arrives — do not show fake Free/Pro/Premium labels during the fetch.
     const freeBtn = document.getElementById('pricing-free-btn');
     const proBtn = document.getElementById('pricing-pro-btn');
     const premiumBtn = document.getElementById('pricing-premium-btn');
@@ -147,6 +144,16 @@ window.rcBilling = (function () {
     const proInterval = document.getElementById('pricing-pro-interval');
     const premiumAmount = document.getElementById('pricing-premium-amount');
     const premiumInterval = document.getElementById('pricing-premium-interval');
+    [freeBtn, proBtn, premiumBtn].forEach((btn) => {
+      if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; btn.classList.add('opacity-60', 'cursor-not-allowed'); }
+    });
+
+    const config = await fetchPublicConfig();
+    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+    const snapshot = await fetchRuntimeSnapshot();
+    const entitlement = snapshot?.meta?.entitlement || null;
+    const currentTier = normalizeRuntimeTier(entitlement?.tier || snapshot?.meta?.effectiveTier || snapshot?.policy?.tier || snapshot?.tier || 'basic');
+    const plans = config?.stripe?.plans || {};
 
     if (proAmount) proAmount.textContent = plans?.pro?.amountLabel || 'Configured in Stripe';
     if (proInterval) proInterval.textContent = plans?.pro?.intervalLabel || '';
@@ -200,10 +207,21 @@ window.rcBilling = (function () {
     const billingState = document.getElementById('subscription-billing-state');
     const primaryBtn = document.getElementById('subscription-primary-btn');
     const secondaryBtn = document.getElementById('subscription-secondary-btn');
+
+    // Neutral pending while account truth is in flight
+    if (statusCopy) statusCopy.textContent = 'Checking your account…';
+    if (billingState) billingState.textContent = '—';
+    if (primaryBtn) primaryBtn.disabled = true;
+    if (secondaryBtn) secondaryBtn.disabled = true;
+
     const config = await fetchPublicConfig();
     const snapshot = await fetchRuntimeSnapshot();
     const entitlement = snapshot?.meta?.entitlement || null;
     const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+
+    // Truth has arrived — unlock buttons before populating settled state
+    if (primaryBtn) primaryBtn.disabled = false;
+    if (secondaryBtn) secondaryBtn.disabled = false;
 
     if (!signedIn) {
       if (statusCopy) statusCopy.textContent = 'Sign in to view your plan details and billing options.';
@@ -264,12 +282,37 @@ window.rcBilling = (function () {
       setMessage('billing-message', `Create an account to continue with ${planDisplayLabel(normalized)}.`, 'info');
       return;
     }
+
+    // Lock plan buttons immediately — do not let a second tap queue a second request
+    const proBtn = document.getElementById('pricing-pro-btn');
+    const premiumBtn = document.getElementById('pricing-premium-btn');
+    [proBtn, premiumBtn].forEach((btn) => {
+      if (btn) { btn.disabled = true; btn.classList.add('opacity-60', 'cursor-not-allowed'); }
+    });
+    try { window.rcInteraction && window.rcInteraction.pending('billing:checkout', 'Preparing checkout…'); } catch (_) {}
+
     try {
       const data = await authenticatedPost('/api/billing?action=checkout', { plan: normalized });
-      if (data?.url) window.location.href = data.url;
-    } catch (error) {
-      setMessage('pricing-message', error.message || 'Unable to start checkout.', 'error');
-      setMessage('billing-message', error.message || 'Unable to start checkout.', 'error');
+      if (data?.url) {
+        // Banner stays as 'Preparing checkout…' — page is about to navigate away
+        window.location.href = data.url;
+      } else {
+        [proBtn, premiumBtn].forEach((btn) => {
+          if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-not-allowed'); }
+        });
+        try { window.rcInteraction && window.rcInteraction.clear('billing:checkout'); } catch (_) {}
+      }
+    } catch (err) {
+      [proBtn, premiumBtn].forEach((btn) => {
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-not-allowed'); }
+      });
+      try {
+        window.rcInteraction && window.rcInteraction.error('billing:checkout', 'Checkout couldn\'t be opened right now.', {
+          actions: [{ label: 'Try again', onClick: () => startCheckout(plan) }],
+        });
+      } catch (_) {}
+      setMessage('pricing-message', err.message || 'Unable to start checkout.', 'error');
+      setMessage('billing-message', err.message || 'Unable to start checkout.', 'error');
     }
   }
 
@@ -279,11 +322,30 @@ window.rcBilling = (function () {
       if (typeof showSigninPane === 'function') showSigninPane();
       return;
     }
+
+    // Disable both subscription buttons immediately — portal open is one-shot
+    const primaryBtn = document.getElementById('subscription-primary-btn');
+    const secondaryBtn = document.getElementById('subscription-secondary-btn');
+    [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) btn.disabled = true; });
+    try { window.rcInteraction && window.rcInteraction.pending('billing:portal', 'Opening billing…'); } catch (_) {}
+
     try {
       const data = await authenticatedPost('/api/billing?action=portal', {});
-      if (data?.url) window.location.href = data.url;
-    } catch (error) {
-      setMessage('billing-message', error.message || 'Unable to open billing portal.', 'error');
+      if (data?.url) {
+        // Page is navigating away — banner stays as 'Opening billing…'
+        window.location.href = data.url;
+      } else {
+        [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) btn.disabled = false; });
+        try { window.rcInteraction && window.rcInteraction.clear('billing:portal'); } catch (_) {}
+      }
+    } catch (err) {
+      [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) btn.disabled = false; });
+      try {
+        window.rcInteraction && window.rcInteraction.error('billing:portal', 'Billing couldn\'t be opened right now.', {
+          actions: [{ label: 'Try again', onClick: openCustomerPortal }],
+        });
+      } catch (_) {}
+      setMessage('billing-message', err.message || 'Unable to open billing portal.', 'error');
     }
   }
 
