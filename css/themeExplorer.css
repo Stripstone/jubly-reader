@@ -58,7 +58,10 @@ body.theme-explorer.reading-active #reading-mode .reading-content::after {
   filter: brightness(0.84);
 }
 
+/* Temp overridden
 body.theme-explorer.reading-active #reading-mode .reading-content.explorer-bg-texture::before { opacity: 0.92; }
+*/
+body.theme-explorer.reading-active #reading-mode .reading-content.explorer-bg-texture::before { opacity: 0.07; background-image: linear-gradient(rgba(0, 0, 0, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 0, 0, 0.025) 1px, transparent 1px), radial-gradient(rgba(0, 0, 0, 0.035) 0.6px, transparent 0.8px); background-size: 12px 12px, 12px 12px, 7px 7px; background-position: 0 0, 0 0, 1px 2px; filter: none; }
 body.theme-explorer.reading-active #reading-mode .reading-content.explorer-bg-wallpaper::after { opacity: 0.95; }
 body.theme-explorer.reading-active #reading-mode .reading-content > :not(#fireCanvas) { position: relative; z-index: 2; }
 body.theme-explorer.reading-active:not(.explorer-embers-off) #fireCanvas { display: block !important; }
