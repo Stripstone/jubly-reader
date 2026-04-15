@@ -689,16 +689,16 @@
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
-        // Await the section's async work (e.g. refreshLibrary on dashboard) before
-        // releasing the boot hold, so the correct section is chosen before any
-        // visible shell surface appears.
-        // Race section settlement against a hard 500ms cap: the closeout is about
-        // wrong first paint, not widening into deeper runtime boot redesign.
+        // Start section work immediately under the boot hold so dashboard
+        // refresh begins right away, but do not force pending onto fast paths.
+        // Reveal once either the section settles or the anti-flash cap expires.
+        const sectionRevealWork = showSection(settledSection, { historyMode: 'replace' });
+        const bootRevealCapMs = 1000;
         try {
             await Promise.all([
                 Promise.race([
-                    showSection(settledSection, { historyMode: 'replace' }),
-                    new Promise(resolve => setTimeout(resolve, 500))
+                    sectionRevealWork,
+                    new Promise(resolve => setTimeout(resolve, bootRevealCapMs))
                 ]),
                 appearancePainted
             ]);
