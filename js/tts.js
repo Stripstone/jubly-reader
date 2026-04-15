@@ -53,6 +53,7 @@ const TTS_STATE = {
   browserExpectedEntryBlockIndex: -1,
 
   playbackBlockedReason: '',
+  lastSkipBlockedReason: '',
   pendingCloudSeekKey: null,
   pendingCloudSeekSessionId: 0,
   pendingCloudSeekBlockIndex: -1,
@@ -1260,11 +1261,12 @@ function computeSkipEligibility(delta) {
   if (!ctx) return { can: false, reason: 'no-active-or-paused-session' };
   const nextPage = ctx.pageIndex + (delta < 0 ? -1 : 1);
   const hasCrossPageTarget = typeof pages !== 'undefined' && !!pages && Number.isFinite(nextPage) && nextPage >= 0 && !!pages[nextPage];
-  if (ctx.blockCount <= 0) return { can: hasCrossPageTarget, reason: hasCrossPageTarget ? 'cross-page-target' : 'no-blocks-or-page-target' };
+  const skipBlockedSuffix = TTS_STATE.lastSkipBlockedReason ? ('|skip-suppressed-' + TTS_STATE.lastSkipBlockedReason) : '';
+  if (ctx.blockCount <= 0) return { can: hasCrossPageTarget, reason: (hasCrossPageTarget ? 'cross-page-target' : 'no-blocks-or-page-target') + skipBlockedSuffix };
   const targetBlock = ctx.blockIndex + (delta < 0 ? -1 : 1);
-  if (targetBlock >= 0 && targetBlock < ctx.blockCount) return { can: true, reason: 'in-page-target' };
-  if (targetBlock < 0) return { can: true, reason: 'restart-block-0' };
-  return { can: hasCrossPageTarget, reason: hasCrossPageTarget ? 'cross-page-target' : 'no-next-page-target' };
+  if (targetBlock >= 0 && targetBlock < ctx.blockCount) return { can: true, reason: 'in-page-target' + skipBlockedSuffix };
+  if (targetBlock < 0) return { can: true, reason: 'restart-block-0' + skipBlockedSuffix };
+  return { can: hasCrossPageTarget, reason: (hasCrossPageTarget ? 'cross-page-target' : 'no-next-page-target') + skipBlockedSuffix };
 }
 
 function getPlaybackControlEligibility() {
@@ -2191,6 +2193,8 @@ function ttsRestartCloudFromBlockStart(audio, key, sessionId, blockIdx, seekTime
 
 function ttsJumpSentence(delta) {
 
+  TTS_STATE.lastSkipBlockedReason = '';
+
   if (!TTS_STATE.activeKey) {
     ttsDiagPush('skip-block', { delta, resolved: 'no-active-key' });
     TTS_DEBUG.lastSkip = { resolved: 'no-active-key', delta };
@@ -2262,6 +2266,29 @@ function ttsJumpSentence(delta) {
       markProvenance: TTS_STATE.highlightMarksProvenance || 'unknown',
     });
 
+    // ── Estimated-marks gate ─────────────────────────────────────────────────
+    // Cloud seeks against estimated marks are not trustworthy audio entry
+    // boundaries. Suppress the seek and surface the reason so callers have
+    // a truthful skip eligibility signal rather than a silent misaligned jump.
+    if (TTS_STATE.highlightMarksProvenance === 'estimated') {
+      TTS_STATE.lastSkipBlockedReason = 'estimated-marks';
+      ttsDiagPush('cloud-seek-suppressed-estimated-marks', {
+        key,
+        delta,
+        sourcePage,
+        sourceBlock,
+        targetBlock: target,
+        seekTime,
+        rawTimeS,
+        markProvenance: 'estimated',
+        sessionId: TTS_STATE.activeSessionId,
+      });
+      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: sourceBlock, crossPage: false, moved: false, path: 'cloud-seek-suppressed-estimated-marks' };
+      TTS_DEBUG.lastSkip = skipResult;
+      ttsDiagPush('skip-block', skipResult);
+      return false;
+    }
+
     TTS_STATE.activeBlockIndex = target;
     ttsHighlightBlock(target);
     if (pausedForContract) {
@@ -2270,6 +2297,7 @@ function ttsJumpSentence(delta) {
     }
 
     if (!mediaSeekReady) {
+      TTS_STATE.lastSkipBlockedReason = '';
       queuePendingCloudSeek(key, TTS_STATE.activeSessionId, target, leadMs);
       const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek-deferred-not-ready', clippingProtection: leadMs > 0, leadMs, sessionId: TTS_STATE.activeSessionId };
       TTS_DEBUG.lastSkip = skipResult;
@@ -2286,6 +2314,7 @@ function ttsJumpSentence(delta) {
         moved = ttsRestartCloudFromBlockStart(audio, key, TTS_STATE.activeSessionId, target, seekTime, 'cloud-skip-restart');
       }
     } catch (_) {
+      TTS_STATE.lastSkipBlockedReason = '';
       queuePendingCloudSeek(key, TTS_STATE.activeSessionId, target, leadMs);
       const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek-deferred-after-error', clippingProtection: leadMs > 0, leadMs, sessionId: TTS_STATE.activeSessionId };
       TTS_DEBUG.lastSkip = skipResult;
@@ -2293,6 +2322,7 @@ function ttsJumpSentence(delta) {
       return true;
     }
 
+    TTS_STATE.lastSkipBlockedReason = '';
     const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved, path: pausedForContract ? 'cloud-seek-paused' : 'cloud-seek-restart-from-block-start', clippingProtection: leadMs > 0, leadMs, seekTime, blockTimeMs: Number(marks[target].time || 0), sessionId: TTS_STATE.activeSessionId };
     TTS_DEBUG.lastSkip = skipResult;
     ttsDiagPush('skip-block', skipResult);
