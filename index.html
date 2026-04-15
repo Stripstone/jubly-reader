@@ -926,6 +926,15 @@
         </div>
     </div>
 
+    <!-- READING INTRO HOLD
+         Universal cover shown at the start of every reading session.
+         Uses only the Plain/Default base color — Texture and Wallpaper load behind it.
+         Owned entirely by startReadingFromPreview() in js/library.js.
+         Never competes with ::before or ::after on .reading-content. -->
+    <div id="reading-intro-hold" aria-hidden="true">
+        <p id="reading-intro-message" class="reading-intro-message"></p>
+    </div>
+
     <!-- BOTTOM PLAYBACK BAR: moment controls — always visible -->
     <div class="reading-bottom-bar">
         <div class="reading-bottom-left">

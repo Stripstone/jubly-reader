@@ -1401,8 +1401,64 @@ body.auth-hydrating #profile-page {
   }
 }
 
-/* Restore-pending overlay: hide pages until restore position is known and applied,
-   but always present a visible neutral pending surface instead of a blank view. */
+/* =============================================================================
+   READING INTRO HOLD
+   Universal cover shown at the start of every reading session, for all themes
+   (Basic/Default and all Explorer variants — Plain, Texture, Wallpaper).
+   Uses only var(--rm-page-bg) — the Plain/Default base color for the active
+   theme. Texture and Wallpaper load behind it and never become the first phase.
+
+   Owned by: startReadingFromPreview() in js/library.js
+   Sits at z-index 20 — above reading content, below the fixed bars (z-index 30).
+   Does NOT use ::before or ::after. Does NOT compete with themeExplorer.css.
+
+   States (JS-driven class toggles on #reading-intro-hold):
+     .intro-hold-active         — hold is visible, covering the reading surface
+     .intro-hold-active
+     + .intro-hold-message-visible — message shown after 1000 ms if still loading
+     .intro-hold-fading         — opacity transitions to 0, then classes removed
+   ============================================================================= */
+#reading-intro-hold {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: var(--rm-page-bg, #f5f3ff);
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+#reading-intro-hold.intro-hold-active {
+  display: flex;
+}
+
+#reading-intro-hold.intro-hold-fading {
+  opacity: 0;
+}
+
+/* Message — appears on the hold after 1000 ms via JS if cards aren't ready yet.
+   Uses the same neutral text style as the former ::after message it replaces. */
+.reading-intro-message {
+  font-size: 15px;
+  color: var(--rm-text-2, #64748b);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+#reading-intro-hold.intro-hold-message-visible .reading-intro-message {
+  opacity: 0.65;
+}
+
+
+/* =============================================================================
+   RESTORE-PENDING — page card guard (defense in depth)
+   Keeps #pages hidden while startReadingFromPreview() is resolving, preventing
+   stale or partially-rendered cards from flashing under the intro hold.
+   The visible pending surface is now owned by #reading-intro-hold above.
+   ============================================================================= */
 #pages {
   transition: opacity 0.14s ease;
 }
@@ -1410,18 +1466,4 @@ body.auth-hydrating #profile-page {
   visibility: hidden;
   opacity: 0;
   transition: none; /* suppress transition while hidden; runs on reveal */
-}
-#reading-mode.reading-restore-pending .reading-content::after {
-  content: 'Preparing reading view…';
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  opacity: 0.6;
-  pointer-events: none;
-}
-#reading-mode.reading-restore-pending[data-restore-kind="returning"] .reading-content::after {
-  content: 'Returning to your place…';
 }

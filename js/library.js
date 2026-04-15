@@ -3001,6 +3001,23 @@ window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
   if (!bookId) return false;
 
+  // ── Intro hold ─────────────────────────────────────────────────────────────
+  // Activated synchronously before any await so the reading surface is covered
+  // from the very first frame. Texture and Wallpaper prepare behind it and
+  // never become the visible first phase. Released after cards are confirmed
+  // ready (after __rcLoadBook + waitForNextPaint). Message appears on the hold
+  // after 1000 ms if loading is still in progress.
+  const holdEl = document.getElementById('reading-intro-hold');
+  const holdMsgEl = document.getElementById('reading-intro-message');
+  let _holdMsgTimer = null;
+  try {
+    if (holdEl) {
+      holdEl.classList.remove('intro-hold-fading', 'intro-hold-message-visible');
+      holdEl.classList.add('intro-hold-active');
+    }
+  } catch (_) {}
+  // ───────────────────────────────────────────────────────────────────────────
+
   // MUST be synchronous — before any await — so reading mode never shows stale
   // page content while network calls are in flight.
   const pagesEl = document.getElementById('pages');
@@ -3050,6 +3067,15 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     if (readingModeEl) readingModeEl.setAttribute('data-restore-kind', hasRestore ? 'returning' : 'opening');
   } catch (_) {}
 
+  // Start the 1000 ms message timer now that we know if this is a fresh open or
+  // a return. If cards are ready before 1000 ms the timer is cleared and the
+  // message never appears. If not, the message fades in on the existing hold.
+  try {
+    const msgText = hasRestore ? 'Returning to your place\u2026' : 'Preparing reading view\u2026';
+    if (holdMsgEl) holdMsgEl.textContent = msgText;
+    if (holdEl) _holdMsgTimer = setTimeout(() => holdEl.classList.add('intro-hold-message-visible'), 1000);
+  } catch (_) {}
+
   // Await the runtime-owned book load path. This resolves only after render()
   // and applyPendingReadingRestore() have both completed, so #pages is already
   // scrolled to the correct position before reading-restore-pending is removed.
@@ -3058,8 +3084,25 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   }
   try { await waitForNextPaint(2); } catch (_) {}
 
-  // Remove pending state and clean up the restore-kind attribute.
-  // The opacity transition on #pages produces a smooth fade-in from this point.
+  // Cards are rendered and painted. Clear the message timer (fast load — message
+  // never needed), then release the hold and the page guard simultaneously so
+  // the reading surface and the hold cross-fade in a single motion.
+  if (_holdMsgTimer) { clearTimeout(_holdMsgTimer); _holdMsgTimer = null; }
+
+  // Fade out the hold. JS removes the active classes once the transition ends
+  // (with a 400 ms hard fallback in case transitionend does not fire).
+  try {
+    if (holdEl) {
+      holdEl.classList.remove('intro-hold-message-visible');
+      holdEl.classList.add('intro-hold-fading');
+      const releaseHold = () => holdEl.classList.remove('intro-hold-active', 'intro-hold-fading');
+      holdEl.addEventListener('transitionend', releaseHold, { once: true });
+      setTimeout(releaseHold, 400);
+    }
+  } catch (_) {}
+
+  // Remove restore-pending — triggers the #pages opacity fade-in (0.14 s),
+  // which runs simultaneously with the hold fade-out above.
   try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
   try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
   try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}
