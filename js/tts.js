@@ -60,6 +60,7 @@ const TTS_STATE = {
   cloudRestartRequestId: 0,
   cloudRestartInFlight: false,
 
+  highlightMarksProvenance: null,
   highlightPageKey: null,
   highlightPageEl: null,
   highlightOriginalHTML: null,
@@ -519,6 +520,7 @@ function splitIntoSentenceRanges(text) {
 
 function ttsClearSentenceHighlight() {
   if (TTS_STATE.highlightRAF) { cancelAnimationFrame(TTS_STATE.highlightRAF); TTS_STATE.highlightRAF = null; }
+  TTS_STATE.highlightMarksProvenance = null;
   if (TTS_STATE.highlightPageEl && TTS_STATE.highlightOriginalHTML != null) {
     TTS_STATE.highlightPageEl.innerHTML = TTS_STATE.highlightOriginalHTML;
     try {
@@ -589,6 +591,7 @@ function ttsMaybePrepareSentenceHighlight(key, rawText, marks) {
   TTS_STATE.highlightOriginalHTML = textEl.innerHTML;
   TTS_STATE.highlightMarks = spansMeta;
   TTS_STATE.highlightEnds = spansMeta.map((r, i) => i + 1 < spansMeta.length ? spansMeta[i + 1].time : Infinity);
+  TTS_STATE.highlightMarksProvenance = 'timed';
   textEl.innerHTML = spansHtml.join('');
   TTS_STATE.highlightSpans = Array.from(textEl.querySelectorAll('.tts-sentence'));
   try { const h = pageEl.querySelector('.hint-btn'); if (h) h.disabled = true; } catch (_) {}
@@ -632,6 +635,7 @@ function ttsPrepareEstimatedHighlight(key, rawText, audio) {
     });
     TTS_STATE.highlightMarks = m;
     TTS_STATE.highlightEnds = m.map((x, i) => i + 1 < m.length ? m[i + 1].time : Infinity);
+    TTS_STATE.highlightMarksProvenance = 'estimated';
   }
   buildTimings(60);
   let refined = false;
@@ -2147,7 +2151,7 @@ function ttsRestartCloudFromBlockStart(audio, key, sessionId, blockIdx, seekTime
       TTS_STATE.pausedBlockIndex = -1;
       TTS_STATE.pausedPageKey = null;
       ttsStartHighlightLoop(audio);
-      ttsDiagPush('cloud-restart-applied', { key, sessionId, requestId, targetBlock: target, seekTime, reason, ...extra });
+      ttsDiagPush('cloud-restart-applied', { key, sessionId, requestId, targetBlock: target, seekTime, reason, audioCurrentTimeMsAtUnmute: audio.currentTime * 1000, markProvenance: TTS_STATE.highlightMarksProvenance || 'unknown', ...extra });
       return true;
     }
     if (outcome === 'failed') {
@@ -2208,8 +2212,8 @@ function ttsJumpSentence(delta) {
     pausedBlockIndex: Number(TTS_STATE.pausedBlockIndex ?? -1),
     highlightBlockIndex: Number(TTS_STATE.activeBlockIndex ?? -1),
     audioCurrentTimeMs: TTS_STATE.audio ? TTS_STATE.audio.currentTime * 1000 : null,
-    committedTarget: (TTS_STATE.postSeekMinBlock ?? -1) >= 0 ? TTS_STATE.postSeekMinBlock : null,
     activeBlockMarkTimeMs: (marks && Number.isFinite(TTS_STATE.activeBlockIndex) && TTS_STATE.activeBlockIndex >= 0 && marks[TTS_STATE.activeBlockIndex]) ? marks[TTS_STATE.activeBlockIndex].time : null,
+    markProvenance: TTS_STATE.highlightMarksProvenance || 'unknown',
     hasAudio: !!TTS_STATE.audio,
     hasBrowserSpeakFromBlock: !!TTS_STATE.browserSpeakFromBlock,
     blockCount,
@@ -2253,7 +2257,9 @@ function ttsJumpSentence(delta) {
       rangeStart: targetPreview?.start ?? -1,
       rangeEnd: targetPreview?.end ?? -1,
       seekTime,
+      rawTimeS,
       blockTimeMs: Number(marks[target].time || 0),
+      markProvenance: TTS_STATE.highlightMarksProvenance || 'unknown',
     });
 
     TTS_STATE.activeBlockIndex = target;
