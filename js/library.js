@@ -189,6 +189,19 @@
     return task;
   }
 
+  function setButtonBusy(btn, busy, busyLabel) {
+    if (!btn) return;
+    if (busy) {
+      if (!btn.dataset.idleLabel) btn.dataset.idleLabel = btn.textContent || '';
+      btn.disabled = true;
+      if (busyLabel) btn.textContent = busyLabel;
+      return;
+    }
+    btn.textContent = btn.dataset.idleLabel || btn.textContent || '';
+    delete btn.dataset.idleLabel;
+    btn.disabled = false;
+  }
+
   function waitForNextPaint(count = 2) {
     const frames = Math.max(1, Number(count) || 1);
     return new Promise((resolve) => {
@@ -2640,12 +2653,14 @@
 
 This removes them from Deleted Files and frees the device storage.`);
         if (!ok) return;
+        setButtonBusy(deleteAll, true, 'Deleting…');
         try {
           await permanentlyDeleteAllLocalBooks(deleted.map((entry) => entry.id));
           emitDeletedChanged();
           await renderDeletedCount();
           renderDeleted();
         } catch (_) {
+          setButtonBusy(deleteAll, false);
           alert('Delete all failed.');
         }
       });
@@ -2676,6 +2691,7 @@ This removes them from Deleted Files and frees the device storage.`);
           restore.type = 'button';
           restore.textContent = 'Restore';
           restore.addEventListener('click', async () => {
+            setButtonBusy(restore, true, 'Restoring…');
             try {
               await restoreDeletedLocalBook(b.id);
               await refreshBookSelect();
@@ -2684,6 +2700,7 @@ This removes them from Deleted Files and frees the device storage.`);
               await renderDeletedCount();
               renderDeleted();
             } catch (_) {
+              setButtonBusy(restore, false);
               alert('Restore failed.');
             }
           });

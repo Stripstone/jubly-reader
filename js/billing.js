@@ -39,7 +39,11 @@ window.rcBilling = (function () {
 
   async function authenticatedPost(url, body) {
     const token = getAccessToken();
-    if (!token) throw new Error('Sign in required.');
+    if (!token) {
+      const err = new Error('Sign in required.');
+      err.code = 'auth_required';
+      throw err;
+    }
     const resp = await fetch(url, {
       method: 'POST',
       headers: {
@@ -50,8 +54,19 @@ window.rcBilling = (function () {
       cache: 'no-store',
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data?.error || `Request failed (${resp.status})`);
+    if (!resp.ok) {
+      const err = new Error(data?.error || `Request failed (${resp.status})`);
+      if (resp.status === 401 || resp.status === 403) err.code = 'auth_required';
+      throw err;
+    }
     return data;
+  }
+
+  function isAuthRequiredError(error) {
+    const code = String(error && error.code || '').trim().toLowerCase();
+    if (code === 'auth_required') return true;
+    const msg = String(error && error.message || error || '').trim().toLowerCase();
+    return msg === 'sign in required.' || msg === 'sign in required';
   }
 
   function syncPlanIdQuery(plan) {
@@ -131,6 +146,21 @@ window.rcBilling = (function () {
     button.onclick = onclick;
     button.classList.toggle('opacity-60', !!disabled);
     button.classList.toggle('cursor-not-allowed', !!disabled);
+  }
+
+  function setButtonBusy(button, busyLabel) {
+    if (!button) return;
+    if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent || '';
+    button.disabled = true;
+    button.classList.add('opacity-60', 'cursor-not-allowed');
+    if (busyLabel) button.textContent = busyLabel;
+  }
+
+  function clearButtonBusy(button) {
+    if (!button) return;
+    if (button.dataset.idleLabel) button.textContent = button.dataset.idleLabel;
+    delete button.dataset.idleLabel;
+    button.classList.remove('opacity-60', 'cursor-not-allowed');
   }
 
   async function renderPricingUi() {
@@ -289,6 +319,8 @@ window.rcBilling = (function () {
     [proBtn, premiumBtn].forEach((btn) => {
       if (btn) { btn.disabled = true; btn.classList.add('opacity-60', 'cursor-not-allowed'); }
     });
+    const clickedBtn = normalized === 'premium' ? premiumBtn : proBtn;
+    setButtonBusy(clickedBtn, 'Preparing…');
     try { window.rcInteraction && window.rcInteraction.pending('billing:checkout', 'Preparing checkout…'); } catch (_) {}
 
     try {
@@ -298,28 +330,38 @@ window.rcBilling = (function () {
         window.location.href = data.url;
       } else {
         [proBtn, premiumBtn].forEach((btn) => {
-          if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-not-allowed'); }
+          if (btn) { clearButtonBusy(btn); btn.disabled = false; }
         });
         try { window.rcInteraction && window.rcInteraction.clear('billing:checkout'); } catch (_) {}
       }
     } catch (err) {
       [proBtn, premiumBtn].forEach((btn) => {
-        if (btn) { btn.disabled = false; btn.classList.remove('opacity-60', 'cursor-not-allowed'); }
+        if (btn) { clearButtonBusy(btn); btn.disabled = false; }
       });
       try {
-        window.rcInteraction && window.rcInteraction.error('billing:checkout', 'Checkout couldn\'t be opened right now.', {
-          actions: [{ label: 'Try again', onClick: () => startCheckout(plan) }],
-        });
+        const actions = window.rcInteraction && window.rcInteraction.actions
+          ? (isAuthRequiredError(err)
+              ? [window.rcInteraction.actions.openLogin()]
+              : [window.rcInteraction.actions.retry(() => startCheckout(plan))])
+          : [];
+        window.rcInteraction && window.rcInteraction.error(
+          'billing:checkout',
+          isAuthRequiredError(err) ? 'Sign in to continue with checkout.' : 'Checkout couldn\'t be opened right now.',
+          { actions }
+        );
       } catch (_) {}
-      setMessage('pricing-message', err.message || 'Unable to start checkout.', 'error');
-      setMessage('billing-message', err.message || 'Unable to start checkout.', 'error');
+      setMessage('pricing-message', isAuthRequiredError(err) ? 'Sign in to continue with checkout.' : (err.message || 'Unable to start checkout.'), 'error');
+      setMessage('billing-message', isAuthRequiredError(err) ? 'Sign in to continue with checkout.' : (err.message || 'Unable to start checkout.'), 'error');
     }
   }
 
   async function openCustomerPortal() {
     if (!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn())) {
       setMessage('billing-message', 'Sign in to manage billing.', 'info');
-      if (typeof showSigninPane === 'function') showSigninPane();
+      try {
+        const actions = window.rcInteraction && window.rcInteraction.actions ? [window.rcInteraction.actions.openLogin()] : [];
+        window.rcInteraction && window.rcInteraction.error('billing:portal', 'Sign in to manage billing.', { actions });
+      } catch (_) {}
       return;
     }
 
@@ -327,6 +369,7 @@ window.rcBilling = (function () {
     const primaryBtn = document.getElementById('subscription-primary-btn');
     const secondaryBtn = document.getElementById('subscription-secondary-btn');
     [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) btn.disabled = true; });
+    setButtonBusy(secondaryBtn, 'Opening…');
     try { window.rcInteraction && window.rcInteraction.pending('billing:portal', 'Opening billing…'); } catch (_) {}
 
     try {
@@ -335,21 +378,28 @@ window.rcBilling = (function () {
         // Page is navigating away — banner stays as 'Opening billing…'
         window.location.href = data.url;
       } else {
-        [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) btn.disabled = false; });
+        [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) { clearButtonBusy(btn); btn.disabled = false; } });
         try { window.rcInteraction && window.rcInteraction.clear('billing:portal'); } catch (_) {}
       }
     } catch (err) {
-      [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) btn.disabled = false; });
+      [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) { clearButtonBusy(btn); btn.disabled = false; } });
       try {
-        window.rcInteraction && window.rcInteraction.error('billing:portal', 'Billing couldn\'t be opened right now.', {
-          actions: [{ label: 'Try again', onClick: openCustomerPortal }],
-        });
+        const actions = window.rcInteraction && window.rcInteraction.actions
+          ? (isAuthRequiredError(err)
+              ? [window.rcInteraction.actions.openLogin()]
+              : [window.rcInteraction.actions.retry(openCustomerPortal)])
+          : [];
+        window.rcInteraction && window.rcInteraction.error(
+          'billing:portal',
+          isAuthRequiredError(err) ? 'Sign in to manage billing.' : 'Billing couldn\'t be opened right now.',
+          { actions }
+        );
       } catch (_) {}
-      setMessage('billing-message', err.message || 'Unable to open billing portal.', 'error');
+      setMessage('billing-message', isAuthRequiredError(err) ? 'Sign in to manage billing.' : (err.message || 'Unable to open billing portal.'), 'error');
     }
   }
 
-  function handleQueryFeedback() {
+  async function handleQueryFeedback() {
     try {
       const url = new URL(window.location.href);
       const checkout = url.searchParams.get('checkout');
@@ -358,21 +408,30 @@ window.rcBilling = (function () {
         clearPendingPlan();
         setMessage('pricing-message', 'Checkout completed. Refreshing your account access…', 'success');
         setMessage('billing-message', 'Checkout completed. Refreshing your account access…', 'success');
-        refreshRuntimeFromAccount();
+        try { window.rcInteraction && window.rcInteraction.pending('billing:return', 'Updating your plan…'); } catch (_) {}
+        await refreshRuntimeFromAccount();
+        try { window.rcInteraction && window.rcInteraction.clear('billing:return'); } catch (_) {}
       } else if (checkout === 'cancel') {
         clearPendingPlan();
       }
       if (portal === 'return') {
         clearPendingPlan();
         setMessage('billing-message', 'Returned from billing portal. Refreshing your account access…', 'success');
-        refreshRuntimeFromAccount();
+        try { window.rcInteraction && window.rcInteraction.pending('billing:return', 'Refreshing billing status…'); } catch (_) {}
+        await refreshRuntimeFromAccount();
+        try { window.rcInteraction && window.rcInteraction.clear('billing:return'); } catch (_) {}
       }
       if (checkout || portal) {
         url.searchParams.delete('checkout');
         url.searchParams.delete('portal');
         window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
       }
-    } catch (_) {}
+    } catch (_) {
+      try {
+        const actions = window.rcInteraction && window.rcInteraction.actions ? [window.rcInteraction.actions.refresh()] : [];
+        window.rcInteraction && window.rcInteraction.error('billing:return', 'We couldn\'t confirm your billing update yet.', { actions });
+      } catch (_) {}
+    }
   }
 
   async function handleAuthChanged(e) {

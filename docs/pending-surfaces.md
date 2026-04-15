@@ -1,7 +1,22 @@
 # Pending State Surface Catalog
 
 Every user-touchable surface that pends, loads, or auths something.
-Checked = banner / pending state wired. Unchecked = still needs it.
+
+Status meanings:
+- ✅ wired now
+- ◐ wired, but intentionally inline/local rather than banner-only
+- — intentionally no routine pending surface; keep immediate behavior and surface only real failure
+
+Error action outcomes (standardized in this pass):
+- `Try again` = rerun the same user action without a page reload
+- `Refresh` = reload the page and re-request app-level truth
+- `Open login` = open the login surface when auth is missing or expired
+- `Dismiss` = close an informational or recoverable error with no immediate retry path
+
+Notes:
+- Recoverable error banners now use only these action labels.
+- If a caller does not supply a recovery action, the banner falls back to `Dismiss`.
+- Blocking errors still suppress dismiss actions and keep the action locked until the owner resolves them.
 
 ---
 
@@ -9,10 +24,10 @@ Checked = banner / pending state wired. Unchecked = still needs it.
 
 | Surface | What it does | Status |
 |---|---|---|
-| Login page → **Sign In** button | Supabase signIn | ✅ Disables to `Please wait…` during await |
-| Login page → **Create Account** button | Supabase signUp | ✅ Disables to `Please wait…` during await |
-| Sidebar → **Logout** button | Supabase signOut | ✅ Banner: `Signing out…` → error with Try again / Refresh |
-| App cold load (no button) | Session restore on boot | ☐ Boot scrim exists — no banner if session restore stalls or fails |
+| Login page → **Sign In** button | Supabase signIn | ✅ Inline button state: `Please wait…` during await |
+| Login page → **Create Account** button | Supabase signUp | ✅ Inline button state: `Please wait…` during await |
+| Sidebar → **Logout** button | Supabase signOut | ✅ Banner: `Signing out…` → recoverable error with standardized actions `Try again` / `Refresh` |
+| App cold load (no button) | Session restore on boot | ✅ Delayed boot-scrim copy: `Checking your account…` if auth settle takes long |
 
 ---
 
@@ -20,9 +35,10 @@ Checked = banner / pending state wired. Unchecked = still needs it.
 
 | Surface | What it does | Status |
 |---|---|---|
-| Profile → Account → **Save** (name edit) | `updateDisplayName` | ✅ Disables to `Saving…` during await |
-| Profile → Account → **Save Password** | `changePassword` | ✅ Disables to `Saving…` during await |
-| Profile → **Open Support Chat** button | Intercom `openChat()` | ☐ No pending state while widget loads |
+| Profile → Account → **Save** (name edit) | `updateDisplayName` | ✅ Inline button state: `Saving…` during await |
+| Profile → Account → **Save Password** | `changePassword` | ✅ Inline button state: `Saving…` during await |
+| Profile → **Start Chat** button | Intercom `openChat()` | ✅ Inline button state: `Opening…` while widget loads; failure falls back to `Dismiss` |
+| Profile → **Share your thoughts** link | Intercom `openFeedback()` | ✅ Inline text swap: `Opening…` while widget loads; failure falls back to `Dismiss` |
 
 ---
 
@@ -30,11 +46,12 @@ Checked = banner / pending state wired. Unchecked = still needs it.
 
 | Surface | What it does | Status |
 |---|---|---|
-| Pricing modal → **Free / Choose Pro / Choose Premium** buttons | `fetchPublicConfig` + `fetchRuntimeSnapshot` | ✅ Disable to `Loading…` while config resolves |
-| Profile → Subscription tab (renders on open) | `fetchRuntimeSnapshot` | ✅ Shows `Checking your account…` / `—` while in flight |
-| Pricing modal → **Choose Pro / Choose Premium** (signed in) | `POST /api/billing?action=checkout` | ✅ Banner: `Preparing checkout…` → error with Try again |
-| Profile → Subscription → **Manage Billing** button | `POST /api/billing?action=portal` | ✅ Banner: `Opening billing…` → error with Try again |
-| App returns from Stripe checkout (no button) | Entitlement re-hydration after redirect | ☐ `?checkout=success` triggers policy refresh — no banner while plan truth settles |
+| Pricing modal → **Free / Choose Pro / Choose Premium** buttons | `fetchPublicConfig` + `fetchRuntimeSnapshot` | ✅ Neutral inline pending: buttons disable to `Loading…` while config resolves |
+| Profile → Subscription tab (renders on open) | `fetchRuntimeSnapshot` | ✅ Inline copy: `Checking your account…` / `—` while in flight |
+| Pricing modal → **Choose Pro / Choose Premium** (signed in) | `POST /api/billing?action=checkout` | ✅ Inline clicked-button state: `Preparing…` + banner: `Preparing checkout…`; error resolves to `Try again` or `Open login` if auth expired |
+| Profile → Subscription → **Manage Billing** button | `POST /api/billing?action=portal` | ✅ Inline clicked-button state: `Opening…` + banner: `Opening billing…`; error resolves to `Try again` or `Open login` if auth expired |
+| App returns from Stripe checkout (no button) | Entitlement re-hydration after redirect | ✅ Banner: `Updating your plan…` while policy truth settles; failure resolves to `Refresh` |
+| App returns from billing portal (no button) | Billing-status re-hydration after redirect | ✅ Banner: `Refreshing billing status…` while policy truth settles; failure resolves to `Refresh` |
 
 ---
 
@@ -42,7 +59,7 @@ Checked = banner / pending state wired. Unchecked = still needs it.
 
 | Surface | What it does | Status |
 |---|---|---|
-| Nav → **Usage pill** (renders on auth) | Usage snapshot hydration | ✅ Shows `Checking…` when truth is not yet authoritative |
+| Nav → **Usage pill** (renders on auth) | Usage snapshot hydration | ✅ Inline neutral pending: `Checking…` until truth is authoritative |
 
 ---
 
@@ -50,11 +67,11 @@ Checked = banner / pending state wired. Unchecked = still needs it.
 
 | Surface | What it does | Status |
 |---|---|---|
-| Importer → **Scan Contents** button | EPUB parse via JSZip | ☐ Button disables (pre-existing) — no banner if stall or parse failure |
-| Importer → **Import** button (post-scan) | `POST /api/content?action=page-break` then IndexedDB write | ☐ Progress bar exists for page creation — page-break server call has no step indicator |
-| Importer → **Import** button (non-EPUB file) | Upload → FreeConvert → poll → fetch EPUB → parse | ☐ Four-step async chain — no per-step banner |
-| Importer → **Import Text** button | Markdown chapter parse + IndexedDB write | ☐ No pending state during parse or write |
-| Importer opens (no button) | `GET /api/app?kind=import-capacity` | ☐ Buttons lock via `_capacityVerified` flag — no copy explaining why they are locked |
+| Importer → **Scan Contents** button | EPUB parse via JSZip | ✅ Inline button state: `Scanning…` + existing inline step text such as `Reading book…` |
+| Importer → **Import** button (post-scan) | `POST /api/content?action=page-break` then IndexedDB write | ✅ Inline progress stage now includes explicit page-builder step before save |
+| Importer → **Import** button (non-EPUB file) | Upload → FreeConvert → poll → fetch EPUB → parse | ✅ Existing inline multi-step copy retained (`Preparing upload…`, `Uploading…`, `Converting…`, `Reading book…`) |
+| Importer → **Import Text** button | Markdown chapter parse + IndexedDB write | ✅ Inline button state: `Importing…` + progress stage appears before page-break await |
+| Importer opens (no button) | `GET /api/app?kind=import-capacity` | ✅ Inline copy while actions are locked: `Checking import availability…` |
 
 ---
 
@@ -62,9 +79,11 @@ Checked = banner / pending state wired. Unchecked = still needs it.
 
 | Surface | What it does | Status |
 |---|---|---|
-| Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ☐ `setLibrarySurfaceState('pending')` exists — no banner if hydration stalls |
-| Library modal → **Delete** book button | `syncRemoteLibraryItemState` | ☐ No button disable or feedback during delete |
-| Deleted files modal → **Restore** / **Purge** buttons | `syncRemoteLibraryItemState` | ☐ No button disable or feedback during operation |
+| Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ✅ In-surface pending remains the primary seam; delayed banner appears only if hydration noticeably stalls |
+| Library modal → **Delete** book button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
+| Deleted files modal → **Restore** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Restoring…` on the clicked row |
+| Deleted files modal → **Delete** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
+| Deleted files modal → **Delete All** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` while batch delete runs |
 
 ---
 
@@ -72,37 +91,41 @@ Checked = banner / pending state wired. Unchecked = still needs it.
 
 | Surface | What it does | Status |
 |---|---|---|
-| Reading mode → **Play** button | Cloud TTS `POST /api/ai?action=tts` | ☐ No pending state while audio fetch is in flight |
-| Reading mode → **Skip forward / back** buttons | Runtime route decision | ☐ Controls react immediately — if runtime loses truth, no explanation shown |
+| Reading mode → **Play** / `Read page` cloud start | Cloud TTS `POST /api/ai?action=tts` | ✅ No routine pending banner; preserve normal countdown/flow. Surface only real playback errors with `Try again`. Transient cloud/server transport failures must stop cleanly and leave Play immediately retryable. |
+| Reading mode → **Skip forward / back** buttons | Runtime route decision | — Intentionally no routine pending state; keep immediate response and surface only real failure |
 
 ---
 
-## Settings (durable sync)
+## Settings / persistence
 
-These surfaces use local projection — the control reacts instantly — so the only
-failure case is a deferred sync write error. A single shared save-failure path
-is likely sufficient rather than per-control banners.
+These surfaces use immediate local projection by design. The control should react right away.
+Pending UI should not be added to every control.
 
-| Surface | What it does | Status |
+| Surface group | What it does | Status |
 |---|---|---|
-| Reading settings → **Voice** select | Queued to durable sync | ☐ No save confirmation |
-| Reading settings → **Autoplay** toggle | Queued to durable sync | ☐ No save confirmation |
-| Reading settings → **Light / Dark** appearance buttons | `setAppAppearance()` → sync | ☐ No save confirmation |
-| Explorer → **Font / Accent / Background / Music** controls | `explorerSettingChanged()` → sync | ☐ No save confirmation |
-| Reading settings → **Reading theme** swatches | `setTheme()` → sync | ☐ No save confirmation |
+| Durable synced settings (voice, volume, autoplay, durable theme/font/daily-goal paths) | Queued to durable sync | ✅ Shared failure seam only: banner on sync error — `Your changes weren’t saved yet.` → `Try again` |
+| Local-only appearance and Explorer cosmetics that are not durable truth | Local projection | — No routine pending banner |
 
 ---
 
 ## Summary
 
-| Group | Wired | Remaining |
+| Group | Wired / intentional | Remaining follow-up |
 |---|---|---|
-| Auth | 3 | 1 |
-| Account / Profile | 2 | 1 |
-| Billing & Subscription | 4 | 1 |
+| Auth | 4 | 0 |
+| Account / Profile | 4 | 0 |
+| Billing & Subscription | 6 | 0 |
 | Usage | 1 | 0 |
-| Importer | 0 | 5 |
-| Library | 0 | 3 |
-| Reading / TTS | 0 | 2 |
-| Settings | 0 | 5 |
-| **Total** | **10** | **18** |
+| Importer | 5 | 0 |
+| Library | 5 | 0 |
+| Reading / TTS | 1 wired, 1 intentionally immediate | 0 |
+| Settings / persistence | 1 wired, 1 intentionally immediate | 0 |
+| **Total surfaces covered** | **27** | **0 in this bounded pass** |
+
+## Notes locked by this pass
+
+- Button-owned waits prefer inline busy states before any global banner.
+- App-level or cross-surface truth settles may use the bottom interaction banner.
+- Skip controls remain immediate; adding routine pending there would mask a deeper runtime issue.
+- Settings stay optimistic/local first; the shared save-failure seam is enough for this pass.
+- Recoverable error banners now standardize to `Try again`, `Refresh`, `Open login`, or `Dismiss`.

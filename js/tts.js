@@ -382,7 +382,11 @@ function isBrowserStaleEntryBlock(blockIdx) {
 
 function isRecoverablePlaybackFailure(err) {
   const msg = String(err && err.message ? err.message : err || '');
-  return /audio playback failed|notallowederror|interrupted|notsupportederror|mediaerror/i.test(msg);
+  // Recoverable failures should surface clearly but must not permanently lock
+  // playback controls. In particular, transient cloud/server transport issues
+  // (for example websocket 1006 / unable-to-contact-server) should leave Play
+  // immediately retryable after the failed session is cleaned up.
+  return /audio playback failed|notallowederror|interrupted|notsupportederror|mediaerror|unable to contact server|statuscode:\s*1006|failed to fetch|networkerror|network request failed|timeout|timed out|service unavailable|bad gateway|gateway timeout|tts request failed \(5\d\d\)|server error/i.test(msg);
 }
 
 function isRecoverableBrowserUtteranceError(evt) {
@@ -2039,6 +2043,10 @@ async function cloudFetchUrl(text, opts = {}) {
   return { url: data.url, sentenceMarks: Array.isArray(data.sentenceMarks) ? data.sentenceMarks : null, capability };
 }
 
+function clearTtsStartupBanner() {
+  try { window.rcInteraction && window.rcInteraction.clear('tts:start'); } catch (_) {}
+}
+
 async function ttsSpeakQueue(key, parts) {
   const routeInfo = getPreferredTtsRouteInfo();
   TTS_DEBUG.lastRouteDecision = routeInfo;
@@ -2142,7 +2150,10 @@ async function ttsSpeakQueue(key, parts) {
         try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
         audio.onended = () => { ttsClearSentenceHighlight(); resolve(); };
         audio.onerror = () => reject(new Error('Audio playback failed'));
-        audio.play().then(() => applyPending('play-start')).catch(reject);
+        audio.play().then(() => {
+          clearTtsStartupBanner();
+          applyPending('play-start');
+        }).catch(reject);
       });
 
       if (TTS_STATE.activeSessionId !== sessionId) return;
@@ -2156,9 +2167,11 @@ async function ttsSpeakQueue(key, parts) {
       const pageIndex = _cp ? _cp.pageIndex : -1;
       if (Number.isFinite(pageIndex) && pageIndex >= 0) { ttsKeepWarmForAutoplay(); ttsAutoplayScheduleNext({ pageIndex, key, reason: 'page-complete' }); }
     }
+    clearTtsStartupBanner();
     ttsDiagPush('speak-action', { action: 'completed', route: 'cloud', key, before, after: ttsBlockSnapshot() });
 
   } catch (err) {
+    clearTtsStartupBanner();
     if (TTS_STATE.activeSessionId !== sessionId) return;
     if (err && (err.name === 'AbortError' || String(err).includes('aborted'))) return;
     const ri = getPreferredTtsRouteInfo();
@@ -2168,8 +2181,19 @@ async function ttsSpeakQueue(key, parts) {
     TTS_DEBUG.lastError = { at: new Date().toISOString(), path: 'cloud', key, message: msg, recoverable };
     ttsDiagPush('cloud-playback-failed', { key, message: msg, route: ri, recoverable });
     console.warn('Cloud TTS unavailable; keeping browser fallback disabled for predictable voice behavior:', err);
+    try {
+      const actions = window.rcInteraction && window.rcInteraction.actions
+        ? [window.rcInteraction.actions.retry(() => { try { if (typeof window.startFocusedPageTts === 'function') window.startFocusedPageTts(); } catch (_) {} })]
+        : [];
+      window.rcInteraction && window.rcInteraction.error('tts:start', 'Playback couldn\'t start.', { actions });
+    } catch (_) {}
     ttsStop();
-    if (recoverable) TTS_STATE.playbackBlockedReason = '';
+    if (recoverable) {
+      // Keep explicit cloud selection intact, but do not treat transient cloud
+      // transport/server failure as a lasting capability block. The user should
+      // be able to press Play again immediately after the failed session stops.
+      TTS_STATE.playbackBlockedReason = '';
+    }
     TTS_DEBUG.lastResolvedPath = ri.selected.explicitCloud ? 'cloud-failure-explicit' : 'cloud-failure';
     return;
   }

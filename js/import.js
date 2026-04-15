@@ -222,6 +222,18 @@ async function requestServerPageBreak(payload) {
       if (textImportBtn) textImportBtn.disabled = locked || !(textBodyInput && String(textBodyInput.value || '').trim());
     }
 
+    function _setButtonBusy(btn, busy, busyLabel, idleLabel) {
+      if (!btn) return;
+      if (busy) {
+        if (!btn.dataset.idleLabel) btn.dataset.idleLabel = idleLabel || btn.textContent || '';
+        btn.disabled = true;
+        if (busyLabel) btn.textContent = busyLabel;
+        return;
+      }
+      btn.textContent = btn.dataset.idleLabel || idleLabel || btn.textContent || '';
+      delete btn.dataset.idleLabel;
+    }
+
     function getSelectedFileStatus(fileRef = _file) {
       if (!fileRef) return '';
       const ext = (String(fileRef.name || '').match(/\.([^.]+)$/i) || [])[1]?.toLowerCase() || '';
@@ -230,6 +242,10 @@ async function requestServerPageBreak(payload) {
     }
 
     function syncIdleStatus(snapshot = null) {
+      if (!_capacityVerified) {
+        setStatus('Checking import availability…');
+        return;
+      }
       if (_inputMode === 'file' && _file) {
         setStatus(getSelectedFileStatus(_file));
         return;
@@ -311,15 +327,17 @@ async function requestServerPageBreak(payload) {
       try { document.body.classList.remove('import-drop-pending'); } catch (_) {}
       guardImportCapacity().then(guard => {
         if (modal.style.display === 'none') return;
-        syncIdleStatus(guard.snapshot);
         if (!guard.ok) {
+          syncIdleStatus(guard.snapshot);
           resetImporterState({ keepModalOpen: false });
         } else {
           _capacityVerified = true;
+          syncIdleStatus(guard.snapshot);
           _setActionButtonsLocked(false);
         }
       }).catch(() => {
         _capacityVerified = true;
+        syncIdleStatus(localSnapshot);
         _setActionButtonsLocked(false);
       });
       return true;
@@ -373,7 +391,10 @@ async function requestServerPageBreak(payload) {
       if (!textImportBtn) return;
       const hasText = !!(textBodyInput && String(textBodyInput.value || '').trim());
       textImportBtn.disabled = !hasText;
-      if (_inputMode === 'text') setStatus(hasText ? 'Text will be split into pages using the normal importer page-breaking behavior.' : 'Paste text to import it as a book.');
+      if (_inputMode === 'text') {
+        if (!_capacityVerified) setStatus('Checking import availability…');
+        else setStatus(hasText ? 'Text will be split into pages using the normal importer page-breaking behavior.' : 'Paste text to import it as a book.');
+      }
     }
 
     function generateLocalImportId(prefix = 'upl') {
@@ -397,12 +418,19 @@ async function requestServerPageBreak(payload) {
       const raw = String(textBodyInput && textBodyInput.value || '').trim();
       if (!raw) return;
       _importInProgress = true;
-      if (textImportBtn) textImportBtn.disabled = true;
+      if (textImportBtn) {
+        _setButtonBusy(textImportBtn, true, 'Importing…', 'Import Text');
+        textImportBtn.disabled = true;
+      }
 
       try {
         const guard = await guardImportCapacity();
         syncImportEntryState(guard.snapshot);
         if (!guard.ok) return;
+
+        showStage('progress');
+        doneBtn.style.display = 'none';
+        setProgress(12, 'Preparing text import', 'Sending text to the page builder');
 
         const pageBreak = await requestServerPageBreak({
           kind: 'text',
@@ -417,8 +445,6 @@ async function requestServerPageBreak(payload) {
           return;
         }
 
-        showStage('progress');
-        doneBtn.style.display = 'none';
         setProgress(15, 'Preparing text import', `${pages.length} pages detected`);
 
         const stamp = new Date();
@@ -454,7 +480,10 @@ async function requestServerPageBreak(payload) {
         doneBtn.style.display = 'inline-block';
       } finally {
         _importInProgress = false;
-        if (textImportBtn) textImportBtn.disabled = !(textBodyInput && String(textBodyInput.value || '').trim());
+        if (textImportBtn) {
+          _setButtonBusy(textImportBtn, false, 'Importing…', 'Import Text');
+          textImportBtn.disabled = !(textBodyInput && String(textBodyInput.value || '').trim());
+        }
       }
     }
 
@@ -476,19 +505,21 @@ async function requestServerPageBreak(payload) {
 
       guardImportCapacity().then(guard => {
         if (modal.style.display === 'none') return;
-        syncIdleStatus(guard.snapshot);
         if (!guard.ok) {
+          syncIdleStatus(guard.snapshot);
           // Server denied — close modal (guardImportCapacity already set status and
           // may have opened the pricing modal).
           resetImporterState({ keepModalOpen: false });
         } else {
           // Server confirmed capacity — unlock actions.
           _capacityVerified = true;
+          syncIdleStatus(guard.snapshot);
           _setActionButtonsLocked(false);
         }
       }).catch(() => {
         // Server unreachable — trust local verdict and unlock.
         _capacityVerified = true;
+        syncIdleStatus(localSnapshot);
         _setActionButtonsLocked(false);
       });
     }
@@ -764,7 +795,10 @@ async function requestServerPageBreak(payload) {
       // Lock immediately — before any await — so rapid clicks cannot trigger
       // concurrent scans regardless of which code path runs next.
       _scanInProgress = true;
-      if (scanBtn) scanBtn.disabled = true;
+      if (scanBtn) {
+        _setButtonBusy(scanBtn, true, 'Scanning…', 'Scan Contents');
+        scanBtn.disabled = true;
+      }
 
       try {
 
@@ -840,7 +874,10 @@ async function requestServerPageBreak(payload) {
         console.error('Book scan error:', e);
         setStatus('Failed to scan book. Try another file.');
       } finally {
-        if (scanBtn) scanBtn.disabled = !_file;
+        if (scanBtn) {
+          _setButtonBusy(scanBtn, false, 'Scanning…', 'Scan Contents');
+          scanBtn.disabled = !_file;
+        }
       }
 
       } finally {
@@ -854,7 +891,10 @@ async function requestServerPageBreak(payload) {
     async function scanContentsViaConversion() {
       const formatLabel = _inputFormat.toUpperCase();
       try {
-        scanBtn.disabled = true;
+        if (scanBtn) {
+          _setButtonBusy(scanBtn, true, 'Scanning…', 'Scan Contents');
+          scanBtn.disabled = true;
+        }
 
         if (!window.JSZip) {
           setStatus('JSZip failed to load. Check your network connection.');
@@ -969,7 +1009,10 @@ async function requestServerPageBreak(payload) {
             ` and then import the resulting EPUB here.`;
         }
       } finally {
-        scanBtn.disabled = !_file;
+        if (scanBtn) {
+          _setButtonBusy(scanBtn, false, 'Scanning…', 'Scan Contents');
+          scanBtn.disabled = !_file;
+        }
       }
     }
 
@@ -983,7 +1026,10 @@ async function requestServerPageBreak(payload) {
       if (selectedIds.size === 0) return;
       // Lock immediately — before any await — so rapid clicks cannot trigger concurrent imports.
       _importInProgress = true;
-      if (doImportBtn) doImportBtn.disabled = true;
+      if (doImportBtn) {
+        _setButtonBusy(doImportBtn, true, 'Importing…', 'Import');
+        doImportBtn.disabled = true;
+      }
 
       try {
         // Re-verify capacity at write time as a server-side safety check.
@@ -1028,7 +1074,7 @@ async function requestServerPageBreak(payload) {
           }
         );
 
-        setProgress(72, 'Breaking pages', 'Preparing document pages');
+        setProgress(72, 'Preparing pages', 'Sending selected sections to the page builder');
         const pageBreak = await requestServerPageBreak({
           kind: 'sections',
           sections,
@@ -1069,7 +1115,10 @@ async function requestServerPageBreak(payload) {
       } finally {
         // Always release the import lock so the user can retry without reopening the modal.
         _importInProgress = false;
-        if (doImportBtn) doImportBtn.disabled = !(_tocItems.some(x => x.selected));
+        if (doImportBtn) {
+          _setButtonBusy(doImportBtn, false, 'Importing…', 'Import');
+          doImportBtn.disabled = !(_tocItems.some(x => x.selected));
+        }
       }
     }
 

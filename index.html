@@ -4,35 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>jubly | Focus-First Reading</title>
-    <script>
-        (function () {
-            try {
-                var mode = 'light';
-                try {
-                    var raw = localStorage.getItem('rc_appearance_prefs');
-                    if (raw) {
-                        var parsed = JSON.parse(raw) || {};
-                        var stored = parsed.appearance_mode || parsed.mode || parsed.appearance;
-                        if (stored === 'dark' || stored === 'light') mode = stored;
-                    }
-                } catch (_) {}
-                if (mode !== 'dark') {
-                    try {
-                        var match = String(document.cookie || '').match(/(?:^|; )rc_appearance_mode=([^;]+)/);
-                        var cookieMode = match ? decodeURIComponent(match[1]) : '';
-                        if (cookieMode === 'dark' || cookieMode === 'light') mode = cookieMode;
-                    } catch (_) {}
-                }
-                var root = document.documentElement;
-                root.classList.remove('app-light', 'app-dark');
-                root.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
-                root.setAttribute('data-app-appearance', mode);
-                root.style.backgroundColor = mode === 'dark' ? '#0f172a' : '#ffffff';
-                root.style.color = mode === 'dark' ? '#e2e8f0' : '#1e293b';
-                root.style.colorScheme = mode;
-            } catch (_) {}
-        })();
-    </script>
+    <script src="js/shell.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Lora:wght@400;500&family=Crimson+Pro:wght@400;600;700&display=swap" rel="stylesheet">
     <!-- JSZip: required for EPUB import (app's import.js) -->
@@ -41,28 +13,10 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <link rel="stylesheet" href="css/shell.css">
     <link rel="stylesheet" href="css/themeExplorer.css">
-    <style>
-        html, body { min-height: 100%; }
-        html.app-light, html.app-light body { background: #ffffff; color: #1e293b; }
-        html.app-dark, html.app-dark body { background: #0f172a; color: #e2e8f0; }
-        body.boot-pending > :not(#boot-scrim) { visibility: hidden !important; }
-        #boot-scrim {
-            position: fixed;
-            inset: 0;
-            z-index: 2147483647;
-            pointer-events: none;
-            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-            opacity: 1;
-            transition: opacity 0.16s ease;
-        }
-        html.app-dark #boot-scrim {
-            background: radial-gradient(circle at top, #1e293b 0%, #0f172a 68%);
-        }
-        body:not(.boot-pending) #boot-scrim { opacity: 0; }
-    </style>
+
 </head>
 <body class="auth-hydrating boot-pending">
-<div id="boot-scrim" aria-hidden="true"></div>
+<div id="boot-scrim" aria-hidden="true"><div id="boot-scrim-copy"></div></div>
 
 <!-- ═══════════════════════════════════════════════════════════
      APP INFRASTRUCTURE — required by app JS, not part of shell UI
@@ -1081,9 +1035,6 @@
     </div>
 </div>
 
-<!-- Interaction banner — shared pending/success/error surface. Load before shell.js. -->
-<script src="js/interaction.js"></script>
-<script src="js/shell.js"></script>
 <!-- Pass 4: auth core and durable sync seam. Load after shell.js, before app.js. -->
 <script src="js/auth.js"></script>
 <script src="js/sync.js"></script>

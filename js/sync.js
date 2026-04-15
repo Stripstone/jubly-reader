@@ -633,10 +633,19 @@ window.rcSync = (function () {
       if (_remoteSettingsRow) _confirmedSettingsRow = _remoteSettingsRow;
       _pushEvent('settings-sync-ok', { theme_id: _remoteSettingsRow?.theme_id });
       _recordSync('settings', 'success', { row: data && data.row ? data.row : null, snapshotAt: _lastSyncSnapshotAt });
+      try { window.rcInteraction && window.rcInteraction.clear('settings:sync'); } catch (_) {}
       _emitHydrated('settings');
       return data && data.row ? data.row : null;
     } catch (error) {
       _recordSync('settings', 'error', { message: String(error?.message || error || 'settings sync failed') });
+      try {
+        if (window.rcInteraction && syncingKeys.size > 0) {
+          const actions = window.rcInteraction.actions
+            ? [window.rcInteraction.actions.retry(() => { try { syncSettings().catch(() => {}); } catch (_) {} })]
+            : [];
+          window.rcInteraction.error('settings:sync', 'Your changes weren\'t saved yet.', { actions });
+        }
+      } catch (_) {}
       // Do NOT snap back. The dirty set preserves user intent and will be retried.
       // Snapping back on transient server errors (503, network timeout) violates the
       // runtime contract: "no setting that changes and then snaps back for no reason."

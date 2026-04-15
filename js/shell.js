@@ -1,17 +1,55 @@
 // ============================================================
-    // jubly — Shell + App bridge
-    // ============================================================
-    //
-    // PERMANENT (shell navigation and app wiring):
-    //   showSection(), initFocusMode(), switchTab(), openModal(),
-    //   closeModal(), setTheme(), handleExplorerSwatch(),
-    //   setTier(), updateTierPill(), handlePausePlay(),
-    //   handleAutoplayToggle(), updateProgressBar(),
-    //   showSessionComplete(), renderDashboard(), startReading()
-    //
-    // SCAFFOLD (remove on real auth wiring):
-    //   login() — simulates auth; replace with Supabase auth flow
-    // ============================================================
+// jubly — Shell + App bridge
+// ============================================================
+//
+// PRE-RUNTIME APPEARANCE BOOTSTRAP (temporary shell bridge):
+//   Applies the last-safe local appearance class to <html> before CSS paints
+//   so the shell does not flash the wrong light/dark surface before runtime
+//   re-applies the authoritative appearance state from js/state.js.
+//   Retirement condition: remove when runtime provides an equally-early
+//   appearance bootstrap seam without using index.html inline script ownership.
+(function applyLastSafeAppearanceBoot() {
+    try {
+        var mode = 'light';
+        try {
+            var raw = localStorage.getItem('rc_appearance_prefs');
+            if (raw) {
+                var parsed = JSON.parse(raw) || {};
+                var stored = parsed.appearance_mode || parsed.mode || parsed.appearance;
+                if (stored === 'dark' || stored === 'light') mode = stored;
+            }
+        } catch (_) {}
+        if (mode !== 'dark') {
+            try {
+                var match = String(document.cookie || '').match(/(?:^|; )rc_appearance_mode=([^;]+)/);
+                var cookieMode = match ? decodeURIComponent(match[1]) : '';
+                if (cookieMode === 'dark' || cookieMode === 'light') mode = cookieMode;
+            } catch (_) {}
+        }
+        var root = document.documentElement;
+        if (!root) return;
+        root.classList.remove('app-light', 'app-dark');
+        root.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
+        root.setAttribute('data-app-appearance', mode);
+        root.style.backgroundColor = mode === 'dark' ? '#0f172a' : '#ffffff';
+        root.style.color = mode === 'dark' ? '#e2e8f0' : '#1e293b';
+        root.style.colorScheme = mode;
+    } catch (_) {}
+})();
+
+// ============================================================
+// PERMANENT (shell navigation and app wiring):
+// ============================================================
+//
+//   showSection(), initFocusMode(), switchTab(), openModal(),
+//   closeModal(), setTheme(), handleExplorerSwatch(),
+//   setTier(), updateTierPill(), handlePausePlay(),
+//   handleAutoplayToggle(), updateProgressBar(),
+//   showSessionComplete(), renderDashboard(), startReading()
+//
+// SCAFFOLD (remove on real auth wiring):
+//   login() — simulates auth; replace with Supabase auth flow
+// ============================================================
 
     // ── Section routing ──────────────────────────────────────────
     const ALL_SECTIONS     = ['landing-page', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
@@ -22,6 +60,212 @@
 
 
     let _bootReleaseComplete = false;
+    let _bootPendingMessageTimer = null;
+    let _libraryPendingBannerTimer = null;
+
+// Shell-resident interaction banner
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared interaction banner.
+//
+// The single surface where the shell surfaces pending, success, and
+// recoverable-error states for async operations. Shell presents — it does
+// NOT own auth, billing, or runtime truth.
+//
+// Rules (from product docs):
+//   - never stack multiple banners
+//   - newest higher-severity message replaces the older one
+//   - same-key message always replaces, regardless of severity
+//   - pending can upgrade to success or error
+//   - success auto-dismisses (~2.2s)
+//   - recoverable error stays visible until dismissed or retried
+//   - blocking error keeps the action locked until the user acts
+//   - copy must describe the user-visible state, not an internal cause
+//
+// API:
+//   window.rcInteraction.pending(key, message)
+//   window.rcInteraction.success(key, message)
+//   window.rcInteraction.error(key, message, { actions?: [{label, onClick}], blocking?: bool })
+//   window.rcInteraction.actions.retry(onClick)
+//   window.rcInteraction.actions.refresh()
+//   window.rcInteraction.actions.openLogin()
+//   window.rcInteraction.actions.dismiss(key)
+//   window.rcInteraction.clear(key)
+//   window.rcInteraction.clearAll()
+// ─────────────────────────────────────────────────────────────────────────────
+
+window.rcInteraction = (function () {
+
+  // Severity order — higher number wins when two keys compete for the banner
+  const SEV = { pending: 0, success: 1, error: 2, blocking: 3 };
+
+  // Single active slot
+  let _active = null;  // { key, sevName, severity, message, actions, timer }
+  let _el = null;
+
+  function _defaultOpenLogin() {
+    try {
+      if (typeof showSigninPane === 'function') {
+        showSigninPane();
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (typeof showSection === 'function') {
+        showSection('login-page');
+        return;
+      }
+    } catch (_) {}
+  }
+
+  const actionPresets = {
+    retry(onClick) {
+      return { label: 'Try again', onClick: typeof onClick === 'function' ? onClick : function () {} };
+    },
+    refresh() {
+      return { label: 'Refresh', onClick: function () { try { window.location.reload(); } catch (_) {} } };
+    },
+    openLogin(onClick) {
+      return { label: 'Open login', onClick: typeof onClick === 'function' ? onClick : _defaultOpenLogin };
+    },
+    dismiss(key) {
+      return { label: 'Dismiss', onClick: function () { clear(key); } };
+    },
+  };
+
+  // ── DOM ───────────────────────────────────────────────────────────────────
+
+  function _ensureEl() {
+    if (_el && _el.isConnected) return _el;
+    _el = document.createElement('div');
+    _el.id = 'rc-interaction-banner';
+    _el.setAttribute('role', 'status');
+    _el.setAttribute('aria-live', 'polite');
+    _el.setAttribute('aria-atomic', 'true');
+    document.body.appendChild(_el);
+    return _el;
+  }
+
+  function _render() {
+    const el = _ensureEl();
+    if (!_active) {
+      el.removeAttribute('data-sev');
+      el.classList.remove('rc-banner--visible');
+      el.innerHTML = '';
+      return;
+    }
+
+    el.setAttribute('data-sev', _active.sevName);
+    el.classList.add('rc-banner--visible');
+    el.innerHTML = '';
+
+    const msgEl = document.createElement('span');
+    msgEl.className = 'rc-banner__message';
+    msgEl.textContent = _active.message;
+    el.appendChild(msgEl);
+
+    if (_active.actions && _active.actions.length) {
+      const actionsEl = document.createElement('span');
+      actionsEl.className = 'rc-banner__actions';
+      _active.actions.forEach((action) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'rc-banner__action-btn';
+        btn.textContent = action.label;
+        btn.addEventListener('click', () => {
+          try { action.onClick(); } catch (_) {}
+        });
+        actionsEl.appendChild(btn);
+      });
+      el.appendChild(actionsEl);
+    }
+
+    const hasDismissAction = !!(_active.actions && _active.actions.some((action) => String(action && action.label || '').trim().toLowerCase() === 'dismiss'));
+
+    // Dismiss is always available except on blocking errors or when an explicit
+    // Dismiss action button is already present.
+    if (_active.sevName !== 'blocking' && !hasDismissAction) {
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'rc-banner__close';
+      closeBtn.setAttribute('aria-label', 'Dismiss');
+      closeBtn.textContent = '×';
+      const capturedKey = _active.key;
+      closeBtn.addEventListener('click', () => clear(capturedKey));
+      el.appendChild(closeBtn);
+    }
+  }
+
+  // ── Core show logic ───────────────────────────────────────────────────────
+
+  function _show(key, sevName, message, actions) {
+    const sev = SEV[sevName] ?? 0;
+
+    // A different key at higher severity keeps its banner — do not override
+    if (_active && _active.key !== key && sev < _active.severity) return;
+
+    // Clear any existing auto-dismiss timer
+    if (_active && _active.timer) {
+      clearTimeout(_active.timer);
+      _active = Object.assign({}, _active, { timer: null });
+    }
+
+    _active = {
+      key,
+      sevName,
+      severity: sev,
+      message,
+      actions: Array.isArray(actions) ? actions : [],
+      timer: null,
+    };
+
+    if (sevName === 'success') {
+      _active.timer = setTimeout(() => {
+        if (_active && _active.key === key && _active.sevName === 'success') {
+          _active = null;
+          _render();
+        }
+      }, 2200);
+    }
+
+    _render();
+  }
+
+  // ── Public API ────────────────────────────────────────────────────────────
+
+  function pending(key, message) {
+    _show(key, 'pending', message);
+  }
+
+  function success(key, message) {
+    _show(key, 'success', message);
+  }
+
+  function error(key, message, opts) {
+    const blocking = !!(opts && opts.blocking);
+    const actions = opts && Array.isArray(opts.actions) ? opts.actions.slice() : [];
+    if (!blocking && actions.length === 0) actions.push(actionPresets.dismiss(key));
+    _show(key, blocking ? 'blocking' : 'error', message, actions);
+  }
+
+  function clear(key) {
+    if (!_active) return;
+    if (!key || _active.key === key) {
+      if (_active.timer) clearTimeout(_active.timer);
+      _active = null;
+      _render();
+    }
+  }
+
+  function clearAll() {
+    if (_active && _active.timer) clearTimeout(_active.timer);
+    _active = null;
+    _render();
+  }
+
+  return { pending, success, error, clear, clearAll, actions: actionPresets };
+})();
+
+
 
     function isRuntimeAppearanceReady() {
         try {
@@ -96,9 +340,36 @@
         });
     }
 
+    function scheduleBootPendingMessage() {
+        if (_bootPendingMessageTimer) return;
+        _bootPendingMessageTimer = window.setTimeout(() => {
+            _bootPendingMessageTimer = null;
+            try {
+                const copy = document.getElementById('boot-scrim-copy');
+                if (!copy) return;
+                copy.textContent = 'Checking your account…';
+                copy.classList.add('boot-scrim-copy--visible');
+            } catch (_) {}
+        }, 1200);
+    }
+
+    function clearBootPendingMessage() {
+        if (_bootPendingMessageTimer) {
+            window.clearTimeout(_bootPendingMessageTimer);
+            _bootPendingMessageTimer = null;
+        }
+        try {
+            const copy = document.getElementById('boot-scrim-copy');
+            if (!copy) return;
+            copy.classList.remove('boot-scrim-copy--visible');
+            copy.textContent = '';
+        } catch (_) {}
+    }
+
     function releaseBootPending() {
         if (_bootReleaseComplete) return;
         _bootReleaseComplete = true;
+        clearBootPendingMessage();
         try { document.body.classList.remove('boot-pending'); } catch (_) {}
         try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
         const scrim = document.getElementById('boot-scrim');
@@ -123,6 +394,19 @@
         SHELL_DEBUG[slot] = entry;
         try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
         return entry;
+    }
+
+    function setInlineBusy(button, busyLabel, enabledLabel, disabled) {
+        if (!button) return;
+        if (busyLabel) {
+            if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent || '';
+            button.textContent = busyLabel;
+            button.disabled = true;
+            return;
+        }
+        button.textContent = enabledLabel || button.dataset.idleLabel || button.textContent || '';
+        delete button.dataset.idleLabel;
+        if (typeof disabled === 'boolean') button.disabled = disabled;
     }
 
     function shellTrailPush(tag, data) {
@@ -638,12 +922,10 @@
                 if (result && result.ok === false) {
                     if (logoutBtn) logoutBtn.disabled = false;
                     try {
-                        window.rcInteraction && window.rcInteraction.error('auth:signout', 'We couldn\'t confirm sign-out yet.', {
-                            actions: [
-                                { label: 'Try again', onClick: shellSignOut },
-                                { label: 'Refresh', onClick: () => window.location.reload() },
-                            ],
-                        });
+                        const actions = window.rcInteraction && window.rcInteraction.actions
+                            ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
+                            : [];
+                        window.rcInteraction && window.rcInteraction.error('auth:signout', 'We couldn\'t confirm sign-out yet.', { actions });
                     } catch (_) {}
                     return;
                 }
@@ -652,12 +934,10 @@
         } catch (_) {
             if (logoutBtn) logoutBtn.disabled = false;
             try {
-                window.rcInteraction && window.rcInteraction.error('auth:signout', 'We couldn\'t confirm sign-out yet.', {
-                    actions: [
-                        { label: 'Try again', onClick: shellSignOut },
-                        { label: 'Refresh', onClick: () => window.location.reload() },
-                    ],
-                });
+                const actions = window.rcInteraction && window.rcInteraction.actions
+                    ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
+                    : [];
+                window.rcInteraction && window.rcInteraction.error('auth:signout', 'We couldn\'t confirm sign-out yet.', { actions });
             } catch (_) {}
         }
     }
@@ -706,6 +986,7 @@
             document.body.classList.add('auth-hydrating');
             document.body.classList.add('boot-pending');
         } catch (_) {}
+        scheduleBootPendingMessage();
         const appearanceReady = waitForRuntimeAppearanceReady();
         const appearancePainted = Promise.resolve(appearanceReady).then(() => waitForRuntimeAppearancePainted());
         try {
@@ -1342,6 +1623,27 @@
     let _libraryInitialResolutionComplete = false;
     let _libraryRefreshSequence = 0;
 
+    function scheduleLibraryPendingBanner() {
+        if (_libraryPendingBannerTimer || _libraryInitialResolutionComplete) return;
+        _libraryPendingBannerTimer = window.setTimeout(() => {
+            _libraryPendingBannerTimer = null;
+            if (_libraryInitialResolutionComplete) return;
+            if (!isAuthedUser()) return;
+            if (getCurrentVisibleSection() !== 'dashboard') return;
+            try {
+                window.rcInteraction && window.rcInteraction.pending('library:hydrate', 'Books are still loading…');
+            } catch (_) {}
+        }, 1400);
+    }
+
+    function clearLibraryPendingBanner() {
+        if (_libraryPendingBannerTimer) {
+            window.clearTimeout(_libraryPendingBannerTimer);
+            _libraryPendingBannerTimer = null;
+        }
+        try { window.rcInteraction && window.rcInteraction.clear('library:hydrate'); } catch (_) {}
+    }
+
     function setLibrarySurfaceState(state) {
         const pendingEl = document.getElementById('library-pending');
         const popEl = document.getElementById('library-populated');
@@ -1373,6 +1675,7 @@
 
         if (!authed) {
             _libraryInitialResolutionComplete = false;
+            clearLibraryPendingBanner();
             if (libraryRefreshRetryTimer) {
                 clearTimeout(libraryRefreshRetryTimer);
                 libraryRefreshRetryTimer = null;
@@ -1387,7 +1690,10 @@
         // truthful local-library read resolves to populated vs empty/importer.
         // After that first truthful read, later refreshes keep the current visible
         // surface instead of flashing back through pending.
-        if (!_libraryInitialResolutionComplete) setLibrarySurfaceState('pending');
+        if (!_libraryInitialResolutionComplete) {
+            setLibrarySurfaceState('pending');
+            scheduleLibraryPendingBanner();
+        }
 
         // Until runtime book storage is actually available, do not imply an empty
         // library and do not leave a blank gap. Keep the pending surface visible
@@ -1416,6 +1722,7 @@
         });
         _loggedFirstLocalLibraryRead = true;
         _libraryInitialResolutionComplete = true;
+        clearLibraryPendingBanner();
         const has = books.length > 0;
         if (!has) {
             setLibrarySurfaceState('empty');
@@ -1766,8 +2073,40 @@
             setPasswordEdit(false);
             setSettingsStatus('Password updated.', 'success');
         });
-        document.getElementById('profile-help-chat-btn')?.addEventListener('click', async (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openChat === 'function') await window.rcHelp.openChat(); } catch (_) {} });
-        document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') await window.rcHelp.openFeedback(); } catch (_) {} });
+        document.getElementById('profile-help-chat-btn')?.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const btn = e.currentTarget;
+            setInlineBusy(btn, 'Opening…');
+            try {
+                if (window.rcHelp && typeof window.rcHelp.openChat === 'function') {
+                    const ok = await window.rcHelp.openChat();
+                    if (!ok) {
+                        try { window.rcInteraction && window.rcInteraction.error('help:chat', 'Support chat couldn\'t be opened right now.'); } catch (_) {}
+                    }
+                }
+            } catch (_) {
+                try { window.rcInteraction && window.rcInteraction.error('help:chat', 'Support chat couldn\'t be opened right now.'); } catch (_) {}
+            } finally {
+                setInlineBusy(btn, null, null, false);
+            }
+        });
+        document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const btn = e.currentTarget;
+            setInlineBusy(btn, 'Opening…');
+            try {
+                if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
+                    const ok = await window.rcHelp.openFeedback();
+                    if (!ok) {
+                        try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
+                    }
+                }
+            } catch (_) {
+                try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
+            } finally {
+                setInlineBusy(btn, null, null, false);
+            }
+        });
         const tierSel = document.getElementById('tierSelect');
         if (tierSel) {
             tierSel.addEventListener('change', () => {
