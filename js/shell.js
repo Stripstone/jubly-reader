@@ -689,17 +689,16 @@
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
-        // Start section work immediately under the boot hold so dashboard
-        // refresh begins right away, but do not force pending onto fast paths.
-        // Reveal once either the section settles or the anti-flash cap expires.
-        const sectionRevealWork = showSection(settledSection, { historyMode: 'replace' });
-        const bootRevealCapMs = 1000;
+        // Start the library refresh immediately behind the boot hold, then always
+        // wait the full 1000ms before revealing. At reveal time the library is
+        // either settled (show books or empty state directly) or still pending
+        // (show the neutral pending surface). No early release — the hold is a
+        // minimum, not a cap.
+        showSection(settledSection, { historyMode: 'replace' });
+        const bootHoldMs = 1000;
         try {
             await Promise.all([
-                Promise.race([
-                    sectionRevealWork,
-                    new Promise(resolve => setTimeout(resolve, bootRevealCapMs))
-                ]),
+                new Promise(resolve => setTimeout(resolve, bootHoldMs)),
                 appearancePainted
             ]);
             await waitForBootRevealFrame();
