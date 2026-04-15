@@ -205,125 +205,6 @@
     });
   }
 
-  const READING_INTRO_MESSAGE_DELAY_MS = 1000;
-  const READING_INTRO_RELEASE_FADE_MS = 180;
-  let readingIntroMessageTimer = null;
-  let readingIntroReleaseTimer = null;
-
-  function clearReadingIntroTimers() {
-    try { if (readingIntroMessageTimer) clearTimeout(readingIntroMessageTimer); } catch (_) {}
-    try { if (readingIntroReleaseTimer) clearTimeout(readingIntroReleaseTimer); } catch (_) {}
-    readingIntroMessageTimer = null;
-    readingIntroReleaseTimer = null;
-  }
-
-  function getReadingIntroMessage(kind) {
-    return String(kind || '') === 'returning'
-      ? 'Returning to your place…'
-      : 'Preparing reading view…';
-  }
-
-  function ensureReadingIntroHold() {
-    const readingContent = document.querySelector('#reading-mode .reading-content');
-    if (!readingContent) return null;
-    let hold = document.getElementById('reading-intro-hold');
-    if (hold && hold.parentElement !== readingContent) {
-      try { hold.remove(); } catch (_) {}
-      hold = null;
-    }
-    if (!hold) {
-      hold = document.createElement('div');
-      hold.id = 'reading-intro-hold';
-      hold.setAttribute('aria-hidden', 'true');
-      const message = document.createElement('div');
-      message.className = 'reading-intro-message';
-      hold.appendChild(message);
-      readingContent.appendChild(hold);
-    }
-    return hold;
-  }
-
-  function setReadingIntroMessageKind(kind) {
-    const readingModeEl = document.getElementById('reading-mode');
-    const hold = ensureReadingIntroHold();
-    const normalizedKind = String(kind || 'opening') === 'returning' ? 'returning' : 'opening';
-    if (readingModeEl) readingModeEl.setAttribute('data-reading-intro-kind', normalizedKind);
-    const messageEl = hold ? hold.querySelector('.reading-intro-message') : null;
-    if (messageEl) messageEl.textContent = getReadingIntroMessage(normalizedKind);
-  }
-
-  function beginReadingIntroHold(kind = 'opening') {
-    const readingModeEl = document.getElementById('reading-mode');
-    if (!readingModeEl) return null;
-    clearReadingIntroTimers();
-    const hold = ensureReadingIntroHold();
-    readingModeEl.classList.remove('reading-intro-releasing', 'reading-intro-message-visible');
-    readingModeEl.classList.add('reading-intro-active');
-    setReadingIntroMessageKind(kind);
-    readingIntroMessageTimer = setTimeout(() => {
-      try {
-        const modeEl = document.getElementById('reading-mode');
-        if (modeEl && modeEl.classList.contains('reading-intro-active') && !modeEl.classList.contains('reading-intro-releasing')) {
-          modeEl.classList.add('reading-intro-message-visible');
-        }
-      } catch (_) {}
-    }, READING_INTRO_MESSAGE_DELAY_MS);
-    return hold;
-  }
-
-  function clearReadingIntroHold() {
-    clearReadingIntroTimers();
-    const readingModeEl = document.getElementById('reading-mode');
-    if (!readingModeEl) return;
-    readingModeEl.classList.remove('reading-intro-active', 'reading-intro-releasing', 'reading-intro-message-visible');
-    readingModeEl.removeAttribute('data-reading-intro-kind');
-  }
-
-  function getReadingIntroTargetCard() {
-    const pageEls = Array.from(document.querySelectorAll('#pages .page'));
-    if (!pageEls.length) return null;
-    const preferredIndex = Number.isFinite(Number(lastFocusedPageIndex)) && Number(lastFocusedPageIndex) >= 0
-      ? Number(lastFocusedPageIndex)
-      : (Number.isFinite(Number(currentPageIndex)) && Number(currentPageIndex) >= 0 ? Number(currentPageIndex) : 0);
-    return pageEls[Math.min(Math.max(preferredIndex, 0), pageEls.length - 1)] || pageEls[0] || null;
-  }
-
-  function isReadingIntroCardLayerReady() {
-    try {
-      const pagesEl = document.getElementById('pages');
-      const readingModeEl = document.getElementById('reading-mode');
-      if (!pagesEl || !readingModeEl || readingModeEl.classList.contains('hidden-section')) return false;
-      const pageEls = pagesEl.querySelectorAll('.page');
-      if (!pageEls.length) return false;
-      const targetCard = getReadingIntroTargetCard();
-      const targetText = targetCard ? targetCard.querySelector('.page-text') : null;
-      const rect = targetCard ? targetCard.getBoundingClientRect() : null;
-      return !!(targetCard && targetText && rect && rect.height > 0 && pagesEl.scrollHeight > 0);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  async function waitForReadingIntroCardLayerReady(maxFrames = 10) {
-    const attempts = Math.max(1, Number(maxFrames) || 1);
-    for (let i = 0; i < attempts; i += 1) {
-      if (isReadingIntroCardLayerReady()) return true;
-      try { await waitForNextPaint(1); } catch (_) {}
-    }
-    return isReadingIntroCardLayerReady();
-  }
-
-  function releaseReadingIntroHold() {
-    const readingModeEl = document.getElementById('reading-mode');
-    if (!readingModeEl || !readingModeEl.classList.contains('reading-intro-active')) return false;
-    clearReadingIntroTimers();
-    readingModeEl.classList.add('reading-intro-releasing');
-    readingIntroReleaseTimer = setTimeout(() => {
-      try { clearReadingIntroHold(); } catch (_) {}
-    }, READING_INTRO_RELEASE_FADE_MS);
-    return true;
-  }
-
   async function localDeletedBookDelete(id) {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
@@ -1686,8 +1567,8 @@
     }
 
     // Async so that loadBook can await full render + restore before resolving.
-    // The reading intro hold is released only after this render/restore work and
-    // the target page-card layout are both complete.
+    // This closes the race where reading-restore-pending was removed before
+    // render() and applyPendingReadingRestore() had actually run.
     async function refreshChapterAndPagesUI(options = {}) {
       const restore = (options && options.restore && typeof options.restore === 'object') ? options.restore : null;
       const restorePageIndex = Number.isFinite(Number(restore?.pageIndex)) ? Math.max(0, Number(restore.pageIndex)) : 0;
@@ -1701,7 +1582,7 @@
         populatePagesSelect(bookPages);
         try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, bookPages.length - 1)); } catch (_) {}
         // Await render completion so the restore scroll finishes before the caller
-        // releases the reading intro hold and reveals the page layer.
+        // removes reading-restore-pending and reveals pages to the user.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
         if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true, pageMeta: bookPages });
         return;
@@ -3121,12 +3002,15 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   if (!bookId) return false;
 
   // MUST be synchronous — before any await — so reading mode never shows stale
-  // page content or an intermediate Explorer reveal while runtime prep is in flight.
+  // page content while network calls are in flight.
   const pagesEl = document.getElementById('pages');
+  const readingModeEl = document.getElementById('reading-mode');
   try {
-    clearReadingIntroHold();
     if (pagesEl) pagesEl.innerHTML = '';
-    beginReadingIntroHold('opening');
+    if (readingModeEl) {
+      readingModeEl.classList.add('reading-restore-pending');
+      readingModeEl.setAttribute('data-restore-kind', 'opening');
+    }
   } catch (_) {}
 
   // Fire-and-forget: the current reading target is safe in memory and will be
@@ -3158,26 +3042,32 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     }
   } catch (_) {}
 
+  // Compute restore truth. Keep a visible neutral pending surface while the
+  // runtime-owned load/restore path is unresolved so cold entry never presents
+  // a blank reading view. Returning restores get a more specific label.
   const hasRestore = !!(restore && Number.isFinite(Number(restore.pageIndex)) && Number(restore.pageIndex) > 0);
-  try { setReadingIntroMessageKind(hasRestore ? 'returning' : 'opening'); } catch (_) {}
+  try {
+    if (readingModeEl) readingModeEl.setAttribute('data-restore-kind', hasRestore ? 'returning' : 'opening');
+  } catch (_) {}
 
-  // Await the runtime-owned book load path. The hold remains in place until the
-  // target page card exists and has laid out, so theme/page prep can continue
-  // behind it without revealing an intermediate page-card phase to the user.
+  // Await the runtime-owned book load path. This resolves only after render()
+  // and applyPendingReadingRestore() have both completed, so #pages is already
+  // scrolled to the correct position before reading-restore-pending is removed.
   if (typeof window.__rcLoadBook === 'function') {
     try { await window.__rcLoadBook(normalizedId, { restore }); } catch (_) {}
   }
   try { await waitForNextPaint(2); } catch (_) {}
 
-  const introReady = await waitForReadingIntroCardLayerReady(10);
-  if (introReady) releaseReadingIntroHold();
+  // Remove pending state and clean up the restore-kind attribute.
+  // The opacity transition on #pages produces a smooth fade-in from this point.
+  try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
+  try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
   try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}
-  return introReady;
+  return true;
 };
 
 window.exitReadingSession = function exitReadingSession() {
   try { flushCurrentReadingProgress('reading-exit').catch(() => {}); } catch (_) {}
-  try { clearReadingIntroHold(); } catch (_) {}
   const metrics = finalizeReadingMetricsSession();
   const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}

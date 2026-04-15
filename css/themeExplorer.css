@@ -18,8 +18,6 @@ body.theme-explorer {
   --rm-shadow:         0 4px 16px rgba(139,111,87,0.12);
   --rm-btn-bg:         rgba(193,125,74,0.10);
   --rm-btn-hover:      rgba(193,125,74,0.18);
-  --reading-intro-hold-bg: linear-gradient(180deg, rgba(235,231,222,0.97) 0%, rgba(223,221,216,0.98) 100%);
-  --reading-intro-hold-text: rgba(43, 37, 32, 0.66);
 }
 
 body.theme-explorer.reading-active #reading-mode .reading-content {
