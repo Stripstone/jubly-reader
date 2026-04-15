@@ -689,13 +689,19 @@
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
-        // Show the settled section immediately once auth/appearance choice is safe.
-        // Do not hold boot reveal on dashboard refreshLibrary() work: the dashboard
-        // now reveals with its truthful pending library surface, and library refresh
-        // continues afterward inside that already-visible runtime-owned surface.
+        // Await the section's async work (e.g. refreshLibrary on dashboard) before
+        // releasing the boot hold, so the correct section is chosen before any
+        // visible shell surface appears.
+        // Race section settlement against a hard 500ms cap: the closeout is about
+        // wrong first paint, not widening into deeper runtime boot redesign.
         try {
-            showSection(settledSection, { historyMode: 'replace' });
-            await appearancePainted;
+            await Promise.all([
+                Promise.race([
+                    showSection(settledSection, { historyMode: 'replace' }),
+                    new Promise(resolve => setTimeout(resolve, 500))
+                ]),
+                appearancePainted
+            ]);
             await waitForBootRevealFrame();
         } catch (_) {}
         releaseBootPending();

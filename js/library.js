@@ -189,32 +189,6 @@
     return task;
   }
 
-
-  function ensureReadingEntryStatusNode() {
-    try {
-      const readingContent = document.querySelector('#reading-mode .reading-content');
-      if (!readingContent) return null;
-      let statusEl = readingContent.querySelector('.reading-entry-status');
-      if (!statusEl) {
-        statusEl = document.createElement('div');
-        statusEl.className = 'reading-entry-status';
-        statusEl.setAttribute('aria-hidden', 'true');
-        readingContent.appendChild(statusEl);
-      }
-      return statusEl;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function setReadingEntryStatus(kind) {
-    try {
-      const statusEl = ensureReadingEntryStatusNode();
-      if (!statusEl) return;
-      statusEl.textContent = String(kind || '') === 'returning' ? 'Returning to your place…' : 'Preparing reading view…';
-    } catch (_) {}
-  }
-
   function waitForNextPaint(count = 2) {
     const frames = Math.max(1, Number(count) || 1);
     return new Promise((resolve) => {
@@ -3031,16 +3005,11 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   // page content while network calls are in flight.
   const pagesEl = document.getElementById('pages');
   const readingModeEl = document.getElementById('reading-mode');
-  let readingEntrySurfaceReady = null;
   try {
     if (pagesEl) pagesEl.innerHTML = '';
     if (readingModeEl) {
       readingModeEl.classList.add('reading-restore-pending');
       readingModeEl.setAttribute('data-restore-kind', 'opening');
-    }
-    setReadingEntryStatus('opening');
-    if (window.rcTheme && typeof window.rcTheme.prepareReadingEntrySurface === 'function') {
-      readingEntrySurfaceReady = window.rcTheme.prepareReadingEntrySurface();
     }
   } catch (_) {}
 
@@ -3079,7 +3048,6 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   const hasRestore = !!(restore && Number.isFinite(Number(restore.pageIndex)) && Number(restore.pageIndex) > 0);
   try {
     if (readingModeEl) readingModeEl.setAttribute('data-restore-kind', hasRestore ? 'returning' : 'opening');
-    setReadingEntryStatus(hasRestore ? 'returning' : 'opening');
   } catch (_) {}
 
   // Await the runtime-owned book load path. This resolves only after render()
@@ -3089,7 +3057,6 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     try { await window.__rcLoadBook(normalizedId, { restore }); } catch (_) {}
   }
   try { await waitForNextPaint(2); } catch (_) {}
-  try { if (readingEntrySurfaceReady) await readingEntrySurfaceReady; } catch (_) {}
 
   // Remove pending state and clean up the restore-kind attribute.
   // The opacity transition on #pages produces a smooth fade-in from this point.

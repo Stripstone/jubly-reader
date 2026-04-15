@@ -1401,9 +1401,8 @@ body.auth-hydrating #profile-page {
   }
 }
 
-/* Restore-pending overlay: keep pages hidden until runtime can reveal one stable
-   reading surface, and use a dedicated status node so theme layers do not compete
-   with the pending presentation. */
+/* Restore-pending overlay: hide pages until restore position is known and applied,
+   but always present a visible neutral pending surface instead of a blank view. */
 #pages {
   transition: opacity 0.14s ease;
 }
@@ -1412,23 +1411,17 @@ body.auth-hydrating #profile-page {
   opacity: 0;
   transition: none; /* suppress transition while hidden; runs on reveal */
 }
-#reading-mode .reading-entry-status {
+#reading-mode.reading-restore-pending .reading-content::after {
+  content: 'Preparing reading view…';
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 96px 24px 112px;
-  text-align: center;
   font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: var(--rm-text-2, #64748b);
-  opacity: 0;
+  opacity: 0.6;
   pointer-events: none;
-  z-index: 3;
-  transition: opacity 0.16s ease;
 }
-#reading-mode.reading-restore-pending .reading-entry-status {
-  opacity: 0.72;
+#reading-mode.reading-restore-pending[data-restore-kind="returning"] .reading-content::after {
+  content: 'Returning to your place…';
 }

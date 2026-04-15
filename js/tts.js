@@ -73,11 +73,6 @@ const TTS_STATE = {
   highlightSpans: null,
   highlightMarks: null,
   highlightEnds: null,
-  followScrollRaf: 0,
-  followScrollPane: null,
-  followScrollTargetTop: null,
-  followScrollStartTop: null,
-  followScrollStartedAt: 0,
 };
 
 const TTS_DEBUG = {
@@ -644,7 +639,6 @@ function splitIntoSentenceRanges(text) {
 
 function ttsClearSentenceHighlight() {
   if (TTS_STATE.highlightRAF) { cancelAnimationFrame(TTS_STATE.highlightRAF); TTS_STATE.highlightRAF = null; }
-  ttsCancelFollowScroll();
   TTS_STATE.highlightMarksProvenance = null;
   if (TTS_STATE.highlightPageEl && TTS_STATE.highlightOriginalHTML != null) {
     TTS_STATE.highlightPageEl.innerHTML = TTS_STATE.highlightOriginalHTML;
@@ -659,76 +653,6 @@ function ttsClearSentenceHighlight() {
   TTS_STATE.highlightSpans = null;
   TTS_STATE.highlightMarks = null;
   TTS_STATE.highlightEnds = null;
-}
-
-function ttsCancelFollowScroll(pane) {
-  try {
-    if (TTS_STATE.followScrollRaf) cancelAnimationFrame(TTS_STATE.followScrollRaf);
-  } catch (_) {}
-  TTS_STATE.followScrollRaf = 0;
-  if (!pane || TTS_STATE.followScrollPane === pane) {
-    TTS_STATE.followScrollPane = null;
-    TTS_STATE.followScrollTargetTop = null;
-    TTS_STATE.followScrollStartTop = null;
-    TTS_STATE.followScrollStartedAt = 0;
-  }
-}
-
-function ttsSmoothFollowScrollTo(pane, targetTop) {
-  if (!pane) return;
-  const maxScroll = Math.max(0, Number(pane.scrollHeight || 0) - Number(pane.clientHeight || 0));
-  const clampedTarget = Math.max(0, Math.min(Number(targetTop) || 0, maxScroll));
-  const currentTop = Number(pane.scrollTop || 0);
-  if (Math.abs(clampedTarget - currentTop) < 2) {
-    ttsCancelFollowScroll(pane);
-    pane.scrollTop = clampedTarget;
-    return;
-  }
-  try {
-    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      ttsCancelFollowScroll(pane);
-      pane.scrollTop = clampedTarget;
-      return;
-    }
-  } catch (_) {}
-  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-  if (TTS_STATE.followScrollPane !== pane) {
-    ttsCancelFollowScroll();
-    TTS_STATE.followScrollPane = pane;
-  } else if (
-    TTS_STATE.followScrollRaf &&
-    TTS_STATE.followScrollTargetTop != null &&
-    Math.abs(clampedTarget - Number(TTS_STATE.followScrollTargetTop || 0)) < 2
-  ) {
-    return;
-  }
-  TTS_STATE.followScrollStartTop = currentTop;
-  TTS_STATE.followScrollTargetTop = clampedTarget;
-  TTS_STATE.followScrollStartedAt = now;
-  const durationMs = 180;
-  const step = (ts) => {
-    if (TTS_STATE.followScrollPane !== pane) {
-      ttsCancelFollowScroll();
-      return;
-    }
-    const startedAt = Number(TTS_STATE.followScrollStartedAt || ts);
-    const startTop = Number(TTS_STATE.followScrollStartTop != null ? TTS_STATE.followScrollStartTop : pane.scrollTop);
-    const target = Math.max(0, Math.min(Number(TTS_STATE.followScrollTargetTop || 0), Math.max(0, Number(pane.scrollHeight || 0) - Number(pane.clientHeight || 0))));
-    const elapsed = Math.max(0, Number(ts) - startedAt);
-    const t = Math.min(1, elapsed / durationMs);
-    const eased = 1 - Math.pow(1 - t, 3);
-    pane.scrollTop = startTop + ((target - startTop) * eased);
-    if (t >= 1 || Math.abs(target - Number(pane.scrollTop || 0)) < 1) {
-      pane.scrollTop = target;
-      ttsCancelFollowScroll(pane);
-      return;
-    }
-    TTS_STATE.followScrollRaf = requestAnimationFrame(step);
-  };
-  try {
-    if (TTS_STATE.followScrollRaf) cancelAnimationFrame(TTS_STATE.followScrollRaf);
-  } catch (_) {}
-  TTS_STATE.followScrollRaf = requestAnimationFrame(step);
 }
 
 function ttsHighlightBlock(blockIdx) {
@@ -757,7 +681,8 @@ function ttsHighlightBlock(blockIdx) {
         const desiredBottom = viewBottom - edgePad;
         if (blockTop < desiredTop || blockBottom > desiredBottom) {
           const centered = blockTop - (pane.clientHeight / 2) + (cur.offsetHeight / 2);
-          ttsSmoothFollowScrollTo(pane, centered);
+          const maxScroll = Math.max(0, pane.scrollHeight - pane.clientHeight);
+          pane.scrollTop = Math.max(0, Math.min(centered, maxScroll));
         }
       }
     }
