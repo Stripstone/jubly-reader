@@ -46,25 +46,13 @@ function normalizeEntitlementTier(row) {
   return 'basic';
 }
 
-function normalizeEntitlementStatus(value) {
-  const status = String(value || '').trim().toLowerCase();
-  if (status === 'active') return 'active';
-  if (status === 'trialing') return 'trialing';
-  if (status === 'past_due') return 'past_due';
-  return 'inactive';
-}
-
-function isEntitlementRuntimeEligible(status) {
-  return status === 'active' || status === 'trialing' || status === 'past_due';
-}
-
 function normalizeEntitlementSnapshot(row) {
   if (!row || typeof row !== 'object') return null;
   return {
     userId: row.user_id || null,
     provider: row.provider || null,
     tier: normalizeEntitlementTier(row),
-    status: normalizeEntitlementStatus(row.status),
+    status: row.status || null,
     stripeCustomerId: row.stripe_customer_id || null,
     stripeSubscriptionId: row.stripe_subscription_id || null,
     periodStart: row.period_start || null,
@@ -189,7 +177,7 @@ export async function getResolvedRuntimePolicyForRequest(req) {
     effectiveTier = developerOverrideTier;
     resolutionMode = 'developer-override';
     tierSource = 'developer-override';
-  } else if (entitlementSnapshot && isEntitlementRuntimeEligible(entitlementSnapshot.status)) {
+  } else if (entitlementSnapshot && entitlementSnapshot.status === 'active') {
     effectiveTier = resolveRuntimeTier(entitlementSnapshot.tier);
     resolutionMode = 'entitlement';
     tierSource = 'entitlement';

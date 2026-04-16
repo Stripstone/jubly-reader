@@ -183,7 +183,7 @@ window.rcDevTools = (function () {
           <strong style="display:block; margin-bottom:8px; font-size:13px;">Plan</strong>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <label style="font-size:12px;">Tier<select id="devPlanTier" style="width:100%; margin-top:4px;"><option value="basic">Basic</option><option value="pro">Pro</option><option value="premium">Premium</option></select></label>
-            <label style="font-size:12px;">Status<select id="devPlanStatus" style="width:100%; margin-top:4px;"><option value="active">active</option><option value="trialing">trialing</option><option value="past_due">past_due</option><option value="inactive">inactive</option></select></label>
+            <label style="font-size:12px;">Status<select id="devPlanStatus" style="width:100%; margin-top:4px;"><option value="active">active</option><option value="trialing">trialing</option><option value="canceled">canceled</option><option value="past_due">past_due</option></select></label>
           </div>
           <div style="display:flex; justify-content:flex-end; margin-top:8px;"><button type="button" id="devPlanSaveBtn">Save plan</button></div>
         </section>
