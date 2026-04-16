@@ -161,6 +161,12 @@ Premium remains intentional and visible even if packaging evolves later.
 - token or usage display should appear only where it is truly helpful and backed by real values
 - manual tier selector buttons are development-only and must not remain production authority
 
+### Pending and re-hydration framework requirement
+- account, billing, usage, restore, and other server-backed shell/value surfaces must use safe pending, neutral, hidden, or locked states rather than believable wrong values
+- `pending-surfaces.md` is the maintained framework companion for these surfaces and must be updated when they change
+- dead-end account or billing buttons are launch failures, not minor polish issues
+- interim modal or section-based public flows still have to obey this framework while route-backed final surfaces are being completed
+
 ## Data ownership and authority map
 
 ### Shell owns
@@ -362,6 +368,7 @@ For persistence and account-backed behavior, always check:
 - reading continuity
 
 Launch-failing examples include:
+- changing account, billing, or usage loading behavior without updating `pending-surfaces.md`
 - flashing page 1 before restore catches up
 - showing a believable but wrong usage value before account truth loads
 - showing a setting change immediately and then snapping back unexpectedly

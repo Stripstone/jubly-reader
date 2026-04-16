@@ -1,6 +1,10 @@
-# Pending State Surface Catalog
+# Pending Surfaces Framework and Catalog
 
-Every user-touchable surface that pends, loads, or auths something.
+This document is the maintained framework companion to `02_RUNTIME_CONTRACT.md` and `05_PRODUCT_LAUNCH_AND_INTEGRATION.md` for user-visible pending, loading, hydration, re-auth, restore, and other server-backed shell/value surfaces.
+
+It carries operational weight similar to how `app_tables_canonical.sql` pairs with `06_SUPABASE_SCHEMA_REFERENCE.md`: it does not replace the higher-order policy docs, but passes that touch these surfaces must reference it and keep it aligned.
+
+Every user-touchable surface that pends, loads, hydrates, or auths something should either be covered here or be intentionally classified as not needing a routine pending surface.
 
 Status meanings:
 - ✅ wired now
@@ -17,6 +21,20 @@ Notes:
 - Recoverable error banners now use only these action labels.
 - If a caller does not supply a recovery action, the banner falls back to `Dismiss`.
 - Blocking errors still suppress dismiss actions and keep the action locked until the owner resolves them.
+
+## Framework rules
+
+Use this document to keep runtime experience honest during slow truth-settle paths.
+
+Required rules:
+- render the safe pending, hidden, or locked state before any await that can stall the visible surface
+- never show a believable wrong account, plan, usage, subscription, continue, or restore value while truth is still settling
+- keep gated actions locked until the required server-backed verification path is settled
+- treat cache or last-safe projection as responsiveness help only, not as new authority
+- if a surface is intentionally immediate with no routine pending state, keep that decision explicit and surface real failure honestly
+
+Maintenance rule:
+- when a pass changes one of these surfaces, update this document in the same pass or explicitly flag the discrepancy before implementation continues
 
 ---
 
