@@ -56,7 +56,8 @@ window.rcBilling = (function () {
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       const err = new Error(data?.error || `Request failed (${resp.status})`);
-      if (resp.status === 401 || resp.status === 403) err.code = 'auth_required';
+      err.code = data?.code || (resp.status === 401 || resp.status === 403 ? 'auth_required' : '');
+      if (!err.code && (resp.status === 401 || resp.status === 403)) err.code = 'auth_required';
       throw err;
     }
     return data;
@@ -115,6 +116,28 @@ window.rcBilling = (function () {
     if (normalized === 'free') return 'basic';
     if (normalized === 'paid') return 'pro';
     return ['basic', 'pro', 'premium'].includes(normalized) ? normalized : 'basic';
+  }
+
+
+  function normalizeEntitlementStatus(status) {
+    const normalized = String(status || '').trim().toLowerCase();
+    if (normalized === 'active') return 'active';
+    if (normalized === 'trialing') return 'trialing';
+    if (normalized === 'past_due') return 'past_due';
+    return 'inactive';
+  }
+
+  function hasBillingCustomer(entitlement) {
+    return !!String(entitlement?.stripeCustomerId || entitlement?.stripeCustomerID || entitlement?.stripe_customer_id || '').trim();
+  }
+
+  function applyActionButtonState(button, label, onclick, disabled = false) {
+    if (!button) return;
+    button.textContent = label;
+    button.onclick = disabled ? null : onclick;
+    button.disabled = !!disabled;
+    button.classList.toggle('opacity-60', !!disabled);
+    button.classList.toggle('cursor-not-allowed', !!disabled);
   }
 
   function openPricingForSignup() {
@@ -237,66 +260,68 @@ window.rcBilling = (function () {
     const billingState = document.getElementById('subscription-billing-state');
     const primaryBtn = document.getElementById('subscription-primary-btn');
     const secondaryBtn = document.getElementById('subscription-secondary-btn');
+    const overviewBtn = document.getElementById('subscription-overview-billing-btn');
 
-    // Neutral pending while account truth is in flight
     if (statusCopy) statusCopy.textContent = 'Checking your account…';
     if (billingState) billingState.textContent = '—';
-    if (primaryBtn) primaryBtn.disabled = true;
-    if (secondaryBtn) secondaryBtn.disabled = true;
+    [primaryBtn, secondaryBtn, overviewBtn].forEach((btn) => applyActionButtonState(btn, btn?.textContent || 'Checking…', null, true));
 
     const config = await fetchPublicConfig();
     const snapshot = await fetchRuntimeSnapshot();
     const entitlement = snapshot?.meta?.entitlement || null;
+    const status = normalizeEntitlementStatus(entitlement?.status || 'inactive');
     const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
-
-    // Truth has arrived — unlock buttons before populating settled state
-    if (primaryBtn) primaryBtn.disabled = false;
-    if (secondaryBtn) secondaryBtn.disabled = false;
+    const stripeReady = !!(config?.stripe?.plans?.pro?.available || config?.stripe?.plans?.premium?.available);
+    const canManageBilling = hasBillingCustomer(entitlement);
+    const openPricing = function () {
+      if (typeof openPricingForSignup === 'function') openPricingForSignup();
+      else if (typeof openModal === 'function') openModal('pricing-modal');
+    };
 
     if (!signedIn) {
       if (statusCopy) statusCopy.textContent = 'Sign in to view your plan details and billing options.';
       if (billingState) billingState.textContent = 'Not signed in';
-      if (primaryBtn) {
-        primaryBtn.textContent = 'View Pricing';
-        primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
-      }
-      if (secondaryBtn) {
-        secondaryBtn.textContent = 'Sign in first';
-        secondaryBtn.onclick = function () { if (typeof showSigninPane === 'function') showSigninPane(); };
-      }
+      applyActionButtonState(primaryBtn, 'View Pricing', openPricing, false);
+      applyActionButtonState(secondaryBtn, 'Sign in first', function () { if (typeof showSigninPane === 'function') showSigninPane(); }, false);
+      applyActionButtonState(overviewBtn, 'Sign in first', function () { if (typeof showSigninPane === 'function') showSigninPane(); }, false);
       return;
     }
 
-    if (entitlement && (entitlement.status === 'active' || entitlement.status === 'trialing')) {
+    if (entitlement && (status === 'active' || status === 'trialing' || status === 'past_due')) {
       const resolvedTier = normalizeRuntimeTier(entitlement?.tier);
-      const tierLabel = resolvedTier === 'premium' ? 'Premium' : resolvedTier === 'pro' ? 'Pro' : 'Free';
+      const tierLabel = resolvedTier === 'premium' ? 'Premium' : resolvedTier === 'pro' ? 'Pro' : 'Basic';
       const renewsAt = entitlement.renewsAt || entitlement.periodEnd || null;
       const renewsLabel = renewsAt
         ? new Date(renewsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-        : `${tierLabel} active`;
-      if (statusCopy) statusCopy.textContent = `Your ${tierLabel} plan is active.`;
+        : (status === 'trialing' ? 'Trial' : status === 'past_due' ? 'Past due' : `${tierLabel} active`);
+      if (statusCopy) {
+        statusCopy.textContent = status === 'trialing'
+          ? `Your ${tierLabel} trial is active.`
+          : status === 'past_due'
+            ? `Your ${tierLabel} plan has a payment issue. Update billing to keep access uninterrupted.`
+            : `Your ${tierLabel} plan is active.`;
+      }
       if (billingState) billingState.textContent = renewsLabel;
-      if (primaryBtn) {
-        primaryBtn.textContent = 'Manage Billing';
-        primaryBtn.onclick = function () { openCustomerPortal(); };
-      }
-      if (secondaryBtn) {
-        secondaryBtn.textContent = 'View Pricing';
-        secondaryBtn.onclick = function () { if (typeof openModal === 'function') openModal('pricing-modal'); };
-      }
-    } else {
-      if (statusCopy) statusCopy.textContent = 'You are on the Free plan. Upgrade whenever you want more books, storage, and features.';
-      if (billingState) billingState.textContent = 'Free';
-      if (primaryBtn) {
-        primaryBtn.textContent = 'View Pricing';
-        primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
-      }
-      if (secondaryBtn) {
-        const stripeReady = !!(config?.stripe?.plans?.pro?.available || config?.stripe?.plans?.premium?.available);
-        secondaryBtn.textContent = stripeReady ? 'Manage Billing' : 'Billing unavailable';
-        secondaryBtn.onclick = function () { if (stripeReady) openCustomerPortal(); };
-      }
+      applyActionButtonState(primaryBtn, canManageBilling ? 'Manage Billing' : 'View Pricing', canManageBilling ? function () { openCustomerPortal('subscription-primary-btn'); } : openPricing, false);
+      applyActionButtonState(secondaryBtn, canManageBilling ? 'View Pricing' : 'Billing starts after upgrade', canManageBilling ? openPricing : null, !canManageBilling);
+      applyActionButtonState(overviewBtn, canManageBilling ? 'Manage Billing' : 'Billing starts after upgrade', canManageBilling ? function () { openCustomerPortal('subscription-overview-billing-btn'); } : null, !canManageBilling);
+      return;
     }
+
+    if (canManageBilling) {
+      if (statusCopy) statusCopy.textContent = 'Your paid plan is inactive. Manage Billing to resume service or update the subscription for this account.';
+      if (billingState) billingState.textContent = 'Inactive';
+      applyActionButtonState(primaryBtn, 'Manage Billing', function () { openCustomerPortal('subscription-primary-btn'); }, false);
+      applyActionButtonState(secondaryBtn, 'View Pricing', openPricing, false);
+      applyActionButtonState(overviewBtn, 'Manage Billing', function () { openCustomerPortal('subscription-overview-billing-btn'); }, false);
+      return;
+    }
+
+    if (statusCopy) statusCopy.textContent = 'You are on the Basic plan. Upgrade whenever you want more synced storage and features.';
+    if (billingState) billingState.textContent = 'Basic';
+    applyActionButtonState(primaryBtn, 'View Pricing', openPricing, false);
+    applyActionButtonState(secondaryBtn, stripeReady ? 'Billing starts after upgrade' : 'Billing unavailable', null, true);
+    applyActionButtonState(overviewBtn, stripeReady ? 'Billing starts after upgrade' : 'Billing unavailable', null, true);
   }
 
   async function startCheckout(plan) {
@@ -342,7 +367,9 @@ window.rcBilling = (function () {
         const actions = window.rcInteraction && window.rcInteraction.actions
           ? (isAuthRequiredError(err)
               ? [window.rcInteraction.actions.openLogin()]
-              : [window.rcInteraction.actions.retry(() => startCheckout(plan))])
+              : (String(err?.code || '').trim().toLowerCase() === 'subscription_exists'
+                  ? [window.rcInteraction.actions.retry(() => openCustomerPortal('subscription-primary-btn'))]
+                  : [window.rcInteraction.actions.retry(() => startCheckout(plan))]))
           : [];
         window.rcInteraction && window.rcInteraction.error(
           'billing:checkout',
@@ -350,12 +377,17 @@ window.rcBilling = (function () {
           { actions }
         );
       } catch (_) {}
-      setMessage('pricing-message', isAuthRequiredError(err) ? 'Sign in to continue with checkout.' : (err.message || 'Unable to start checkout.'), 'error');
-      setMessage('billing-message', isAuthRequiredError(err) ? 'Sign in to continue with checkout.' : (err.message || 'Unable to start checkout.'), 'error');
+      const checkoutMessage = isAuthRequiredError(err)
+        ? 'Sign in to continue with checkout.'
+        : (String(err?.code || '').trim().toLowerCase() === 'subscription_exists'
+            ? 'Use Manage Billing to update the current subscription for this account.'
+            : (err.message || 'Unable to start checkout.'));
+      setMessage('pricing-message', checkoutMessage, String(err?.code || '').trim().toLowerCase() === 'subscription_exists' ? 'info' : 'error');
+      setMessage('billing-message', checkoutMessage, String(err?.code || '').trim().toLowerCase() === 'subscription_exists' ? 'info' : 'error');
     }
   }
 
-  async function openCustomerPortal() {
+  async function openCustomerPortal(buttonId) {
     if (!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn())) {
       setMessage('billing-message', 'Sign in to manage billing.', 'info');
       try {
@@ -365,33 +397,40 @@ window.rcBilling = (function () {
       return;
     }
 
-    // Disable both subscription buttons immediately — portal open is one-shot
     const primaryBtn = document.getElementById('subscription-primary-btn');
     const secondaryBtn = document.getElementById('subscription-secondary-btn');
-    [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) btn.disabled = true; });
-    setButtonBusy(secondaryBtn, 'Opening…');
+    const overviewBtn = document.getElementById('subscription-overview-billing-btn');
+    const buttons = [primaryBtn, secondaryBtn, overviewBtn].filter(Boolean);
+    buttons.forEach((btn) => { btn.disabled = true; });
+    const clickedBtn = buttonId ? document.getElementById(buttonId) : null;
+    setButtonBusy(clickedBtn || primaryBtn || overviewBtn || secondaryBtn, 'Opening…');
     try { window.rcInteraction && window.rcInteraction.pending('billing:portal', 'Opening billing…'); } catch (_) {}
 
     try {
       const data = await authenticatedPost('/api/billing?action=portal', {});
       if (data?.url) {
-        // Page is navigating away — banner stays as 'Opening billing…'
         window.location.href = data.url;
       } else {
-        [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) { clearButtonBusy(btn); btn.disabled = false; } });
+        buttons.forEach((btn) => { clearButtonBusy(btn); btn.disabled = false; });
         try { window.rcInteraction && window.rcInteraction.clear('billing:portal'); } catch (_) {}
       }
     } catch (err) {
-      [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) { clearButtonBusy(btn); btn.disabled = false; } });
+      buttons.forEach((btn) => { clearButtonBusy(btn); btn.disabled = false; });
+      if (String(err?.code || '').trim().toLowerCase() === 'no_billing_customer') {
+        try { window.rcInteraction && window.rcInteraction.clear('billing:portal'); } catch (_) {}
+        setMessage('billing-message', err.message || 'Billing starts after your first paid plan.', 'info');
+        renderSubscriptionUi().catch(() => {});
+        return;
+      }
       try {
         const actions = window.rcInteraction && window.rcInteraction.actions
           ? (isAuthRequiredError(err)
               ? [window.rcInteraction.actions.openLogin()]
-              : [window.rcInteraction.actions.retry(openCustomerPortal)])
+              : [window.rcInteraction.actions.retry(() => openCustomerPortal(buttonId))])
           : [];
         window.rcInteraction && window.rcInteraction.error(
           'billing:portal',
-          isAuthRequiredError(err) ? 'Sign in to manage billing.' : 'Billing couldn\'t be opened right now.',
+          isAuthRequiredError(err) ? 'Sign in to manage billing.' : "Billing couldn't be opened right now.",
           { actions }
         );
       } catch (_) {}
@@ -480,7 +519,7 @@ window.rcBilling = (function () {
 })();
 
 window.startCheckout = function startCheckout(plan) { return window.rcBilling.startCheckout(plan); };
-window.openCustomerPortal = function openCustomerPortal() { return window.rcBilling.openCustomerPortal(); };
+window.openCustomerPortal = function openCustomerPortal(buttonId) { return window.rcBilling.openCustomerPortal(buttonId); };
 
 window.openPricingForSignup = function openPricingForSignup() { return window.rcBilling.openPricingForSignup(); };
 window.continueWithFree = function continueWithFree() { return window.rcBilling.continueWithFree(); };

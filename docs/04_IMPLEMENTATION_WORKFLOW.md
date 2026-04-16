@@ -22,12 +22,6 @@ If the base is wrong, discard the pass and restart from the correct state.
 Before judging whether a patch "works," confirm that it does not violate scaffold authority, file responsibility, ownership boundaries, or duplicate-truth rules.
 If it does, the patch is disqualified even when runtime smoke testing looks good.
 
-### 0.3 Pending-surface framework check
-When a pass touches auth, billing, usage, restore, account hydration, library hydration, importer-capacity checks, or any other server-backed user-visible surface:
-- read `pending-surfaces.md` alongside `02_RUNTIME_CONTRACT.md` and `05_PRODUCT_LAUNCH_AND_INTEGRATION.md` before coding
-- treat mismatches between code, runtime, and `pending-surfaces.md` as a documentation or implementation discrepancy that must be resolved
-- update `pending-surfaces.md` in the same pass when behavior changes
-
 ### 0.5 Schema-replacement sequencing rule
 When a pass is replacing a drifted durable schema before launch:
 1. rewrite the docs first
@@ -111,8 +105,6 @@ When a pass touches a user-visible transition, apply these rules by default:
 - gate account-backed rendering on explicit hydration or confirmation seams, not inferred readiness
 - when using cache for responsiveness, treat it as projection only
 - reserve layout space when late hydration text would otherwise shake the page
-
-For server-backed or hydration-backed user surfaces, these rules are not complete until the pass also remains aligned with `pending-surfaces.md`.
 
 ### 4. Create one canonical patch artifact
 The default deliverable for an implementation pass is one scoped `.diff` file.

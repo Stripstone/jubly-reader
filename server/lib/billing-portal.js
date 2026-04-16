@@ -24,7 +24,10 @@ export default async function handler(req, res) {
 
   const entitlement = await getActiveEntitlement(user.id).catch(() => null);
   if (!entitlement?.stripe_customer_id) {
-    return json(res, 409, { error: 'No billing customer record exists for this account yet.' });
+    return json(res, 409, {
+      error: 'Billing starts after your first paid plan. Choose Pro or Premium to create a billing profile for this account.',
+      code: 'no_billing_customer',
+    });
   }
 
   const form = new URLSearchParams();

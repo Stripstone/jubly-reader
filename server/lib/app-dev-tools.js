@@ -509,7 +509,8 @@ async function buildSnapshot(req, user) {
 async function setPlan(userId, payload) {
   const tierInput = String(payload?.tier || 'basic').trim().toLowerCase();
   const tier = tierInput === 'free' ? 'basic' : tierInput === 'paid' ? 'pro' : tierInput;
-  const status = toText(payload?.status, 'active');
+  const statusInput = toText(payload?.status, 'active').toLowerCase();
+  const status = ['active', 'trialing', 'past_due', 'inactive'].includes(statusInput) ? statusInput : 'inactive';
   const existing = await getActiveEntitlement(userId).catch(() => null);
   return upsertEntitlement({
     ...(existing || {}),
