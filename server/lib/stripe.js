@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { optionalEnv, requiredEnv } from './env.js';
+import { requiredEnv } from './env.js';
 
 function getConfiguredPlanRef(plan) {
   if (plan === 'pro' || plan === 'paid') return String(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO || '').trim();
@@ -194,46 +194,9 @@ export function verifyStripeSignature(rawBody, signatureHeader, secret) {
   }
 }
 
-function parseBooleanEnv(name, fallback = false) {
-  const value = String(optionalEnv(name, '') || '').trim().toLowerCase();
-  if (!value) return !!fallback;
-  if (['1', 'true', 'yes', 'on'].includes(value)) return true;
-  if (['0', 'false', 'no', 'off'].includes(value)) return false;
-  return !!fallback;
-}
-
-function parseIntegerEnv(name, fallback = 0) {
-  const value = Number(optionalEnv(name, ''));
-  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : Math.max(0, Math.trunc(fallback || 0));
-}
-
-function normalizeMissingPaymentMethodBehavior(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  return ['cancel', 'pause', 'create_invoice'].includes(normalized) ? normalized : 'cancel';
-}
-
-export function getCheckoutBillingConfig(planRaw) {
-  const plan = String(planRaw || '').trim().toLowerCase() === 'premium' ? 'premium' : 'pro';
-  const trialDays = plan === 'premium'
-    ? parseIntegerEnv('PLAN_PREMIUM_TRIAL_DAYS', 0)
-    : parseIntegerEnv('PLAN_PRO_TRIAL_DAYS', 0);
-  const requireCard = parseBooleanEnv('PLAN_REQUIRE_CARD', false);
-  return {
-    allowPromotionCodes: parseBooleanEnv('PLAN_ALLOW_PROMOTION_CODES', true),
-    automaticTax: parseBooleanEnv('STRIPE_AUTOMATIC_TAX', true),
-    limitOneSubscription: parseBooleanEnv('PLAN_LIMIT_ONE_SUBSCRIPTION', true),
-    requireCard,
-    trialDays,
-    missingPaymentMethodBehavior: normalizeMissingPaymentMethodBehavior(optionalEnv('PLAN_TRIAL_MISSING_PAYMENT_METHOD_BEHAVIOR', 'cancel')),
-    paymentMethodCollection: (!requireCard && trialDays > 0) ? 'if_required' : 'always',
-  };
-}
-
 export function entitlementFromStripeStatus(statusRaw) {
   const status = String(statusRaw || '').trim().toLowerCase();
-  if (status === 'active') return 'active';
-  if (status === 'trialing') return 'trialing';
-  if (status === 'past_due') return 'past_due';
-  if (status === 'canceled' || status === 'unpaid' || status === 'incomplete' || status === 'incomplete_expired' || status === 'paused') return 'inactive';
+  if (status === 'active' || status === 'trialing') return 'active';
+  if (status === 'canceled') return 'canceled';
   return 'inactive';
 }

@@ -728,20 +728,20 @@
             <div id="tab-subscription" class="tab-content hidden-section space-y-5">
                 <div class="sub-hero">
                     <h3 class="text-2xl font-extrabold mb-1">Account access</h3>
-                    <p id="subscription-status-copy" class="text-purple-200 text-sm mb-5">Check your current access, local device totals, and billing status here. Use View Pricing to compare plans or Manage Billing when it becomes available for your account.</p>
+                    <p id="subscription-status-copy" class="text-purple-200 text-sm mb-5">Check your current plan, device storage, and renewal status here. Use View Pricing to compare plans or Manage Billing when available for your account.</p>
                     <div class="flex gap-3 flex-wrap">
-                        <button id="subscription-primary-btn" type="button" disabled class="bg-white text-indigo-700 font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-indigo-50 transition opacity-60 cursor-not-allowed">Checking…</button>
-                        <button id="subscription-secondary-btn" type="button" disabled class="bg-white/20 text-white font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-white/30 transition border border-white/30 opacity-60 cursor-not-allowed">Checking…</button>
+                        <button id="subscription-primary-btn" onclick="openModal('pricing-modal')" class="bg-white text-indigo-700 font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-indigo-50 transition">View Pricing</button>
+                        <button id="subscription-secondary-btn" onclick="openCustomerPortal()" class="bg-white/20 text-white font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-white/30 transition border border-white/30">Manage Billing</button>
                     </div>
                 </div>
                 <div id="billing-message" class="hidden-section section-card shadow-sm text-sm font-semibold"></div>
                 <div class="grid grid-cols-3 gap-4">
                     <div class="section-card shadow-sm text-center">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">On this device</p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Books</p>
                         <p id="subscription-books-value" class="text-2xl font-black text-slate-800">—</p>
                     </div>
                     <div class="section-card shadow-sm text-center">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Local storage</p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Storage</p>
                         <p id="subscription-storage-value" class="text-2xl font-black text-slate-800">—</p>
                     </div>
                     <div class="section-card shadow-sm text-center">
@@ -756,7 +756,7 @@
                         <li class="flex items-center gap-2.5"><span class="text-emerald-500 font-bold">✓</span> Reading progress stays tied to your account when signed in</li>
                         <li class="flex items-center gap-2.5"><span class="text-emerald-500 font-bold">✓</span> Billing changes return here after checkout or portal updates</li>
                     </ul>
-                    <button id="subscription-overview-billing-btn" type="button" disabled class="btn-jubly px-5 py-2.5 rounded-xl font-bold text-sm opacity-60 cursor-not-allowed">Checking billing…</button>
+                    <button onclick="openCustomerPortal()" class="btn-jubly px-5 py-2.5 rounded-xl font-bold text-sm">Manage Billing</button>
                 </div>
             </div>
 

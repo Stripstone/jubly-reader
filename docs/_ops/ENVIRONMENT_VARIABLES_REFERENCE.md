@@ -3,33 +3,24 @@
 # Canonical entitlement vocabulary: basic / pro / premium
 # Stripe-backed paid plans: pro / premium
 # -----------------------------
-PLAN_REQUIRE_CARD = false # Wired now: when true, Checkout always collects a payment method up front
-PLAN_TRIAL_MISSING_PAYMENT_METHOD_BEHAVIOR = cancel # Wired now: Checkout trial end behavior when no payment method is collected (cancel / pause / create_invoice)
-PLAN_ALLOW_PROMOTION_CODES = true # Wired now: whether hosted Checkout allows promotion / coupon codes
-PLAN_LIMIT_ONE_SUBSCRIPTION = true # Wired now: blocks a second Stripe subscription and sends the user to Manage Billing instead
+PLAN_REQUIRE_CARD = false # Whether paid plan checkout should require a payment method up front
+PLAN_TRIAL_MISSING_PAYMENT_METHOD_BEHAVIOR = cancel # What to do when a trial ends without a payment method (for example: cancel or pause)
+PLAN_ALLOW_PROMOTION_CODES = true # Whether checkout should allow customer-entered promotion / coupon codes
+PLAN_LIMIT_ONE_SUBSCRIPTION = true # Whether to block users from starting a second subscription when one is already active
 
 PLAN_PRO_MONTHLY_USD_CENTS = 900 # Display/reference monthly price for the Pro plan in USD cents ($9.00)
 PLAN_PREMIUM_MONTHLY_USD_CENTS = 1700 # Display/reference monthly price for the Premium plan in USD cents ($17.00)
-PLAN_PRO_TRIAL_DAYS = 3 # Wired now: trial days passed to Stripe Checkout for the Pro plan
-PLAN_PREMIUM_TRIAL_DAYS = 0 # Wired now: trial days passed to Stripe Checkout for the Premium plan
-
-# -----------------------------
-# APP ORIGIN / RETURN URLS
-# Used by backend auth and billing return URLs when you want to override
-# request-derived origin detection.
-# -----------------------------
-APP_BASE_URL = https://example.com # Preferred explicit app origin for checkout success/cancel and portal return URLs
-PUBLIC_APP_URL = https://example.com # Fallback explicit app origin if APP_BASE_URL is unset
-SITE_URL = https://example.com # Final fallback explicit app origin if neither APP_BASE_URL nor PUBLIC_APP_URL is set
+PLAN_PRO_TRIAL_DAYS = 3 # Number of trial days for the Pro plan
+PLAN_PREMIUM_TRIAL_DAYS = 0 # Number of trial days for the Premium plan
 
 # -----------------------------
 # STRIPE
 # -----------------------------
 STRIPE_PRICE_PRO_MONTHLY= price_*** # Stripe monthly Price object ID used to bill the Pro subscription
 STRIPE_PRICE_PREMIUM_MONTHLY= price_*** # Stripe monthly Price object ID used to bill the Premium subscription
-STRIPE_AUTOMATIC_TAX = true # Wired now: enables Stripe automatic tax calculation for hosted Checkout sessions
+STRIPE_AUTOMATIC_TAX = true # Enable Stripe automatic tax calculation for Stripe checkout sessions
 STRIPE_SECRET_KEY = *** # Stripe secret API key used by the backend for Checkout, billing, and other Stripe server actions
-STRIPE_PUBLISHABLE_KEY = *** # Not required by the current hosted-Checkout flow; keep only if client-side Stripe components are added later
+STRIPE_PUBLISHABLE_KEY = *** # Stripe publishable key used by the frontend for Stripe client-side initialization
 STRIPE_WEBHOOK_SECRET = *** # Stripe webhook signing secret used to verify incoming webhook events
 
 # -----------------------------
