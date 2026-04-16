@@ -545,9 +545,7 @@ window.rcInteraction = (function () {
         const supportFooter = document.getElementById('supportFooter');
         if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'block' : 'none';
         const sbLibrary = document.getElementById('sb-library');
-        const sbProfile = document.getElementById('sb-profile');
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
-        if (sbProfile) sbProfile.classList.toggle('active', id === 'profile-page');
 
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');

@@ -67,29 +67,6 @@
                     <input type="checkbox" id="autoplayToggle" style="accent-color:var(--theme-accent); width:15px; height:15px; cursor:pointer;">
                 </label>
             </div>
-            <div class="rs-prototype-group">
-                <div class="rs-prototype-heading">
-                    <p class="rs-section-label">Display</p>
-                    <p class="rs-section-sub">Prototype placement for everyday reading controls.</p>
-                </div>
-                <div class="rs-prototype-grid">
-                    <label class="rs-proto-option"><span>Preview rail visibility</span><select><option>Show on desktop</option><option>Hidden by default</option></select></label>
-                    <label class="rs-proto-option"><span>Reading density</span><select><option>Comfort</option><option selected>Balanced</option><option>Compact</option></select></label>
-                </div>
-                <div class="rs-prototype-toggles">
-                    <label class="rs-proto-toggle"><span>Reduced motion</span><input type="checkbox"></label>
-                    <label class="rs-proto-toggle"><span>Always resume last book</span><input type="checkbox" checked></label>
-                </div>
-            </div>
-            <div class="rs-prototype-group">
-                <div class="rs-prototype-heading">
-                    <p class="rs-section-label">Session</p>
-                    <p class="rs-section-sub">Sleep timer defaults belong here, not in persistent reading chrome.</p>
-                </div>
-                <div class="rs-prototype-grid single">
-                    <label class="rs-proto-option"><span>Sleep timer default</span><select><option>Off</option><option>20 minutes</option><option selected>End of page</option></select></label>
-                </div>
-            </div>
         </div>
 
         <div class="rs-panel" id="rs-panel-sound" style="display:none;">
@@ -143,16 +120,6 @@
                         <div class="theme-swatch flex items-center justify-center text-xl" style="background: linear-gradient(135deg, #c17d4a, #e8d9c4); opacity: 0.6;">🧭</div>
                         <span class="text-xs font-semibold text-slate-400">Explorer</span>
                     </button>
-                </div>
-            </div>
-
-            <div class="rs-theme-section rs-prototype-group">
-                <p class="rs-section-label">Ambience &amp; Focus Presets</p>
-                <p class="rs-section-sub">Main home for mood presets in this prototype.</p>
-                <div class="rs-preset-grid">
-                    <button type="button" class="rs-preset-card active"><strong>Quiet Night</strong><span>Low-light, softer motion</span></button>
-                    <button type="button" class="rs-preset-card"><strong>Deep Focus</strong><span>Cleaner contrast, fewer distractions</span></button>
-                    <button type="button" class="rs-preset-card"><strong>Default</strong><span>Balanced everyday setup</span></button>
                 </div>
             </div>
 
@@ -341,36 +308,6 @@
                     <div class="import-hint" style="margin:0;">Tip: Dedication/Index/etc. are unchecked by default.</div>
                 </div>
             </div>
-            <div class="import-stage import-customize-prototype">
-                <div class="shell-prototype-label">Placement prototype</div>
-                <div class="import-customize-card">
-                    <div class="import-customize-head">
-                        <div>
-                            <div class="import-picker-title">Customize Chapters</div>
-                            <p class="import-customize-copy">Advanced second-step editor for merge, split, and search before final import.</p>
-                        </div>
-                        <span class="import-customize-pill">Stage 2 add-on</span>
-                    </div>
-                    <div class="import-customize-grid">
-                        <div class="import-customize-panel">
-                            <h4>Chapter list</h4>
-                            <ul>
-                                <li>Introduction</li>
-                                <li>Chapter 1</li>
-                                <li>Chapter 2</li>
-                                <li>Chapter 3</li>
-                            </ul>
-                        </div>
-                        <div class="import-customize-panel">
-                            <h4>Find split point</h4>
-                            <div class="import-customize-search">Search inside chapter…</div>
-                            <div class="import-customize-actions">
-                                <span>Add split</span><span>Remove split</span><span>Merge</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
             <!-- Stage 3: Progress -->
             <div id="importStageProgress" class="import-stage" style="display:none;">
                 <div class="import-progress">
@@ -484,29 +421,11 @@
 </nav>
 
 <!-- SIDEBAR (logged-in, non-reading views only) -->
-<aside id="app-sidebar" class="fixed left-0 z-40 flex-col items-center gap-3 bg-white border-r border-slate-200 shell-prototype-rail" style="top:57px; height:calc(100vh - 57px); width:96px; display:none;">
-    <div class="shell-prototype-badge">Prototype</div>
-    <button type="button" class="sidebar-hero-btn" title="Resume Reading" onclick="showSection('dashboard')">
-        <span class="sidebar-hero-kicker">Resume</span>
-        <span class="sidebar-hero-title">Last read</span>
+<aside id="app-sidebar" class="fixed left-0 z-40 flex-col items-center pt-5 gap-1 bg-white border-r border-slate-200" style="top:57px; height:calc(100vh - 57px); width:68px; display:none;">
+    <button onclick="showSection('dashboard')" id="sb-library" class="sidebar-btn" title="Library">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        Library
     </button>
-    <div class="sidebar-main-stack">
-        <button onclick="showSection('dashboard')" id="sb-library" class="sidebar-btn" title="Library">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-            Library
-        </button>
-        <button onclick="showSection('profile-page')" id="sb-profile" class="sidebar-btn" title="Profile">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
-            Profile
-        </button>
-    </div>
-    <div class="sidebar-utility-stack">
-        <div class="sidebar-progress-chip" aria-hidden="true">
-            <span class="sidebar-progress-label">Today</span>
-            <strong>18 min</strong>
-        </div>
-        <button type="button" class="sidebar-history-shortcut" title="History shortcut" onclick="showSection('profile-page'); setTimeout(function(){ try { switchTab('tab-history'); } catch (_) {} }, 0);">History →</button>
-    </div>
 </aside>
 <div id="landing-page" class="min-h-[88vh] flex flex-col md:flex-row items-center justify-center max-w-6xl mx-auto px-6 gap-10 py-16">
     <div class="w-full md:w-1/2 flex justify-center order-1 md:order-1">
@@ -603,63 +522,6 @@
             <button id="importBookBtn"    class="btn-jubly px-6 py-2.5 rounded-lg font-bold text-sm shadow-sm">+ Import Book</button>
         </div>
     </header>
-
-    <section class="shell-prototype-section library-prototype-zone" aria-label="Library placement prototype">
-        <div class="shell-prototype-label">Placement prototype</div>
-        <div class="library-hero-card section-card shadow-sm">
-            <div>
-                <p class="library-hero-kicker">Continue where you left off</p>
-                <h3 class="library-hero-title">History of Philosophy</h3>
-                <p class="library-hero-copy">Chapter 7 · Last position saved on page 42</p>
-            </div>
-            <div class="library-hero-actions">
-                <button type="button" class="btn-jubly px-5 py-2.5 rounded-xl text-sm font-bold">Resume reading</button>
-                <button type="button" class="btn-ghost px-4 py-2.5 rounded-xl text-sm font-bold">Open chapter</button>
-            </div>
-        </div>
-        <div class="library-lane-grid">
-            <section class="library-lane section-card shadow-sm">
-                <div class="library-lane-head">
-                    <h3>Continue Reading</h3>
-                    <span>2 active books</span>
-                </div>
-                <div class="library-card-row">
-                    <article class="library-proto-card active"><strong>Philosophy Reader</strong><span>Chapter 7 · 18 min left</span></article>
-                    <article class="library-proto-card active"><strong>Biology Notes</strong><span>Page 14 · 9 min left</span></article>
-                </div>
-            </section>
-            <section class="library-lane section-card shadow-sm">
-                <div class="library-lane-head">
-                    <h3>Started Not Finished</h3>
-                    <span>Momentum lane</span>
-                </div>
-                <div class="library-card-row">
-                    <article class="library-proto-card"><strong>Modern Literature</strong><span>Saved after intro</span></article>
-                    <article class="library-proto-card"><strong>Chemistry Guide</strong><span>Paused in chapter 3</span></article>
-                </div>
-            </section>
-            <section class="library-lane section-card shadow-sm quiet-lane">
-                <div class="library-lane-head">
-                    <h3>Recently Imported</h3>
-                    <span>Support lane</span>
-                </div>
-                <div class="library-card-row">
-                    <article class="library-proto-card quiet"><strong>Case Study PDF</strong><span>Imported today</span></article>
-                    <article class="library-proto-card quiet"><strong>Lecture Pack</strong><span>Imported yesterday</span></article>
-                </div>
-            </section>
-            <section class="library-lane section-card shadow-sm quiet-lane">
-                <div class="library-lane-head">
-                    <h3>Recently Finished</h3>
-                    <span>Archive lane</span>
-                </div>
-                <div class="library-card-row">
-                    <article class="library-proto-card quiet"><strong>Reading Sprint</strong><span>Finished last session</span></article>
-                    <article class="library-proto-card quiet"><strong>Field Notes</strong><span>Completed this week</span></article>
-                </div>
-            </section>
-        </div>
-    </section>
 
     <section id="library-public-sample" class="hidden-section">
         <div class="section-card shadow-sm border border-indigo-100 bg-indigo-50/40">
@@ -790,7 +652,6 @@
                 </div>
                 <nav class="flex flex-col gap-1">
                     <button data-tab="tab-profile"       onclick="switchTab('tab-profile')"       class="profile-tab-btn active text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Profile</button>
-                    <button data-tab="tab-history"       onclick="switchTab('tab-history')"       class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">History</button>
                     <button data-tab="tab-subscription"  onclick="switchTab('tab-subscription')"  class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Subscription</button>
                     <button data-tab="tab-settings"      onclick="switchTab('tab-settings')"      class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Settings</button>
                     <hr class="my-2 border-slate-200">
@@ -829,15 +690,6 @@
                         <p class="text-xs text-slate-400 mt-1"><span id="profile-sessions-completed">0</span> sessions completed</p>
                     </div>
                 </div>
-                <section class="profile-analytics-strip section-card shadow-sm">
-                    <div class="shell-prototype-label">Placement prototype</div>
-                    <div class="profile-analytics-grid">
-                        <article><span>Pages today</span><strong>26</strong></article>
-                        <article><span>Minutes this week</span><strong>96</strong></article>
-                        <article><span>Books in progress</span><strong>3</strong></article>
-                        <article><span>Chapters finished</span><strong>8</strong></article>
-                    </div>
-                </section>
                 <div id="profile-goal-celebration" class="profile-goal-celebration hidden-section" aria-live="polite">🎉✨ Daily goal complete ✨🎉</div>
                 <div class="section-card shadow-sm">
                     <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400 mb-1">Discover Jubly Apps</h4>
@@ -872,31 +724,6 @@
                 </div>
             </div>
 
-            <div id="tab-history" class="tab-content hidden-section space-y-5">
-                <section class="section-card shadow-sm profile-history-surface">
-                    <div class="shell-prototype-label">Placement prototype</div>
-                    <div class="profile-history-head">
-                        <div>
-                            <h4>Reading History</h4>
-                            <p>History is a destination here, while leftnav stays a shortcut only.</p>
-                        </div>
-                        <button type="button" class="btn-ghost px-3 py-2 rounded-lg text-xs font-bold">Filters later</button>
-                    </div>
-                    <div class="profile-history-list">
-                        <div class="profile-history-group">
-                            <span class="profile-history-label">Today</span>
-                            <article><strong>Philosophy Reader</strong><span>Opened chapter 7 · 18 min session</span></article>
-                            <article><strong>Biology Notes</strong><span>Reviewed 4 pages before pause</span></article>
-                        </div>
-                        <div class="profile-history-group">
-                            <span class="profile-history-label">Earlier this week</span>
-                            <article><strong>Modern Literature</strong><span>Returned after 2 days away</span></article>
-                            <article><strong>Case Study PDF</strong><span>Imported and previewed</span></article>
-                        </div>
-                    </div>
-                </section>
-            </div>
-
             <!-- Subscription Tab -->
             <div id="tab-subscription" class="tab-content hidden-section space-y-5">
                 <div class="sub-hero">
@@ -920,20 +747,6 @@
                     <div class="section-card shadow-sm text-center">
                         <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Renews</p>
                         <p id="subscription-billing-state" class="text-xl font-black text-slate-800 mt-1">—</p>
-                    </div>
-                </div>
-                <div class="section-card shadow-sm subscription-token-card">
-                    <div class="shell-prototype-label">Placement prototype</div>
-                    <div class="subscription-token-head">
-                        <div>
-                            <h4>Usage &amp; token context</h4>
-                            <p>Account context lives here instead of persistent reading clutter.</p>
-                        </div>
-                        <span class="subscription-token-pill">42 tokens</span>
-                    </div>
-                    <div class="subscription-token-row">
-                        <span>Import badges and TTS pricing appear at action points</span>
-                        <span class="subscription-token-warning">Low-token warning state</span>
                     </div>
                 </div>
                 <div class="section-card shadow-sm">
@@ -1027,7 +840,6 @@
     <div id="reading-top-bar" class="reading-top-bar">
         <div class="reading-top-left">
             <button id="openReadingSettings" type="button" class="pb-icon-btn reading-top-settings-btn" aria-label="Open reading settings" title="Reading settings"><svg class="settings-gear" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg><span class="settings-label">Settings</span></button>
-            <button type="button" class="reading-top-chip" aria-disabled="true" title="Sleep timer prototype">⏱ Timer</button>
             <div class="reading-divider"></div>
             <!-- bookControls wraps bookSelect — initBookImporter() wires to this div -->
             <div id="bookControls" style="display:flex;align-items:center;">
@@ -1052,47 +864,18 @@
     </div>
 
     <!-- CONTENT -->
-    <div class="reading-content reading-content-prototype-shell">
+    <div class="reading-content">
         <canvas id="fireCanvas" style="display:none;" aria-hidden="true"></canvas>
-        <aside class="reading-preview-rail" aria-hidden="true">
-            <div class="shell-prototype-label slim">Preview rail</div>
-            <div class="reading-rail-track"><span class="is-current"></span></div>
-            <div class="reading-rail-cards">
-                <div class="reading-rail-card active">Pg 41</div>
-                <div class="reading-rail-card">Pg 42</div>
-                <div class="reading-rail-card">Pg 43</div>
-            </div>
-        </aside>
-        <div class="reading-stage">
-            <!-- #pages — app's render() (library.js) writes .page card elements here -->
-            <div id="pages"></div>
-            <div class="reading-meta-strip" aria-hidden="true">
-                <span>18 min left</span>
-                <span>7 pages left in chapter</span>
-                <span>63% complete</span>
-            </div>
-            <div class="reading-milestone-toast" aria-hidden="true">This sitting: 6 pages completed</div>
-        </div>
+        <!-- #pages — app's render() (library.js) writes .page card elements here -->
+        <div id="pages"></div>
 
         <!-- END-OF-SESSION SIGNAL (shown by showSessionComplete() when last page done) -->
         <div id="session-complete" class="hidden-section mt-12 mb-4">
-            <div class="glass-card p-8 text-center session-complete-prototype" style="border-color: var(--theme-accent); border-width: 2px;">
-                <div class="shell-prototype-label centered">Placement prototype</div>
+            <div class="glass-card p-8 text-center" style="border-color: var(--theme-accent); border-width: 2px;">
                 <div class="text-3xl mb-3">✓</div>
                 <h3 class="font-extrabold text-lg text-slate-800 mb-1">Session complete</h3>
-                <p id="session-stats" class="text-sm text-slate-400 mb-2">You read <strong id="stat-pages">—</strong> pages · <strong id="stat-minutes">—</strong> min</p>
-                <p class="session-complete-chapter">Chapter finished · your next place is saved</p>
+                <p id="session-stats" class="text-sm text-slate-400 mb-6">You read <strong id="stat-pages">—</strong> pages · <strong id="stat-minutes">—</strong> min</p>
                 <button onclick="showSection('dashboard')" class="btn-theme px-8 py-3 rounded-xl font-bold text-sm">Back to Library →</button>
-            </div>
-        </div>
-        <div class="session-complete-preview mt-8 mb-4" aria-hidden="true">
-            <div class="glass-card p-8 text-center session-complete-prototype" style="border-color: var(--theme-accent); border-width: 2px;">
-                <div class="shell-prototype-label centered">Visible preview</div>
-                <div class="text-3xl mb-3">✓</div>
-                <h3 class="font-extrabold text-lg text-slate-800 mb-1">Session complete</h3>
-                <p class="text-sm text-slate-400 mb-2">You read <strong>6</strong> pages · <strong>18</strong> min</p>
-                <p class="session-complete-chapter">Chapter finished · your next place is saved</p>
-                <button type="button" onclick="showSection('dashboard')" class="btn-theme px-8 py-3 rounded-xl font-bold text-sm">Back to Library →</button>
             </div>
         </div>
     </div>
