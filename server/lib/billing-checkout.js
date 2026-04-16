@@ -2,7 +2,7 @@ import { json, readJsonBody, withCors } from './http.js';
 import { requestOrigin } from './env.js';
 import { getAllowedBrowserOrigins } from './origins.js';
 import { getActiveEntitlement, getUserFromAccessToken } from './supabase.js';
-import { getPlanConfig, stripeRequest } from './stripe.js';
+import { getCheckoutBillingConfig, getPlanConfig, stripeRequest } from './stripe.js';
 
 function getBearer(req) {
   const header = String(req?.headers?.authorization || req?.headers?.Authorization || '').trim();
@@ -31,6 +31,18 @@ export default async function handler(req, res) {
   }
 
   const existing = await getActiveEntitlement(user.id).catch(() => null);
+  const billing = getCheckoutBillingConfig(plan.tier);
+  const existingLifecycle = String(existing?.status || '').trim().toLowerCase();
+  const hasCurrentStripeSubscription = existing?.provider === 'stripe'
+    && ['active', 'trialing', 'past_due'].includes(existingLifecycle)
+    && !!(existing?.stripe_customer_id || existing?.stripe_subscription_id);
+  if (billing.limitOneSubscription && hasCurrentStripeSubscription) {
+    return json(res, 409, {
+      error: 'This account already has a billing profile. Use Manage Billing to update the current subscription.',
+      code: 'subscription_exists',
+    });
+  }
+
   const origin = requestOrigin(req);
   const form = new URLSearchParams();
   form.set('mode', 'subscription');
@@ -39,11 +51,17 @@ export default async function handler(req, res) {
   form.set('client_reference_id', user.id);
   form.set('line_items[0][price]', plan.priceId);
   form.set('line_items[0][quantity]', '1');
-  form.set('allow_promotion_codes', 'true');
+  form.set('allow_promotion_codes', billing.allowPromotionCodes ? 'true' : 'false');
+  form.set('payment_method_collection', billing.paymentMethodCollection);
+  if (billing.automaticTax) form.set('automatic_tax[enabled]', 'true');
   form.set('metadata[user_id]', user.id);
   form.set('metadata[tier]', plan.tier);
   form.set('subscription_data[metadata][user_id]', user.id);
   form.set('subscription_data[metadata][tier]', plan.tier);
+  if (billing.trialDays > 0) {
+    form.set('subscription_data[trial_period_days]', String(billing.trialDays));
+    form.set('subscription_data[trial_settings][end_behavior][missing_payment_method]', billing.missingPaymentMethodBehavior);
+  }
   if (existing?.stripe_customer_id) form.set('customer', existing.stripe_customer_id);
   else if (user.email) form.set('customer_email', user.email);
 

@@ -329,7 +329,7 @@ Obfuscation may be used as friction, not as the main protection model.
 - heavy local assets remain device-local
 
 ## Current Supabase scope
-Planned durable records:
+Durable records in active use or partial integration:
 - users
 - owned library items
 - reading progress
@@ -339,23 +339,44 @@ Planned durable records:
 - entitlement state
 - usage window summary
 
-Still pending:
-- frontend `supabase-js` integration
-- signed-in progress sync
-- signed-in durable settings sync
-- backend JWT verification
-- Stripe webhook write path
-- auth-linked routing decisions
+Wired now in the current artifact:
+- frontend `supabase-js` initialization through `GET /api/app?kind=public-config`
+- backend bearer-token user resolution for authenticated app and billing routes
+- Stripe checkout and billing-portal launch through backend routes
+- Stripe webhook entitlement writes into `user_entitlements`
+- auth-linked runtime entitlement resolution through `GET /api/app?kind=runtime-config`
+
+Still pending or incomplete:
+- final route-backed public `/pricing`, `/login`, and `/signup` realization
+- full signed-in progress sync completion across all continuity surfaces
+- full signed-in durable settings sync completion across all intended durable settings
+- removal of remaining prototype public/auth shortcuts and dead-end account buttons
+- final subscription/account summaries that reflect server-backed storage truth rather than local-device summaries
 
 ## Environment variables
-Authoritative names:
+Authoritative billing and auth names in active use:
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 - `SUPABASE_SECRET_KEY`
+- `APP_BASE_URL` / `PUBLIC_APP_URL` / `SITE_URL` as explicit app-origin overrides for auth and billing returns
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRICE_PRO_MONTHLY`
+- `STRIPE_PRICE_PREMIUM_MONTHLY`
+
+Checkout-behavior names currently wired through the backend:
+- `PLAN_REQUIRE_CARD`
+- `PLAN_TRIAL_MISSING_PAYMENT_METHOD_BEHAVIOR`
+- `PLAN_ALLOW_PROMOTION_CODES`
+- `PLAN_LIMIT_ONE_SUBSCRIPTION`
+- `PLAN_PRO_TRIAL_DAYS`
+- `PLAN_PREMIUM_TRIAL_DAYS`
+- `STRIPE_AUTOMATIC_TAX`
 
 Rules:
 - only `SUPABASE_URL` and `SUPABASE_ANON_KEY` belong in frontend client initialization
-- `SUPABASE_SECRET_KEY` is backend-only
+- `SUPABASE_SECRET_KEY`, Stripe secrets, and checkout-behavior variables are backend-only
+- `STRIPE_PUBLISHABLE_KEY` is not required by the current hosted-Checkout flow unless the product later adopts client-side Stripe components
 
 ## Validation checklist
 First apply the structural compliance gate from `03_ARCHITECTURE_AND_GUARDRAILS.md`.
@@ -368,7 +389,6 @@ For persistence and account-backed behavior, always check:
 - reading continuity
 
 Launch-failing examples include:
-- changing account, billing, or usage loading behavior without updating `pending-surfaces.md`
 - flashing page 1 before restore catches up
 - showing a believable but wrong usage value before account truth loads
 - showing a setting change immediately and then snapping back unexpectedly
