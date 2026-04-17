@@ -132,76 +132,19 @@ window.rcAuth = (function () {
   function getClient() { return _client; }
   function getConfig() { return _config ? { ..._config } : null; }
 
-
-  function _emailValidationMessage(email) {
-    const value = String(email || '').trim();
-    if (!value) return 'Enter a valid email address.';
-    if (value.length > 254) return 'Enter a valid email address.';
-    const at = value.indexOf('@');
-    if (at <= 0 || at !== value.lastIndexOf('@')) return 'Enter a valid email address.';
-
-    const local = value.slice(0, at);
-    const domain = value.slice(at + 1);
-
-    if (!local || !domain) return 'Enter a valid email address.';
-    if (local.length > 64) return 'Enter a valid email address.';
-    if (local.startsWith('.') || local.endsWith('.') || local.includes('..')) return 'Enter a valid email address.';
-    if (!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local)) return 'Enter a valid email address.';
-
-    if (domain.startsWith('.') || domain.endsWith('.') || domain.includes('..')) return 'Enter a valid email address.';
-    const labels = domain.split('.');
-    if (labels.length < 2) return 'Enter a valid email address.';
-    for (const label of labels) {
-      if (!label || label.length > 63) return 'Enter a valid email address.';
-      if (label.startsWith('-') || label.endsWith('-')) return 'Enter a valid email address.';
-      if (!/^[A-Za-z0-9-]+$/.test(label)) return 'Enter a valid email address.';
-    }
-    const tld = labels[labels.length - 1] || '';
-    if (!/^[A-Za-z]{2,24}$/.test(tld)) return 'Enter a valid email address.';
-    return '';
-  }
-
-  function looksLikeEmail(email) {
-    return !_emailValidationMessage(email);
-  }
-
-  async function inspectEmail(email) {
-    const normalized = String(email || '').trim().toLowerCase();
-    if (!looksLikeEmail(normalized)) {
-      return { ok: false, exists: false, error: { message: 'Enter a valid email address.' } };
-    }
-    try {
-      const resp = await fetch(`/api/app?kind=auth-email-check&email=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
-      const data = await resp.json().catch(() => null);
-      if (!resp.ok || !data || typeof data !== 'object') {
-        return { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
-      }
-      return { ok: !!data.ok, exists: !!data.exists, error: data.ok ? null : { message: String(data.error || 'Unable to verify email yet.') } };
-    } catch (_) {
-      return { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
-    }
-  }
-
-  async function signUp(email, password, username, authOptions) {
+  async function signUp(email, password, username) {
     if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
-    const normalizedEmail = String(email || '').trim();
-    const emailError = _emailValidationMessage(normalizedEmail);
-    if (emailError) return { error: { message: emailError } };
     const options = {};
-    const requestedRedirect = authOptions && typeof authOptions === 'object' ? String(authOptions.emailRedirectTo || '').trim() : '';
-    const redirect = requestedRedirect || String(_config && _config.authRedirectUrl || '').trim();
+    const redirect = String(_config && _config.authRedirectUrl || '').trim();
     if (redirect) options.emailRedirectTo = redirect;
     const name = String(username || '').trim();
     if (name) options.data = { full_name: name, name };
-    return _client.auth.signUp({ email: normalizedEmail, password, options });
+    return _client.auth.signUp({ email, password, options });
   }
 
   async function signIn(email, password) {
     if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
-    const normalizedEmail = String(email || '').trim();
-    const emailError = _emailValidationMessage(normalizedEmail);
-    if (emailError) return { error: { message: emailError } };
-    return _client.auth.signInWithPassword({ email: normalizedEmail, password });
+    return _client.auth.signInWithPassword({ email, password });
   }
 
   async function signOut() {
@@ -260,8 +203,6 @@ window.rcAuth = (function () {
     signOut,
     updateDisplayName,
     changePassword,
-    looksLikeEmail,
-    inspectEmail,
   };
 })();
 

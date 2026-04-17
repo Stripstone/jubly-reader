@@ -196,8 +196,7 @@ export function verifyStripeSignature(rawBody, signatureHeader, secret) {
 
 export function entitlementFromStripeStatus(statusRaw) {
   const status = String(statusRaw || '').trim().toLowerCase();
-  if (status === 'active') return 'active';
-  if (status === 'trialing') return 'trialing';
-  if (status === 'past_due') return 'past_due';
+  if (status === 'active' || status === 'trialing') return 'active';
+  if (status === 'canceled') return 'canceled';
   return 'inactive';
 }

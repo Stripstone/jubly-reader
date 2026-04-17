@@ -3,21 +3,37 @@
 // ============================================================
 //
 // PRE-RUNTIME APPEARANCE BOOTSTRAP (temporary shell bridge):
-//   Public boot now starts from the safe light appearance instead of reusing
-//   client-cached light/dark state before auth truth exists. Signed-in users
-//   can restore their persisted appearance only after auth resolves.
+//   Applies the last-safe local appearance class to <html> before CSS paints
+//   so the shell does not flash the wrong light/dark surface before runtime
+//   re-applies the authoritative appearance state from js/state.js.
 //   Retirement condition: remove when runtime provides an equally-early
 //   appearance bootstrap seam without using index.html inline script ownership.
-(function applyPublicSafeAppearanceBoot() {
+(function applyLastSafeAppearanceBoot() {
     try {
+        var mode = 'light';
+        try {
+            var raw = localStorage.getItem('rc_appearance_prefs');
+            if (raw) {
+                var parsed = JSON.parse(raw) || {};
+                var stored = parsed.appearance_mode || parsed.mode || parsed.appearance;
+                if (stored === 'dark' || stored === 'light') mode = stored;
+            }
+        } catch (_) {}
+        if (mode !== 'dark') {
+            try {
+                var match = String(document.cookie || '').match(/(?:^|; )rc_appearance_mode=([^;]+)/);
+                var cookieMode = match ? decodeURIComponent(match[1]) : '';
+                if (cookieMode === 'dark' || cookieMode === 'light') mode = cookieMode;
+            } catch (_) {}
+        }
         var root = document.documentElement;
         if (!root) return;
         root.classList.remove('app-light', 'app-dark');
-        root.classList.add('app-light');
-        root.setAttribute('data-app-appearance', 'light');
-        root.style.backgroundColor = '#ffffff';
-        root.style.color = '#1e293b';
-        root.style.colorScheme = 'light';
+        root.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
+        root.setAttribute('data-app-appearance', mode);
+        root.style.backgroundColor = mode === 'dark' ? '#0f172a' : '#ffffff';
+        root.style.color = mode === 'dark' ? '#e2e8f0' : '#1e293b';
+        root.style.colorScheme = mode;
     } catch (_) {}
 })();
 
@@ -695,94 +711,10 @@ window.rcInteraction = (function () {
         returnToPublicEntry();
     }
 
-    function readPendingPlanIntent() {
-        try {
-            return window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
-                ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase()
-                : '';
-        } catch (_) {
-            return '';
-        }
-    }
-
-    function buildAuthRedirectForPendingPlan() {
-        try {
-            const config = window.rcAuth && typeof window.rcAuth.getConfig === 'function' ? window.rcAuth.getConfig() : null;
-            const base = String((config && (config.canonicalLoginUrl || config.authRedirectUrl)) || '').trim();
-            if (!base) return '';
-            const url = new URL(base, window.location.origin);
-            url.searchParams.set('view', 'login-page');
-            url.searchParams.set('auth', 'verified');
-            const pendingPlan = readPendingPlanIntent();
-            if (pendingPlan === 'pro' || pendingPlan === 'premium') {
-                url.searchParams.set('next', 'checkout');
-                url.searchParams.set('tier', pendingPlan);
-            } else {
-                url.searchParams.delete('next');
-                url.searchParams.delete('tier');
-            }
-            return `${url.origin}${url.pathname}${url.search}${url.hash}`;
-        } catch (_) {
-            return '';
-        }
-    }
-
-    function readAuthLocationState() {
-        try {
-            const params = new URLSearchParams(window.location.search || '');
-            return String(params.get('auth') || '').trim().toLowerCase();
-        } catch (_) {
-            return '';
-        }
-    }
-
-    function clearAuthLocationState() {
-        try {
-            const url = new URL(window.location.href);
-            if (!url.searchParams.has('auth')) return;
-            url.searchParams.delete('auth');
-            window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-        } catch (_) {}
-    }
-
-    function clearPaidIntentLocationState() {
-        try {
-            if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') {
-                window.rcBilling.clearPendingPlan();
-            }
-            const url = new URL(window.location.href);
-            url.searchParams.delete('tier');
-            if (String(url.searchParams.get('next') || '').trim().toLowerCase() === 'checkout') url.searchParams.delete('next');
-            window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-        } catch (_) {}
-    }
-
-    async function applyAuthLocationState() {
-        const state = readAuthLocationState();
-        if (state !== 'verified') return;
-        const verifiedUser = window.rcAuth && typeof window.rcAuth.getUser === 'function' ? window.rcAuth.getUser() : null;
-        const verifiedEmail = String((verifiedUser && verifiedUser.email) || '').trim();
-        closeModal('pricing-modal');
-        closeModal('ownership-modal');
-        if (window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn() && typeof window.rcAuth.signOut === 'function') {
-            await window.rcAuth.signOut();
-        }
-        _authMode = 'signin';
-        _signupStep = 1;
-        _validatedSignupEmail = '';
-        toggleAuthMode(true);
-        showSection('login-page', { historyMode: 'replace' });
-        const emailField = document.getElementById('loginEmail');
-        if (emailField && verifiedEmail) emailField.value = verifiedEmail;
-        _authShowSuccess('Email verified. Log In to continue.');
-        clearAuthLocationState();
-    }
-
     function authBack() {
         _authClearMessages();
         if (_authMode === 'signup' && _signupStep === 2) {
             _signupStep = 1;
-            _validatedSignupEmail = '';
             applyAuthModeUi();
             try {
                 const emailField = document.getElementById('loginEmail');
@@ -790,8 +722,6 @@ window.rcInteraction = (function () {
             } catch (_) {}
             return;
         }
-        _validatedSignupEmail = '';
-        clearPaidIntentLocationState();
         returnToPublicEntry();
     }
 
@@ -800,7 +730,6 @@ window.rcInteraction = (function () {
         closeModal('pricing-modal');
         _authMode = 'signup';
         _signupStep = 1;
-        _validatedSignupEmail = '';
         toggleAuthMode(true);
         showSection('login-page');
     }
@@ -869,7 +798,6 @@ window.rcInteraction = (function () {
 
     let _authMode = 'signin'; // 'signin' | 'signup'
     let _signupStep = 1; // 1=email, 2=username+password
-    let _validatedSignupEmail = '';
 
     function applyAuthModeUi() {
         const heading       = document.getElementById('auth-form-heading');
@@ -898,7 +826,7 @@ window.rcInteraction = (function () {
                 if (usernameWrap) usernameWrap.classList.add('hidden-section');
                 if (passwordWrap) passwordWrap.classList.add('hidden-section');
                 if (confirmWrap) confirmWrap.classList.add('hidden-section');
-                if (submitBtn) submitBtn.textContent = 'Next';
+                if (submitBtn) submitBtn.textContent = 'Submit';
             } else {
                 if (emailWrap) emailWrap.classList.add('hidden-section');
                 if (subheading) subheading.textContent = 'Choose a username and password.';
@@ -925,7 +853,6 @@ window.rcInteraction = (function () {
     function toggleAuthMode(forceApply = false) {
         if (!forceApply) _authMode = _authMode === 'signin' ? 'signup' : 'signin';
         _signupStep = 1;
-        _validatedSignupEmail = '';
         applyAuthModeUi();
     }
 
@@ -968,43 +895,6 @@ window.rcInteraction = (function () {
                 _authShowError('Email is required.');
                 return;
             }
-            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
-                _authShowError('Enter a valid email address.');
-                return;
-            }
-            if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
-            try {
-                const inspected = window.rcAuth && typeof window.rcAuth.inspectEmail === 'function'
-                    ? await window.rcAuth.inspectEmail(email)
-                    : { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
-                const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
-                if (inspected && inspected.exists) {
-                    _authMode = 'signin';
-                    _signupStep = 1;
-                    _validatedSignupEmail = '';
-                    applyAuthModeUi();
-                    const emailField = document.getElementById('loginEmail');
-                    if (emailField) emailField.value = email;
-                    const passwordField = document.getElementById('loginPassword');
-                    try { if (passwordField) passwordField.focus(); } catch (_) {}
-                    _authShowError(pendingPlan && pendingPlan !== 'free'
-                        ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                        : 'An account with this email already exists. Log In to continue.');
-                    if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
-                    return;
-                }
-                if (!inspected || inspected.ok !== true) {
-                    _validatedSignupEmail = '';
-                    _authShowError(String((inspected && inspected.error && inspected.error.message) || 'Unable to verify email yet. Please try again.'));
-                    return;
-                }
-                _validatedSignupEmail = String(email || '').trim().toLowerCase();
-            } finally {
-                if (btn && btn.disabled) {
-                    btn.disabled = false;
-                    btn.textContent = 'Next';
-                }
-            }
             _signupStep = 2;
             applyAuthModeUi();
             try { const nextField = document.getElementById('signupUsername'); if (nextField) nextField.focus(); } catch (_) {}
@@ -1019,20 +909,6 @@ window.rcInteraction = (function () {
         } else {
             if (!email || !username || !password || !confirm) {
                 _authShowError('Username, password, and confirmation are required.');
-                return;
-            }
-            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
-                _signupStep = 1;
-                _validatedSignupEmail = '';
-                applyAuthModeUi();
-                _authShowError('Enter a valid email address.');
-                return;
-            }
-            if (String(_validatedSignupEmail || '') !== String(email || '').trim().toLowerCase()) {
-                _signupStep = 1;
-                _validatedSignupEmail = '';
-                applyAuthModeUi();
-                _authShowError('Finish the email step before creating your account.');
                 return;
             }
             if (password !== confirm) {
@@ -1050,46 +926,31 @@ window.rcInteraction = (function () {
 
         try {
             if (_authMode === 'signup') {
-                const result = await window.rcAuth.signUp(email, password, username, {
-                    emailRedirectTo: buildAuthRedirectForPendingPlan(),
-                });
+                const result = await window.rcAuth.signUp(email, password, username);
                 const error = result && result.error ? result.error : null;
                 const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                 const identities = Array.isArray(result?.data?.user?.identities) ? result.data.user.identities : null;
                 const existingAccountLikely = !error && !result?.data?.session && Array.isArray(identities) && identities.length === 0;
                 if (error) {
-                    const message = String(error.message || 'Account creation failed. Please try again.');
-                    if (/already\s+registered|already\s+exists|user\s+already\s+registered/i.test(message)) {
-                        _authMode = 'signin';
-                        _signupStep = 1;
-                        applyAuthModeUi();
-                        const emailField = document.getElementById('loginEmail');
-                        if (emailField) emailField.value = email;
-                        _authShowError(pendingPlan && pendingPlan !== 'free'
-                            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                            : 'An account with this email already exists. Log In to continue.');
-                    } else {
-                        _authShowError(message);
-                    }
+                    _authShowError(error.message || 'Account creation failed. Please try again.');
                 } else if (existingAccountLikely) {
                     _authMode = 'signin';
                     _signupStep = 1;
                     applyAuthModeUi();
                     _authShowError(pendingPlan && pendingPlan !== 'free'
-                        ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                        : 'An account with this email already exists. Log In to continue.');
+                        ? `Account already exists. Sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+                        : 'Account already exists. Sign in to continue.');
                 } else if (result?.data?.session) {
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free'
                         ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
                         : 'Account created. Continuing to your library…');
                 } else {
-                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Check your email to verify your account.');
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Account created. Check your email, then sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Account created. Check your email, then sign in.');
                 }
             } else {
                 const { error } = await window.rcAuth.signIn(email, password);
                 if (error) {
-                    const message = String(error.message || 'Sign-in failed. Check your email and password.');
-                    _authShowError(/email\s+not\s+confirmed/i.test(message) ? 'Check your email to verify your account before signing in.' : message);
+                    _authShowError(error.message || 'Sign-in failed. Check your email and password.');
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     if (pendingPlan === 'pro' || pendingPlan === 'premium') {
@@ -1102,7 +963,7 @@ window.rcInteraction = (function () {
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
+                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Submit' : 'Create Account') : 'Sign In';
             }
         }
     }
@@ -1147,7 +1008,6 @@ window.rcInteraction = (function () {
         }
 
         if (signedIn) {
-            try { if (window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted(); } catch (_) {}
             const pendingPaid = !!(window.rcBilling && typeof window.rcBilling.hasPendingPaidIntent === 'function' && window.rcBilling.hasPendingPaidIntent());
             if (pendingPaid && (current === 'landing-page' || current === 'login-page')) {
                 syncShellAuthPresentation(current === 'landing-page' ? 'login-page' : current);
@@ -1163,7 +1023,6 @@ window.rcInteraction = (function () {
                 try { refreshLibrary('auth-change-signed-in'); } catch(_) {}
             }
         } else {
-            try { if (window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false }); } catch (_) {}
             if (current === 'profile-page') showSection('landing-page', { historyMode: 'replace' });
             else syncShellAuthPresentation(current);
         }
@@ -1191,13 +1050,6 @@ window.rcInteraction = (function () {
                 await window.rcAuth.init();
             }
         } catch (_) {}
-        try {
-            if (window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()) {
-                if (window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
-            } else if (window.rcAppearance && typeof window.rcAppearance.load === 'function') {
-                window.rcAppearance.load({ fromLocal: false });
-            }
-        } catch (_) {}
 
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
@@ -1208,7 +1060,6 @@ window.rcInteraction = (function () {
         // (show the neutral pending surface). No early release — the hold is a
         // minimum, not a cap.
         showSection(settledSection, { historyMode: 'replace' });
-        await applyAuthLocationState();
         const bootHoldMs = 1000;
         try {
             await Promise.all([
@@ -1741,11 +1592,7 @@ window.rcInteraction = (function () {
         try { if (typeof pauseOrResumeReading === 'function') result = !!pauseOrResumeReading(); } catch (_) {}
         setTimeout(syncShellPlaybackControls, 0);
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
-        // Keep the playback page visible even when runtime is still paused
-        // immediately after the action. This covers pause-preserved skip and
-        // timing-sensitive resume paths where the session page is authoritative
-        // before playback has fully flipped to unpaused.
-        if (afterPlayback?.active && (!before.playback?.active || before.playback?.paused || before.countdown?.active)) {
+        if (afterPlayback?.active && !afterPlayback.paused && (!before.playback?.active || before.playback?.paused || before.countdown?.active)) {
             bringPlaybackPageIntoView(afterPlayback);
         }
         shellDebugRemember('lastControlAction', {
@@ -1791,9 +1638,7 @@ window.rcInteraction = (function () {
         } catch (_) {}
         syncShellPlaybackControls();
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
-        // Skip should return the viewport to the playback page even when the
-        // session remains paused after the move (pause-preserve contract).
-        if (moved && afterPlayback?.active) {
+        if (moved && afterPlayback?.active && !afterPlayback.paused) {
             bringPlaybackPageIntoView(afterPlayback);
         }
         shellDebugRemember('lastSkipAction', {

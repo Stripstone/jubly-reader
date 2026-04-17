@@ -177,7 +177,7 @@ export async function getResolvedRuntimePolicyForRequest(req) {
     effectiveTier = developerOverrideTier;
     resolutionMode = 'developer-override';
     tierSource = 'developer-override';
-  } else if (entitlementSnapshot && (entitlementSnapshot.status === 'active' || entitlementSnapshot.status === 'trialing')) {
+  } else if (entitlementSnapshot && entitlementSnapshot.status === 'active') {
     effectiveTier = resolveRuntimeTier(entitlementSnapshot.tier);
     resolutionMode = 'entitlement';
     tierSource = 'entitlement';
