@@ -24,13 +24,6 @@ STRIPE_PUBLISHABLE_KEY = *** # Stripe publishable key used by the frontend for S
 STRIPE_WEBHOOK_SECRET = *** # Stripe webhook signing secret used to verify incoming webhook events
 
 # -----------------------------
-# APP / PUBLIC URLS
-# -----------------------------
-APP_BASE_URL = https://your-public-app.example # Canonical public app origin used for auth email redirects and billing return URLs
-PUBLIC_APP_URL = https://your-public-app.example # Fallback canonical public app origin if APP_BASE_URL is not set
-SITE_URL = https://your-public-app.example # Final fallback canonical public app origin if the other public URL envs are not set
-
-# -----------------------------
 # SUPABASE
 # -----------------------------
 DEV_CREDA = *** # Developer account auth

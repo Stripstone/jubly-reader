@@ -711,37 +711,6 @@ window.rcInteraction = (function () {
         returnToPublicEntry();
     }
 
-    function readAuthLocationState() {
-        try {
-            const params = new URLSearchParams(window.location.search || '');
-            return String(params.get('auth') || '').trim().toLowerCase();
-        } catch (_) {
-            return '';
-        }
-    }
-
-    function clearAuthLocationState() {
-        try {
-            const url = new URL(window.location.href);
-            if (!url.searchParams.has('auth')) return;
-            url.searchParams.delete('auth');
-            window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-        } catch (_) {}
-    }
-
-    function applyAuthLocationState() {
-        const state = readAuthLocationState();
-        if (state !== 'verified') return;
-        closeModal('pricing-modal');
-        closeModal('ownership-modal');
-        _authMode = 'signin';
-        _signupStep = 1;
-        toggleAuthMode(true);
-        showSection('login-page', { historyMode: 'replace' });
-        _authShowSuccess('Email verified. Log In to continue.');
-        clearAuthLocationState();
-    }
-
     function authBack() {
         _authClearMessages();
         if (_authMode === 'signup' && _signupStep === 2) {
@@ -857,7 +826,7 @@ window.rcInteraction = (function () {
                 if (usernameWrap) usernameWrap.classList.add('hidden-section');
                 if (passwordWrap) passwordWrap.classList.add('hidden-section');
                 if (confirmWrap) confirmWrap.classList.add('hidden-section');
-                if (submitBtn) submitBtn.textContent = 'Next';
+                if (submitBtn) submitBtn.textContent = 'Submit';
             } else {
                 if (emailWrap) emailWrap.classList.add('hidden-section');
                 if (subheading) subheading.textContent = 'Choose a username and password.';
@@ -926,36 +895,6 @@ window.rcInteraction = (function () {
                 _authShowError('Email is required.');
                 return;
             }
-            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
-                _authShowError('Enter a valid email address.');
-                return;
-            }
-            if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
-            try {
-                const inspected = window.rcAuth && typeof window.rcAuth.inspectEmail === 'function'
-                    ? await window.rcAuth.inspectEmail(email)
-                    : { ok: false, exists: false, error: null };
-                const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
-                if (inspected && inspected.exists) {
-                    _authMode = 'signin';
-                    _signupStep = 1;
-                    applyAuthModeUi();
-                    const emailField = document.getElementById('loginEmail');
-                    if (emailField) emailField.value = email;
-                    const passwordField = document.getElementById('loginPassword');
-                    try { if (passwordField) passwordField.focus(); } catch (_) {}
-                    _authShowError(pendingPlan && pendingPlan !== 'free'
-                        ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                        : 'An account with this email already exists. Log In to continue.');
-                    if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
-                    return;
-                }
-            } finally {
-                if (btn && btn.disabled) {
-                    btn.disabled = false;
-                    btn.textContent = 'Next';
-                }
-            }
             _signupStep = 2;
             applyAuthModeUi();
             try { const nextField = document.getElementById('signupUsername'); if (nextField) nextField.focus(); } catch (_) {}
@@ -993,36 +932,25 @@ window.rcInteraction = (function () {
                 const identities = Array.isArray(result?.data?.user?.identities) ? result.data.user.identities : null;
                 const existingAccountLikely = !error && !result?.data?.session && Array.isArray(identities) && identities.length === 0;
                 if (error) {
-                    const message = String(error.message || 'Account creation failed. Please try again.');
-                    if (/already\s+registered|already\s+exists|user\s+already\s+registered/i.test(message)) {
-                        _authMode = 'signin';
-                        _signupStep = 1;
-                        applyAuthModeUi();
-                        _authShowError(pendingPlan && pendingPlan !== 'free'
-                            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                            : 'An account with this email already exists. Log In to continue.');
-                    } else {
-                        _authShowError(message);
-                    }
+                    _authShowError(error.message || 'Account creation failed. Please try again.');
                 } else if (existingAccountLikely) {
                     _authMode = 'signin';
                     _signupStep = 1;
                     applyAuthModeUi();
                     _authShowError(pendingPlan && pendingPlan !== 'free'
-                        ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                        : 'An account with this email already exists. Log In to continue.');
+                        ? `Account already exists. Sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+                        : 'Account already exists. Sign in to continue.');
                 } else if (result?.data?.session) {
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free'
                         ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
                         : 'Account created. Continuing to your library…');
                 } else {
-                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Check your email to verify your account.');
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Account created. Check your email, then sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Account created. Check your email, then sign in.');
                 }
             } else {
                 const { error } = await window.rcAuth.signIn(email, password);
                 if (error) {
-                    const message = String(error.message || 'Sign-in failed. Check your email and password.');
-                    _authShowError(/email\s+not\s+confirmed/i.test(message) ? 'Check your email to verify your account before signing in.' : message);
+                    _authShowError(error.message || 'Sign-in failed. Check your email and password.');
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     if (pendingPlan === 'pro' || pendingPlan === 'premium') {
@@ -1035,7 +963,7 @@ window.rcInteraction = (function () {
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
+                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Submit' : 'Create Account') : 'Sign In';
             }
         }
     }
@@ -1132,7 +1060,6 @@ window.rcInteraction = (function () {
         // (show the neutral pending surface). No early release — the hold is a
         // minimum, not a cap.
         showSection(settledSection, { historyMode: 'replace' });
-        applyAuthLocationState();
         const bootHoldMs = 1000;
         try {
             await Promise.all([
