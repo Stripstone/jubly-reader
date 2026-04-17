@@ -1676,6 +1676,5 @@ body.auth-hydrating #profile-page {
   opacity: 0.78;
 }
 #pricing-modal.pricing-modal-settling .pricing-card button {
-  opacity: 0.5;
-  pointer-events: none;
+  visibility: hidden;
 }
