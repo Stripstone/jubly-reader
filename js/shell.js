@@ -749,7 +749,6 @@ window.rcInteraction = (function () {
         try {
             if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') {
                 window.rcBilling.clearPendingPlan();
-                return;
             }
             const url = new URL(window.location.href);
             url.searchParams.delete('tier');
@@ -758,15 +757,23 @@ window.rcInteraction = (function () {
         } catch (_) {}
     }
 
-    function applyAuthLocationState() {
+    async function applyAuthLocationState() {
         const state = readAuthLocationState();
         if (state !== 'verified') return;
+        const verifiedUser = window.rcAuth && typeof window.rcAuth.getUser === 'function' ? window.rcAuth.getUser() : null;
+        const verifiedEmail = String((verifiedUser && verifiedUser.email) || '').trim();
         closeModal('pricing-modal');
         closeModal('ownership-modal');
+        if (window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn() && typeof window.rcAuth.signOut === 'function') {
+            await window.rcAuth.signOut();
+        }
         _authMode = 'signin';
         _signupStep = 1;
+        _validatedSignupEmail = '';
         toggleAuthMode(true);
         showSection('login-page', { historyMode: 'replace' });
+        const emailField = document.getElementById('loginEmail');
+        if (emailField && verifiedEmail) emailField.value = verifiedEmail;
         _authShowSuccess('Email verified. Log In to continue.');
         clearAuthLocationState();
     }
@@ -775,6 +782,7 @@ window.rcInteraction = (function () {
         _authClearMessages();
         if (_authMode === 'signup' && _signupStep === 2) {
             _signupStep = 1;
+            _validatedSignupEmail = '';
             applyAuthModeUi();
             try {
                 const emailField = document.getElementById('loginEmail');
@@ -782,6 +790,7 @@ window.rcInteraction = (function () {
             } catch (_) {}
             return;
         }
+        _validatedSignupEmail = '';
         clearPaidIntentLocationState();
         returnToPublicEntry();
     }
@@ -791,6 +800,7 @@ window.rcInteraction = (function () {
         closeModal('pricing-modal');
         _authMode = 'signup';
         _signupStep = 1;
+        _validatedSignupEmail = '';
         toggleAuthMode(true);
         showSection('login-page');
     }
@@ -859,6 +869,7 @@ window.rcInteraction = (function () {
 
     let _authMode = 'signin'; // 'signin' | 'signup'
     let _signupStep = 1; // 1=email, 2=username+password
+    let _validatedSignupEmail = '';
 
     function applyAuthModeUi() {
         const heading       = document.getElementById('auth-form-heading');
@@ -914,6 +925,7 @@ window.rcInteraction = (function () {
     function toggleAuthMode(forceApply = false) {
         if (!forceApply) _authMode = _authMode === 'signin' ? 'signup' : 'signin';
         _signupStep = 1;
+        _validatedSignupEmail = '';
         applyAuthModeUi();
     }
 
@@ -964,11 +976,12 @@ window.rcInteraction = (function () {
             try {
                 const inspected = window.rcAuth && typeof window.rcAuth.inspectEmail === 'function'
                     ? await window.rcAuth.inspectEmail(email)
-                    : { ok: false, exists: false, error: null };
+                    : { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
                 const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                 if (inspected && inspected.exists) {
                     _authMode = 'signin';
                     _signupStep = 1;
+                    _validatedSignupEmail = '';
                     applyAuthModeUi();
                     const emailField = document.getElementById('loginEmail');
                     if (emailField) emailField.value = email;
@@ -980,6 +993,12 @@ window.rcInteraction = (function () {
                     if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
                     return;
                 }
+                if (!inspected || inspected.ok !== true) {
+                    _validatedSignupEmail = '';
+                    _authShowError(String((inspected && inspected.error && inspected.error.message) || 'Unable to verify email yet. Please try again.'));
+                    return;
+                }
+                _validatedSignupEmail = String(email || '').trim().toLowerCase();
             } finally {
                 if (btn && btn.disabled) {
                     btn.disabled = false;
@@ -1000,6 +1019,20 @@ window.rcInteraction = (function () {
         } else {
             if (!email || !username || !password || !confirm) {
                 _authShowError('Username, password, and confirmation are required.');
+                return;
+            }
+            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
+                _signupStep = 1;
+                _validatedSignupEmail = '';
+                applyAuthModeUi();
+                _authShowError('Enter a valid email address.');
+                return;
+            }
+            if (String(_validatedSignupEmail || '') !== String(email || '').trim().toLowerCase()) {
+                _signupStep = 1;
+                _validatedSignupEmail = '';
+                applyAuthModeUi();
+                _authShowError('Finish the email step before creating your account.');
                 return;
             }
             if (password !== confirm) {
@@ -1175,7 +1208,7 @@ window.rcInteraction = (function () {
         // (show the neutral pending surface). No early release — the hold is a
         // minimum, not a cap.
         showSection(settledSection, { historyMode: 'replace' });
-        applyAuthLocationState();
+        await applyAuthLocationState();
         const bootHoldMs = 1000;
         try {
             await Promise.all([
