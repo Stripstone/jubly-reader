@@ -882,23 +882,18 @@ function ttsRunPageHandoff(input = {}) {
   const resolved = ttsBuildPageHandoffTarget(input);
   if (!resolved) return false;
   const { currentIndex, nextIndex, sourceType, bookId, chapterIndex, text, targetBlockIndex, behavior, reason } = resolved;
-  const focusResult = (typeof window.activateReadingPage === 'function')
-    ? window.activateReadingPage(nextIndex, {
-        scrollIntoView: true,
-        behavior,
-        block: 'start',
-        syncTarget: true,
-        persistReason: String(reason || 'tts-page-handoff'),
-      })
-    : ((typeof window.focusReadingPage === 'function')
-        ? window.focusReadingPage(nextIndex, { behavior, persistReason: String(reason || 'tts-page-handoff') })
-        : { ok: false });
+  const focusResult = (typeof window.focusReadingPage === 'function')
+    ? window.focusReadingPage(nextIndex, { behavior })
+    : { ok: false };
   if ((!focusResult || focusResult.ok === false) && behavior) {
     try {
       const pageEls = document.querySelectorAll('.page');
       const nextPageEl = pageEls[nextIndex];
       if (nextPageEl) nextPageEl.scrollIntoView({ behavior, block: 'start' });
     } catch (_) {}
+  }
+  if (typeof setReadingTarget === 'function') {
+    setReadingTarget({ sourceType, bookId, chapterIndex, pageIndex: nextIndex });
   }
   const nextTarget = window.__rcReadingTarget || { sourceType, bookId, chapterIndex, pageIndex: nextIndex };
   const nextKey = (typeof readingTargetToKey === 'function') ? readingTargetToKey(nextTarget) : `page-${nextIndex}`;
@@ -2961,23 +2956,12 @@ function ttsRestartPage(pageIndex, targetContext) {
   const idx = Number(pageIndex);
   if (!Number.isFinite(idx) || idx < 0) return false;
   if (typeof pages === 'undefined' || !pages[idx]) return false;
+  try { if (typeof window.focusReadingPage === 'function') window.focusReadingPage(idx, { behavior: 'smooth' }); } catch (_) {}
+  // Set reading target from provided context (preserves source/chapter) or
+  // fall back to current __rcReadingTarget if no context was passed.
   const _ctx = targetContext || window.__rcReadingTarget || {};
-  try {
-    if (typeof window.activateReadingPage === 'function') {
-      window.activateReadingPage(idx, {
-        scrollIntoView: true,
-        behavior: 'smooth',
-        block: 'start',
-        syncTarget: true,
-        persistReason: 'restart-page',
-      });
-    } else if (typeof window.focusReadingPage === 'function') {
-      window.focusReadingPage(idx, { behavior: 'smooth', persistReason: 'restart-page' });
-    } else if (typeof setReadingTarget === 'function') {
-      setReadingTarget({ sourceType: _ctx.sourceType || '', bookId: _ctx.bookId || '', chapterIndex: _ctx.chapterIndex != null ? _ctx.chapterIndex : -1, pageIndex: idx });
-    }
-  } catch (_) {}
-  ttsSpeakQueue((typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget || { sourceType: _ctx.sourceType || '', bookId: _ctx.bookId || '', chapterIndex: _ctx.chapterIndex != null ? _ctx.chapterIndex : -1, pageIndex: idx }) : `page-${idx}`, [pages[idx]]);
+  if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType || '', bookId: _ctx.bookId || '', chapterIndex: _ctx.chapterIndex != null ? _ctx.chapterIndex : -1, pageIndex: idx });
+  ttsSpeakQueue((typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${idx}`, [pages[idx]]);
   ttsDiagPush('restart-page', { pageIndex: idx });
   return true;
 }
