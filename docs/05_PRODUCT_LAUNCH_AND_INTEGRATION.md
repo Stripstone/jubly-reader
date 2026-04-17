@@ -11,7 +11,7 @@ If earlier docs, prototype UI, audit notes, or older onboarding language conflic
 This document does not override architectural disqualifiers; launch is not honest when it depends on structural non-compliance.
 
 ## Product experience in one paragraph
-The user should see value quickly with low friction. A new visitor lands in a clean library-style entry surface, sees one sample book, and may enter reading without creating an account. Ownership and expansion actions gently require account creation. Plan choice appears early and clearly through pricing. Once a user signs up and pays, the product should stay out of the way: they remain signed in, keep their place, keep their settings where appropriate, understand what they have access to, and move through upgrades, downgrades, and usage resets without losing progress.
+The user should see value quickly with low friction. A new visitor lands on a focused landing page, uses **Try it now** to enter the sample reading experience directly, and may exit into the intro library without creating an account. Ownership and expansion actions gently require account creation. Plan choice appears early and clearly through pricing. Once a user signs up and pays, the product should stay out of the way: they remain signed in, keep their place, keep their settings where appropriate, understand what they have access to, and move through upgrades, downgrades, and usage resets without losing progress.
 
 ## Launch promise
 Launch is honest only when a user can:
@@ -40,8 +40,8 @@ Launch is honest only when a user can:
 A visitor has not signed in and has not created an account.
 
 Should see:
-- app-like library entry surface
-- one sample book
+- landing page
+- Try it now
 - Login
 - Sign Up
 
@@ -88,8 +88,8 @@ Premium remains intentional and visible even if packaging evolves later.
 ## Route and page intent
 
 ### Public routes
-- `/` — entry library-like experience with sample book
-- `/pricing` — plan choice
+- `/` — landing page with direct sample-reading entry
+- `/pricing` — intended plan-choice route; interim modal or section-based pricing may remain while route-backed flow is completed
 - `/login` — sign in
 - `/signup` — account creation after plan choice
 
@@ -105,15 +105,16 @@ Premium remains intentional and visible even if packaging evolves later.
 
 ### New user acquisition flow
 1. User lands on `/`
-2. Sees sample book and Login / Sign Up
-3. May open the sample and read
-4. When ready to own or expand, chooses Sign Up
-5. Pricing presents Basic, Pro trial, or Premium
-6. User chooses plan
-7. User completes signup
-8. If selected plan is Basic, user enters `/app` immediately
-9. If selected plan is Pro or Premium, backend initiates Stripe checkout as needed
-10. Runtime boots with account and entitlement truth
+2. Sees the landing CTA **Try it now** plus Login / Sign Up
+3. `Try it now` opens the sample reading experience directly with no account wall
+4. Exiting sample reading reveals the intro library
+5. From the intro library, account-backed actions open pricing
+6. Pricing presents Basic, Pro, or Premium
+7. User chooses plan
+8. User completes signup or login
+9. If selected plan is Basic, user enters `/app` immediately
+10. If selected plan is Pro or Premium, backend initiates Stripe checkout as needed
+11. Runtime boots with account and entitlement truth
 
 ### Returning user flow
 1. User opens `/login` or returns with an existing session
@@ -150,9 +151,10 @@ Premium remains intentional and visible even if packaging evolves later.
 - avoid `free` as canonical plan vocabulary; marketing copy may invite trial, but product/runtime language must stay `basic / pro / premium`
 - `Sign Up` is the canonical public acquisition action
 - `Login` is the canonical returning-user entry
+- `Try it now` is the canonical landing CTA for entering the sample reading experience
 - `Continue with Google` and Email/Password should preserve selected plan intent
 - sample-book reading should remain available pre-account
-- account-only actions should prompt auth rather than pretending to work
+- account-only actions should prompt pricing/auth rather than pretending to work
 
 ### Signed-in surfaces
 - `Profile` appears only for signed-in users

@@ -55,7 +55,9 @@
     const ALL_SECTIONS     = ['landing-page', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
     const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
     const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
-        let _currentSection = 'landing-page';
+    let _currentSection = 'landing-page';
+    let _publicIntroLibraryVisible = false;
+    let _publicSampleSessionActive = false;
     let _shellAuthBootstrapped = false;
 
 
@@ -438,10 +440,15 @@ window.rcInteraction = (function () {
         return ALL_SECTIONS.includes(id) ? id : 'landing-page';
     }
 
+    function isIntroLibraryVisible() {
+        return !isAuthedUser() && !!_publicIntroLibraryVisible;
+    }
+
     function resolveSectionForAuth(id) {
         const normalized = normalizeSection(id);
         if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'login-page')) return 'dashboard';
         if (!isAuthedUser() && normalized === 'profile-page') return 'landing-page';
+        if (!isAuthedUser() && normalized === 'dashboard' && !isIntroLibraryVisible()) return 'landing-page';
         return normalized;
     }
 
@@ -488,7 +495,7 @@ window.rcInteraction = (function () {
         // Do not toggle display — CSS min-height on #dashboard-subtitle reserves
         // a fixed line of space so text changes never cause layout shift.
         if (!authed) {
-            subtitle.innerHTML = 'Create an account to enter your library and keep your settings, billing, and progress in one place.';
+            subtitle.innerHTML = 'Bring in your own books or text and make this reading space yours.';
             return;
         }
         const remoteMetrics = (window.rcSync && typeof window.rcSync.getRemoteProfileMetrics === 'function') ? window.rcSync.getRemoteProfileMetrics() : null;
@@ -549,8 +556,12 @@ window.rcInteraction = (function () {
 
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
-        if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !authed);
+        const publicSampleCopy = document.getElementById('library-public-sample-copy');
+        const publicSampleSubcopy = document.getElementById('library-public-sample-subcopy');
+        if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !(authed || isIntroLibraryVisible()));
         if (librarySample) librarySample.classList.add('hidden-section');
+        if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your library.';
+        if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Start free, keep your place, and come back anytime.';
         renderLibrarySubtitle(authed);
 
         const profileGuestCard = document.getElementById('profile-guest-card');
@@ -579,6 +590,7 @@ window.rcInteraction = (function () {
 
     function showSection(id, options = {}) {
         const targetId = resolveSectionForAuth(id);
+        if (targetId === 'landing-page' && !options.preserveIntroLibrary) _publicIntroLibraryVisible = false;
         const readingModeEl = document.getElementById('reading-mode');
         const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
 
@@ -666,11 +678,7 @@ window.rcInteraction = (function () {
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
     function login() {
-        if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
-        closeModal('pricing-modal');
-        closeModal('ownership-modal');
-        showSection('dashboard');
-        try { refreshLibrary('prototype-login'); } catch(_) {}
+        showSigninPane();
     }
 
     function continueWithFree() {
@@ -690,11 +698,17 @@ window.rcInteraction = (function () {
         showSection('login-page');
     }
 
-    function returnToLanding() {
-        if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
+    function returnToPublicEntry() {
         closeModal('pricing-modal');
         closeModal('ownership-modal');
-        showSection('landing-page');
+        showSection(isIntroLibraryVisible() ? 'dashboard' : 'landing-page');
+    }
+
+    function returnToLanding() {
+        if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
+        _publicIntroLibraryVisible = false;
+        _publicSampleSessionActive = false;
+        returnToPublicEntry();
     }
 
     function authBack() {
@@ -708,7 +722,7 @@ window.rcInteraction = (function () {
             } catch (_) {}
             return;
         }
-        returnToLanding();
+        returnToPublicEntry();
     }
 
     function showSignupPane(forceDirect = false) {
@@ -720,19 +734,42 @@ window.rcInteraction = (function () {
         showSection('login-page');
     }
 
+    async function startPublicSampleReading() {
+        _publicSampleSessionActive = true;
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        const signal = document.getElementById('session-complete');
+        if (signal) signal.classList.add('hidden-section');
+        showSection('reading-mode');
+        try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(PUBLIC_SAMPLE_BOOK_ID); } catch (_) {}
+    }
+
     function openSampleBookPreview() {
-        try { openPreview(PUBLIC_SAMPLE_BOOK_ID, 'Reading Training'); } catch (_) {}
+        startPublicSampleReading().catch(() => {});
+    }
+
+    function goToPostReadingSurface() {
+        if (!isAuthedUser() && _publicSampleSessionActive) {
+            _publicIntroLibraryVisible = true;
+            _publicSampleSessionActive = false;
+        }
+        showSection(isIntroLibraryVisible() ? 'dashboard' : 'landing-page');
     }
 
     function promptOwnershipAction(kind) {
         if (isAuthedUser()) return false;
-        const copy = document.getElementById('ownership-copy');
-        if (copy) {
-            copy.textContent = kind === 'manage'
-                ? 'Managing your personal library belongs to your signed-in account. You can still explore the sample book without creating one.'
-                : 'Importing books belongs to your signed-in account. You can still explore the sample book without creating one.';
+        const message = 'Create an account to import books, save your place, and build your library.';
+        if (window.rcBilling && typeof window.rcBilling.showPricingForGatedAction === 'function') {
+            window.rcBilling.showPricingForGatedAction(message);
+        } else {
+            const pricingMessage = document.getElementById('pricing-message');
+            if (pricingMessage) {
+                pricingMessage.textContent = message;
+                pricingMessage.classList.remove('hidden-section');
+                pricingMessage.style.color = '#4338ca';
+            }
+            openModal('pricing-modal');
         }
-        openModal('ownership-modal');
         return true;
     }
 
@@ -889,17 +926,36 @@ window.rcInteraction = (function () {
 
         try {
             if (_authMode === 'signup') {
-                const { error } = await window.rcAuth.signUp(email, password, username);
+                const result = await window.rcAuth.signUp(email, password, username);
+                const error = result && result.error ? result.error : null;
+                const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
+                const identities = Array.isArray(result?.data?.user?.identities) ? result.data.user.identities : null;
+                const existingAccountLikely = !error && !result?.data?.session && Array.isArray(identities) && identities.length === 0;
                 if (error) {
                     _authShowError(error.message || 'Account creation failed. Please try again.');
+                } else if (existingAccountLikely) {
+                    _authMode = 'signin';
+                    _signupStep = 1;
+                    applyAuthModeUi();
+                    _authShowError(pendingPlan && pendingPlan !== 'free'
+                        ? `Account already exists. Sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+                        : 'Account already exists. Sign in to continue.');
+                } else if (result?.data?.session) {
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free'
+                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
+                        : 'Account created. Continuing to your library…');
                 } else {
-                    const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Account created. Check your email, then sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Account created. Check your email, then sign in.');
                 }
             } else {
                 const { error } = await window.rcAuth.signIn(email, password);
                 if (error) {
                     _authShowError(error.message || 'Sign-in failed. Check your email and password.');
+                } else {
+                    const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
+                    if (pendingPlan === 'pro' || pendingPlan === 'premium') {
+                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`);
+                    }
                 }
             }
         } catch (_) {

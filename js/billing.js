@@ -119,6 +119,14 @@ window.rcBilling = (function () {
 
   function openPricingForSignup() {
     clearPendingPlan();
+    setMessage('pricing-message', '', 'info');
+    if (typeof closeModal === 'function') closeModal('ownership-modal');
+    if (typeof openModal === 'function') openModal('pricing-modal');
+    renderPricingUi().catch(() => {});
+  }
+
+  function showPricingForGatedAction(message) {
+    setMessage('pricing-message', message || 'Create an account to import books, save your place, and build your library.', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
     if (typeof openModal === 'function') openModal('pricing-modal');
     renderPricingUi().catch(() => {});
@@ -136,7 +144,7 @@ window.rcBilling = (function () {
     const normalized = normalizePlan(plan);
     if (normalized === 'premium') return 'Premium';
     if (normalized === 'pro') return 'Pro';
-    return 'Free';
+    return 'Basic';
   }
 
   function applyPlanButtonState(button, label, onclick, disabled = false) {
@@ -191,22 +199,28 @@ window.rcBilling = (function () {
     if (premiumInterval) premiumInterval.textContent = plans?.premium?.intervalLabel || '';
 
     if (!signedIn) {
-      applyPlanButtonState(freeBtn, 'Free', () => rememberPlanAndOpenSignup('free'));
+      applyPlanButtonState(freeBtn, 'Continue with Basic', () => rememberPlanAndOpenSignup('free'));
       applyPlanButtonState(proBtn, 'Choose Pro', () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
       applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
       return;
     }
 
-    applyPlanButtonState(freeBtn, currentTier === 'basic' ? 'Current Plan' : 'Free Plan', () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); }, currentTier === 'basic');
+    applyPlanButtonState(freeBtn, currentTier === 'basic' ? 'Current Plan' : 'Basic Plan', () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); }, currentTier === 'basic');
     applyPlanButtonState(proBtn, currentTier === 'pro' ? 'Current Plan' : 'Upgrade to Pro', () => startCheckout('pro'), !plans?.pro?.available || currentTier === 'pro');
     applyPlanButtonState(premiumBtn, currentTier === 'premium' ? 'Current Plan' : 'Upgrade to Premium', () => startCheckout('premium'), !plans?.premium?.available || currentTier === 'premium');
   }
 
   function continueWithFree() {
+    if (!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn())) {
+      rememberPlanAndOpenSignup('free');
+      setMessage('pricing-message', 'Create an account to continue with Basic.', 'info');
+      setMessage('billing-message', 'Create an account to continue with Basic.', 'info');
+      return;
+    }
     clearPendingPlan();
     if (typeof closeModal === 'function') closeModal('pricing-modal');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
-    if (typeof login === 'function') login();
+    if (typeof showSection === 'function') showSection('dashboard');
   }
 
   async function refreshRuntimeFromAccount() {
@@ -285,8 +299,8 @@ window.rcBilling = (function () {
         secondaryBtn.onclick = function () { if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
     } else {
-      if (statusCopy) statusCopy.textContent = 'You are on the Free plan. Upgrade whenever you want more books, storage, and features.';
-      if (billingState) billingState.textContent = 'Free';
+      if (statusCopy) statusCopy.textContent = 'You are on the Basic plan. Upgrade whenever you want more books, storage, and features.';
+      if (billingState) billingState.textContent = 'Basic';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
         primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
@@ -471,6 +485,7 @@ window.rcBilling = (function () {
     renderSubscriptionUi,
     renderPricingUi,
     rememberPendingPlan,
+    showPricingForGatedAction,
     readPendingPlan,
     clearPendingPlan,
     openPricingForSignup,

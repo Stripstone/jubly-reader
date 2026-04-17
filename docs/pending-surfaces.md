@@ -64,6 +64,7 @@ Maintenance rule:
 
 | Surface | What it does | Status |
 |---|---|---|
+| Login / Create account surface with pending paid intent | Auth settles, then paid checkout handoff begins | ✅ Inline auth copy stays honest: existing-account signup does not fake a new-account success, and successful paid auth communicates `Redirecting to … checkout…` while checkout starts |
 | Pricing modal → **Free / Choose Pro / Choose Premium** buttons | `fetchPublicConfig` + `fetchRuntimeSnapshot` | ✅ Neutral inline pending: buttons disable to `Loading…` while config resolves |
 | Profile → Subscription tab (renders on open) | `fetchRuntimeSnapshot` | ✅ Inline copy: `Checking your account…` / `—` while in flight |
 | Pricing modal → **Choose Pro / Choose Premium** (signed in) | `POST /api/billing?action=checkout` | ✅ Inline clicked-button state: `Preparing…` + banner: `Preparing checkout…`; error resolves to `Try again` or `Open login` if auth expired |
