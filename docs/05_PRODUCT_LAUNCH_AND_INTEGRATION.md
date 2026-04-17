@@ -123,6 +123,14 @@ Premium remains intentional and visible even if packaging evolves later.
 4. Signed-in users bypass public friction by default
 5. Runtime restores owned library, progress, settings, and entitlement truth after durable state is available
 
+### Email verification flow
+1. New user submits email on signup
+2. App validates email format before moving to username/password
+3. Existing-account emails are redirected toward Log In rather than continuing through signup
+4. New-account signup success communicates `Check your email to verify your account`
+5. Verification link returns to the canonical login surface, not a localhost fallback
+6. User logs in only after verification is complete
+
 ### Visitor tries an account-owned action
 1. Visitor taps import or owned-library action
 2. Public shell opens a subtle auth prompt
@@ -153,6 +161,7 @@ Premium remains intentional and visible even if packaging evolves later.
 - `Login` is the canonical returning-user entry
 - `Try it now` is the canonical landing CTA for entering the sample reading experience
 - `Continue with Google` and Email/Password should preserve selected plan intent
+- email verification redirects should use the canonical public login URL built from deployed app origin config, not a localhost fallback
 - sample-book reading should remain available pre-account
 - account-only actions should prompt pricing/auth rather than pretending to work
 
