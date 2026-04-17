@@ -29,6 +29,7 @@ A schema that appears convenient does not legalize wrong ownership in shell, run
 - `user_daily_stats`
 - `user_entitlements`
 - `user_usage`
+- `user_trial_claims`
 
 ## Explicit non-launch table
 - `user_sessions`
@@ -254,9 +255,38 @@ Current server-authoritative usage window summary.
 - window ordering must always be valid
 - counters are non-negative
 
+## 9. user_trial_claims
+
+### Purpose
+Server-owned anti-abuse ledger for trial eligibility and enforcement.
+
+### Canonical columns
+- `id`
+- `user_id`
+- `tier`
+- `ip_fingerprint_hash`
+- `claim_status`
+- `claimed_at`
+- `expires_at`
+- `notes`
+- `created_at`
+- `updated_at`
+
+### Canonical meanings
+- `tier` = the trial-eligible paid plan this claim applies to, currently `pro` or `premium`
+- `ip_fingerprint_hash` = hashed server-observed IP footprint used only for anti-abuse checks
+- `claim_status` = current server interpretation of the claim, currently `granted`, `blocked`, or `expired`
+
+### Key rules
+- this table is server-owned and is not a client-readable product surface
+- no raw IP addresses should be stored here; only hashed server-observed footprints
+- this table supports rules like one trial per account and, when enabled, one trial per server-observed IP footprint
+- local cache, shell copy, or Stripe UI must not become the owner of trial-abuse truth
+
 ## RLS intent
 Current launch intent is strict:
-- authenticated users may read their own rows
+- authenticated users may read their own rows for user-facing tables only
+- `user_trial_claims` remains server-owned with no client read or write path
 - direct client durable writes are not the normal launch path
 - service-role or server paths perform real durable mutations
 
@@ -313,6 +343,11 @@ Replace drifted app tables with one canonical schema before launch.
 
 #### Entitlements
 - confirm runtime policy resolves from `user_entitlements.tier`, not from guessed client plan state or legacy plan labels
+
+#### Trial anti-abuse
+- grant one trial through the server billing path
+- confirm `user_trial_claims` records the account plus tier claim
+- when unique-IP enforcement is enabled, confirm a second account from the same server-observed IP footprint is blocked from receiving another trial
 
 ## If something still resets after replacement
 Treat it in this order:
