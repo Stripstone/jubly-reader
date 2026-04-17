@@ -155,10 +155,11 @@ window.rcAuth = (function () {
     }
   }
 
-  async function signUp(email, password, username) {
+  async function signUp(email, password, username, authOptions) {
     if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
     const options = {};
-    const redirect = String(_config && _config.authRedirectUrl || '').trim();
+    const requestedRedirect = authOptions && typeof authOptions === 'object' ? String(authOptions.emailRedirectTo || '').trim() : '';
+    const redirect = requestedRedirect || String(_config && _config.authRedirectUrl || '').trim();
     if (redirect) options.emailRedirectTo = redirect;
     const name = String(username || '').trim();
     if (name) options.data = { full_name: name, name };

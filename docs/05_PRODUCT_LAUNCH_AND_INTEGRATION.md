@@ -129,7 +129,8 @@ Premium remains intentional and visible even if packaging evolves later.
 3. Existing-account emails are redirected toward Log In rather than continuing through signup
 4. New-account signup success communicates `Check your email to verify your account`
 5. Verification link returns to the canonical login surface, not a localhost fallback
-6. User logs in only after verification is complete
+6. Paid continuation preserves `next=checkout` plus `tier=pro|premium` through verification and login
+7. User logs in only after verification is complete
 
 ### Visitor tries an account-owned action
 1. Visitor taps import or owned-library action
@@ -408,3 +409,9 @@ Replace with real flows:
 - local entitlement simulation → resolved entitlement object
 - static subscription summary → durable subscription truth
 - pricing modal-only thinking → route-backed pricing surface
+
+
+## Operator redirect contract
+- `APP_BASE_URL` is the canonical public app origin for verified auth continuation and billing continuation redirects.
+- Supabase Site URL should equal the bare `APP_BASE_URL` origin.
+- Supabase Redirect URLs should include the exact verified login continuation paths for plain login, verified login, and verified paid continuation.

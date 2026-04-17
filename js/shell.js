@@ -695,6 +695,38 @@ window.rcInteraction = (function () {
         returnToPublicEntry();
     }
 
+    function readPendingPlanIntent() {
+        try {
+            return window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
+                ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase()
+                : '';
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function buildAuthRedirectForPendingPlan() {
+        try {
+            const config = window.rcAuth && typeof window.rcAuth.getConfig === 'function' ? window.rcAuth.getConfig() : null;
+            const base = String((config && (config.canonicalLoginUrl || config.authRedirectUrl)) || '').trim();
+            if (!base) return '';
+            const url = new URL(base, window.location.origin);
+            url.searchParams.set('view', 'login-page');
+            url.searchParams.set('auth', 'verified');
+            const pendingPlan = readPendingPlanIntent();
+            if (pendingPlan === 'pro' || pendingPlan === 'premium') {
+                url.searchParams.set('next', 'checkout');
+                url.searchParams.set('tier', pendingPlan);
+            } else {
+                url.searchParams.delete('next');
+                url.searchParams.delete('tier');
+            }
+            return `${url.origin}${url.pathname}${url.search}${url.hash}`;
+        } catch (_) {
+            return '';
+        }
+    }
+
     function readAuthLocationState() {
         try {
             const params = new URLSearchParams(window.location.search || '');
@@ -709,6 +741,19 @@ window.rcInteraction = (function () {
             const url = new URL(window.location.href);
             if (!url.searchParams.has('auth')) return;
             url.searchParams.delete('auth');
+            window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+        } catch (_) {}
+    }
+
+    function clearPaidIntentLocationState() {
+        try {
+            if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') {
+                window.rcBilling.clearPendingPlan();
+                return;
+            }
+            const url = new URL(window.location.href);
+            url.searchParams.delete('tier');
+            if (String(url.searchParams.get('next') || '').trim().toLowerCase() === 'checkout') url.searchParams.delete('next');
             window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
         } catch (_) {}
     }
@@ -737,6 +782,7 @@ window.rcInteraction = (function () {
             } catch (_) {}
             return;
         }
+        clearPaidIntentLocationState();
         returnToPublicEntry();
     }
 
@@ -971,7 +1017,9 @@ window.rcInteraction = (function () {
 
         try {
             if (_authMode === 'signup') {
-                const result = await window.rcAuth.signUp(email, password, username);
+                const result = await window.rcAuth.signUp(email, password, username, {
+                    emailRedirectTo: buildAuthRedirectForPendingPlan(),
+                });
                 const error = result && result.error ? result.error : null;
                 const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                 const identities = Array.isArray(result?.data?.user?.identities) ? result.data.user.identities : null;
@@ -982,6 +1030,8 @@ window.rcInteraction = (function () {
                         _authMode = 'signin';
                         _signupStep = 1;
                         applyAuthModeUi();
+                        const emailField = document.getElementById('loginEmail');
+                        if (emailField) emailField.value = email;
                         _authShowError(pendingPlan && pendingPlan !== 'free'
                             ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
                             : 'An account with this email already exists. Log In to continue.');

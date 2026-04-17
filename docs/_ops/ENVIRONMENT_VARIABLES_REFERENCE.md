@@ -52,3 +52,11 @@ FREECONVERT_API_KEY = *** # FreeConvert API key
 AWS_S3_BUCKET = *** # AWS S3 bucket name
 AWS_ACCESS_KEY_ID = *** # AWS access key ID
 AWS_SECRET_ACCESS_KEY = *** # AWS secret access key
+
+Supabase Auth dashboard values (operator-set, not code-owned):
+- Site URL = APP_BASE_URL
+- Redirect URLs should include:
+  - APP_BASE_URL/?view=login-page
+  - APP_BASE_URL/?view=login-page&auth=verified
+  - APP_BASE_URL/?view=login-page&auth=verified&next=checkout&tier=pro
+  - APP_BASE_URL/?view=login-page&auth=verified&next=checkout&tier=premium

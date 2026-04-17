@@ -73,8 +73,13 @@ window.rcBilling = (function () {
     try {
       const url = new URL(window.location.href);
       const normalized = normalizePlan(plan);
-      if (normalized === 'pro' || normalized === 'premium') url.searchParams.set('tier', normalized);
-      else url.searchParams.delete('tier');
+      if (normalized === 'pro' || normalized === 'premium') {
+        url.searchParams.set('tier', normalized);
+        url.searchParams.set('next', 'checkout');
+      } else {
+        url.searchParams.delete('tier');
+        if (String(url.searchParams.get('next') || '').trim().toLowerCase() === 'checkout') url.searchParams.delete('next');
+      }
       window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
     } catch (_) {}
   }

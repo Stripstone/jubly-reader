@@ -27,7 +27,7 @@ function isLocalOrigin(origin) {
 }
 
 export function requestOrigin(req) {
-  const explicit = stripTrailingSlash(optionalEnv('APP_BASE_URL') || optionalEnv('PUBLIC_APP_URL') || optionalEnv('SITE_URL'));
+  const explicit = stripTrailingSlash(optionalEnv('APP_BASE_URL'));
   const host = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '').trim();
   const forwarded = String(req?.headers?.['x-forwarded-proto'] || '').trim().toLowerCase();
   const hasNonLocalHost = !!host && !isLocalHost(host);
