@@ -993,6 +993,17 @@ window.rcSync = (function () {
         window.rcUsage.applySnapshot({ remaining: null, limit: null, authoritative: false, source: 'signout' });
       }
     } catch (_) {}
+    // Reset runtime policy to safe basic-tier so logged-out/public users do not
+    // inherit cloud capability or elevated entitlements from the prior signed-in session.
+    // getFallbackRuntimePolicy is a global defined in state.js (load-order guaranteed before sync.js).
+    try {
+      if (typeof getFallbackRuntimePolicy === 'function' && window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
+        window.rcPolicy.apply(getFallbackRuntimePolicy('basic'), 'basic', { resolved: false });
+      }
+    } catch (_) {}
+    // Clear session voice selection so a stale cloud voice ID from the prior signed-in
+    // session cannot drive post-logout TTS route selection toward the cloud path.
+    try { window.__rcSessionVoiceSelection = ''; } catch (_) {}
   }
 
   async function rehydrateDurableData() {
