@@ -15,69 +15,17 @@
   // ===================================
   const LOCAL_DB_NAME = 'rc_local_library_v1';
 
-  function _clampReadingPageIndex(idx) {
-    const total = Array.isArray(pages) ? pages.length : 0;
-    if (!Number.isFinite(idx) || idx < 0) return 0;
-    if (!total) return Math.max(0, Math.trunc(idx));
-    return Math.max(0, Math.min(Math.trunc(idx), total - 1));
-  }
-
   function getFocusedOrInferredReadingPageIndex() {
-    // Lane 2 policy: passive scroll is observational only. Page truth comes
-    // from explicit actions and restore, not viewport measurement.
     try {
-      if (typeof lastFocusedPageIndex === 'number' && lastFocusedPageIndex >= 0) {
-        return _clampReadingPageIndex(lastFocusedPageIndex);
-      }
+      if (typeof lastFocusedPageIndex === 'number' && lastFocusedPageIndex >= 0) return lastFocusedPageIndex;
     } catch (_) {}
-    try {
-      if (typeof currentPageIndex === 'number' && currentPageIndex >= 0) {
-        return _clampReadingPageIndex(currentPageIndex);
-      }
-    } catch (_) {}
-    try {
-      const targetIdx = Number((window.__rcReadingTarget || {}).pageIndex);
-      if (Number.isFinite(targetIdx) && targetIdx >= 0) return _clampReadingPageIndex(targetIdx);
-    } catch (_) {}
-    return 0;
-  }
-
-  function getExplicitViewedReadingPageIndex() {
-    // Explicit Play / Read Page may sample the currently viewed page once.
-    // This helper must never be used as passive page authority.
     try {
       if (typeof inferCurrentPageIndex === 'function') {
         const idx = inferCurrentPageIndex();
-        if (Number.isFinite(idx) && idx >= 0) return _clampReadingPageIndex(idx);
+        if (Number.isFinite(idx) && idx >= 0) return idx;
       }
     } catch (_) {}
-    return getFocusedOrInferredReadingPageIndex();
-  }
-
-  function syncExplicitReadingAuthority(pageIndex, options = {}) {
-    const idx = _clampReadingPageIndex(Number(pageIndex));
-    lastFocusedPageIndex = idx;
-    try { currentPageIndex = idx; } catch (_) {}
-    if (options.updateMetrics !== false) updateReadingMetricsPage(idx);
-    if (options.syncTarget !== false) {
-      try {
-        const _ctx = (typeof window.getReadingTargetContext === 'function')
-          ? window.getReadingTargetContext()
-          : (window.__rcReadingTarget || {});
-        if (typeof setReadingTarget === 'function') {
-          setReadingTarget({
-            sourceType: _ctx.sourceType || '',
-            bookId: _ctx.bookId || '',
-            chapterIndex: _ctx.chapterIndex != null ? _ctx.chapterIndex : -1,
-            pageIndex: idx,
-          });
-        }
-      } catch (_) {}
-    }
-    if (options.persistReason) {
-      try { queueCurrentReadingProgress(String(options.persistReason)); } catch (_) {}
-    }
-    return idx;
+    return 0;
   }
 
   async function flushCurrentReadingProgress(reason) {
@@ -114,7 +62,13 @@
       const target = pageEls[idx];
       if (!target) return false;
       target.scrollIntoView({ behavior: 'auto', block: 'start' });
-      syncExplicitReadingAuthority(idx, { syncTarget: true, updateMetrics: false });
+      lastFocusedPageIndex = idx;
+      try { currentPageIndex = idx; } catch (_) {}
+      // Advance reading target to the restored page; preserve source context set by render().
+      try {
+        const _cur = window.__rcReadingTarget || {};
+        if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _cur.sourceType || '', bookId: _cur.bookId || '', chapterIndex: _cur.chapterIndex != null ? _cur.chapterIndex : -1, pageIndex: idx });
+      } catch (_) {}
       window.__rcPendingRestorePageIndex = -1;
       return true;
     } catch (_) {
@@ -2214,7 +2168,13 @@
             ttsAutoplayCancelCountdown();
             return;
           }
-          syncExplicitReadingAuthority(i, { syncTarget: true });
+          try { currentPageIndex = i; } catch (_) {}
+          lastFocusedPageIndex = i;
+          // Update authoritative reading target to this page before speaking.
+          try {
+            const _ctx = getReadingTargetContext();
+            if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: i });
+          } catch (_) {}
           ttsSpeakQueue(
             (typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${i}`,
             [text]
@@ -2247,17 +2207,16 @@
         });
       }
 
-      // Click-only authority update: avoid treating touchstart / drag-to-scroll as
-      // a page-target mutation on mobile.
-      page.addEventListener("click", () => {
-        syncExplicitReadingAuthority(i, { syncTarget: true, updateMetrics: false });
+      // Clicking anywhere on the page should make "Next" advance from that page.
+      page.addEventListener("pointerdown", () => {
+        lastFocusedPageIndex = i;
       });
 
       // Timer events and keyboard nav — only present in non-reading-mode cards.
       if (textarea) {
         textarea.addEventListener("focus", () => {
 
-          syncExplicitReadingAuthority(i, { syncTarget: true, updateMetrics: false });
+          lastFocusedPageIndex = i;
           // Scroll to show entire page card (passage + textarea) instead of centering on textarea
           const pageCard = textarea.closest('.page');
           pageCard.scrollIntoView({
@@ -2782,18 +2741,86 @@ This removes them from Deleted Files and frees the device storage.`);
 
   // ===================================
 
-// ─── Passive viewport observer seam (disabled as page authority) ────────────
+// ─── Scroll-based active-page tracker ────────────────────────────────────────
 //
-// Lane 2 removes scroll-owned page truth. lastFocusedPageIndex stays owned by
-// explicit actions and restore only. We keep this install seam idempotent so
-// render() can still call it safely, but passive viewport changes no longer
-// write page authority or progress.
+// lastFocusedPageIndex is the runtime truth for active page. It is already
+// written by all explicit navigation paths (pointer, focus, goToNext, TTS skip,
+// restore). The one gap: user scrolls without clicking. Without this tracker,
+// lastFocusedPageIndex becomes stale after restore or pointer interaction, and
+// startFocusedPageTts / progress bar both return the wrong page.
+//
+// This installs one passive scroll listener (idempotent — safe to call after
+// every render()). On each scroll frame it measures the current visible page
+// via inferCurrentPageIndex() and writes the result into lastFocusedPageIndex.
+// inferCurrentPageIndex() is the measurement tool; lastFocusedPageIndex stays
+// the runtime state; all existing consumers stay unchanged.
+//
+// Guards:
+//   pages.length > 0       — skip if no content is loaded
+//   rect.height > 0        — skip if pages are in a hidden section (rect = 0)
 function _installScrollPageTracker() {
   if (window.__rcScrollPageTrackerInstalled) return;
   window.__rcScrollPageTrackerInstalled = true;
-  // Lane 2 policy: passive viewport changes are observational only.
-  // Keep the hook in place as an idempotent render seam, but do not let scroll,
-  // resize, or fullscreen reconciliation overwrite page truth or progress.
+  var raf = 0;
+  var prevIdx = -1;
+  var settleTimer = 0;
+
+  function reconcileVisiblePage(reason) {
+    if (raf) return;
+    raf = requestAnimationFrame(function () {
+      raf = 0;
+      try {
+        if (!Array.isArray(pages) || !pages.length) return;
+        const pageEls = Array.from(document.querySelectorAll('.page'));
+        if (!pageEls.length) return;
+        let bestEl = null;
+        let bestIdx = -1;
+        const nearBottom = (typeof window.isReadingViewportNearBottom === 'function')
+          ? !!window.isReadingViewportNearBottom()
+          : false;
+        if (nearBottom) {
+          bestEl = pageEls[pageEls.length - 1];
+          bestIdx = parseInt(bestEl?.dataset?.pageIndex || String(pageEls.length - 1), 10);
+        } else {
+          let bestDist = Infinity;
+          for (const el of pageEls) {
+            const rect = el.getBoundingClientRect();
+            if (rect.height <= 0) continue;
+            const dataIdx = parseInt(el.dataset.pageIndex || '-1', 10);
+            if (Number.isNaN(dataIdx) || dataIdx < 0) continue;
+            const dist = Math.abs(rect.top);
+            if (dist < bestDist) { bestDist = dist; bestIdx = dataIdx; bestEl = el; }
+          }
+        }
+        if (!bestEl || !Number.isFinite(bestIdx) || bestIdx < 0) return;
+        if (bestEl.getBoundingClientRect().height <= 0) return;
+        lastFocusedPageIndex = bestIdx;
+        try { currentPageIndex = bestIdx; } catch (_) {}
+        updateReadingMetricsPage(bestIdx);
+        try {
+          const _ctx = window.getReadingTargetContext();
+          if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
+        } catch (_) {}
+        if (bestIdx !== prevIdx) {
+          prevIdx = bestIdx;
+          try { queueCurrentReadingProgress(reason || 'scroll-tracker'); } catch (_) {}
+        }
+      } catch (_) {}
+    });
+  }
+
+  function reconcileVisiblePageAfterSettle(reason) {
+    reconcileVisiblePage(reason);
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(function () {
+      settleTimer = 0;
+      reconcileVisiblePage(reason + '-settled');
+    }, 160);
+  }
+
+  window.addEventListener('scroll', function () { reconcileVisiblePage('scroll-tracker'); }, { passive: true });
+  window.addEventListener('resize', function () { reconcileVisiblePageAfterSettle('resize-reconcile'); }, { passive: true });
+  window.addEventListener('fullscreenchange', function () { reconcileVisiblePageAfterSettle('fullscreen-reconcile'); }, { passive: true });
 }
 
 
@@ -2899,9 +2926,23 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   document.querySelectorAll('.' + activeClass).forEach((el) => el.classList.remove(activeClass));
   target.classList.add(activeClass);
   target.scrollIntoView({ behavior: options.behavior || 'smooth', block: 'start' });
-  syncExplicitReadingAuthority(idx, { syncTarget: true, persistReason: 'focus-reading-page' });
+  lastFocusedPageIndex = idx;
+  try { currentPageIndex = idx; } catch (_) {}
+  updateReadingMetricsPage(idx);
+  // Keep reading target in sync so bottom-bar Play speaks the navigated-to page.
+  try {
+    const _ctx = window.getReadingTargetContext();
+    if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: idx });
+  } catch (_) {}
   try { if (window.TTS_STATE) window.TTS_STATE.playbackBlockedReason = ''; } catch (_) {}
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
+  // Pass 4: schedule durable reading progress sync if the user is signed in.
+  try {
+    if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
+      const _t = window.__rcReadingTarget || {};
+      window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, idx, { reason: 'focus-reading-page' });
+    }
+  } catch (_) {}
   return { ok: true, index: idx, total };
 };
 
@@ -2946,16 +2987,19 @@ window.ttsAdvancePageSession = function ttsAdvancePageSession(delta) {
 
 window.startFocusedPageTts = function startFocusedPageTts() {
   const baseTarget = window.getReadingTargetContext();
+  // Refuse to infer target from DOM focus or scroll. If no authoritative
+  // reading target exists, block and emit diagnostics rather than guessing.
   if (!baseTarget || !baseTarget.sourceType) {
     try { if (typeof ttsDiagPush === 'function') ttsDiagPush('start-focused-blocked', { reason: 'no-reading-target', pageCount: Array.isArray(pages) ? pages.length : 0 }); } catch (_) {}
     return false;
   }
-  // Lane 2 policy: passive scrolling never mutates page truth, but explicit
-  // Play may sample the currently viewed page once before playback begins.
-  const idx = getExplicitViewedReadingPageIndex();
+  const idx = Math.max(0, Math.min(Number((window.__rcReadingTarget || {}).pageIndex) || 0, (Array.isArray(pages) ? pages.length : 1) - 1));
   const text = (Array.isArray(pages) && pages[idx]) ? pages[idx] : '';
   if (!text) return false;
-  syncExplicitReadingAuthority(idx, { syncTarget: true });
+  // Normalize clamped index back into target before deriving key.
+  if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: baseTarget.sourceType, bookId: baseTarget.bookId, chapterIndex: baseTarget.chapterIndex, pageIndex: idx });
+  try { currentPageIndex = idx; } catch (_) {}
+  lastFocusedPageIndex = idx;
   try { if (window.TTS_STATE) window.TTS_STATE.playbackBlockedReason = ''; } catch (_) {}
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
   ttsSpeakQueue(
