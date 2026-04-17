@@ -4,7 +4,6 @@
 
 window.rcBilling = (function () {
   let _configPromise = null;
-  let _pricingRenderToken = 0;
 
   function setMessage(id, message, tone = 'info') {
     const el = document.getElementById(id);
@@ -128,12 +127,14 @@ window.rcBilling = (function () {
     setMessage('pricing-message', '', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
     if (typeof openModal === 'function') openModal('pricing-modal');
+    renderPricingUi().catch(() => {});
   }
 
   function showPricingForGatedAction(message) {
     setMessage('pricing-message', message || 'Create an account to import books, save your place, and build your library.', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
     if (typeof openModal === 'function') openModal('pricing-modal');
+    renderPricingUi().catch(() => {});
   }
 
   function rememberPlanAndOpenSignup(plan) {
@@ -160,28 +161,6 @@ window.rcBilling = (function () {
     button.classList.toggle('cursor-not-allowed', !!disabled);
   }
 
-  function setPricingModalSettledPendingState(signedIn) {
-    const modal = document.getElementById('pricing-modal');
-    const freeBtn = document.getElementById('pricing-free-btn');
-    const proBtn = document.getElementById('pricing-pro-btn');
-    const premiumBtn = document.getElementById('pricing-premium-btn');
-    if (modal) modal.classList.add('pricing-modal-settling');
-    if (signedIn) {
-      applyPlanButtonState(freeBtn, 'Basic', null, true);
-      applyPlanButtonState(proBtn, 'Pro', null, true);
-      applyPlanButtonState(premiumBtn, 'Premium', null, true);
-      return;
-    }
-    applyPlanButtonState(freeBtn, 'Continue for free', null, true);
-    applyPlanButtonState(proBtn, 'Choose Pro', null, true);
-    applyPlanButtonState(premiumBtn, 'Choose Premium', null, true);
-  }
-
-  function clearPricingModalSettledPendingState() {
-    const modal = document.getElementById('pricing-modal');
-    if (modal) modal.classList.remove('pricing-modal-settling');
-  }
-
   function setButtonBusy(button, busyLabel) {
     if (!button) return;
     if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent || '';
@@ -198,7 +177,9 @@ window.rcBilling = (function () {
   }
 
   async function renderPricingUi() {
-    const token = ++_pricingRenderToken;
+    // Grab elements before the async gap so we can show neutral pending state
+    // while config and runtime snapshot resolve. Never claim a plan until truth
+    // arrives — do not show fake Free/Pro/Premium labels during the fetch.
     const freeBtn = document.getElementById('pricing-free-btn');
     const proBtn = document.getElementById('pricing-pro-btn');
     const premiumBtn = document.getElementById('pricing-premium-btn');
@@ -206,13 +187,13 @@ window.rcBilling = (function () {
     const proInterval = document.getElementById('pricing-pro-interval');
     const premiumAmount = document.getElementById('pricing-premium-amount');
     const premiumInterval = document.getElementById('pricing-premium-interval');
-    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
-    setPricingModalSettledPendingState(signedIn);
+    [freeBtn, proBtn, premiumBtn].forEach((btn) => {
+      if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; btn.classList.add('opacity-60', 'cursor-not-allowed'); }
+    });
 
     const config = await fetchPublicConfig();
+    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
     const snapshot = await fetchRuntimeSnapshot();
-    if (token !== _pricingRenderToken) return;
-    clearPricingModalSettledPendingState();
     const entitlement = snapshot?.meta?.entitlement || null;
     const currentTier = normalizeRuntimeTier(entitlement?.tier || snapshot?.meta?.effectiveTier || snapshot?.policy?.tier || snapshot?.tier || 'basic');
     const plans = config?.stripe?.plans || {};

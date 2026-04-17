@@ -1669,12 +1669,3 @@ body.auth-hydrating #profile-page {
   transition: opacity 120ms;
 }
 .rc-banner__close:hover { opacity: 0.85; }
-
-
-/* Group A: pricing modal should open as one settled pending-safe piece */
-#pricing-modal.pricing-modal-settling .pricing-card {
-  opacity: 0.78;
-}
-#pricing-modal.pricing-modal-settling .pricing-card button {
-  visibility: hidden;
-}
