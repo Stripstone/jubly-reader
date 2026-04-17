@@ -83,18 +83,23 @@
   // applies the .page-active class. Used by goToNext in Reading mode.
   function activatePageCard(pageEl, pageIndex) {
     if (!pageEl) return;
-    pageEl.classList.add('page-active');
 
-    // Reading-mode Next/advance is explicit page-change intent. When narration
-    // has just been stopped, make the navigated-to page the new runtime-active
-    // page immediately so Play resumes from this card instead of snapping back
-    // to the previously spoken page.
-    lastFocusedPageIndex = pageIndex;
-    try { currentPageIndex = pageIndex; } catch (_) {}
+    // Reading-mode Next/advance is explicit page-change intent. Route this
+    // through the shared runtime page-activation helper so the active card,
+    // current page truth, and persisted restore target all stay aligned.
     try {
-      if (typeof setReadingTarget === 'function' && typeof window.getReadingTargetContext === 'function') {
-        const ctx = window.getReadingTargetContext();
-        setReadingTarget({ sourceType: ctx.sourceType, bookId: ctx.bookId, chapterIndex: ctx.chapterIndex, pageIndex });
+      if (typeof window.activateReadingPage === 'function') {
+        window.activateReadingPage(pageIndex, { syncTarget: true, persistReason: 'manual-next-page' });
+      } else {
+        pageEl.classList.add('page-active');
+        lastFocusedPageIndex = pageIndex;
+        try { currentPageIndex = pageIndex; } catch (_) {}
+        try {
+          if (typeof setReadingTarget === 'function' && typeof window.getReadingTargetContext === 'function') {
+            const ctx = window.getReadingTargetContext();
+            setReadingTarget({ sourceType: ctx.sourceType, bookId: ctx.bookId, chapterIndex: ctx.chapterIndex, pageIndex });
+          }
+        } catch (_) {}
       }
     } catch (_) {}
     try {
@@ -103,8 +108,6 @@
         pageTurnSound.play();
       }
     } catch (_) {}
-    // Remove the active class after a short beat so it doesn't linger indefinitely.
-    setTimeout(() => pageEl.classList.remove('page-active'), 600);
   }
 
   function goToNext(currentIndex) {

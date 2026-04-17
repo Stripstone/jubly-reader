@@ -819,7 +819,14 @@ window.rcSync = (function () {
     }
     const target = window.__rcReadingTarget || {};
     if (!target || !target.bookId) return null;
-    return _writeProgress(target.bookId, target.chapterIndex, target.pageIndex, { reason: 'flush-current-target' });
+    let pageIndex = Number(target.pageIndex);
+    try {
+      if (typeof window.getCurrentReadingPageIndex === 'function') {
+        const resolved = Number(window.getCurrentReadingPageIndex());
+        if (Number.isFinite(resolved) && resolved >= 0) pageIndex = resolved;
+      }
+    } catch (_) {}
+    return _writeProgress(target.bookId, target.chapterIndex, pageIndex, { reason: 'flush-current-target' });
   }
 
   // ── Progress reads ────────────────────────────────────────────────────────

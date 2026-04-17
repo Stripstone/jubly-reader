@@ -22,13 +22,15 @@
     return Math.max(0, Math.min(Math.trunc(idx), total - 1));
   }
 
-  function getFocusedOrInferredReadingPageIndex() {
-    // Lane 2 policy: passive scroll is observational only. Page truth comes
-    // from explicit actions and restore, not viewport measurement.
+  function getActiveReadingPageIndex() {
+    // Current-page truth is runtime-owned and explicit: whichever page the
+    // runtime most recently activated is the current page. Passive scroll never
+    // mutates this. The DOM marker is primary; mirrored state is only a boot/
+    // fallback seam until cards are rendered.
     try {
-      if (typeof lastFocusedPageIndex === 'number' && lastFocusedPageIndex >= 0) {
-        return _clampReadingPageIndex(lastFocusedPageIndex);
-      }
+      const activeEl = document.querySelector('.page.page-active');
+      const activeIdx = Number(activeEl?.dataset?.pageIndex);
+      if (Number.isFinite(activeIdx) && activeIdx >= 0) return _clampReadingPageIndex(activeIdx);
     } catch (_) {}
     try {
       if (typeof currentPageIndex === 'number' && currentPageIndex >= 0) {
@@ -42,6 +44,28 @@
     return 0;
   }
 
+  function activateReadingPage(pageIndex, options = {}) {
+    const idx = _clampReadingPageIndex(Number(pageIndex));
+    const pageEls = Array.from(document.querySelectorAll('.page'));
+    const target = pageEls[idx] || null;
+    const shouldMarkActive = options.markActive !== false && appMode === 'reading';
+    if (shouldMarkActive && pageEls.length) {
+      pageEls.forEach((el) => el.classList.remove('page-active'));
+      if (target) target.classList.add('page-active');
+    }
+    if (options.scrollIntoView && target) {
+      try {
+        target.scrollIntoView({ behavior: options.behavior || 'smooth', block: options.block || 'start' });
+      } catch (_) {}
+    }
+    syncExplicitReadingAuthority(idx, {
+      syncTarget: options.syncTarget !== false,
+      updateMetrics: options.updateMetrics,
+      persistReason: options.persistReason,
+    });
+    return { ok: !!target, index: idx, total: pageEls.length };
+  }
+
   function getExplicitViewedReadingPageIndex() {
     // Explicit Play / Read Page may sample the currently viewed page once.
     // This helper must never be used as passive page authority.
@@ -51,7 +75,7 @@
         if (Number.isFinite(idx) && idx >= 0) return _clampReadingPageIndex(idx);
       }
     } catch (_) {}
-    return getFocusedOrInferredReadingPageIndex();
+    return getActiveReadingPageIndex();
   }
 
   function syncExplicitReadingAuthority(pageIndex, options = {}) {
@@ -87,7 +111,7 @@
       const bookId = String(ctx.bookId || '').trim();
       if (!bookId) return null;
       const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
-      const pageIndex = getFocusedOrInferredReadingPageIndex();
+      const pageIndex = getActiveReadingPageIndex();
       return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'flush') });
     } catch (_) {
       return null;
@@ -101,7 +125,7 @@
       const bookId = String(ctx.bookId || '').trim();
       if (!bookId) return;
       const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
-      const pageIndex = getFocusedOrInferredReadingPageIndex();
+      const pageIndex = getActiveReadingPageIndex();
       window.rcSync.scheduleProgressSync(bookId, chapterIndex, pageIndex, { reason: String(reason || 'queue') });
     } catch (_) {}
   }
@@ -113,8 +137,7 @@
       const pageEls = document.querySelectorAll('.page');
       const target = pageEls[idx];
       if (!target) return false;
-      target.scrollIntoView({ behavior: 'auto', block: 'start' });
-      syncExplicitReadingAuthority(idx, { syncTarget: true, updateMetrics: false });
+      activateReadingPage(idx, { scrollIntoView: true, behavior: 'auto', block: 'start', syncTarget: true, updateMetrics: false });
       window.__rcPendingRestorePageIndex = -1;
       return true;
     } catch (_) {
@@ -2214,7 +2237,7 @@
             ttsAutoplayCancelCountdown();
             return;
           }
-          syncExplicitReadingAuthority(i, { syncTarget: true });
+          activateReadingPage(i, { syncTarget: true, persistReason: 'read-page' });
           ttsSpeakQueue(
             (typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${i}`,
             [text]
@@ -2250,14 +2273,14 @@
       // Click-only authority update: avoid treating touchstart / drag-to-scroll as
       // a page-target mutation on mobile.
       page.addEventListener("click", () => {
-        syncExplicitReadingAuthority(i, { syncTarget: true, updateMetrics: false });
+        activateReadingPage(i, { syncTarget: true, updateMetrics: false });
       });
 
       // Timer events and keyboard nav — only present in non-reading-mode cards.
       if (textarea) {
         textarea.addEventListener("focus", () => {
 
-          syncExplicitReadingAuthority(i, { syncTarget: true, updateMetrics: false });
+          activateReadingPage(i, { syncTarget: true, updateMetrics: false, markActive: false });
           // Scroll to show entire page card (passage + textarea) instead of centering on textarea
           const pageCard = textarea.closest('.page');
           pageCard.scrollIntoView({
@@ -2410,7 +2433,11 @@
     
     applyModeVisibility();
     if (typeof applyTierAccess === 'function') applyTierAccess();
-    try { applyPendingReadingRestore(); } catch (_) {}
+    let restoreApplied = false;
+    try { restoreApplied = !!applyPendingReadingRestore(); } catch (_) {}
+    if (!restoreApplied && appMode === 'reading' && Array.isArray(pages) && pages.length) {
+      try { activateReadingPage(Math.max(0, Number((window.__rcReadingTarget || {}).pageIndex) || 0), { syncTarget: true, updateMetrics: false }); } catch (_) {}
+    }
     try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
     _installScrollPageTracker();
     try { if (typeof window.__jublyAfterRender === 'function') window.__jublyAfterRender(); } catch (_) {}
@@ -2803,7 +2830,7 @@ let _activeReadingMetricsSession = null;
 function beginReadingMetricsSession(bookId, totalPages) {
   const safeBookId = String(bookId || '');
   if (!safeBookId) return;
-  const startingPageIndex = Math.max(0, getFocusedOrInferredReadingPageIndex());
+  const startingPageIndex = Math.max(0, getActiveReadingPageIndex());
   const now = Date.now();
   _activeReadingMetricsSession = {
     bookId: safeBookId,
@@ -2891,24 +2918,24 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   if (!pageEls.length) return { ok: false, reason: 'no-pages' };
   const total = pageEls.length;
   let idx = Number(targetIndex);
-  if (!Number.isFinite(idx)) idx = getFocusedOrInferredReadingPageIndex();
+  if (!Number.isFinite(idx)) idx = getActiveReadingPageIndex();
   idx = ((idx % total) + total) % total;
-  const target = pageEls[idx];
-  if (!target) return { ok: false, reason: 'missing-target', index: idx, total };
-  const activeClass = 'page-active';
-  document.querySelectorAll('.' + activeClass).forEach((el) => el.classList.remove(activeClass));
-  target.classList.add(activeClass);
-  target.scrollIntoView({ behavior: options.behavior || 'smooth', block: 'start' });
-  syncExplicitReadingAuthority(idx, { syncTarget: true, persistReason: 'focus-reading-page' });
+  const result = activateReadingPage(idx, {
+    scrollIntoView: true,
+    behavior: options.behavior || 'smooth',
+    block: 'start',
+    syncTarget: true,
+    persistReason: options.persistReason || 'focus-reading-page',
+  });
   try { if (window.TTS_STATE) window.TTS_STATE.playbackBlockedReason = ''; } catch (_) {}
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
-  return { ok: true, index: idx, total };
+  return result && result.ok !== false ? { ok: true, index: idx, total } : { ok: false, reason: 'missing-target', index: idx, total };
 };
 
 window.stepReadingPage = function stepReadingPage(delta, options = {}) {
   const total = Array.isArray(pages) ? pages.length : 0;
   if (!total) return { ok: false, reason: 'no-pages', total: 0 };
-  const current = getFocusedOrInferredReadingPageIndex();
+  const current = getActiveReadingPageIndex();
   const next = ((current + Number(delta || 0)) % total + total) % total;
   return window.focusReadingPage(next, options);
 };
@@ -2929,7 +2956,7 @@ window.ttsAdvancePageSession = function ttsAdvancePageSession(delta) {
           ttsStop();
         }
       } catch (_) {}
-      const current = getFocusedOrInferredReadingPageIndex();
+      const current = getActiveReadingPageIndex();
       const next = ((current + step) % total + total) % total;
       const result = window.focusReadingPage(next, { behavior: 'smooth' });
       return !!result?.ok;
@@ -2938,7 +2965,7 @@ window.ttsAdvancePageSession = function ttsAdvancePageSession(delta) {
     return false;
   }
   try { if (typeof ttsAutoplayCancelCountdown === 'function') ttsAutoplayCancelCountdown(); } catch (_) {}
-  const current = getFocusedOrInferredReadingPageIndex();
+  const current = getActiveReadingPageIndex();
   const next = ((current + step) % total + total) % total;
   const result = window.focusReadingPage(next, { behavior: 'smooth' });
   return !!result?.ok;
@@ -2959,9 +2986,12 @@ window.startFocusedPageTts = function startFocusedPageTts() {
   // sampled page through the same focus path used by explicit page targeting.
   // This keeps scroll observational-only while bringing the chosen page into
   // view before playback begins.
-  const focusResult = (typeof window.focusReadingPage === 'function')
-    ? window.focusReadingPage(idx, { behavior: 'smooth' })
-    : null;
+  const focusResult = activateReadingPage(idx, {
+    scrollIntoView: true,
+    behavior: 'smooth',
+    syncTarget: true,
+    persistReason: 'play-focused-page',
+  });
   if (!focusResult || focusResult.ok !== true) {
     syncExplicitReadingAuthority(idx, { syncTarget: true });
   }
@@ -2974,7 +3004,8 @@ window.startFocusedPageTts = function startFocusedPageTts() {
   return true;
 };
 
-window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
+window.getCurrentReadingPageIndex = getActiveReadingPageIndex;
+window.activateReadingPage = activateReadingPage;
 
 // Runtime-owned reading-entry API.
 // Resolves the book, prepares all page content, and renders page cards.
@@ -3094,7 +3125,7 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
 window.exitReadingSession = function exitReadingSession() {
   try { flushCurrentReadingProgress('reading-exit').catch(() => {}); } catch (_) {}
   const metrics = finalizeReadingMetricsSession();
-  const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
+  const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getActiveReadingPageIndex(), metrics };
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}
   try { if (typeof ttsAutoplayCancelCountdown === 'function') { ttsAutoplayCancelCountdown(); result.countdownCleared = true; } } catch (_) {}
   try { const signal = document.getElementById('session-complete'); if (signal) signal.classList.add('hidden-section'); } catch (_) {}
@@ -3112,7 +3143,7 @@ window.exitReadingSession = function exitReadingSession() {
 window.getRuntimeUiState = function getRuntimeUiState() {
   return {
     pageCount: Array.isArray(pages) ? pages.length : 0,
-    activePageIndex: getFocusedOrInferredReadingPageIndex(),
+    activePageIndex: getActiveReadingPageIndex(),
     hasPages: Array.isArray(pages) && pages.length > 0,
     restore: (typeof window.getReadingRestoreStatus === 'function') ? window.getReadingRestoreStatus() : null
   };

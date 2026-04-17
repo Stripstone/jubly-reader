@@ -1529,14 +1529,20 @@ window.rcInteraction = (function () {
     function getActivePlaybackPageIndex(playbackStatus) {
         const status = playbackStatus || null;
         try {
+            if (typeof window.getCurrentReadingPageIndex === 'function') {
+                const idx = Number(window.getCurrentReadingPageIndex());
+                if (Number.isFinite(idx) && idx >= 0) return idx;
+            }
+        } catch (_) {}
+        try {
+            const idx = Number((window.__rcReadingTarget || {}).pageIndex);
+            if (Number.isFinite(idx) && idx >= 0) return idx;
+        } catch (_) {}
+        try {
             const parsed = (typeof readingTargetFromKey === 'function' && status?.key)
                 ? readingTargetFromKey(String(status.key))
                 : null;
             const idx = Number(parsed?.pageIndex);
-            if (Number.isFinite(idx) && idx >= 0) return idx;
-        } catch (_) {}
-        try {
-            const idx = Number((window.__rcReadingTarget || {}).pageIndex);
             if (Number.isFinite(idx) && idx >= 0) return idx;
         } catch (_) {}
         return -1;
