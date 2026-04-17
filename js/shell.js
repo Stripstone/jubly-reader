@@ -1741,7 +1741,11 @@ window.rcInteraction = (function () {
         try { if (typeof pauseOrResumeReading === 'function') result = !!pauseOrResumeReading(); } catch (_) {}
         setTimeout(syncShellPlaybackControls, 0);
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
-        if (afterPlayback?.active && !afterPlayback.paused && (!before.playback?.active || before.playback?.paused || before.countdown?.active)) {
+        // Keep the playback page visible even when runtime is still paused
+        // immediately after the action. This covers pause-preserved skip and
+        // timing-sensitive resume paths where the session page is authoritative
+        // before playback has fully flipped to unpaused.
+        if (afterPlayback?.active && (!before.playback?.active || before.playback?.paused || before.countdown?.active)) {
             bringPlaybackPageIntoView(afterPlayback);
         }
         shellDebugRemember('lastControlAction', {
@@ -1787,7 +1791,9 @@ window.rcInteraction = (function () {
         } catch (_) {}
         syncShellPlaybackControls();
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
-        if (moved && afterPlayback?.active && !afterPlayback.paused) {
+        // Skip should return the viewport to the playback page even when the
+        // session remains paused after the move (pause-preserve contract).
+        if (moved && afterPlayback?.active) {
             bringPlaybackPageIntoView(afterPlayback);
         }
         shellDebugRemember('lastSkipAction', {

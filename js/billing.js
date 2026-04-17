@@ -123,17 +123,33 @@ window.rcBilling = (function () {
     return ['basic', 'pro', 'premium'].includes(normalized) ? normalized : 'basic';
   }
 
-  function openPricingForSignup() {
+  function openPricingModalSettled() {
+    const el = document.getElementById('pricing-modal');
+    if (!el) return;
+    el.classList.remove('hidden-section');
+    if (el.classList.contains('modal-overlay')) el.style.display = 'flex';
+  }
+
+  async function openPricingForSignup() {
     clearPendingPlan();
     setMessage('pricing-message', '', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
-    if (typeof openModal === 'function') openModal('pricing-modal');
+    await renderPricingUi();
+    openPricingModalSettled();
   }
 
-  function showPricingForGatedAction(message) {
+  async function openPricingForAccount(message = '') {
+    clearPendingPlan();
+    setMessage('pricing-message', message || '', 'info');
+    await renderPricingUi();
+    openPricingModalSettled();
+  }
+
+  async function showPricingForGatedAction(message) {
     setMessage('pricing-message', message || 'Create an account to import books, save your place, and build your library.', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
-    if (typeof openModal === 'function') openModal('pricing-modal');
+    await renderPricingUi();
+    openPricingModalSettled();
   }
 
   function rememberPlanAndOpenSignup(plan) {
@@ -180,6 +196,29 @@ window.rcBilling = (function () {
   function clearPricingModalSettledPendingState() {
     const modal = document.getElementById('pricing-modal');
     if (modal) modal.classList.remove('pricing-modal-settling');
+  }
+
+  function getSignedInPlanButtonModel(currentTier, plans) {
+    const tier = normalizeRuntimeTier(currentTier || 'basic');
+    const isBasicLocked = tier === 'pro' || tier === 'premium';
+    const isProLocked = tier === 'premium';
+    return {
+      free: {
+        label: tier === 'basic' ? 'Current Plan' : 'Basic',
+        disabled: tier === 'basic' || isBasicLocked,
+        onclick: tier === 'basic' ? () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); } : null,
+      },
+      pro: {
+        label: tier === 'pro' ? 'Current Plan' : 'Upgrade to Pro',
+        disabled: !plans?.pro?.available || tier === 'pro' || isProLocked,
+        onclick: tier === 'pro' || isProLocked ? null : () => startCheckout('pro'),
+      },
+      premium: {
+        label: tier === 'premium' ? 'Current Plan' : 'Upgrade to Premium',
+        disabled: !plans?.premium?.available || tier === 'premium',
+        onclick: tier === 'premium' ? null : () => startCheckout('premium'),
+      },
+    };
   }
 
   function setButtonBusy(button, busyLabel) {
@@ -229,9 +268,10 @@ window.rcBilling = (function () {
       return;
     }
 
-    applyPlanButtonState(freeBtn, currentTier === 'basic' ? 'Current Plan' : 'Basic Plan', () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); }, currentTier === 'basic');
-    applyPlanButtonState(proBtn, currentTier === 'pro' ? 'Current Plan' : 'Upgrade to Pro', () => startCheckout('pro'), !plans?.pro?.available || currentTier === 'pro');
-    applyPlanButtonState(premiumBtn, currentTier === 'premium' ? 'Current Plan' : 'Upgrade to Premium', () => startCheckout('premium'), !plans?.premium?.available || currentTier === 'premium');
+    const buttonModel = getSignedInPlanButtonModel(currentTier, plans);
+    applyPlanButtonState(freeBtn, buttonModel.free.label, buttonModel.free.onclick, buttonModel.free.disabled);
+    applyPlanButtonState(proBtn, buttonModel.pro.label, buttonModel.pro.onclick, buttonModel.pro.disabled);
+    applyPlanButtonState(premiumBtn, buttonModel.premium.label, buttonModel.premium.onclick, buttonModel.premium.disabled);
   }
 
   function continueWithFree() {
@@ -296,7 +336,7 @@ window.rcBilling = (function () {
       if (billingState) billingState.textContent = 'Not signed in';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
-        primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
+        primaryBtn.onclick = function () { if (window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') window.rcBilling.openPricingForAccount(); else if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
       if (secondaryBtn) {
         secondaryBtn.textContent = 'Sign in first';
@@ -320,14 +360,14 @@ window.rcBilling = (function () {
       }
       if (secondaryBtn) {
         secondaryBtn.textContent = 'View Pricing';
-        secondaryBtn.onclick = function () { if (typeof openModal === 'function') openModal('pricing-modal'); };
+        secondaryBtn.onclick = function () { if (window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') window.rcBilling.openPricingForAccount(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
     } else {
       if (statusCopy) statusCopy.textContent = 'You are on the Basic plan. Upgrade whenever you want more books, storage, and features.';
       if (billingState) billingState.textContent = 'Basic';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
-        primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
+        primaryBtn.onclick = function () { if (window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') window.rcBilling.openPricingForAccount(); else if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
       if (secondaryBtn) {
         const stripeReady = !!(config?.stripe?.plans?.pro?.available || config?.stripe?.plans?.premium?.available);
@@ -513,6 +553,7 @@ window.rcBilling = (function () {
     readPendingPlan,
     clearPendingPlan,
     openPricingForSignup,
+    openPricingForAccount,
     continueWithFree,
     hasPendingPaidIntent,
   };
@@ -522,4 +563,5 @@ window.startCheckout = function startCheckout(plan) { return window.rcBilling.st
 window.openCustomerPortal = function openCustomerPortal() { return window.rcBilling.openCustomerPortal(); };
 
 window.openPricingForSignup = function openPricingForSignup() { return window.rcBilling.openPricingForSignup(); };
+window.openPricingForAccount = function openPricingForAccount(message) { return window.rcBilling.openPricingForAccount(message); };
 window.continueWithFree = function continueWithFree() { return window.rcBilling.continueWithFree(); };
