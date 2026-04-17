@@ -1143,6 +1143,13 @@ function browserSpeakQueue(key, parts, opts = {}) {
       return;
     }
 
+    // Advance the expected entry block before the utterance is queued so that
+    // normal queue progression (onend → speakFromBlock(blockIdx + 1)) does not
+    // trip the stale-entry guard in onstart. Without this, browserExpectedEntryBlockIndex
+    // stays at the previous block's value until its onstart runs, causing every
+    // block after the first to be cancelled as stale before it can speak.
+    TTS_STATE.browserExpectedEntryBlockIndex = blockIdx;
+
     const requestId = Number.isFinite(Number(opts.restartRequestId)) ? Number(opts.restartRequestId) : 0;
     const entryReason = String(opts.reason || (requestId > 0 ? 'restart-from-block' : 'queue-progress'));
     const r = ranges[blockIdx];
