@@ -2955,16 +2955,7 @@ window.startFocusedPageTts = function startFocusedPageTts() {
   const idx = getExplicitViewedReadingPageIndex();
   const text = (Array.isArray(pages) && pages[idx]) ? pages[idx] : '';
   if (!text) return false;
-  // Restore the explicit viewport handoff for bottom Play by routing the
-  // sampled page through the same focus path used by explicit page targeting.
-  // This keeps scroll observational-only while bringing the chosen page into
-  // view before playback begins.
-  const focusResult = (typeof window.focusReadingPage === 'function')
-    ? window.focusReadingPage(idx, { behavior: 'smooth' })
-    : null;
-  if (!focusResult || focusResult.ok !== true) {
-    syncExplicitReadingAuthority(idx, { syncTarget: true });
-  }
+  syncExplicitReadingAuthority(idx, { syncTarget: true });
   try { if (window.TTS_STATE) window.TTS_STATE.playbackBlockedReason = ''; } catch (_) {}
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
   ttsSpeakQueue(
