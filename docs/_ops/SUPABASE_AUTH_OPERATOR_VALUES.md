@@ -20,4 +20,4 @@ Add these exact redirect URLs in Supabase Auth:
 ## Email template
 In Supabase Auth → Email Templates → Confirm signup, paste the contents of `SUPABASE_CONFIRM_SIGNUP_TEMPLATE.html`.
 
-The template intentionally uses `{{ .ConfirmationURL }}` so verification stays provider-backed while continuation returns to the app-owned verified login flow.
+The template intentionally uses `{{ .ConfirmationURL }}` so verification stays provider-backed while continuation returns to the app-owned verified login flow. After confirm, the app clears any transient auto-login session and lands on login with preserved continuation intent.
