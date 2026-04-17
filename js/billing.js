@@ -199,7 +199,7 @@ window.rcBilling = (function () {
     if (premiumInterval) premiumInterval.textContent = plans?.premium?.intervalLabel || '';
 
     if (!signedIn) {
-      applyPlanButtonState(freeBtn, 'Continue with Basic', () => rememberPlanAndOpenSignup('free'));
+      applyPlanButtonState(freeBtn, 'Continue for free', () => rememberPlanAndOpenSignup('free'));
       applyPlanButtonState(proBtn, 'Choose Pro', () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
       applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
       return;

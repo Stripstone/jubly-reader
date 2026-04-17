@@ -12,6 +12,33 @@ function supabaseServiceKey() {
   return requiredEnv('SUPABASE_SECRET_KEY');
 }
 
+
+export async function findAuthUserByEmail(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return null;
+  const response = await fetch(`${supabaseBaseUrl()}/auth/v1/admin/users?email=${encodeURIComponent(normalized)}`, {
+    method: 'GET',
+    headers: {
+      apikey: supabaseServiceKey(),
+      Authorization: `Bearer ${supabaseServiceKey()}`,
+    },
+  });
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (_) { data = null; }
+  if (!response.ok) {
+    const detail = (data && typeof data === 'object')
+      ? (data.message || data.error || data.msg || JSON.stringify(data))
+      : '';
+    const error = new Error(`Supabase Auth ${response.status}${detail ? ` – ${detail}` : ''}`);
+    error.status = response.status;
+    throw error;
+  }
+  const users = Array.isArray(data?.users) ? data.users : [];
+  const match = users.find((user) => String(user?.email || '').trim().toLowerCase() === normalized) || null;
+  return match;
+}
+
 export async function getUserFromAccessToken(accessToken) {
   const token = String(accessToken || '').trim();
   if (!token) return null;

@@ -3,37 +3,21 @@
 // ============================================================
 //
 // PRE-RUNTIME APPEARANCE BOOTSTRAP (temporary shell bridge):
-//   Applies the last-safe local appearance class to <html> before CSS paints
-//   so the shell does not flash the wrong light/dark surface before runtime
-//   re-applies the authoritative appearance state from js/state.js.
+//   Public boot now starts from the safe light appearance instead of reusing
+//   client-cached light/dark state before auth truth exists. Signed-in users
+//   can restore their persisted appearance only after auth resolves.
 //   Retirement condition: remove when runtime provides an equally-early
 //   appearance bootstrap seam without using index.html inline script ownership.
-(function applyLastSafeAppearanceBoot() {
+(function applyPublicSafeAppearanceBoot() {
     try {
-        var mode = 'light';
-        try {
-            var raw = localStorage.getItem('rc_appearance_prefs');
-            if (raw) {
-                var parsed = JSON.parse(raw) || {};
-                var stored = parsed.appearance_mode || parsed.mode || parsed.appearance;
-                if (stored === 'dark' || stored === 'light') mode = stored;
-            }
-        } catch (_) {}
-        if (mode !== 'dark') {
-            try {
-                var match = String(document.cookie || '').match(/(?:^|; )rc_appearance_mode=([^;]+)/);
-                var cookieMode = match ? decodeURIComponent(match[1]) : '';
-                if (cookieMode === 'dark' || cookieMode === 'light') mode = cookieMode;
-            } catch (_) {}
-        }
         var root = document.documentElement;
         if (!root) return;
         root.classList.remove('app-light', 'app-dark');
-        root.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
-        root.setAttribute('data-app-appearance', mode);
-        root.style.backgroundColor = mode === 'dark' ? '#0f172a' : '#ffffff';
-        root.style.color = mode === 'dark' ? '#e2e8f0' : '#1e293b';
-        root.style.colorScheme = mode;
+        root.classList.add('app-light');
+        root.setAttribute('data-app-appearance', 'light');
+        root.style.backgroundColor = '#ffffff';
+        root.style.color = '#1e293b';
+        root.style.colorScheme = 'light';
     } catch (_) {}
 })();
 
@@ -711,6 +695,37 @@ window.rcInteraction = (function () {
         returnToPublicEntry();
     }
 
+    function readAuthLocationState() {
+        try {
+            const params = new URLSearchParams(window.location.search || '');
+            return String(params.get('auth') || '').trim().toLowerCase();
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function clearAuthLocationState() {
+        try {
+            const url = new URL(window.location.href);
+            if (!url.searchParams.has('auth')) return;
+            url.searchParams.delete('auth');
+            window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+        } catch (_) {}
+    }
+
+    function applyAuthLocationState() {
+        const state = readAuthLocationState();
+        if (state !== 'verified') return;
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        _authMode = 'signin';
+        _signupStep = 1;
+        toggleAuthMode(true);
+        showSection('login-page', { historyMode: 'replace' });
+        _authShowSuccess('Email verified. Log In to continue.');
+        clearAuthLocationState();
+    }
+
     function authBack() {
         _authClearMessages();
         if (_authMode === 'signup' && _signupStep === 2) {
@@ -826,7 +841,7 @@ window.rcInteraction = (function () {
                 if (usernameWrap) usernameWrap.classList.add('hidden-section');
                 if (passwordWrap) passwordWrap.classList.add('hidden-section');
                 if (confirmWrap) confirmWrap.classList.add('hidden-section');
-                if (submitBtn) submitBtn.textContent = 'Submit';
+                if (submitBtn) submitBtn.textContent = 'Next';
             } else {
                 if (emailWrap) emailWrap.classList.add('hidden-section');
                 if (subheading) subheading.textContent = 'Choose a username and password.';
@@ -895,6 +910,36 @@ window.rcInteraction = (function () {
                 _authShowError('Email is required.');
                 return;
             }
+            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
+                _authShowError('Enter a valid email address.');
+                return;
+            }
+            if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+            try {
+                const inspected = window.rcAuth && typeof window.rcAuth.inspectEmail === 'function'
+                    ? await window.rcAuth.inspectEmail(email)
+                    : { ok: false, exists: false, error: null };
+                const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
+                if (inspected && inspected.exists) {
+                    _authMode = 'signin';
+                    _signupStep = 1;
+                    applyAuthModeUi();
+                    const emailField = document.getElementById('loginEmail');
+                    if (emailField) emailField.value = email;
+                    const passwordField = document.getElementById('loginPassword');
+                    try { if (passwordField) passwordField.focus(); } catch (_) {}
+                    _authShowError(pendingPlan && pendingPlan !== 'free'
+                        ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+                        : 'An account with this email already exists. Log In to continue.');
+                    if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
+                    return;
+                }
+            } finally {
+                if (btn && btn.disabled) {
+                    btn.disabled = false;
+                    btn.textContent = 'Next';
+                }
+            }
             _signupStep = 2;
             applyAuthModeUi();
             try { const nextField = document.getElementById('signupUsername'); if (nextField) nextField.focus(); } catch (_) {}
@@ -932,25 +977,36 @@ window.rcInteraction = (function () {
                 const identities = Array.isArray(result?.data?.user?.identities) ? result.data.user.identities : null;
                 const existingAccountLikely = !error && !result?.data?.session && Array.isArray(identities) && identities.length === 0;
                 if (error) {
-                    _authShowError(error.message || 'Account creation failed. Please try again.');
+                    const message = String(error.message || 'Account creation failed. Please try again.');
+                    if (/already\s+registered|already\s+exists|user\s+already\s+registered/i.test(message)) {
+                        _authMode = 'signin';
+                        _signupStep = 1;
+                        applyAuthModeUi();
+                        _authShowError(pendingPlan && pendingPlan !== 'free'
+                            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+                            : 'An account with this email already exists. Log In to continue.');
+                    } else {
+                        _authShowError(message);
+                    }
                 } else if (existingAccountLikely) {
                     _authMode = 'signin';
                     _signupStep = 1;
                     applyAuthModeUi();
                     _authShowError(pendingPlan && pendingPlan !== 'free'
-                        ? `Account already exists. Sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                        : 'Account already exists. Sign in to continue.');
+                        ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+                        : 'An account with this email already exists. Log In to continue.');
                 } else if (result?.data?.session) {
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free'
                         ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
                         : 'Account created. Continuing to your library…');
                 } else {
-                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Account created. Check your email, then sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Account created. Check your email, then sign in.');
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Check your email to verify your account.');
                 }
             } else {
                 const { error } = await window.rcAuth.signIn(email, password);
                 if (error) {
-                    _authShowError(error.message || 'Sign-in failed. Check your email and password.');
+                    const message = String(error.message || 'Sign-in failed. Check your email and password.');
+                    _authShowError(/email\s+not\s+confirmed/i.test(message) ? 'Check your email to verify your account before signing in.' : message);
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     if (pendingPlan === 'pro' || pendingPlan === 'premium') {
@@ -963,7 +1019,7 @@ window.rcInteraction = (function () {
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Submit' : 'Create Account') : 'Sign In';
+                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
             }
         }
     }
@@ -1008,6 +1064,7 @@ window.rcInteraction = (function () {
         }
 
         if (signedIn) {
+            try { if (window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted(); } catch (_) {}
             const pendingPaid = !!(window.rcBilling && typeof window.rcBilling.hasPendingPaidIntent === 'function' && window.rcBilling.hasPendingPaidIntent());
             if (pendingPaid && (current === 'landing-page' || current === 'login-page')) {
                 syncShellAuthPresentation(current === 'landing-page' ? 'login-page' : current);
@@ -1023,6 +1080,7 @@ window.rcInteraction = (function () {
                 try { refreshLibrary('auth-change-signed-in'); } catch(_) {}
             }
         } else {
+            try { if (window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false }); } catch (_) {}
             if (current === 'profile-page') showSection('landing-page', { historyMode: 'replace' });
             else syncShellAuthPresentation(current);
         }
@@ -1050,6 +1108,13 @@ window.rcInteraction = (function () {
                 await window.rcAuth.init();
             }
         } catch (_) {}
+        try {
+            if (window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()) {
+                if (window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
+            } else if (window.rcAppearance && typeof window.rcAppearance.load === 'function') {
+                window.rcAppearance.load({ fromLocal: false });
+            }
+        } catch (_) {}
 
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
@@ -1060,6 +1125,7 @@ window.rcInteraction = (function () {
         // (show the neutral pending surface). No early release — the hold is a
         // minimum, not a cap.
         showSection(settledSection, { historyMode: 'replace' });
+        applyAuthLocationState();
         const bootHoldMs = 1000;
         try {
             await Promise.all([
