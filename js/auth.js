@@ -132,29 +132,6 @@ window.rcAuth = (function () {
   function getClient() { return _client; }
   function getConfig() { return _config ? { ..._config } : null; }
 
-
-  function looksLikeEmail(email) {
-    const value = String(email || '').trim();
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-  }
-
-  async function inspectEmail(email) {
-    const normalized = String(email || '').trim().toLowerCase();
-    if (!looksLikeEmail(normalized)) {
-      return { ok: false, exists: false, error: { message: 'Enter a valid email address.' } };
-    }
-    try {
-      const resp = await fetch(`/api/app?kind=auth-email-check&email=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
-      const data = await resp.json().catch(() => null);
-      if (!resp.ok || !data || typeof data !== 'object') {
-        return { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
-      }
-      return { ok: !!data.ok, exists: !!data.exists, error: data.ok ? null : { message: String(data.error || 'Unable to verify email yet.') } };
-    } catch (_) {
-      return { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
-    }
-  }
-
   async function signUp(email, password, username) {
     if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
     const options = {};
@@ -226,8 +203,6 @@ window.rcAuth = (function () {
     signOut,
     updateDisplayName,
     changePassword,
-    looksLikeEmail,
-    inspectEmail,
   };
 })();
 
