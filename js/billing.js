@@ -123,17 +123,26 @@ window.rcBilling = (function () {
     return ['basic', 'pro', 'premium'].includes(normalized) ? normalized : 'basic';
   }
 
-  function openPricingForSignup() {
+  function openPricingModalSettled() {
+    const el = document.getElementById('pricing-modal');
+    if (!el) return;
+    el.classList.remove('hidden-section');
+    if (el.classList.contains('modal-overlay')) el.style.display = 'flex';
+  }
+
+  async function openPricingForSignup() {
     clearPendingPlan();
     setMessage('pricing-message', '', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
-    if (typeof openModal === 'function') openModal('pricing-modal');
+    await renderPricingUi();
+    openPricingModalSettled();
   }
 
-  function showPricingForGatedAction(message) {
+  async function showPricingForGatedAction(message) {
     setMessage('pricing-message', message || 'Create an account to import books, save your place, and build your library.', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
-    if (typeof openModal === 'function') openModal('pricing-modal');
+    await renderPricingUi();
+    openPricingModalSettled();
   }
 
   function rememberPlanAndOpenSignup(plan) {
