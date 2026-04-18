@@ -1,0 +1,2457 @@
+// ============================================================
+// jubly — Shell + App bridge
+// ============================================================
+//
+// PRE-RUNTIME APPEARANCE BOOTSTRAP (temporary shell bridge):
+//   Applies a public-safe appearance class to <html> before CSS paints, then
+//   lets runtime restore persisted local appearance only after signed-in auth
+//   truth is available.
+//   Retirement condition: remove when runtime provides an equally-early
+//   appearance bootstrap seam without using index.html inline script ownership.
+(function applyPublicSafeAppearanceBoot() {
+    try {
+        // Public/signed-out surfaces must not inherit a prior account's local
+        // dark appearance before auth truth exists. Runtime restores persisted
+        // appearance after a signed-in account is confirmed.
+        var mode = 'light';
+        try {
+            var params = new URLSearchParams(window.location.search || '');
+            var view = String(params.get('view') || '').trim();
+            if (view === 'dashboard' || view === 'profile-page') {
+                var raw = localStorage.getItem('rc_appearance_prefs');
+                if (raw) {
+                    var parsed = JSON.parse(raw) || {};
+                    var stored = parsed.appearance_mode || parsed.mode || parsed.appearance;
+                    if (stored === 'dark' || stored === 'light') mode = stored;
+                }
+            }
+        } catch (_) {}
+        var root = document.documentElement;
+        if (!root) return;
+        root.classList.remove('app-light', 'app-dark');
+        root.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
+        root.setAttribute('data-app-appearance', mode);
+        root.style.backgroundColor = mode === 'dark' ? '#0f172a' : '#ffffff';
+        root.style.color = mode === 'dark' ? '#e2e8f0' : '#1e293b';
+        root.style.colorScheme = mode;
+    } catch (_) {}
+})();
+
+// ============================================================
+// PERMANENT (shell navigation and app wiring):
+// ============================================================
+//
+//   showSection(), initFocusMode(), switchTab(), openModal(),
+//   closeModal(), setTheme(), handleExplorerSwatch(),
+//   setTier(), updateTierPill(), handlePausePlay(),
+//   handleAutoplayToggle(), updateProgressBar(),
+//   showSessionComplete(), renderDashboard(), startReading()
+//
+// SCAFFOLD (remove on real auth wiring):
+//   login() — simulates auth; replace with Supabase auth flow
+// ============================================================
+
+    // ── Section routing ──────────────────────────────────────────
+    const ALL_SECTIONS     = ['landing-page', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
+    const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
+    const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
+    let _currentSection = 'landing-page';
+    let _publicIntroLibraryVisible = false;
+    let _publicSampleSessionActive = false;
+    let _shellAuthBootstrapped = false;
+
+
+    let _bootReleaseComplete = false;
+    let _bootPendingMessageTimer = null;
+    let _libraryPendingBannerTimer = null;
+
+// Shell-resident interaction banner
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared interaction banner.
+//
+// The single surface where the shell surfaces pending, success, and
+// recoverable-error states for async operations. Shell presents — it does
+// NOT own auth, billing, or runtime truth.
+//
+// Rules (from product docs):
+//   - never stack multiple banners
+//   - newest higher-severity message replaces the older one
+//   - same-key message always replaces, regardless of severity
+//   - pending can upgrade to success or error
+//   - success auto-dismisses (~2.2s)
+//   - recoverable error stays visible until dismissed or retried
+//   - blocking error keeps the action locked until the user acts
+//   - copy must describe the user-visible state, not an internal cause
+//
+// API:
+//   window.rcInteraction.pending(key, message)
+//   window.rcInteraction.success(key, message)
+//   window.rcInteraction.error(key, message, { actions?: [{label, onClick}], blocking?: bool })
+//   window.rcInteraction.actions.retry(onClick)
+//   window.rcInteraction.actions.refresh()
+//   window.rcInteraction.actions.openLogin()
+//   window.rcInteraction.actions.dismiss(key)
+//   window.rcInteraction.clear(key)
+//   window.rcInteraction.clearAll()
+// ─────────────────────────────────────────────────────────────────────────────
+
+window.rcInteraction = (function () {
+
+  // Severity order — higher number wins when two keys compete for the banner
+  const SEV = { pending: 0, success: 1, error: 2, blocking: 3 };
+
+  // Single active slot
+  let _active = null;  // { key, sevName, severity, message, actions, timer }
+  let _el = null;
+
+  function _defaultOpenLogin() {
+    try {
+      if (typeof showSigninPane === 'function') {
+        showSigninPane();
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (typeof showSection === 'function') {
+        showSection('login-page');
+        return;
+      }
+    } catch (_) {}
+  }
+
+  const actionPresets = {
+    retry(onClick) {
+      return { label: 'Try again', onClick: typeof onClick === 'function' ? onClick : function () {} };
+    },
+    refresh() {
+      return { label: 'Refresh', onClick: function () { try { window.location.reload(); } catch (_) {} } };
+    },
+    openLogin(onClick) {
+      return { label: 'Open login', onClick: typeof onClick === 'function' ? onClick : _defaultOpenLogin };
+    },
+    dismiss(key) {
+      return { label: 'Dismiss', onClick: function () { clear(key); } };
+    },
+  };
+
+  // ── DOM ───────────────────────────────────────────────────────────────────
+
+  function _ensureEl() {
+    if (_el && _el.isConnected) return _el;
+    _el = document.createElement('div');
+    _el.id = 'rc-interaction-banner';
+    _el.setAttribute('role', 'status');
+    _el.setAttribute('aria-live', 'polite');
+    _el.setAttribute('aria-atomic', 'true');
+    document.body.appendChild(_el);
+    return _el;
+  }
+
+  function _render() {
+    const el = _ensureEl();
+    if (!_active) {
+      el.removeAttribute('data-sev');
+      el.classList.remove('rc-banner--visible');
+      el.innerHTML = '';
+      return;
+    }
+
+    el.setAttribute('data-sev', _active.sevName);
+    el.classList.add('rc-banner--visible');
+    el.innerHTML = '';
+
+    const msgEl = document.createElement('span');
+    msgEl.className = 'rc-banner__message';
+    msgEl.textContent = _active.message;
+    el.appendChild(msgEl);
+
+    if (_active.actions && _active.actions.length) {
+      const actionsEl = document.createElement('span');
+      actionsEl.className = 'rc-banner__actions';
+      _active.actions.forEach((action) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'rc-banner__action-btn';
+        btn.textContent = action.label;
+        btn.addEventListener('click', () => {
+          try { action.onClick(); } catch (_) {}
+        });
+        actionsEl.appendChild(btn);
+      });
+      el.appendChild(actionsEl);
+    }
+
+    const hasDismissAction = !!(_active.actions && _active.actions.some((action) => String(action && action.label || '').trim().toLowerCase() === 'dismiss'));
+
+    // Dismiss is always available except on blocking errors or when an explicit
+    // Dismiss action button is already present.
+    if (_active.sevName !== 'blocking' && !hasDismissAction) {
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'rc-banner__close';
+      closeBtn.setAttribute('aria-label', 'Dismiss');
+      closeBtn.textContent = '×';
+      const capturedKey = _active.key;
+      closeBtn.addEventListener('click', () => clear(capturedKey));
+      el.appendChild(closeBtn);
+    }
+  }
+
+  // ── Core show logic ───────────────────────────────────────────────────────
+
+  function _show(key, sevName, message, actions) {
+    const sev = SEV[sevName] ?? 0;
+
+    // A different key at higher severity keeps its banner — do not override
+    if (_active && _active.key !== key && sev < _active.severity) return;
+
+    // Clear any existing auto-dismiss timer
+    if (_active && _active.timer) {
+      clearTimeout(_active.timer);
+      _active = Object.assign({}, _active, { timer: null });
+    }
+
+    _active = {
+      key,
+      sevName,
+      severity: sev,
+      message,
+      actions: Array.isArray(actions) ? actions : [],
+      timer: null,
+    };
+
+    if (sevName === 'success') {
+      _active.timer = setTimeout(() => {
+        if (_active && _active.key === key && _active.sevName === 'success') {
+          _active = null;
+          _render();
+        }
+      }, 2200);
+    }
+
+    _render();
+  }
+
+  // ── Public API ────────────────────────────────────────────────────────────
+
+  function pending(key, message) {
+    _show(key, 'pending', message);
+  }
+
+  function success(key, message) {
+    _show(key, 'success', message);
+  }
+
+  function error(key, message, opts) {
+    const blocking = !!(opts && opts.blocking);
+    const actions = opts && Array.isArray(opts.actions) ? opts.actions.slice() : [];
+    if (!blocking && actions.length === 0) actions.push(actionPresets.dismiss(key));
+    _show(key, blocking ? 'blocking' : 'error', message, actions);
+  }
+
+  function clear(key) {
+    if (!_active) return;
+    if (!key || _active.key === key) {
+      if (_active.timer) clearTimeout(_active.timer);
+      _active = null;
+      _render();
+    }
+  }
+
+  function clearAll() {
+    if (_active && _active.timer) clearTimeout(_active.timer);
+    _active = null;
+    _render();
+  }
+
+  return { pending, success, error, clear, clearAll, actions: actionPresets };
+})();
+
+
+
+    function isRuntimeAppearanceReady() {
+        try {
+            if (window.rcAppearance && typeof window.rcAppearance.hasApplied === 'function' && window.rcAppearance.hasApplied()) return true;
+        } catch (_) {}
+        try {
+            return !!(document.body && document.body.getAttribute('data-appearance-ready') === 'true');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function isRuntimeAppearancePainted() {
+        try {
+            return !!(document.body && document.body.getAttribute('data-appearance-painted') === 'true');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function waitForRuntimeAppearanceReady() {
+        return new Promise((resolve) => {
+            if (isRuntimeAppearanceReady()) {
+                resolve();
+                return;
+            }
+            const onApplied = () => {
+                cleanup();
+                resolve();
+            };
+            const cleanup = () => {
+                try { document.removeEventListener('rc:appearance-applied', onApplied); } catch (_) {}
+            };
+            try { document.addEventListener('rc:appearance-applied', onApplied); } catch (_) {}
+            if (isRuntimeAppearanceReady()) {
+                cleanup();
+                resolve();
+            }
+        });
+    }
+
+    function waitForRuntimeAppearancePainted() {
+        return new Promise((resolve) => {
+            if (isRuntimeAppearancePainted()) {
+                resolve();
+                return;
+            }
+            const onPainted = () => {
+                cleanup();
+                resolve();
+            };
+            const cleanup = () => {
+                try { document.removeEventListener('rc:appearance-painted', onPainted); } catch (_) {}
+            };
+            try { document.addEventListener('rc:appearance-painted', onPainted); } catch (_) {}
+            if (isRuntimeAppearancePainted()) {
+                cleanup();
+                resolve();
+            }
+        });
+    }
+
+    function waitForBootRevealFrame() {
+        return new Promise((resolve) => {
+            if (!(window && typeof window.requestAnimationFrame === 'function')) {
+                setTimeout(resolve, 0);
+                return;
+            }
+            window.requestAnimationFrame(() => {
+                window.requestAnimationFrame(resolve);
+            });
+        });
+    }
+
+    function scheduleBootPendingMessage() {
+        if (_bootPendingMessageTimer) return;
+        _bootPendingMessageTimer = window.setTimeout(() => {
+            _bootPendingMessageTimer = null;
+            try {
+                const copy = document.getElementById('boot-scrim-copy');
+                if (!copy) return;
+                copy.textContent = 'Checking your account…';
+                copy.classList.add('boot-scrim-copy--visible');
+            } catch (_) {}
+        }, 1200);
+    }
+
+    function clearBootPendingMessage() {
+        if (_bootPendingMessageTimer) {
+            window.clearTimeout(_bootPendingMessageTimer);
+            _bootPendingMessageTimer = null;
+        }
+        try {
+            const copy = document.getElementById('boot-scrim-copy');
+            if (!copy) return;
+            copy.classList.remove('boot-scrim-copy--visible');
+            copy.textContent = '';
+        } catch (_) {}
+    }
+
+    function releaseBootPending() {
+        if (_bootReleaseComplete) return;
+        _bootReleaseComplete = true;
+        clearBootPendingMessage();
+        try { document.body.classList.remove('boot-pending'); } catch (_) {}
+        try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
+        const scrim = document.getElementById('boot-scrim');
+        if (!scrim) return;
+        try {
+            scrim.setAttribute('aria-hidden', 'true');
+            window.setTimeout(() => {
+                try { scrim.remove(); } catch (_) {}
+            }, 180);
+        } catch (_) {}
+    }
+
+    let SHELL_DEBUG = {
+        seq: 0,
+        lastPlaybackSync: null,
+        lastControlAction: null,
+        lastSkipAction: null,
+        lastProgressSnapshot: null
+    };
+    function shellDebugRemember(slot, data) {
+        const entry = Object.assign({ seq: ++SHELL_DEBUG.seq, at: new Date().toISOString() }, data || {});
+        SHELL_DEBUG[slot] = entry;
+        try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
+        return entry;
+    }
+
+    function setInlineBusy(button, busyLabel, enabledLabel, disabled) {
+        if (!button) return;
+        if (busyLabel) {
+            if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent || '';
+            button.textContent = busyLabel;
+            button.disabled = true;
+            return;
+        }
+        button.textContent = enabledLabel || button.dataset.idleLabel || button.textContent || '';
+        delete button.dataset.idleLabel;
+        if (typeof disabled === 'boolean') button.disabled = disabled;
+    }
+
+    function shellTrailPush(tag, data) {
+        try {
+            if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
+            window.__rcEventTrail.push(Object.assign({ t: new Date().toISOString(), tag }, data || {}));
+            if (window.__rcEventTrail.length > 40) window.__rcEventTrail.shift();
+            if (typeof updateDiagnostics === 'function') updateDiagnostics();
+        } catch (_) {}
+    }
+
+    function isAuthedUser() {
+        try { return !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()); } catch (_) { return false; }
+    }
+
+    function getAuthUser() {
+        try { return window.rcAuth && typeof window.rcAuth.getUser === 'function' ? window.rcAuth.getUser() : null; } catch (_) { return null; }
+    }
+
+    function getCurrentVisibleSection() {
+        const active = ALL_SECTIONS.find((s) => {
+            const el = document.getElementById(s);
+            return el && !el.classList.contains('hidden-section');
+        });
+        return active || _currentSection || 'landing-page';
+    }
+
+    function normalizeSection(id) {
+        return ALL_SECTIONS.includes(id) ? id : 'landing-page';
+    }
+
+    function isIntroLibraryVisible() {
+        return !isAuthedUser() && !!_publicIntroLibraryVisible;
+    }
+
+    function isPublicAbandonSurface(sectionId) {
+        if (isAuthedUser()) return false;
+        return sectionId === 'landing-page' || (sectionId === 'dashboard' && isIntroLibraryVisible());
+    }
+
+    function clearPaidIntentForPublicAbandon(sectionId) {
+        if (!isPublicAbandonSurface(sectionId)) return;
+        try {
+            if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
+        } catch (_) {}
+    }
+
+    function resolveSectionForAuth(id) {
+        const normalized = normalizeSection(id);
+        if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'login-page')) return 'dashboard';
+        if (!isAuthedUser() && normalized === 'profile-page') return 'landing-page';
+        if (!isAuthedUser() && normalized === 'dashboard' && !isIntroLibraryVisible()) return 'landing-page';
+        return normalized;
+    }
+
+    function buildShellUrl(sectionId) {
+        const url = new URL(window.location.href);
+        const params = new URLSearchParams(url.search);
+        if (!sectionId || sectionId === 'landing-page') params.delete('view');
+        else params.set('view', sectionId);
+        const query = params.toString();
+        return `${url.pathname}${query ? `?${query}` : ''}`;
+    }
+
+    function syncHistoryForSection(sectionId, mode = 'push') {
+        if (!window.history || sectionId === 'reading-mode') return;
+        const next = buildShellUrl(sectionId);
+        const current = `${window.location.pathname}${window.location.search}`;
+        if (mode === 'replace') {
+            window.history.replaceState({ section: sectionId }, '', next);
+            return;
+        }
+        if (next !== current) window.history.pushState({ section: sectionId }, '', next);
+    }
+
+    function readSectionFromLocation() {
+        try {
+            const params = new URLSearchParams(window.location.search || '');
+            return normalizeSection(params.get('view') || 'landing-page');
+        } catch (_) {
+            return 'landing-page';
+        }
+    }
+
+    function deriveDisplayName(user) {
+        const explicit = String((user && (user.displayName || user?.user_metadata?.full_name || user?.user_metadata?.name)) || '').trim();
+        if (explicit) return explicit;
+        const email = String((user && user.email) || '').trim();
+        if (!email) return 'Account';
+        return email.split('@')[0] || email;
+    }
+
+    function renderLibrarySubtitle(authed) {
+        const subtitle = document.getElementById('dashboard-subtitle');
+        if (!subtitle) return;
+        // Do not toggle display — CSS min-height on #dashboard-subtitle reserves
+        // a fixed line of space so text changes never cause layout shift.
+        if (!authed) {
+            subtitle.innerHTML = 'Bring in your own books or text and make this reading space yours.';
+            return;
+        }
+        const remoteMetrics = (window.rcSync && typeof window.rcSync.getRemoteProfileMetrics === 'function') ? window.rcSync.getRemoteProfileMetrics() : null;
+        const localMetrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
+            ? window.rcReadingMetrics.getReadingProfileMetrics()
+            : { sessionsCompleted: 0, weeklyMinutes: 0 };
+        const metrics = remoteMetrics || localMetrics;
+        const sessions = Math.max(0, Number(metrics.sessionsCompleted || 0));
+        const weekly = Math.max(0, Number(metrics.weeklyMinutes || 0));
+        if (weekly > 0) {
+            subtitle.innerHTML = `You've completed <strong>${sessions} session${sessions === 1 ? '' : 's'}</strong> all time and read <strong>${weekly} min</strong> this week.`;
+        } else {
+            subtitle.innerHTML = `You've completed <strong>${sessions} session${sessions === 1 ? '' : 's'}</strong> all time. Keep the momentum going.`;
+        }
+    }
+
+    function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
+        const id = normalizeSection(sectionId);
+        const authed = isAuthedUser();
+        const user = getAuthUser();
+        const isReading = id === 'reading-mode';
+        const isLanding = id === 'landing-page';
+        const dashboardEl = document.getElementById('dashboard');
+        const profileEl = document.getElementById('profile-page');
+
+        const navUserControls = document.getElementById('nav-user-controls');
+        const navLandingControls = document.getElementById('nav-landing-controls');
+        const navLoginBtn = document.getElementById('nav-login-btn');
+        const navSignupBtn = document.getElementById('nav-signup-btn');
+        const navUserName = document.getElementById('nav-user-name');
+        const navAvatar = document.getElementById('nav-avatar');
+        const navProfileTrigger = document.getElementById('nav-profile-trigger');
+        const navUsagePill = document.getElementById('nav-usage-pill');
+
+        if (navUserControls) navUserControls.classList.toggle('hidden-section', !authed || isReading);
+        if (navLandingControls) navLandingControls.style.display = (!authed && !isReading) ? 'flex' : 'none';
+        if (navLoginBtn) navLoginBtn.style.display = (!authed && id !== 'login-page') ? '' : 'none';
+        if (navSignupBtn) navSignupBtn.style.display = !authed ? '' : 'none';
+        if (navProfileTrigger) navProfileTrigger.style.display = authed ? '' : 'none';
+        if (navUsagePill) navUsagePill.classList.toggle('hidden-section', !authed || isReading);
+
+        const remoteDisplayName = (window.rcSync && typeof window.rcSync.getRemoteUsersRow === 'function') ? (window.rcSync.getRemoteUsersRow()?.display_name || '') : '';
+        const displayName = remoteDisplayName || deriveDisplayName(user);
+        if (navUserName) {
+            navUserName.textContent = authed ? displayName : '';
+            navUserName.classList.toggle('hidden-section', !authed);
+        }
+        if (navAvatar) navAvatar.src = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
+
+        const sidebar = document.getElementById('app-sidebar');
+        if (sidebar) sidebar.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
+        if (dashboardEl) dashboardEl.classList.toggle('with-sidebar', authed);
+        if (profileEl) profileEl.classList.toggle('with-sidebar', authed);
+        const supportFooter = document.getElementById('supportFooter');
+        if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'block' : 'none';
+        const sbLibrary = document.getElementById('sb-library');
+        if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
+
+        const libraryToolbar = document.getElementById('library-toolbar');
+        const librarySample = document.getElementById('library-public-sample');
+        const publicSampleCopy = document.getElementById('library-public-sample-copy');
+        const publicSampleSubcopy = document.getElementById('library-public-sample-subcopy');
+        if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !(authed || isIntroLibraryVisible()));
+        if (librarySample) librarySample.classList.add('hidden-section');
+        if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your own library.';
+        if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Start free, keep your place, and come back anytime.';
+        renderLibrarySubtitle(authed);
+
+        const profileGuestCard = document.getElementById('profile-guest-card');
+        const profileGuestContent = document.getElementById('profile-guest-content');
+        const profileAuthCard = document.getElementById('profile-auth-card');
+        const profileAuthContent = document.getElementById('profile-auth-content');
+        if (profileGuestCard) profileGuestCard.classList.toggle('hidden-section', authed);
+        if (profileGuestContent) profileGuestContent.classList.toggle('hidden-section', authed);
+        if (profileAuthCard) profileAuthCard.classList.toggle('hidden-section', !authed);
+        if (profileAuthContent) profileAuthContent.classList.toggle('hidden-section', !authed);
+
+        const profileNameMain = document.getElementById('profile-name-main');
+        const profileEmailMain = document.getElementById('profile-email-main');
+        const profileAvatarMain = document.getElementById('profile-avatar-main');
+        const profileNameSettings = document.getElementById('profile-name-settings');
+        const profileEmailSettings = document.getElementById('profile-email-settings');
+        const profileAvatarSettings = document.getElementById('profile-avatar-settings');
+        if (profileNameMain) profileNameMain.textContent = authed ? displayName : 'Your account';
+        if (profileEmailMain) profileEmailMain.textContent = authed ? 'Signed-in account' : 'Account settings';
+        if (profileNameSettings) profileNameSettings.textContent = authed ? displayName : 'Your account';
+        if (profileEmailSettings) profileEmailSettings.textContent = authed ? 'Signed-in account' : 'Account settings';
+        const avatarSrc = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
+        if (profileAvatarMain) profileAvatarMain.src = avatarSrc;
+        if (profileAvatarSettings) profileAvatarSettings.src = avatarSrc;
+    }
+
+    function showSection(id, options = {}) {
+        const targetId = resolveSectionForAuth(id);
+        if (targetId === 'landing-page' && !options.preserveIntroLibrary) _publicIntroLibraryVisible = false;
+        const readingModeEl = document.getElementById('reading-mode');
+        const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
+
+        ALL_SECTIONS.forEach((s) => {
+            const el = document.getElementById(s);
+            if (el) el.classList.add('hidden-section');
+        });
+        const target = document.getElementById(targetId);
+        if (target) target.classList.remove('hidden-section');
+        _currentSection = targetId;
+        if (targetId === 'dashboard') {
+            shellTrailPush('dashboard-reveal', {
+                historyMode: options.historyMode || 'push',
+                authed: !!isAuthedUser(),
+                hasLocalLibraryOwner: typeof localBooksGetAll === 'function'
+            });
+        }
+
+        const footer = document.getElementById('landing-footer');
+        if (footer) footer.classList.toggle('hidden-section', targetId !== 'landing-page');
+
+        const mainNav = document.querySelector('nav');
+        if (mainNav) mainNav.style.display = targetId === 'reading-mode' ? 'none' : '';
+        if (wasReading && targetId !== 'reading-mode') {
+            try {
+                let exitResult = null;
+                if (typeof exitReadingSession === 'function') exitResult = exitReadingSession();
+                else cleanupReadingTransientState();
+                shellDebugRemember('lastControlAction', { type: 'exit-reading', exitResult });
+            } catch(_) {}
+        }
+        document.body.classList.toggle('reading-active', targetId === 'reading-mode');
+        if (targetId === 'reading-mode') {
+            initFocusMode();
+            updateTierPill();
+            updateExplorerSwatchState();
+            updateProgressBar();
+            try { if (window.rcTheme) window.rcTheme.applySettings(); } catch (_) {}
+            try {
+                if (window.rcEmbers && typeof window.rcEmbers.refreshBounds === 'function') window.rcEmbers.refreshBounds(true);
+                if (window.rcEmbers && typeof window.rcEmbers.syncVisibility === 'function') window.rcEmbers.syncVisibility();
+            } catch (_) {}
+            try { syncExplorerMusicSource(); } catch (_) {}
+        } else {
+            try { syncExplorerMusicSource(); } catch (_) {}
+        }
+
+        clearPaidIntentForPublicAbandon(targetId);
+        syncShellAuthPresentation(targetId);
+        let _sectionRefreshPromise = null;
+        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary('show-section-dashboard');
+        if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
+        try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
+        if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
+
+        window.scrollTo(0, 0);
+        // Return the async library refresh promise so callers that need to wait
+        // (e.g. DOMContentLoaded before removing auth-hydrating) can await it.
+        return _sectionRefreshPromise || Promise.resolve();
+    }
+
+    // ── Focus mode fade ──────────────────────────────────────────
+    let focusModeTimer   = null;
+    let focusModeHandler = null;
+
+    function initFocusMode() {
+        const bar = document.getElementById('reading-top-bar');
+        const rm  = document.getElementById('reading-mode');
+        if (!bar || !rm) return;
+        if (focusModeHandler) {
+            ['mousemove', 'scroll', 'touchstart', 'click'].forEach(ev =>
+                rm.removeEventListener(ev, focusModeHandler));
+        }
+        focusModeHandler = null;
+        clearTimeout(focusModeTimer);
+        focusModeTimer = null;
+        bar.classList.remove('faded');
+    }
+
+
+
+
+
+    // ── Modals ───────────────────────────────────────────────────
+    function openModal(id)  {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (id === 'pricing-modal' && window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') {
+            window.rcBilling.openPricingForAccount().catch(() => {});
+            return;
+        }
+        el.classList.remove('hidden-section');
+        if (el.classList.contains('modal-overlay')) el.style.display = 'flex';
+    }
+    function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
+
+    function login() {
+        showSigninPane();
+    }
+
+    function continueWithFree() {
+        if (window.rcBilling && typeof window.rcBilling.continueWithFree === 'function') {
+            window.rcBilling.continueWithFree();
+            return;
+        }
+        login();
+    }
+
+    function showSigninPane() {
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        _authMode = 'signin';
+        _signupStep = 1;
+        toggleAuthMode(true);
+        showSection('login-page');
+    }
+
+    function returnToPublicEntry() {
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        try { if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan(); } catch (_) {}
+        showSection(isIntroLibraryVisible() ? 'dashboard' : 'landing-page');
+    }
+
+    function returnToLanding() {
+        if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
+        _publicIntroLibraryVisible = false;
+        _publicSampleSessionActive = false;
+        returnToPublicEntry();
+    }
+
+    function authBack() {
+        _authClearMessages();
+        if (_authMode === 'signup' && _signupStep === 2) {
+            _signupStep = 1;
+            applyAuthModeUi();
+            try {
+                const emailField = document.getElementById('loginEmail');
+                if (emailField) emailField.focus();
+            } catch (_) {}
+            return;
+        }
+        returnToPublicEntry();
+    }
+
+    function showSignupPane(forceDirect = false) {
+        closeModal('ownership-modal');
+        closeModal('pricing-modal');
+        _authMode = 'signup';
+        _signupStep = 1;
+        toggleAuthMode(true);
+        showSection('login-page');
+    }
+
+    async function startPublicSampleReading() {
+        _publicSampleSessionActive = true;
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        const signal = document.getElementById('session-complete');
+        if (signal) signal.classList.add('hidden-section');
+        showSection('reading-mode');
+        try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(PUBLIC_SAMPLE_BOOK_ID); } catch (_) {}
+    }
+
+    function openSampleBookPreview() {
+        startPublicSampleReading().catch(() => {});
+    }
+
+    function goToPostReadingSurface() {
+        if (!isAuthedUser() && _publicSampleSessionActive) {
+            _publicIntroLibraryVisible = true;
+            _publicSampleSessionActive = false;
+        }
+        showSection(isIntroLibraryVisible() ? 'dashboard' : 'landing-page');
+    }
+
+    function promptOwnershipAction(kind) {
+        if (isAuthedUser()) return false;
+        const message = 'Create an account to import books, save your place, and build your own library.';
+        if (window.rcBilling && typeof window.rcBilling.showPricingForGatedAction === 'function') {
+            window.rcBilling.showPricingForGatedAction(message);
+        } else {
+            const pricingMessage = document.getElementById('pricing-message');
+            if (pricingMessage) {
+                pricingMessage.textContent = message;
+                pricingMessage.classList.remove('hidden-section');
+                pricingMessage.style.color = '#4338ca';
+            }
+            openModal('pricing-modal');
+        }
+        return true;
+    }
+
+    function installOwnershipGuards() {
+        const bind = (id, kind) => {
+            const el = document.getElementById(id);
+            if (!el || el.__jublyOwnershipGuard) return;
+            el.__jublyOwnershipGuard = true;
+            el.addEventListener('click', (event) => {
+                if (!isAuthedUser()) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
+                    promptOwnershipAction(kind);
+                }
+            }, true);
+        };
+        bind('manageLibraryBtn', 'manage');
+        bind('importBookBtn', 'import');
+        bind('empty-drop-zone', 'import');
+    }
+
+    // ── Auth — Pass 4 sign-in / sign-up / sign-out ───────────────
+    // Shell is a thin presenter. It calls rcAuth, reflects state, and routes.
+    // It does not own auth state or Supabase operations.
+
+    let _authMode = 'signin'; // 'signin' | 'signup'
+    let _signupStep = 1; // 1=email, 2=username+password
+    let _validatedSignupEmail = '';
+
+    function applyAuthModeUi() {
+        const heading       = document.getElementById('auth-form-heading');
+        const subheading    = document.getElementById('auth-form-subheading');
+        const submitBtn     = document.getElementById('auth-submit-btn');
+        const toggleBtn     = document.getElementById('auth-toggle-btn');
+        const toggleLabel   = document.getElementById('auth-toggle-label');
+        const emailWrap     = document.getElementById('auth-email-wrap');
+        const usernameWrap  = document.getElementById('auth-username-wrap');
+        const passwordWrap  = document.getElementById('auth-password-wrap');
+        const confirmWrap   = document.getElementById('auth-confirm-wrap');
+        const errEl         = document.getElementById('auth-error');
+        const okEl          = document.getElementById('auth-success');
+        const pwInput       = document.getElementById('loginPassword');
+
+        if (errEl) errEl.classList.add('hidden-section');
+        if (okEl) okEl.classList.add('hidden-section');
+
+        if (_authMode === 'signup') {
+            if (heading) heading.textContent = 'Create account';
+            if (toggleBtn) toggleBtn.textContent = 'Sign in instead';
+            if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
+            if (_signupStep === 1) {
+                if (emailWrap) emailWrap.classList.remove('hidden-section');
+                if (subheading) subheading.textContent = 'Enter your email to begin.';
+                if (usernameWrap) usernameWrap.classList.add('hidden-section');
+                if (passwordWrap) passwordWrap.classList.add('hidden-section');
+                if (confirmWrap) confirmWrap.classList.add('hidden-section');
+                if (submitBtn) submitBtn.textContent = 'Next';
+            } else {
+                if (emailWrap) emailWrap.classList.add('hidden-section');
+                if (subheading) subheading.textContent = 'Choose a username and password.';
+                if (usernameWrap) usernameWrap.classList.remove('hidden-section');
+                if (passwordWrap) passwordWrap.classList.remove('hidden-section');
+                if (confirmWrap) confirmWrap.classList.remove('hidden-section');
+                if (submitBtn) submitBtn.textContent = 'Create Account';
+            }
+            if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
+        } else {
+            if (heading) heading.textContent = 'Welcome back';
+            if (subheading) subheading.textContent = 'Sign in to your account to continue';
+            if (toggleBtn) toggleBtn.textContent = 'Create account';
+            if (toggleLabel) toggleLabel.textContent = 'New here?';
+            if (emailWrap) emailWrap.classList.remove('hidden-section');
+            if (usernameWrap) usernameWrap.classList.add('hidden-section');
+            if (passwordWrap) passwordWrap.classList.remove('hidden-section');
+            if (confirmWrap) confirmWrap.classList.add('hidden-section');
+            if (submitBtn) submitBtn.textContent = 'Sign In';
+            if (pwInput) pwInput.setAttribute('autocomplete', 'current-password');
+        }
+    }
+
+    function toggleAuthMode(forceApply = false) {
+        if (!forceApply) _authMode = _authMode === 'signin' ? 'signup' : 'signin';
+        _signupStep = 1;
+        _validatedSignupEmail = '';
+        applyAuthModeUi();
+    }
+
+    function _authShowError(msg) {
+        const el = document.getElementById('auth-error');
+        const ok = document.getElementById('auth-success');
+        if (ok) ok.classList.add('hidden-section');
+        if (!el) return;
+        el.textContent = msg || 'Something went wrong. Please try again.';
+        el.classList.remove('hidden-section');
+    }
+
+    function _authShowSuccess(msg) {
+        const el = document.getElementById('auth-success');
+        const err = document.getElementById('auth-error');
+        if (err) err.classList.add('hidden-section');
+        if (!el) return;
+        el.textContent = msg || '';
+        el.classList.remove('hidden-section');
+    }
+
+    function _authClearMessages() {
+        const err = document.getElementById('auth-error');
+        const ok  = document.getElementById('auth-success');
+        if (err) err.classList.add('hidden-section');
+        if (ok)  ok.classList.add('hidden-section');
+    }
+
+    function buildAuthRedirectForPendingPlan() {
+        let redirect = '';
+        try {
+            const cfg = window.rcAuth && typeof window.rcAuth.getConfig === 'function' ? window.rcAuth.getConfig() : null;
+            redirect = String((cfg && cfg.authRedirectUrl) || '').trim();
+        } catch (_) {}
+        if (!redirect) return '';
+        try {
+            const url = new URL(redirect, window.location.href);
+            url.searchParams.set('view', 'login-page');
+            url.searchParams.set('auth', 'verified');
+            const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
+                ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase()
+                : '';
+            if (pendingPlan === 'pro' || pendingPlan === 'premium') {
+                url.searchParams.set('next', 'checkout');
+                url.searchParams.set('tier', pendingPlan);
+            } else {
+                url.searchParams.delete('next');
+                url.searchParams.delete('tier');
+            }
+            return url.toString();
+        } catch (_) {
+            return redirect;
+        }
+    }
+
+    async function authFormSubmit() {
+        const email    = ((document.getElementById('loginEmail') || {}).value || '').trim();
+        const username = ((document.getElementById('signupUsername') || {}).value || '').trim();
+        const password = (document.getElementById('loginPassword') || {}).value || '';
+        const confirm  = (document.getElementById('loginPasswordConfirm') || {}).value || '';
+        const btn      = document.getElementById('auth-submit-btn');
+
+        _authClearMessages();
+
+        if (_authMode === 'signup' && _signupStep === 1) {
+            if (!email) {
+                _authShowError('Email is required.');
+                return;
+            }
+            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
+                _authShowError('Enter a valid email address.');
+                return;
+            }
+            if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+            try {
+                const inspected = window.rcAuth && typeof window.rcAuth.inspectEmail === 'function'
+                    ? await window.rcAuth.inspectEmail(email)
+                    : { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
+                const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
+                if (inspected && inspected.exists) {
+                    _authMode = 'signin';
+                    _signupStep = 1;
+                    _validatedSignupEmail = '';
+                    applyAuthModeUi();
+                    const emailField = document.getElementById('loginEmail');
+                    if (emailField) emailField.value = email;
+                    const passwordField = document.getElementById('loginPassword');
+                    try { if (passwordField) passwordField.focus(); } catch (_) {}
+                    _authShowError(pendingPlan && pendingPlan !== 'free'
+                        ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+                        : 'An account with this email already exists. Log In to continue.');
+                    return;
+                }
+                if (!inspected || inspected.ok !== true) {
+                    _validatedSignupEmail = '';
+                    _authShowError(String((inspected && inspected.error && inspected.error.message) || 'Unable to verify email yet. Please try again.'));
+                    return;
+                }
+                _validatedSignupEmail = String(email || '').trim().toLowerCase();
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Next';
+                }
+            }
+            _signupStep = 2;
+            applyAuthModeUi();
+            try { const nextField = document.getElementById('signupUsername'); if (nextField) nextField.focus(); } catch (_) {}
+            return;
+        }
+
+        if (_authMode === 'signin') {
+            if (!email || !password) {
+                _authShowError('Email and password are required.');
+                return;
+            }
+        } else {
+            if (!email || !username || !password || !confirm) {
+                _authShowError('Username, password, and confirmation are required.');
+                return;
+            }
+            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
+                _signupStep = 1;
+                _validatedSignupEmail = '';
+                applyAuthModeUi();
+                _authShowError('Enter a valid email address.');
+                return;
+            }
+            if (String(_validatedSignupEmail || '') !== String(email || '').trim().toLowerCase()) {
+                _signupStep = 1;
+                _validatedSignupEmail = '';
+                applyAuthModeUi();
+                _authShowError('Finish the email step before creating your account.');
+                return;
+            }
+            if (password !== confirm) {
+                _authShowError('Passwords do not match.');
+                return;
+            }
+        }
+
+        if (!window.rcAuth || typeof window.rcAuth.signIn !== 'function') {
+            _authShowError('Auth is not available in this environment.');
+            return;
+        }
+
+        if (btn) { btn.disabled = true; btn.textContent = 'Please wait…'; }
+
+        try {
+            if (_authMode === 'signup') {
+                const result = await window.rcAuth.signUp(email, password, username, {
+                    emailRedirectTo: buildAuthRedirectForPendingPlan(),
+                });
+                const error = result && result.error ? result.error : null;
+                const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
+                const identities = Array.isArray(result?.data?.user?.identities) ? result.data.user.identities : null;
+                const existingAccountLikely = !error && !result?.data?.session && Array.isArray(identities) && identities.length === 0;
+                if (error) {
+                    const message = String(error.message || 'Account creation failed. Please try again.');
+                    if (/already\s+registered|already\s+exists|user\s+already\s+registered/i.test(message)) {
+                        _authMode = 'signin';
+                        _signupStep = 1;
+                        _validatedSignupEmail = '';
+                        applyAuthModeUi();
+                        const emailField = document.getElementById('loginEmail');
+                        if (emailField) emailField.value = email;
+                        _authShowError(pendingPlan && pendingPlan !== 'free'
+                            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+                            : 'An account with this email already exists. Log In to continue.');
+                    } else {
+                        _authShowError(message);
+                    }
+                } else if (existingAccountLikely) {
+                    _authMode = 'signin';
+                    _signupStep = 1;
+                    _validatedSignupEmail = '';
+                    applyAuthModeUi();
+                    _authShowError(pendingPlan && pendingPlan !== 'free'
+                        ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+                        : 'An account with this email already exists. Log In to continue.');
+                } else if (result?.data?.session) {
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free'
+                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
+                        : 'Account created. Continuing to your library…');
+                } else {
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Check your email to verify your account.');
+                }
+            } else {
+                const { error } = await window.rcAuth.signIn(email, password);
+                if (error) {
+                    const message = String(error.message || 'Sign-in failed. Check your email and password.');
+                    _authShowError(/email\s+not\s+confirmed/i.test(message) ? 'Check your email to verify your account before signing in.' : message);
+                } else {
+                    const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
+                    if (pendingPlan === 'pro' || pendingPlan === 'premium') {
+                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`);
+                    }
+                }
+            }
+        } catch (_) {
+            _authShowError('Unexpected error. Please try again.');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
+            }
+        }
+    }
+
+    async function shellSignOut() {
+        const logoutBtn = document.querySelector('[onclick="shellSignOut()"]');
+        if (logoutBtn) logoutBtn.disabled = true;
+        try { window.rcInteraction && window.rcInteraction.pending('auth:signout', 'Signing out…'); } catch (_) {}
+        try {
+            if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
+                const result = await window.rcAuth.signOut();
+                if (result && result.ok === false) {
+                    if (logoutBtn) logoutBtn.disabled = false;
+                    try {
+                        const actions = window.rcInteraction && window.rcInteraction.actions
+                            ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
+                            : [];
+                        window.rcInteraction && window.rcInteraction.error('auth:signout', 'We couldn\'t confirm sign-out yet.', { actions });
+                    } catch (_) {}
+                    return;
+                }
+            }
+            try { window.rcInteraction && window.rcInteraction.clear('auth:signout'); } catch (_) {}
+        } catch (_) {
+            if (logoutBtn) logoutBtn.disabled = false;
+            try {
+                const actions = window.rcInteraction && window.rcInteraction.actions
+                    ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
+                    : [];
+                window.rcInteraction && window.rcInteraction.error('auth:signout', 'We couldn\'t confirm sign-out yet.', { actions });
+            } catch (_) {}
+        }
+    }
+
+    function _handleAuthChanged(e) {
+        const { signedIn, source } = e.detail || {};
+        const current = getCurrentVisibleSection();
+        try {
+            if (signedIn && window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
+            else if (!signedIn && window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false });
+        } catch (_) {}
+
+        if (!_shellAuthBootstrapped) {
+            syncShellAuthPresentation(resolveSectionForAuth(current));
+            return;
+        }
+
+        if (signedIn) {
+            const pendingPaid = !!(window.rcBilling && typeof window.rcBilling.hasPendingPaidIntent === 'function' && window.rcBilling.hasPendingPaidIntent());
+            if (pendingPaid && (current === 'landing-page' || current === 'login-page')) {
+                syncShellAuthPresentation(current === 'landing-page' ? 'login-page' : current);
+                return;
+            }
+            if (current === 'landing-page' || current === 'login-page') {
+                showSection('dashboard', { historyMode: 'replace' });
+                try { refreshLibrary('auth-change-dashboard-redirect'); } catch(_) {}
+                return;
+            }
+            syncShellAuthPresentation(current);
+            if (source === 'SIGNED_IN') {
+                try { refreshLibrary('auth-change-signed-in'); } catch(_) {}
+            }
+        } else {
+            if (current === 'profile-page') showSection('landing-page', { historyMode: 'replace' });
+            else syncShellAuthPresentation(current);
+        }
+    }
+
+    try {
+        document.addEventListener('rc:auth-changed', _handleAuthChanged);
+    } catch(_) {}
+
+    window.addEventListener('popstate', () => {
+        showSection(readSectionFromLocation(), { historyMode: 'none' });
+    });
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        installOwnershipGuards();
+        try {
+            document.body.classList.add('auth-hydrating');
+            document.body.classList.add('boot-pending');
+        } catch (_) {}
+        scheduleBootPendingMessage();
+        const appearanceReady = waitForRuntimeAppearanceReady();
+        const appearancePainted = Promise.resolve(appearanceReady).then(() => waitForRuntimeAppearancePainted());
+        try {
+            if (window.rcAuth && typeof window.rcAuth.init === 'function') {
+                await window.rcAuth.init();
+            }
+        } catch (_) {}
+
+        const requestedSection = readSectionFromLocation();
+        const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
+        _shellAuthBootstrapped = true;
+        // Start the library refresh immediately behind the boot hold, then always
+        // wait the full 1000ms before revealing. At reveal time the library is
+        // either settled (show books or empty state directly) or still pending
+        // (show the neutral pending surface). No early release — the hold is a
+        // minimum, not a cap.
+        showSection(settledSection, { historyMode: 'replace' });
+        const bootHoldMs = 1000;
+        try {
+            await Promise.all([
+                new Promise(resolve => setTimeout(resolve, bootHoldMs)),
+                appearancePainted
+            ]);
+            await waitForBootRevealFrame();
+        } catch (_) {}
+        releaseBootPending();
+    });
+    // ── Profile tabs ─────────────────────────────────────────────
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden-section'));
+        document.getElementById(tabId).classList.remove('hidden-section');
+        document.querySelectorAll('.profile-tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabId);
+        });
+        if (tabId === 'tab-profile') { try { renderProfileSurface(); } catch (_) {} }
+        if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
+    }
+
+    // ── Tier simulation (dev/localhost only, gated by canSimulateTierSelection) ──
+    function canSimulateTierSelection() {
+        return !!(window.rcPolicy && typeof window.rcPolicy.canSimulateTier === 'function' && window.rcPolicy.canSimulateTier());
+    }
+
+    function syncTierButtonState() {
+        const current = (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function')
+            ? window.rcEntitlements.getTier()
+            : ((window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic');
+        const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' };
+        document.querySelectorAll('.tier-btn').forEach((btn) => {
+            const next = map[current] || 'Basic';
+            btn.classList.toggle('active', btn.textContent.trim() === next);
+            btn.disabled = !canSimulateTierSelection();
+        });
+        const rows = new Set();
+        document.querySelectorAll('.tier-btn').forEach((btn) => { if (btn.parentElement) rows.add(btn.parentElement); });
+        rows.forEach((row) => { row.style.display = canSimulateTierSelection() ? '' : 'none'; });
+    }
+
+    function setTier(btn) {
+        if (!canSimulateTierSelection()) return;
+        document.querySelectorAll('.tier-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const map = { 'Basic': 'basic', 'Pro': 'pro', 'Premium': 'premium' };
+        const value = map[btn.textContent.trim()] || 'basic';
+        // Call the runtime policy API directly — do not dispatch through #tierSelect DOM element.
+        if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
+            window.rcPolicy.refreshForTier(value).catch(() => {});
+        }
+        updateExplorerSwatchState();
+        try { syncExplorerMusicSource(); } catch (_) {}
+    }
+
+    function updateTierPill() {
+        const tier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
+        const pill = document.getElementById('reading-tier-pill');
+        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' }; pill.textContent = map[tier] || 'Basic'; }
+    }
+
+    function getCurrentTier() {
+        if (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function') {
+            try { return window.rcEntitlements.getTier(); } catch (_) {}
+        }
+        if (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') {
+            try { return window.rcPolicy.getTier(); } catch (_) {}
+        }
+        return 'basic';
+    }
+
+    // ── Theme ────────────────────────────────────────────────────
+    const BUILTIN_MUSIC_SRC = 'assets/song.mp3';
+    let _customMusicUrl = null;
+    let _customMusicRecord = null;
+
+    function revokeCustomMusicUrl() {
+        if (_customMusicUrl) {
+            try { URL.revokeObjectURL(_customMusicUrl); } catch (_) {}
+            _customMusicUrl = null;
+        }
+    }
+
+    function syncMusicRowSelection(source, hasCustom) {
+        document.querySelectorAll('#musicPickerList .music-picker-row').forEach((row) => {
+            const rowSource = row.dataset.musicSource;
+            const selected = rowSource === source && (rowSource !== 'custom' || hasCustom);
+            row.classList.toggle('selected', selected);
+            row.classList.toggle('unavailable', rowSource === 'custom' && !hasCustom);
+        });
+    }
+
+    async function loadCustomMusicRecord(forceReload) {
+        if (!forceReload && _customMusicRecord) return _customMusicRecord;
+        if (!(window.rcMusicDb && typeof window.rcMusicDb.customMusicGet === 'function')) return null;
+        try { _customMusicRecord = await window.rcMusicDb.customMusicGet(); } catch (_) { _customMusicRecord = null; }
+        return _customMusicRecord;
+    }
+
+    function setBgMusicSource(src, sourceKey) {
+        const audio = document.getElementById('bgMusic');
+        if (!audio || !src) return false;
+        if (audio.dataset.rcSourceKey === sourceKey && audio.src) return true;
+        audio.dataset.rcSourceKey = sourceKey;
+        try { audio.src = src; audio.load(); } catch (_) { return false; }
+        return true;
+    }
+
+    async function syncExplorerMusicSource(forceReload) {
+        const themeState = (window.rcTheme && typeof window.rcTheme.get === 'function') ? window.rcTheme.get() : { themeId: 'default', settings: { music: 'default' } };
+        const settings = (themeState && themeState.settings) || { music: 'default' };
+        const isExplorer = themeState && themeState.themeId === 'explorer';
+        if (!isExplorer || settings.music !== 'custom') {
+            revokeCustomMusicUrl();
+            return setBgMusicSource(BUILTIN_MUSIC_SRC, 'default');
+        }
+        const record = await loadCustomMusicRecord(forceReload);
+        if (!record || !record.blob) {
+            try { if (window.rcTheme && typeof window.rcTheme.patchSettings === 'function') window.rcTheme.patchSettings({ music: 'default' }); } catch (_) {}
+            revokeCustomMusicUrl();
+            return setBgMusicSource(BUILTIN_MUSIC_SRC, 'default');
+        }
+        revokeCustomMusicUrl();
+        _customMusicUrl = URL.createObjectURL(record.blob);
+        return setBgMusicSource(_customMusicUrl, `custom:${record.name || 'track'}:${record.savedAt || 0}`);
+    }
+
+    function setTheme(theme) {
+        try {
+            if (window.rcTheme && typeof window.rcTheme.set === 'function') {
+                window.rcTheme.set(theme);
+                window.rcTheme.syncShellState();
+            }
+        } catch (_) {}
+        refreshExplorerPanel();
+        try { syncExplorerMusicSource(); } catch (_) {}
+    }
+
+    function handleExplorerSwatch() {
+        const canUse = !!(window.rcTheme && typeof window.rcTheme.canUseTheme === 'function' && window.rcTheme.canUseTheme('explorer'));
+        if (!canUse) openModal('pricing-modal');
+        else setTheme('explorer');
+    }
+
+    function updateExplorerSwatchState() {
+        const btn = document.getElementById('explorer-swatch-btn');
+        if (!btn) return;
+        const swatch = btn.querySelector('.theme-swatch');
+        const canUse = !!(window.rcTheme && typeof window.rcTheme.canUseTheme === 'function' && window.rcTheme.canUseTheme('explorer'));
+        if (!canUse) {
+            btn.classList.add('explorer-locked');
+            btn.title = 'Upgrade to Pro+ to unlock Explorer theme';
+            if (swatch) swatch.style.opacity = '0.6';
+        } else {
+            btn.classList.remove('explorer-locked');
+            btn.title = 'Explorer theme';
+            if (swatch) swatch.style.opacity = '1';
+        }
+    }
+
+    function switchReadingSettingsTab(tabName) {
+        document.querySelectorAll('.rs-tab').forEach((tab) => {
+            const active = tab.dataset.rsTab === tabName;
+            tab.classList.toggle('active', active);
+            tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        document.querySelectorAll('.rs-panel').forEach((panel) => {
+            panel.style.display = panel.id === `rs-panel-${tabName}` ? '' : 'none';
+        });
+        if (tabName === 'themes') refreshExplorerPanel();
+    }
+
+    function setAppAppearance(mode) {
+        try { if (window.rcAppearance && typeof window.rcAppearance.set === 'function') window.rcAppearance.set(mode); } catch (_) {}
+    }
+
+    function refreshExplorerPanel() {
+        const explorerPanel = document.getElementById('rs-explorer-panel');
+        const emptyState = document.getElementById('rs-themes-empty');
+        if (!explorerPanel || !emptyState) return;
+        const themeState = (window.rcTheme && typeof window.rcTheme.get === 'function') ? window.rcTheme.get() : { themeId: 'default' };
+        const isExplorer = themeState.themeId === 'explorer';
+        explorerPanel.style.display = isExplorer ? '' : 'none';
+        emptyState.style.display = isExplorer ? 'none' : '';
+        try { if (window.rcTheme) window.rcTheme.syncShellState(); } catch (_) {}
+        if (isExplorer) populateExplorerPanel();
+    }
+
+    function populateExplorerPanel() {
+        const settings = (window.rcTheme && typeof window.rcTheme.getSettings === 'function') ? window.rcTheme.getSettings() : null;
+        if (!settings) return;
+        const fontSelect = document.getElementById('explorer-font-select');
+        const embersToggle = document.getElementById('explorer-embers-toggle');
+        const bgSelect = document.getElementById('explorer-bg-select');
+        const musicSub = document.getElementById('explorer-music-sub');
+        if (fontSelect) fontSelect.value = settings.font || 'Lora';
+        if (embersToggle) embersToggle.checked = settings.embersOn !== false;
+        if (bgSelect) bgSelect.value = settings.backgroundMode || 'wallpaper';
+        document.querySelectorAll('.explorer-accent-swatch').forEach((btn) => btn.classList.toggle('selected', btn.dataset.accentSwatch === settings.accentSwatch));
+        document.querySelectorAll('.explorer-ember-swatch').forEach((btn) => btn.classList.toggle('selected', btn.dataset.emberPreset === settings.emberPreset));
+        if (musicSub) musicSub.textContent = settings.music === 'custom' ? ((_customMusicRecord && _customMusicRecord.name) || 'Custom loaded') : 'Built-in default';
+    }
+
+    function explorerSettingChanged() {
+        if (!(window.rcTheme && typeof window.rcTheme.patchSettings === 'function')) return;
+        const fontSelect = document.getElementById('explorer-font-select');
+        const embersToggle = document.getElementById('explorer-embers-toggle');
+        const bgSelect = document.getElementById('explorer-bg-select');
+        window.rcTheme.patchSettings({
+            font: fontSelect ? fontSelect.value : 'Lora',
+            embersOn: !!(embersToggle && embersToggle.checked),
+            backgroundMode: bgSelect ? bgSelect.value : 'wallpaper'
+        });
+        populateExplorerPanel();
+    }
+
+    function explorerAccentSwatchPick(name) {
+        if (!(window.rcTheme && typeof window.rcTheme.patchSettings === 'function')) return;
+        window.rcTheme.patchSettings({ accentSwatch: name });
+        populateExplorerPanel();
+    }
+
+    function explorerEmberPresetPick(name) {
+        if (!(window.rcTheme && typeof window.rcTheme.patchSettings === 'function')) return;
+        window.rcTheme.patchSettings({ emberPreset: name });
+        populateExplorerPanel();
+    }
+
+    function explorerResetDefaults() {
+        if (!(window.rcTheme && typeof window.rcTheme.resetSettings === 'function')) return;
+        window.rcTheme.resetSettings();
+        try { syncExplorerMusicSource(); } catch (_) {}
+        populateExplorerPanel();
+    }
+
+    async function initMusicPickerState(forceReload) {
+        const record = await loadCustomMusicRecord(forceReload);
+        const deleteBtn = document.getElementById('musicCustomDeleteBtn');
+        const status = document.getElementById('musicCustomStatus');
+        const uploadBtn = document.querySelector('#musicPickerList .music-upload-btn');
+        const settings = (window.rcTheme && typeof window.rcTheme.getSettings === 'function') ? window.rcTheme.getSettings() : { music: 'default' };
+        const hasCustom = !!(record && record.blob);
+        if (status) status.textContent = hasCustom ? `Loaded: ${record.name || 'Custom track'}` : 'No custom file loaded';
+        if (deleteBtn) deleteBtn.style.display = hasCustom ? '' : 'none';
+        if (uploadBtn) uploadBtn.textContent = hasCustom ? 'Replace' : 'Upload';
+        syncMusicRowSelection(hasCustom && settings.music === 'custom' ? 'custom' : 'default', hasCustom);
+        populateExplorerPanel();
+        return hasCustom;
+    }
+
+    function openMusicPicker() { initMusicPickerState(false); openModal('musicPickerModal'); }
+    function closeMusicPicker() { closeModal('musicPickerModal'); }
+
+    function triggerMusicUpload() {
+        if (!(window.rcTheme && typeof window.rcTheme.canUseCustomMusic === 'function' && window.rcTheme.canUseCustomMusic())) { openModal('pricing-modal'); return; }
+        const input = document.getElementById('musicCustomInput');
+        if (input) input.click();
+    }
+
+    async function handleMusicUpload(input) {
+        const file = input && input.files && input.files[0];
+        if (!file) return;
+        if (!(window.rcTheme && typeof window.rcTheme.canUseCustomMusic === 'function' && window.rcTheme.canUseCustomMusic())) {
+            openModal('pricing-modal');
+            input.value = '';
+            return;
+        }
+        try {
+            if (window.rcMusicDb && typeof window.rcMusicDb.customMusicPut === 'function') {
+                await window.rcMusicDb.customMusicPut(file, file.name, file.type);
+            }
+            _customMusicRecord = null;
+            await initMusicPickerState(true);
+            if (window.rcTheme && typeof window.rcTheme.patchSettings === 'function') window.rcTheme.patchSettings({ music: 'custom' });
+            await syncExplorerMusicSource(true);
+            populateExplorerPanel();
+        } catch (_) {}
+        if (input) input.value = '';
+    }
+
+    async function deleteCustomMusic() {
+        try {
+            if (window.rcMusicDb && typeof window.rcMusicDb.customMusicDelete === 'function') {
+                await window.rcMusicDb.customMusicDelete();
+            }
+            _customMusicRecord = null;
+            revokeCustomMusicUrl();
+            if (window.rcTheme && typeof window.rcTheme.patchSettings === 'function') window.rcTheme.patchSettings({ music: 'default' });
+            await initMusicPickerState(true);
+            await syncExplorerMusicSource(true);
+            populateExplorerPanel();
+        } catch (_) {}
+    }
+
+    async function selectMusicRow(source) {
+        const hasCustom = await initMusicPickerState(false);
+        if (source === 'custom' && !(window.rcTheme && typeof window.rcTheme.canUseCustomMusic === 'function' && window.rcTheme.canUseCustomMusic())) {
+            openModal('pricing-modal');
+            return false;
+        }
+        if (source === 'custom' && !hasCustom) return false;
+        if (window.rcTheme && typeof window.rcTheme.patchSettings === 'function') window.rcTheme.patchSettings({ music: source === 'custom' ? 'custom' : 'default' });
+        syncMusicRowSelection(source === 'custom' ? 'custom' : 'default', hasCustom);
+        await syncExplorerMusicSource(source === 'custom');
+        populateExplorerPanel();
+        return true;
+    }
+
+    function promptExplorerUpgrade() { openModal('pricing-modal'); }
+
+    // ── F1: TTS Speed Control bridge ─────────────────────────────
+    function shellSetSpeed(value) {
+        const rate = parseFloat(value) || 1;
+        try { if (typeof setPlaybackRate === 'function') return setPlaybackRate(rate); } catch(_) {}
+        return rate;
+    }
+
+    function getActivePlaybackPageIndex(playbackStatus) {
+        const status = playbackStatus || null;
+        try {
+            const parsed = (typeof readingTargetFromKey === 'function' && status?.key)
+                ? readingTargetFromKey(String(status.key))
+                : null;
+            const idx = Number(parsed?.pageIndex);
+            if (Number.isFinite(idx) && idx >= 0) return idx;
+        } catch (_) {}
+        try {
+            const idx = Number((window.__rcReadingTarget || {}).pageIndex);
+            if (Number.isFinite(idx) && idx >= 0) return idx;
+        } catch (_) {}
+        return -1;
+    }
+
+    function getVisibleReadingPageIndex() {
+        try {
+            const pageEls = Array.from(document.querySelectorAll('.page'));
+            if (pageEls.length) {
+                const doc = document.documentElement;
+                const viewportBottom = window.scrollY + window.innerHeight;
+                const docBottom = Math.max(doc.scrollHeight, document.body?.scrollHeight || 0);
+                if ((docBottom - viewportBottom) <= 4) {
+                    const lastIdx = parseInt(pageEls[pageEls.length - 1]?.dataset?.pageIndex || String(pageEls.length - 1), 10);
+                    if (!Number.isNaN(lastIdx) && lastIdx >= 0) return lastIdx;
+                }
+                let bestIdx = -1;
+                let bestDist = Infinity;
+                for (const el of pageEls) {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.height <= 0) continue;
+                    const idx = parseInt(el.dataset.pageIndex || '-1', 10);
+                    if (Number.isNaN(idx) || idx < 0) continue;
+                    const dist = Math.abs(rect.top);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestIdx = idx;
+                    }
+                }
+                if (Number.isFinite(bestIdx) && bestIdx >= 0) return bestIdx;
+            }
+        } catch (_) {}
+        try {
+            if (typeof lastFocusedPageIndex === 'number' && lastFocusedPageIndex >= 0) return lastFocusedPageIndex;
+        } catch (_) {}
+        return 0;
+    }
+
+    // RETIRED (Pass 2): syncVisiblePageAsPlayTarget is no longer called.
+    // Its only call site was handlePausePlay(), which has been updated to
+    // delegate without pre-empting runtime page truth. Runtime owns current-
+    // page targeting through _installScrollPageTracker + __rcReadingTarget.
+    // getVisibleReadingPageIndex() below is kept because it still feeds the
+    // progress display (not launch-critical truth). If progress display is
+    // later moved to a runtime-owned readout, both functions can be deleted.
+    function syncVisiblePageAsPlayTarget() {
+        const idx = getVisibleReadingPageIndex();
+        if (!Number.isFinite(idx) || idx < 0) return false;
+        try {
+            if (typeof window.focusReadingPage === 'function') {
+                const result = window.focusReadingPage(idx, { behavior: 'smooth' });
+                return !!(result && result.ok !== false);
+            }
+        } catch (_) {}
+        return false;
+    }
+
+    function bringPlaybackPageIntoView(playbackStatus) {
+        const idx = getActivePlaybackPageIndex(playbackStatus);
+        if (!Number.isFinite(idx) || idx < 0) return false;
+        const pageEl = document.querySelector(`.page[data-page-index="${idx}"]`) || document.querySelectorAll('.page')[idx];
+        if (!pageEl) return false;
+        try { pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) { return false; }
+        return true;
+    }
+
+    function hasActiveReadingCards() {
+        const reading = document.getElementById('reading-mode');
+        const pagesEl = document.getElementById('pages');
+        return !!(reading && !reading.classList.contains('hidden-section') && pagesEl && pagesEl.querySelector('.page'));
+    }
+
+    // PATCH(authority-boundary): Shell no longer directly manipulates importer DOM.
+    // resetImporterState() in import.js is the single authoritative path:
+    // it clears UI and all internal parser state (_file, _zip, _tocItems, etc.)
+    // so the next open is always clean. The old shell version only reset UI,
+    // leaving internal state dirty and allowing stale file/parse data to persist.
+    function clearImporterTransientUI() {
+        try { if (typeof resetImporterState === 'function') resetImporterState({ keepModalOpen: false }); } catch(_) {}
+    }
+
+    // PATCH(authority-boundary): Shell no longer owns runtime cleanup.
+    // exitReadingSession() in library.js is the single authoritative path:
+    // it stops TTS, cancels countdown, clears music, and emits diagnostics.
+    function cleanupReadingTransientState() {
+        try { if (typeof exitReadingSession === 'function') exitReadingSession(); } catch(_) {}
+    }
+
+    // ── Bottom bar controls ──────────────────────────────────────
+
+    // Pause/Play — calls app's tts.js functions if available.
+    // Guards against first-use case where TTS was never started (TTS_STATE.activeKey is null).
+    function syncShellPlaybackControls() {
+        const btn = document.getElementById('shell-play-btn');
+        const labelEl = document.getElementById('shell-play-label');
+        const iconEl = btn ? btn.querySelector('.shell-play-icon') : null;
+        const prevBtn = document.getElementById('shell-prev-btn');
+        const nextBtn = document.getElementById('shell-next-btn');
+        let status = { active: false, paused: false };
+        let countdown = { active: false };
+        let support = { playable: true, reason: '' };
+        let eligibility = { canPlay: false, canPause: false, canResume: false, canSkipPrev: false, canSkipNext: false, reasons: {} };
+        try { if (typeof getPlaybackStatus === 'function') status = getPlaybackStatus() || status; } catch (_) {}
+        try { if (typeof getCountdownStatus === 'function') countdown = getCountdownStatus() || countdown; } catch (_) {}
+        try { if (typeof getTtsSupportStatus === 'function') support = getTtsSupportStatus() || support; } catch (_) {}
+        try { if (typeof getPlaybackControlEligibility === 'function') eligibility = getPlaybackControlEligibility() || eligibility; } catch (_) {}
+        const canPlay = !!eligibility.canPlay;
+        if (btn) {
+            const label = eligibility.canResume ? 'Resume' : (eligibility.canPause ? 'Pause' : 'Play');
+            btn.classList.toggle('active', !!status.active && !status.paused);
+            btn.title = status.active ? (status.paused ? 'Resume narration' : 'Pause narration') : (countdown.active ? 'Resume current page from countdown' : 'Play current page');
+            btn.disabled = !canPlay;
+            btn.setAttribute('aria-disabled', String(!canPlay));
+            if (labelEl) labelEl.textContent = label;
+            if (iconEl) {
+                iconEl.innerHTML = label === 'Pause'
+                    ? '<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>'
+                    : '<polygon points="8 5 19 12 8 19 8 5"></polygon>';
+            }
+        }
+        [prevBtn, nextBtn].forEach((control) => {
+            if (!control) return;
+            const isPrev = control === prevBtn;
+            const canSkip = isPrev ? !!eligibility.canSkipPrev : !!eligibility.canSkipNext;
+            const reason = isPrev
+                ? (eligibility.reasons?.canSkipPrev || 'Skip unavailable')
+                : (eligibility.reasons?.canSkipNext || 'Skip unavailable');
+            control.disabled = !canSkip;
+            control.setAttribute('aria-disabled', String(!canSkip));
+            control.title = canSkip ? control.title.replace('disabled','').trim() : `Skip unavailable: ${reason}`;
+        });
+        document.querySelectorAll('.tts-btn[data-tts="page"]').forEach((pageBtn) => {
+            const disabled = !support.playable && !pageBtn.classList.contains('tts-active');
+            pageBtn.disabled = disabled;
+            pageBtn.setAttribute('aria-disabled', String(disabled));
+            if (disabled) pageBtn.title = support.reason || 'Playback unavailable';
+            else pageBtn.removeAttribute('title');
+        });
+        // Surface blocked/no-voice/error state visibly rather than leaving dead controls.
+        const blockedMsgEl = document.getElementById('shell-tts-blocked-msg');
+        if (blockedMsgEl) {
+            const blockedReason = !canPlay && !status.active && !countdown.active
+                ? String(support.reason || eligibility.reasons?.canPlay || '')
+                : '';
+            if (blockedReason) {
+                blockedMsgEl.textContent = blockedReason;
+                blockedMsgEl.style.display = '';
+            } else {
+                blockedMsgEl.textContent = '';
+                blockedMsgEl.style.display = 'none';
+            }
+        }
+        // PATCH(speed-sync): Keep #shell-speed in sync with TTS_STATE.rate.
+        // Previously, if setPlaybackRate() was called from any path other than
+        // the shell select itself (e.g. programmatic change, restored preference),
+        // the select remained stale. Now it always reflects runtime truth.
+        try {
+            const speedSel = document.getElementById('shell-speed');
+            const runtimeRate = String(Number(status.playbackRate || 1));
+            if (speedSel && speedSel.value !== runtimeRate) {
+                // Only update if the value exists as an option, to avoid
+                // leaving the select in an invalid/blank state.
+                const hasOpt = Array.from(speedSel.options).some(o => o.value === runtimeRate);
+                if (hasOpt) speedSel.value = runtimeRate;
+            }
+        } catch (_) {}
+
+        shellDebugRemember('lastPlaybackSync', {
+            type: 'playback-sync',
+            playback: status,
+            countdown,
+            support,
+            eligibility,
+            speedSynced: true,
+            controls: {
+                playDisabled: !!(btn && btn.disabled),
+                prevDisabled: !!(prevBtn && prevBtn.disabled),
+                nextDisabled: !!(nextBtn && nextBtn.disabled),
+                blockedReasons: {
+                    play: (!canPlay && eligibility.reasons) ? (eligibility.reasons.canPlay || '') : null,
+                    prev: (!eligibility.canSkipPrev && eligibility.reasons) ? (eligibility.reasons.canSkipPrev || '') : null,
+                    next: (!eligibility.canSkipNext && eligibility.reasons) ? (eligibility.reasons.canSkipNext || '') : null,
+                }
+            }
+        });
+    }
+
+    function handlePausePlay() {
+        // Shell is a pure delegate. All routing — resume, pause, countdown
+        // cancel+restart, and fresh-start — is owned by pauseOrResumeReading()
+        // in tts.js. Shell does not inspect eligibility or countdown here.
+        // PASS2: Removed syncVisiblePageAsPlayTarget() call. Runtime owns
+        // current-page truth via _installScrollPageTracker (library.js), which
+        // keeps __rcReadingTarget.pageIndex current on every scroll frame.
+        // startFocusedPageTts() reads that directly. Shell must not pre-empt
+        // the runtime's page truth with a DOM-visibility inference.
+        const before = {
+            playback: (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null,
+            countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
+        };
+        let result = false;
+        try { if (typeof pauseOrResumeReading === 'function') result = !!pauseOrResumeReading(); } catch (_) {}
+        setTimeout(syncShellPlaybackControls, 0);
+        const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
+        if (afterPlayback?.active && !afterPlayback.paused && (!before.playback?.active || before.playback?.paused || before.countdown?.active)) {
+            bringPlaybackPageIntoView(afterPlayback);
+        }
+        shellDebugRemember('lastControlAction', {
+            type: 'play-toggle',
+            before,
+            result,
+            after: afterPlayback,
+        });
+        return result;
+    }
+
+    // PATCH(autoplay-authority): was a dead stub returning false.
+    // toggleAutoplay() in tts.js is the runtime owner of autoplay state.
+    // Shell forwards the intent and syncs the checkbox so the hidden #autoplayToggle
+    // reflects truth (ui.js reads it on boot, and the settings panel shows it).
+    function handleAutoplayToggle() {
+        let next = false;
+        try { if (typeof toggleAutoplay === 'function') next = !!toggleAutoplay(); } catch(_) {}
+        try {
+            const cb = document.getElementById('autoplayToggle');
+            if (cb) cb.checked = next;
+        } catch(_) {}
+        shellDebugRemember('lastControlAction', { type: 'autoplay-toggle', enabled: next });
+        return next;
+    }
+
+
+
+    function handleTtsStep(delta) {
+        const before = {
+            playback: (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null,
+            countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
+            runtime: (typeof getRuntimeUiState === 'function') ? getRuntimeUiState() : null
+        };
+        let moved = false;
+        let route = 'unavailable';
+        try {
+            if (typeof ttsJumpSentence === 'function') {
+                moved = !!ttsJumpSentence(delta);
+                if (moved) route = 'block-session-transition';
+                else route = 'block-session-unavailable';
+            }
+        } catch (_) {}
+        syncShellPlaybackControls();
+        const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
+        if (moved && afterPlayback?.active && !afterPlayback.paused) {
+            bringPlaybackPageIntoView(afterPlayback);
+        }
+        shellDebugRemember('lastSkipAction', {
+            type: 'skip',
+            delta,
+            route,
+            moved,
+            before,
+            after: {
+                playback: afterPlayback,
+                countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
+                runtime: (typeof getRuntimeUiState === 'function') ? getRuntimeUiState() : null,
+                tts: (typeof getTtsDiagnosticsSnapshot === 'function') ? getTtsDiagnosticsSnapshot() : null
+            }
+        });
+        return moved;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => {
+            updateTierPill();
+            updateExplorerSwatchState();
+            try { if (window.rcTheme) window.rcTheme.syncShellState(); } catch (_) {}
+            try { if (window.rcAppearance) window.rcAppearance.syncButtons(); } catch (_) {}
+            try { refreshExplorerPanel(); } catch (_) {}
+        }, 500);
+        patchRefreshHook();
+        // Reading entry is now fully runtime-owned via startReadingFromPreview → __rcLoadBook.
+        // The previous poll/auto-click bridge (bookSel change → waitForPages → loadBtn.click)
+        // has been retired: loadBook() in library.js calls render() directly, and render()
+        // calls __jublyAfterRender itself. No shell polling or synthetic click is needed.
+    });
+
+    // ── Library table — populated by __jublyLibraryRefresh hook called from library.js ──
+    function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    let libraryRefreshRetryTimer = null;
+    let _loggedFirstLocalLibraryRead = false;
+    let _libraryInitialResolutionComplete = false;
+    let _libraryRefreshSequence = 0;
+
+    function scheduleLibraryPendingBanner() {
+        if (_libraryPendingBannerTimer || _libraryInitialResolutionComplete) return;
+        _libraryPendingBannerTimer = window.setTimeout(() => {
+            _libraryPendingBannerTimer = null;
+            if (_libraryInitialResolutionComplete) return;
+            if (!isAuthedUser()) return;
+            if (getCurrentVisibleSection() !== 'dashboard') return;
+            try {
+                window.rcInteraction && window.rcInteraction.pending('library:hydrate', 'Books are still loading…');
+            } catch (_) {}
+        }, 1400);
+    }
+
+    function clearLibraryPendingBanner() {
+        if (_libraryPendingBannerTimer) {
+            window.clearTimeout(_libraryPendingBannerTimer);
+            _libraryPendingBannerTimer = null;
+        }
+        try { window.rcInteraction && window.rcInteraction.clear('library:hydrate'); } catch (_) {}
+    }
+
+    function setLibrarySurfaceState(state) {
+        const pendingEl = document.getElementById('library-pending');
+        const popEl = document.getElementById('library-populated');
+        const emptyEl = document.getElementById('library-empty');
+        const sampleEl = document.getElementById('library-public-sample');
+        if (pendingEl) pendingEl.classList.toggle('hidden-section', state !== 'pending');
+        if (popEl) popEl.classList.toggle('hidden-section', state !== 'populated');
+        if (emptyEl) emptyEl.classList.toggle('hidden-section', state !== 'empty');
+        if (sampleEl) sampleEl.classList.toggle('hidden-section', state !== 'sample');
+        const dashboardEl = document.getElementById('dashboard');
+        if (dashboardEl) dashboardEl.setAttribute('data-library-state', state);
+    }
+
+    async function refreshLibrary(reason = 'unknown') {
+        const rowsEl  = document.getElementById('library-rows');
+        // NOTE: #dashboard-subtitle is NOT owned by refreshLibrary.
+        // renderLibrarySubtitle() is the single owner of that element.
+        // CSS min-height on #dashboard-subtitle ensures it never causes layout shift.
+        if (!rowsEl) return;
+        const authed = !!isAuthedUser();
+        const hasLocalLibraryOwner = typeof localBooksGetAll === 'function';
+        shellTrailPush('dashboard-library-refresh', {
+            reason,
+            section: getCurrentVisibleSection(),
+            authed,
+            hasLocalLibraryOwner,
+            initialResolved: _libraryInitialResolutionComplete
+        });
+
+        if (!authed) {
+            _libraryInitialResolutionComplete = false;
+            clearLibraryPendingBanner();
+            if (libraryRefreshRetryTimer) {
+                clearTimeout(libraryRefreshRetryTimer);
+                libraryRefreshRetryTimer = null;
+            }
+            setLibrarySurfaceState('sample');
+            return;
+        }
+
+        // Runtime honesty contract for the dashboard books area:
+        // keep the container visible immediately, keep books truth owned by the
+        // local library runtime, and show a neutral pending state until the first
+        // truthful local-library read resolves to populated vs empty/importer.
+        // After that first truthful read, later refreshes keep the current visible
+        // surface instead of flashing back through pending.
+        if (!_libraryInitialResolutionComplete) {
+            setLibrarySurfaceState('pending');
+            scheduleLibraryPendingBanner();
+        }
+
+        // Until runtime book storage is actually available, do not imply an empty
+        // library and do not leave a blank gap. Keep the pending surface visible
+        // and retry owner discovery.
+        // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
+        // or successive unavailability creates an infinite chain that hangs the page.
+        if (!hasLocalLibraryOwner) {
+            shellTrailPush('dashboard-library-owner-pending', { reason, retryDelayMs: 120 });
+            if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
+            return new Promise(resolve => {
+                libraryRefreshRetryTimer = setTimeout(() => {
+                    libraryRefreshRetryTimer = null;
+                    try { refreshLibrary('owner-retry'); } catch (_) {}
+                    resolve();
+                }, 120);
+            });
+        }
+        const refreshSeq = ++_libraryRefreshSequence;
+        let books = [];
+        try { books = await localBooksGetAll(); } catch(_) { books = []; }
+        if (refreshSeq !== _libraryRefreshSequence) return;
+        shellTrailPush('dashboard-library-local-read', {
+            reason,
+            count: Array.isArray(books) ? books.length : 0,
+            firstSuccess: !_loggedFirstLocalLibraryRead
+        });
+        _loggedFirstLocalLibraryRead = true;
+        _libraryInitialResolutionComplete = true;
+        clearLibraryPendingBanner();
+        const has = books.length > 0;
+        if (!has) {
+            setLibrarySurfaceState('empty');
+            try { renderSubscriptionSurface([]); } catch (_) {}
+            return;
+        }
+        books.sort((a, b) => (b.createdAt||0) - (a.createdAt||0));
+        const rows = books.map(b => {
+            const pages = (window.rcLibraryData && typeof window.rcLibraryData.countPagesFromMarkdown === 'function')
+                ? window.rcLibraryData.countPagesFromMarkdown(b.markdown || '')
+                : Math.max(1, (String(b.markdown||'').match(/^\s*##\s+/gm)||[]).length || 1);
+            const surface = (window.rcLibraryData && typeof window.rcLibraryData.getBookSurfaceData === 'function')
+                ? window.rcLibraryData.getBookSurfaceData(`local:${String(b.id)}`, pages, { record: b })
+                : { status: 'Unread', timeLabel: `${Math.max(1, Math.ceil(pages * 2.5))} min left` };
+            const date = new Date(b.createdAt||Date.now()).toLocaleDateString();
+            const id = ('local:' + String(b.id)).replace(/'/g,"\\'");
+            const title = escHtml(b.title||'Untitled');
+            return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
+                <div class="flex-grow flex items-center gap-3"><div class="w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">Added ${date}</p></div></div>
+                <div class="w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div>
+                <div class="w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div>
+                <div class="w-8 text-slate-300">→</div></div>`;
+        });
+        rowsEl.innerHTML = rows.join('');
+        setLibrarySurfaceState('populated');
+        try { renderSubscriptionSurface(books); } catch (_) {}
+
+    }
+    // Hook called by library.js after populateBookSelectWithLocal()
+    window.__jublyLibraryRefresh = refreshLibrary;
+
+    function patchRefreshHook() {
+        let tries = 0;
+        const timer = setInterval(() => {
+            tries += 1;
+            if (typeof window.__rcRefreshBookSelect === 'function') {
+                clearInterval(timer);
+                const prev = window.__rcRefreshBookSelect;
+                if (prev.__jublyWrapped) return;
+                const wrapped = async function() {
+                    const out = await prev.apply(this, arguments);
+                    try { await refreshLibrary('book-select-refresh-hook'); } catch(_) {}
+                    return out;
+                };
+                wrapped.__jublyWrapped = true;
+                window.__rcRefreshBookSelect = wrapped;
+            } else if (tries >= 100) {
+                clearInterval(timer);
+            }
+        }, 100);
+    }
+
+    // Scroll affordance — called by library.js via __jublyAfterRender after render()
+    window.__jublyAfterRender = function() {
+        document.querySelectorAll('#pages .page').forEach(function(pageEl) {
+            const textEl = pageEl.querySelector('.page-text');
+            if (!textEl || textEl.parentElement.classList.contains('page-text-wrap')) return;
+            const wrap = document.createElement('div'); wrap.className = 'page-text-wrap';
+            textEl.parentNode.insertBefore(wrap, textEl); wrap.appendChild(textEl);
+            const fade = document.createElement('div'); fade.className = 'page-text-fade'; wrap.appendChild(fade);
+            function checkScroll() {
+                const atEnd = textEl.scrollHeight - textEl.scrollTop - textEl.clientHeight < 8;
+                wrap.classList.toggle('scrolled-to-end', atEnd || textEl.scrollHeight <= textEl.clientHeight + 4);
+            }
+            textEl.addEventListener('scroll', checkScroll, { passive: true });
+            setTimeout(checkScroll, 150);
+        });
+    };
+
+    // ── Reading session ──────────────────────────────────────────
+    let _previewBookId = null;
+    function openPreview(id, title) {
+        _previewBookId = id;
+        openModal('preview-modal');
+        refreshPreviewSurface(id, title);
+    }
+
+    async function startReading() {
+        closeModal('preview-modal');
+        const signal = document.getElementById('session-complete');
+        if (signal) signal.classList.add('hidden-section');
+        showSection('reading-mode');
+        if (!_previewBookId) return;
+        try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(_previewBookId); } catch (_) {}
+    }
+
+    let _goalCelebrationTimer = null;
+    let _goalEditOpen = false;
+
+    function setGoalEditMode(open) {
+        _goalEditOpen = !!open;
+        const editBtn = document.getElementById('profile-goal-edit-btn');
+        const editForm = document.getElementById('profile-goal-edit-form');
+        const input = document.getElementById('profile-goal-input');
+        if (editBtn) editBtn.classList.toggle('hidden-section', _goalEditOpen);
+        if (editForm) editForm.classList.toggle('hidden-section', !_goalEditOpen);
+        if (_goalEditOpen && input) {
+            const current = (window.rcPrefs && typeof window.rcPrefs.loadProfilePrefs === 'function') ? window.rcPrefs.loadProfilePrefs().dailyGoalMinutes : 15;
+            input.value = String(current || 15);
+            try { input.focus(); input.select(); } catch (_) {}
+        }
+    }
+
+    function triggerGoalCelebration() {
+        const banner = document.getElementById('profile-goal-celebration');
+        if (!banner) return;
+        if (_goalCelebrationTimer) clearTimeout(_goalCelebrationTimer);
+        banner.textContent = '🎉🎊 Goal reached';
+        banner.classList.remove('hidden-section');
+        void banner.offsetWidth;
+        banner.classList.remove('profile-goal-celebration-animate');
+        banner.classList.add('profile-goal-celebration-animate');
+        _goalCelebrationTimer = setTimeout(() => {
+            try { banner.classList.add('hidden-section'); } catch (_) {}
+            try { banner.classList.remove('profile-goal-celebration-animate'); } catch (_) {}
+        }, 1600);
+    }
+
+    async function renderSubscriptionSurface(existingBooks) {
+        const booksValue = document.getElementById('subscription-books-value');
+        const storageValue = document.getElementById('subscription-storage-value');
+        let books = Array.isArray(existingBooks) ? existingBooks : [];
+        if (!books.length && typeof localBooksGetAll === 'function') {
+            try { books = await localBooksGetAll(); } catch (_) { books = []; }
+        }
+        if (booksValue) booksValue.textContent = String(Array.isArray(books) ? books.length : 0);
+        if (storageValue) {
+            const totalBytes = Array.isArray(books) ? books.reduce((sum, book) => sum + Math.max(0, Number(book?.byteSize || 0)), 0) : 0;
+            if (totalBytes >= 1024 * 1024) storageValue.textContent = `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`;
+            else if (totalBytes >= 1024) storageValue.textContent = `${Math.max(1, Math.round(totalBytes / 1024))} KB`;
+            else storageValue.textContent = totalBytes > 0 ? `${totalBytes} B` : '0 B';
+        }
+    }
+
+
+    function renderUsageSurface() {
+        const valueEl = document.getElementById('nav-usage-pill-value');
+        if (!valueEl) return;
+        const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
+            ? window.rcUsage.getSnapshot()
+            : { remaining: null, allowance: null, authoritative: false };
+        const remaining = snapshot?.remaining != null ? Number(snapshot.remaining) : null;
+        if (Number.isFinite(remaining)) {
+            valueEl.textContent = `${Math.max(0, remaining)} left today`;
+        } else {
+            // authoritative: false means usage truth is still settling — do not
+            // show a believable number. Show neutral pending copy instead.
+            valueEl.textContent = snapshot?.authoritative === false ? 'Checking…' : 'Usage';
+        }
+    }
+
+    function renderProfileSurface() {
+        // When signed in, require at least one confirmed snapshot (cache or live)
+        // before rendering values. Until settings hydration is confirmed, local
+        // pref values can contradict server truth (e.g. a local goal of 5 against
+        // a server-confirmed 30 → "15/5"). A safe blank is correct here per the
+        // runtime contract. rc:durable-data-hydrated fires after cache apply
+        // (sub-100ms on returning users) and re-triggers this render with clean data.
+        if (isAuthedUser()) {
+            const hydrated = !!(window.rcSync && typeof window.rcSync.getHydrationState === 'function' && window.rcSync.getHydrationState().settings);
+            if (!hydrated) return;
+        }
+        const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
+            ? window.rcReadingMetrics.getReadingProfileMetrics()
+            : { dailyGoalMinutes: 15, dailyMinutes: 0, weeklyMinutes: 0, sessionsCompleted: 0, progressPct: 0, lastGoalCelebratedOn: '', todayIso: '' };
+        const dailyEl = document.getElementById('profile-daily-minutes');
+        const goalEl = document.getElementById('profile-goal-minutes');
+        const weeklyEl = document.getElementById('profile-weekly-minutes');
+        const sessionsEl = document.getElementById('profile-sessions-completed');
+        const labelEl = document.getElementById('profile-goal-progress-label');
+        const copyEl = document.getElementById('profile-goal-copy');
+        const ringEl = document.getElementById('profile-goal-ring');
+        const goalMinutes = Math.max(5, Number(metrics.dailyGoalMinutes || 15));
+        const displayDailyMinutes = Math.max(0, Number(metrics.displayDailyMinutes != null ? metrics.displayDailyMinutes : Math.min(Number(metrics.dailyMinutes || 0), goalMinutes)));
+        const remainingGoalMinutes = Math.max(0, Number(metrics.remainingGoalMinutes != null ? metrics.remainingGoalMinutes : Math.max(0, goalMinutes - Number(metrics.dailyMinutes || 0))));
+        if (dailyEl) dailyEl.textContent = String(Math.round(displayDailyMinutes));
+        if (goalEl) goalEl.textContent = String(goalMinutes);
+        if (weeklyEl) weeklyEl.textContent = String(metrics.weeklyMinutes || 0);
+        if (sessionsEl) sessionsEl.textContent = String(metrics.sessionsCompleted || 0);
+        if (labelEl) labelEl.textContent = '';
+        if (ringEl) ringEl.style.setProperty('--goal-progress', `${Math.max(0, Math.min(100, Number(metrics.progressPct || 0)))}%`);
+        if (copyEl) {
+            copyEl.textContent = metrics.progressPct >= 100
+                ? 'Goal complete for today.'
+                : `${remainingGoalMinutes} min to go today.`;
+        }
+        if (metrics.progressPct >= 100 && metrics.lastGoalCelebratedOn !== metrics.todayIso) {
+            try {
+                if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') {
+                    window.rcPrefs.saveProfilePrefs({ lastGoalCelebratedOn: metrics.todayIso });
+                }
+            } catch (_) {}
+            triggerGoalCelebration();
+        }
+    }
+
+    async function refreshPreviewSurface(id, fallbackTitle) {
+        const titleEl = document.getElementById('preview-title');
+        const trioEl = document.getElementById('preview-meta-trio');
+        if (titleEl) titleEl.innerText = fallbackTitle || 'Book';
+        if (trioEl) trioEl.textContent = 'Loading preview…';
+        try {
+            if (window.rcLibraryData && typeof window.rcLibraryData.getBookPreviewSurface === 'function') {
+                const surface = await window.rcLibraryData.getBookPreviewSurface(id);
+                if (titleEl) titleEl.innerText = surface.title || fallbackTitle || 'Book';
+                if (trioEl) trioEl.textContent = surface.previewTrio || '0 Pages • 0 min read • Unread';
+                return;
+            }
+        } catch (_) {}
+        if (trioEl) trioEl.textContent = '0 Pages • 0 min read • Unread';
+    }
+
+    // Empty state drag/drop
+    function emptyStateDrop(e) {
+        e.preventDefault();
+        const zone = document.getElementById('empty-drop-zone');
+        if (zone) { zone.style.borderColor = 'transparent'; zone.style.background = ''; }
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (!files || !files.length) return;
+        // Use the one authoritative importer-entry path so the capacity check,
+        // modal open, state reset, and file staging happen in a single async
+        // sequence — eliminates the race where showModal()'s reset cleared a
+        // file staged immediately before via click+dispatch.
+        if (typeof window.openImporterWithFile === 'function') {
+            window.openImporterWithFile(files[0]);
+        }
+    }
+
+    // Session complete signal — presents current runtime page truth only.
+    function showSessionComplete() {
+        const signal = document.getElementById('session-complete');
+        if (!signal || !hasActiveReadingCards()) return;
+        const pageCount = (typeof pages !== 'undefined' && Array.isArray(pages)) ? pages.length : 0;
+        const currentTarget = window.__rcReadingTarget || {};
+        const isTextImport = /^local:text-/i.test(String(currentTarget.bookId || ''));
+        const mins = (window.rcReadingMetrics && typeof window.rcReadingMetrics.estimateReadMinutesFromPages === 'function')
+            ? window.rcReadingMetrics.estimateReadMinutesFromPages(pageCount, { textImport: isTextImport })
+            : Math.max(1, isTextImport ? pageCount : Math.ceil(pageCount * 2.5));
+        document.getElementById('stat-pages').textContent   = pageCount;
+        document.getElementById('stat-minutes').textContent = mins;
+        signal.classList.remove('hidden-section');
+        signal.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // Page progress bar — uses real pages[] from app state
+    function updateProgressBar() {
+        const prog  = document.getElementById('shell-page-progress');
+        if (!prog) return;
+        if (!hasActiveReadingCards()) { prog.textContent = '—'; shellDebugRemember('lastProgressSnapshot', { type: 'progress', visible: false, label: '—' }); return; }
+        const total = (typeof pages !== 'undefined' && Array.isArray(pages)) ? pages.length : 0;
+        let playback = { active: false, paused: false, key: null };
+        try { if (typeof getPlaybackStatus === 'function') playback = getPlaybackStatus() || playback; } catch (_) {}
+        const cur   = (playback.active && !playback.paused)
+                        ? Math.max(0, getActivePlaybackPageIndex(playback))
+                        : Math.max(0, getVisibleReadingPageIndex());
+        const currentLabel = (typeof getDisplayPageNumber === 'function') ? getDisplayPageNumber(cur) : (cur + 1);
+        const totalLabel = (typeof getDisplayPageTotal === 'function') ? getDisplayPageTotal(total) : total;
+        prog.textContent = total > 0 ? `Page ${currentLabel} / ${totalLabel}` : '—';
+        shellDebugRemember('lastProgressSnapshot', { type: 'progress', visible: true, label: prog.textContent, current: cur, total });
+    }
+
+    // ── App event bridge ─────────────────────────────────────────
+    // Called by app's goToNext() / nextCard equivalent at session end
+    // The app will call showSessionComplete() directly once wired;
+    // this is a fallback shim for the transition period.
+    window.jublySessionComplete = showSessionComplete;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const goalEditBtn = document.getElementById('profile-goal-edit-btn');
+        const goalEditForm = document.getElementById('profile-goal-edit-form');
+        const goalCancelBtn = document.getElementById('profile-goal-cancel-btn');
+        const goalInput = document.getElementById('profile-goal-input');
+        goalEditBtn?.addEventListener('click', () => { setGoalEditMode(true); });
+        goalCancelBtn?.addEventListener('click', () => { setGoalEditMode(false); });
+        goalEditForm?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const next = Math.max(5, Math.min(300, Math.round(Number(goalInput && goalInput.value || 0) || 0)));
+            if (!Number.isFinite(next) || next <= 0) return;
+            // saveProfilePrefs fires rc:prefs-changed, which queues rcSync.syncSettings
+            // via _handlePrefsChanged. Shell does not call syncSettings directly to
+            // avoid a competing parallel durable write for the same mutation.
+            try { if (window.rcPrefs && typeof window.rcPrefs.saveProfilePrefs === 'function') window.rcPrefs.saveProfilePrefs({ dailyGoalMinutes: next }); } catch (_) {}
+            setGoalEditMode(false);
+            renderProfileSurface();
+        });
+        const nameTrigger = document.getElementById('profile-name-edit-trigger');
+        const nameForm = document.getElementById('profile-name-edit-form');
+        const nameInput = document.getElementById('profile-name-input');
+        const nameCancel = document.getElementById('profile-name-cancel-btn');
+        const passwordToggle = document.getElementById('profile-password-toggle-btn');
+        const passwordForm = document.getElementById('profile-password-form');
+        const passwordInput = document.getElementById('profile-password-input');
+        const passwordCancel = document.getElementById('profile-password-cancel-btn');
+        const settingsStatus = document.getElementById('profile-settings-status');
+
+        function setSettingsStatus(message, kind) {
+            if (!settingsStatus) return;
+            settingsStatus.textContent = message || '';
+            settingsStatus.classList.toggle('hidden-section', !message);
+            settingsStatus.classList.remove('profile-settings-status-error', 'profile-settings-status-success');
+            if (message) settingsStatus.classList.add(kind === 'error' ? 'profile-settings-status-error' : 'profile-settings-status-success');
+        }
+        function setNameEdit(open) {
+            if (nameForm) nameForm.classList.toggle('hidden-section', !open);
+            if (nameTrigger) nameTrigger.classList.toggle('hidden-section', !!open);
+            if (open && nameInput) {
+                nameInput.value = deriveDisplayName(getAuthUser());
+                setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch (_) {} }, 0);
+            }
+        }
+        function setPasswordEdit(open) {
+            if (passwordForm) passwordForm.classList.toggle('hidden-section', !open);
+            if (passwordToggle) passwordToggle.classList.toggle('hidden-section', !!open);
+            if (!open && passwordInput) passwordInput.value = '';
+            if (open && passwordInput) setTimeout(() => { try { passwordInput.focus(); } catch (_) {} }, 0);
+        }
+        nameTrigger?.addEventListener('click', () => { setSettingsStatus('', 'success'); setNameEdit(true); });
+        nameCancel?.addEventListener('click', () => { setNameEdit(false); });
+        nameForm?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            setSettingsStatus('', 'success');
+            const nextName = String(nameInput?.value || '').trim();
+            if (!nextName) { setSettingsStatus('Username is required.', 'error'); return; }
+            const saveBtn = document.getElementById('profile-name-save-btn');
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+            const result = await (window.rcAuth && typeof window.rcAuth.updateDisplayName === 'function'
+                ? window.rcAuth.updateDisplayName(nextName)
+                : Promise.resolve({ error: { message: 'Profile editing is not available.' } }));
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+            if (result?.error) { setSettingsStatus(result.error.message || 'Unable to update username.', 'error'); return; }
+            setNameEdit(false);
+            syncShellAuthPresentation();
+            setSettingsStatus('Username updated.', 'success');
+        });
+        passwordToggle?.addEventListener('click', () => { setSettingsStatus('', 'success'); setPasswordEdit(true); });
+        passwordCancel?.addEventListener('click', () => { setPasswordEdit(false); });
+        passwordForm?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            setSettingsStatus('', 'success');
+            const nextPassword = String(passwordInput?.value || '');
+            const saveBtn = document.getElementById('profile-password-save-btn');
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+            const result = await (window.rcAuth && typeof window.rcAuth.changePassword === 'function'
+                ? window.rcAuth.changePassword(nextPassword)
+                : Promise.resolve({ error: { message: 'Password changes are not available.' } }));
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Password'; }
+            if (result?.error) { setSettingsStatus(result.error.message || 'Unable to change password.', 'error'); return; }
+            setPasswordEdit(false);
+            setSettingsStatus('Password updated.', 'success');
+        });
+        document.getElementById('profile-help-chat-btn')?.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const btn = e.currentTarget;
+            setInlineBusy(btn, 'Opening…');
+            try {
+                if (window.rcHelp && typeof window.rcHelp.openChat === 'function') {
+                    const ok = await window.rcHelp.openChat();
+                    if (!ok) {
+                        try { window.rcInteraction && window.rcInteraction.error('help:chat', 'Support chat couldn\'t be opened right now.'); } catch (_) {}
+                    }
+                }
+            } catch (_) {
+                try { window.rcInteraction && window.rcInteraction.error('help:chat', 'Support chat couldn\'t be opened right now.'); } catch (_) {}
+            } finally {
+                setInlineBusy(btn, null, null, false);
+            }
+        });
+        document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const btn = e.currentTarget;
+            setInlineBusy(btn, 'Opening…');
+            try {
+                if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
+                    const ok = await window.rcHelp.openFeedback();
+                    if (!ok) {
+                        try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
+                    }
+                }
+            } catch (_) {
+                try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
+            } finally {
+                setInlineBusy(btn, null, null, false);
+            }
+        });
+        const tierSel = document.getElementById('tierSelect');
+        if (tierSel) {
+            tierSel.addEventListener('change', () => {
+                updateTierPill();
+                syncTierButtonState();
+                updateExplorerSwatchState();
+                try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
+                try { syncExplorerMusicSource(); } catch (_) {}
+                refreshExplorerPanel();
+            });
+        }
+        document.addEventListener('rc:runtime-policy-changed', () => {
+            updateTierPill();
+            syncTierButtonState();
+            updateExplorerSwatchState();
+            try { syncExplorerMusicSource(); } catch (_) {}
+            refreshExplorerPanel();
+        });
+        document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} });
+        document.addEventListener('rc:durable-data-hydrated', (e) => { const section = getCurrentVisibleSection(); const kind = e && e.detail ? String(e.detail.kind || 'sync') : 'sync'; try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (section === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} } if (section === 'dashboard') { try { refreshLibrary(`durable-hydrated:${kind}`); } catch (_) {} } });
+        window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (getCurrentVisibleSection() === 'dashboard') { try { refreshLibrary('local-library-changed'); } catch (_) {} } });
+        window.addEventListener('rc:deleted-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
+        window.addEventListener('rc:usage-changed', () => { try { renderUsageSurface(); } catch (_) {} });
+        try { switchReadingSettingsTab('general'); } catch (_) {}
+        try { syncTierButtonState(); } catch (_) {}
+
+        const importCloseBtn = document.getElementById('importBookClose');
+        if (importCloseBtn) {
+            importCloseBtn.addEventListener('click', () => setTimeout(() => { try { if (typeof resetImporterState === 'function') resetImporterState({ keepModalOpen: false }); } catch(_) {} }, 0));
+        }
+        try { renderProfileSurface(); } catch (_) {}
+        try { renderSubscriptionSurface(); } catch (_) {}
+        try { renderUsageSurface(); } catch (_) {}
+        try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {}
+
+        const topSettingsBtn = document.getElementById('openReadingSettings');
+        if (topSettingsBtn) {
+            topSettingsBtn.addEventListener('click', () => { try { refreshExplorerPanel(); } catch (_) {} });
+        }
+        const musicPickerModal = document.getElementById('musicPickerModal');
+        if (musicPickerModal) {
+            musicPickerModal.addEventListener('click', (ev) => { if (ev.target === musicPickerModal) closeMusicPicker(); });
+        }
+
+        // Keep progress bar in sync as the user scrolls or focuses pages.
+        const pagesEl = document.getElementById('pages');
+        if (pagesEl) {
+            pagesEl.addEventListener('scroll',  () => updateProgressBar());
+            pagesEl.addEventListener('focusin', () => updateProgressBar());
+        }
+
+        // Countdown ownership remains on the page-level Read button in tts.js.
+        // The shell next/skip button must not mirror countdown state.
+
+        // F3: Page advance pulse + end-of-book detection via MutationObserver.
+        let _sessionCompletePending = false;
+        const _pagesContainer = document.getElementById('pages');
+        if (_pagesContainer) {
+            new MutationObserver(() => {
+                // Pulse progress indicator on any page advance.
+                const prog = document.getElementById('shell-page-progress');
+                if (prog && !prog.classList.contains('page-advance-pulse')) {
+                    prog.classList.add('page-advance-pulse');
+                    prog.addEventListener('animationend', () => prog.classList.remove('page-advance-pulse'), { once: true });
+                }
+                // Detect last page reached: active page is the last one.
+                try {
+                    if (!hasActiveReadingCards()) return;
+                    const total = (typeof pages !== 'undefined' && Array.isArray(pages)) ? pages.length : 0;
+                    if (total < 1) return;
+                    const activeEl = _pagesContainer.querySelector('.page-active');
+                    if (!activeEl) return;
+                    const allPages = Array.from(_pagesContainer.querySelectorAll('.page'));
+                    const activeIdx = allPages.indexOf(activeEl);
+                    if (activeIdx === total - 1 && !_sessionCompletePending) {
+                        _sessionCompletePending = true;
+                        // 500ms debounce: wait to confirm no further page-active transition follows.
+                        setTimeout(() => {
+                            _sessionCompletePending = false;
+                            const stillActive = _pagesContainer.querySelector('.page-active');
+                            const stillLast   = stillActive && Array.from(_pagesContainer.querySelectorAll('.page')).indexOf(stillActive) === total - 1;
+                            const cd = (typeof getCountdownStatus === 'function') ? getCountdownStatus() : { active: false }; const noCountdown = !cd.active;
+                            if (stillLast && noCountdown) showSessionComplete();
+                        }, 500);
+                    }
+                } catch(_) {}
+            }, { attributes: true, subtree: true, attributeFilter: ['class'] });
+        }
+
+        // Exit reading: stop TTS, cancel autoplay, clear countdown poll before navigating away.
+        // The button's inline onclick still fires (showSection) — this just cleans up first.
+        const exitBtn = document.querySelector('.reading-top-exit');
+        if (exitBtn) {
+            exitBtn.addEventListener('click', () => { try { syncShellPlaybackControls(); } catch(_) {} });
+        }
+
+        setInterval(() => {
+            try { syncShellPlaybackControls(); } catch(_) {}
+            try { updateProgressBar(); } catch(_) {}
+        }, 350);
+    });
+
+    function snapshotShellControl(selector) {
+        const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+        if (!el) return null;
+        let rect = null;
+        try {
+            const r = el.getBoundingClientRect();
+            rect = { width: Math.round(r.width), height: Math.round(r.height), top: Math.round(r.top), left: Math.round(r.left) };
+        } catch (_) {}
+        return {
+            text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
+            disabled: !!el.disabled,
+            ariaDisabled: el.getAttribute('aria-disabled'),
+            title: el.getAttribute('title') || '',
+            className: el.className || '',
+            rect
+        };
+    }
+
+    window.getShellDiagnosticsSnapshot = function getShellDiagnosticsSnapshot() {
+        const topBar = document.getElementById('reading-top-bar');
+        const bottomBar = document.querySelector('.reading-bottom-bar');
+        const readingMode = document.getElementById('reading-mode');
+        const pageBtns = Array.from(document.querySelectorAll('.tts-btn[data-tts="page"]'));
+        const topCluster = document.querySelector('#reading-top-bar .reading-top-left');
+        const topActions = document.querySelector('#reading-top-bar .reading-top-actions');
+        const bottomCluster = document.querySelector('.reading-bottom-bar .reading-bottom-left');
+        const bottomActions = document.querySelector('.reading-bottom-bar .reading-bottom-actions');
+        const progress = document.getElementById('shell-page-progress');
+        return {
+            readingVisible: !!(readingMode && !readingMode.classList.contains('hidden-section')),
+            settingsOpen: !!(typeof window.isReadingSettingsModalOpen === 'function' && window.isReadingSettingsModalOpen()),
+            progressLabel: progress ? progress.textContent : null,
+            playback: (typeof window.getPlaybackStatus === 'function') ? window.getPlaybackStatus() : null,
+            countdown: (typeof window.getCountdownStatus === 'function') ? window.getCountdownStatus() : null,
+            support: (typeof window.getTtsSupportStatus === 'function') ? window.getTtsSupportStatus() : null,
+            runtime: (typeof window.getRuntimeUiState === 'function') ? window.getRuntimeUiState() : null,
+            tts: (typeof window.getTtsDiagnosticsSnapshot === 'function') ? window.getTtsDiagnosticsSnapshot() : null,
+            controls: {
+                settings: snapshotShellControl('#openReadingSettings'),
+                exit: snapshotShellControl('.reading-top-exit'),
+                previous: snapshotShellControl('#shell-prev-btn'),
+                play: snapshotShellControl('#shell-play-btn'),
+                next: snapshotShellControl('#shell-next-btn')
+            },
+            pageReadButtons: {
+                count: pageBtns.length,
+                disabledCount: pageBtns.filter((btn) => !!btn.disabled).length,
+                activeCount: pageBtns.filter((btn) => btn.classList.contains('tts-active')).length,
+                sample: pageBtns.slice(0, 3).map((btn) => snapshotShellControl(btn))
+            },
+            debug: SHELL_DEBUG,
+            layout: {
+                topBar: topBar ? { clientWidth: topBar.clientWidth, scrollWidth: topBar.scrollWidth } : null,
+                topCluster: topCluster ? { clientWidth: topCluster.clientWidth, scrollWidth: topCluster.scrollWidth, offsetLeft: topCluster.offsetLeft } : null,
+                topActions: topActions ? { clientWidth: topActions.clientWidth, offsetLeft: topActions.offsetLeft } : null,
+                bottomBar: bottomBar ? { clientWidth: bottomBar.clientWidth, scrollWidth: bottomBar.scrollWidth } : null,
+                bottomCluster: bottomCluster ? { clientWidth: bottomCluster.clientWidth, scrollWidth: bottomCluster.scrollWidth, offsetLeft: bottomCluster.offsetLeft } : null,
+                bottomActions: bottomActions ? { clientWidth: bottomActions.clientWidth, offsetLeft: bottomActions.offsetLeft } : null
+            }
+        };
+    };
+    // Engine scripts load dynamically after window.load; refresh shell library once boot settles.
+    // refreshLibrary() removed from this timer — it was a timing workaround that
+    // raced against auth and could show the unauthenticated sample state after
+    // auth had resolved. DOMContentLoaded now awaits refreshLibrary() before
+    // removing auth-hydrating, so this stale call is no longer needed.
+    window.addEventListener('load', () => setTimeout(() => { patchRefreshHook(); }, 350));
