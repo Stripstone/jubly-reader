@@ -344,7 +344,7 @@ Obfuscation may be used as friction, not as the main protection model.
 - heavy local assets remain device-local
 
 ## Current Supabase scope
-Planned durable records:
+Durable records:
 - users
 - owned library items
 - reading progress
@@ -352,25 +352,22 @@ Planned durable records:
 - compact daily stats
 - durable user preferences that are intentionally synced
 - entitlement state
+- trial claim records (`user_trial_claims`)
 - usage window summary
 
-Still pending:
-- frontend `supabase-js` integration
-- signed-in progress sync
-- signed-in durable settings sync
-- backend JWT verification
-- Stripe webhook write path
-- auth-linked routing decisions
-
 ## Environment variables
-Authoritative names:
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `SUPABASE_SECRET_KEY`
+Full authoritative reference: `docs/_ops/ENVIRONMENT_VARIABLES_REFERENCE.md`
+
+Key groups:
+- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SECRET_KEY` — Supabase client and service access
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`, `STRIPE_PREMIUM_PRICE_ID` — Stripe billing
+- `PLAN_PRO_TRIAL_DAYS`, `PLAN_PREMIUM_TRIAL_DAYS`, `PLAN_TRIAL_REQUIRE_UNIQUE_IP`, and related `PLAN_*` vars — trial and subscription policy
+- `APP_BASE_URL` — canonical public origin used for checkout and auth redirect URLs
 
 Rules:
 - only `SUPABASE_URL` and `SUPABASE_ANON_KEY` belong in frontend client initialization
-- `SUPABASE_SECRET_KEY` is backend-only
+- `SUPABASE_SECRET_KEY` and all Stripe keys are backend-only
+- `APP_BASE_URL` must be the real resolved URL, not the literal text `APP_BASE_URL`
 
 ## Validation checklist
 First apply the structural compliance gate from `03_ARCHITECTURE_AND_GUARDRAILS.md`.
