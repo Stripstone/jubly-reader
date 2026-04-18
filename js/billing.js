@@ -5,6 +5,7 @@
 window.rcBilling = (function () {
   let _configPromise = null;
   let _pricingRenderToken = 0;
+  let _checkoutInFlightPlan = '';
 
   function setMessage(id, message, tone = 'info') {
     const el = document.getElementById(id);
@@ -167,6 +168,61 @@ window.rcBilling = (function () {
     return 'Basic';
   }
 
+  function getPlanTrialDays(plans, plan) {
+    const normalized = normalizePlan(plan);
+    const raw = normalized === 'premium' ? plans?.premium?.trialDays : normalized === 'pro' ? plans?.pro?.trialDays : 0;
+    const days = Number(raw);
+    return Number.isFinite(days) && days > 0 ? Math.trunc(days) : 0;
+  }
+
+  function trialCtaLabel(plan, fallback, plans) {
+    const normalized = normalizePlan(plan);
+    // Pro trial copy is public config projected from server env; it is not an entitlement claim.
+    if (normalized === 'pro') {
+      const days = getPlanTrialDays(plans, 'pro');
+      if (days > 0) return `${days}-Day Trial`;
+    }
+    return fallback;
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function entitlementMatchesCheckoutPlan(entitlement, expectedPlan) {
+    if (!entitlement || typeof entitlement !== 'object') return false;
+    const status = String(entitlement.status || '').trim().toLowerCase();
+    if (status !== 'active' && status !== 'trialing') return false;
+    const tier = normalizeRuntimeTier(entitlement.tier);
+    const expected = normalizePlan(expectedPlan);
+    if (expected === 'pro' || expected === 'premium') return tier === expected;
+    return tier === 'pro' || tier === 'premium';
+  }
+
+  async function waitForCheckoutEntitlement(expectedPlan) {
+    const attempts = [0, 700, 1200, 1800, 2600, 3600, 5000];
+    for (const waitMs of attempts) {
+      if (waitMs > 0) await delay(waitMs);
+      const snapshot = await fetchRuntimeSnapshot();
+      const entitlement = snapshot?.meta?.entitlement || null;
+      if (entitlementMatchesCheckoutPlan(entitlement, expectedPlan)) {
+        await refreshRuntimeFromAccount();
+        await renderSubscriptionUi();
+        await renderPricingUi();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function daysLeftLabel(endDateLike) {
+    const end = endDateLike ? new Date(endDateLike).getTime() : NaN;
+    if (!Number.isFinite(end)) return '';
+    const days = Math.max(0, Math.ceil((end - Date.now()) / (24 * 60 * 60 * 1000)));
+    if (days <= 0) return 'Last trial day';
+    return days === 1 ? '1 day left' : `${days} days left`;
+  }
+
   function applyPlanButtonState(button, label, onclick, disabled = false) {
     if (!button) return;
     button.textContent = label;
@@ -226,7 +282,7 @@ window.rcBilling = (function () {
         onclick: tier === 'basic' ? () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); } : null,
       },
       pro: {
-        label: tier === 'pro' ? 'Current Plan' : 'Upgrade to Pro',
+        label: tier === 'pro' ? 'Current Plan' : trialCtaLabel('pro', 'Upgrade to Pro', plans),
         disabled: !plans?.pro?.available || tier === 'pro' || isProLocked,
         onclick: tier === 'pro' || isProLocked ? null : () => startCheckout('pro'),
       },
@@ -264,7 +320,7 @@ window.rcBilling = (function () {
 
     if (!signedIn) {
       applyPlanButtonState(freeBtn, 'Continue for free', () => rememberPlanAndOpenSignup('free'));
-      applyPlanButtonState(proBtn, 'Choose Pro', () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
+      applyPlanButtonState(proBtn, trialCtaLabel('pro', 'Choose Pro', plans), () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
       applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
       return;
     }
@@ -349,12 +405,19 @@ window.rcBilling = (function () {
     if (entitlement && (entitlement.status === 'active' || entitlement.status === 'trialing')) {
       const resolvedTier = normalizeRuntimeTier(entitlement?.tier);
       const tierLabel = resolvedTier === 'premium' ? 'Premium' : resolvedTier === 'pro' ? 'Pro' : 'Free';
+      const status = String(entitlement.status || '').trim().toLowerCase();
       const renewsAt = entitlement.renewsAt || entitlement.periodEnd || null;
       const renewsLabel = renewsAt
         ? new Date(renewsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
         : `${tierLabel} active`;
-      if (statusCopy) statusCopy.textContent = `Your ${tierLabel} plan is active.`;
-      if (billingState) billingState.textContent = renewsLabel;
+      if (status === 'trialing') {
+        const remaining = daysLeftLabel(renewsAt);
+        if (statusCopy) statusCopy.textContent = `Your ${tierLabel} free trial is active.`;
+        if (billingState) billingState.textContent = remaining ? `Free trial · ${remaining}` : 'Free trial active';
+      } else {
+        if (statusCopy) statusCopy.textContent = `Your ${tierLabel} plan is active.`;
+        if (billingState) billingState.textContent = renewsLabel;
+      }
       if (primaryBtn) {
         primaryBtn.textContent = 'Manage Billing';
         primaryBtn.onclick = function () { openCustomerPortal(); };
@@ -391,6 +454,8 @@ window.rcBilling = (function () {
       setMessage('billing-message', `Create an account to continue with ${planDisplayLabel(normalized)}.`, 'info');
       return;
     }
+    if (_checkoutInFlightPlan === normalized) return;
+    _checkoutInFlightPlan = normalized;
 
     // Lock plan buttons immediately — do not let a second tap queue a second request
     const proBtn = document.getElementById('pricing-pro-btn');
@@ -408,12 +473,14 @@ window.rcBilling = (function () {
         // Banner stays as 'Preparing checkout…' — page is about to navigate away
         window.location.href = data.url;
       } else {
+        _checkoutInFlightPlan = '';
         [proBtn, premiumBtn].forEach((btn) => {
           if (btn) { clearButtonBusy(btn); btn.disabled = false; }
         });
         try { window.rcInteraction && window.rcInteraction.clear('billing:checkout'); } catch (_) {}
       }
     } catch (err) {
+      _checkoutInFlightPlan = '';
       [proBtn, premiumBtn].forEach((btn) => {
         if (btn) { clearButtonBusy(btn); btn.disabled = false; }
       });
@@ -484,11 +551,17 @@ window.rcBilling = (function () {
       const checkout = url.searchParams.get('checkout');
       const portal = url.searchParams.get('portal');
       if (checkout === 'success') {
-        clearPendingPlan();
+        const expectedPlan = normalizePlan(url.searchParams.get('checkout_plan') || readPendingPlan());
         setMessage('pricing-message', 'Checkout completed. Refreshing your account access…', 'success');
         setMessage('billing-message', 'Checkout completed. Refreshing your account access…', 'success');
         try { window.rcInteraction && window.rcInteraction.pending('billing:return', 'Updating your plan…'); } catch (_) {}
-        await refreshRuntimeFromAccount();
+        const confirmed = await waitForCheckoutEntitlement(expectedPlan);
+        if (!confirmed) {
+          await refreshRuntimeFromAccount();
+          await renderSubscriptionUi();
+          setMessage('billing-message', 'Checkout completed. Your account access is still updating. Refresh if it does not appear shortly.', 'info');
+        }
+        clearPendingPlan();
         try { window.rcInteraction && window.rcInteraction.clear('billing:return'); } catch (_) {}
       } else if (checkout === 'cancel') {
         clearPendingPlan();
@@ -502,6 +575,7 @@ window.rcBilling = (function () {
       }
       if (checkout || portal) {
         url.searchParams.delete('checkout');
+        url.searchParams.delete('checkout_plan');
         url.searchParams.delete('portal');
         window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
       }

@@ -75,6 +75,7 @@ export default async function handler(req, res) {
         }
         break;
       }
+      case 'customer.subscription.created':
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         const subscription = event?.data?.object;

@@ -136,7 +136,7 @@ export default async function handler(req, res) {
 
   const form = new URLSearchParams();
   form.set('mode', 'subscription');
-  form.set('success_url', `${origin}/?checkout=success`);
+  form.set('success_url', `${origin}/?checkout=success&checkout_plan=${encodeURIComponent(plan.tier)}`);
   form.set('cancel_url', `${origin}/?checkout=cancel`);
   form.set('client_reference_id', user.id);
   form.set('line_items[0][price]', plan.priceId);

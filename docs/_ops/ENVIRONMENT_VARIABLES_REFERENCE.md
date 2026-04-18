@@ -54,9 +54,9 @@ AWS_ACCESS_KEY_ID = *** # AWS access key ID
 AWS_SECRET_ACCESS_KEY = *** # AWS secret access key
 
 Supabase Auth dashboard values (operator-set, not code-owned):
-- Site URL = APP_BASE_URL
-- Redirect URLs should include:
-  - APP_BASE_URL/?view=login-page
-  - APP_BASE_URL/?view=login-page&auth=verified
-  - APP_BASE_URL/?view=login-page&auth=verified&next=checkout&tier=pro
-  - APP_BASE_URL/?view=login-page&auth=verified&next=checkout&tier=premium
+- Site URL = the resolved `APP_BASE_URL` value, not the literal text `APP_BASE_URL`
+- Redirect URLs should include the resolved app origin, for example:
+  - https://your-app.example.com/?view=login-page
+  - https://your-app.example.com/?view=login-page&auth=verified
+  - https://your-app.example.com/?view=login-page&auth=verified&next=checkout&tier=pro
+  - https://your-app.example.com/?view=login-page&auth=verified&next=checkout&tier=premium

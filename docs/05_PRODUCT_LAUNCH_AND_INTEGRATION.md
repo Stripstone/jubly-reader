@@ -143,8 +143,8 @@ Premium remains intentional and visible even if packaging evolves later.
 2. App shows a focused upgrade prompt tied to the value unlocked
 3. User proceeds to pricing or checkout
 4. Stripe updates billing
-5. Backend writes durable entitlement state
-6. App refreshes entitlement truth
+5. Backend writes durable entitlement state from checkout and subscription webhook events
+6. App returns with `checkout=success`, shows a pending update state, and polls resolved entitlement truth briefly instead of showing Basic as settled truth
 7. User returns to the same flow with new capability available
 
 ### Manage Billing flow
@@ -170,7 +170,7 @@ Premium remains intentional and visible even if packaging evolves later.
 ### Signed-in surfaces
 - `Profile` appears only for signed-in users
 - `Manage Billing` should be a thin launcher into Stripe portal
-- subscription summary should display resolved durable entitlement truth
+- subscription summary should display resolved durable entitlement truth, including trialing paid access as paid access with remaining trial time when `period_end` is available
 - token or usage display should appear only where it is truly helpful and backed by real values
 - manual tier selector buttons are development-only and must not remain production authority
 
@@ -220,6 +220,7 @@ Premium remains intentional and visible even if packaging evolves later.
 - creating Stripe billing portal sessions
 - verifying Stripe webhooks
 - writing resulting entitlement state to durable records
+- treating `customer.subscription.created`, subscription updates, and checkout completion as valid entitlement-write surfaces for paid trials/subscriptions
 - provider selection, prompt-bearing work, and other protected logic moved off the browser
 
 ## Plan and feature resolution model
@@ -414,5 +415,6 @@ Replace with real flows:
 
 ## Operator redirect contract
 - `APP_BASE_URL` is the canonical public app origin for verified auth continuation and billing continuation redirects.
-- Supabase Site URL should equal the bare `APP_BASE_URL` origin.
+- Supabase Site URL should equal the bare resolved `APP_BASE_URL` origin.
+- Supabase dashboard values must use the real resolved URL, not the literal text `APP_BASE_URL`.
 - Supabase Redirect URLs should include the exact verified login continuation paths for plain login, verified login, and verified paid continuation.

@@ -69,7 +69,7 @@ Maintenance rule:
 | Profile → Subscription tab (renders on open) | `fetchRuntimeSnapshot` | ✅ Inline copy: `Checking your account…` / `—` while in flight |
 | Pricing modal → **Choose Pro / Choose Premium** (signed in) | `POST /api/billing?action=checkout` | ✅ Inline clicked-button state: `Preparing…` + banner: `Preparing checkout…`; error resolves to `Try again` or `Open login` if auth expired |
 | Profile → Subscription → **Manage Billing** button | `POST /api/billing?action=portal` | ✅ Inline clicked-button state: `Opening…` + banner: `Opening billing…`; error resolves to `Try again` or `Open login` if auth expired |
-| App returns from Stripe checkout (no button) | Entitlement re-hydration after redirect | ✅ Banner: `Updating your plan…` while policy truth settles; failure resolves to `Refresh` |
+| App returns from Stripe checkout (no button) | Entitlement re-hydration after redirect | ✅ Banner: `Updating your plan…` while policy truth settles; checkout success polls resolved entitlement briefly before showing the subscription surface as settled, so a just-created trial is not presented as Basic unless the server still has no paid entitlement truth. Failure resolves to `Refresh` |
 | App returns from billing portal (no button) | Billing-status re-hydration after redirect | ✅ Banner: `Refreshing billing status…` while policy truth settles; failure resolves to `Refresh` |
 
 ---
