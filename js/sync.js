@@ -969,48 +969,9 @@ window.rcSync = (function () {
   }
 
   // ── State clearing ────────────────────────────────────────────────────────
-  function _resetPublicRuntimePolicy(reason) {
-    // Runtime policy truth lives in state.js; sync.js only requests the safe
-    // public projection when durable/account state is no longer available.
-    try {
-      if (window.rcPolicy && typeof window.rcPolicy.resetToPublic === 'function') {
-        window.rcPolicy.resetToPublic();
-        _pushEvent('public-policy-reset', { reason: String(reason || 'public') });
-        return true;
-      }
-    } catch (_) {}
-    try {
-      if (typeof getFallbackRuntimePolicy === 'function' && window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
-        window.rcPolicy.apply(getFallbackRuntimePolicy('basic'), 'basic', { resolved: false });
-        _pushEvent('public-policy-reset', { reason: String(reason || 'public'), fallback: 'direct-apply' });
-        return true;
-      }
-    } catch (_) {}
-    _pushEvent('public-policy-reset-skipped', { reason: String(reason || 'public') });
-    return false;
-  }
-
-  function _clearSessionVoiceSelection(reason) {
-    // The durable tts_voice_id may be restored on sign-in; the transient session
-    // value must not survive into public playback routing after sign-out/public boot.
-    try { window.__rcSessionVoiceSelection = ''; } catch (_) {}
-    try {
-      ['voiceFemaleSelect', 'voiceMaleSelect'].forEach((id) => {
-        const select = document.getElementById(id);
-        if (select) select.value = '';
-      });
-    } catch (_) {}
-    if (_dirtySettings && Object.prototype.hasOwnProperty.call(_dirtySettings, 'tts_voice_id')) {
-      delete _dirtySettings.tts_voice_id;
-      _saveDirtySettings();
-    }
-    _pushEvent('session-voice-cleared', { reason: String(reason || 'public') });
-  }
-
-  function _clearRemoteState(reason = 'public') {
+  function _clearRemoteState() {
     _remoteUsersRow = null;
     _remoteSettingsRow = null;
-    _confirmedSettingsRow = null;
     _remoteLibraryItems = [];
     _remoteProgressRows = [];
     _remoteBookMetricsRows = [];
@@ -1019,17 +980,10 @@ window.rcSync = (function () {
     _remoteProfileMetrics = null;
     _remoteUsageSummary = null;
     _remoteEntitlement = null;
-    _pendingRuntimePolicyProjection = null;
-    if (_pendingRuntimePolicyFlushTimer) {
-      clearTimeout(_pendingRuntimePolicyFlushTimer);
-      _pendingRuntimePolicyFlushTimer = null;
-    }
     _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false, usage: false };
     _lastSyncSnapshotAt = null;
     _requestSeq = 0;
     _appliedSeq = 0;
-    _clearSessionVoiceSelection(reason);
-    _resetPublicRuntimePolicy(reason);
     // Clear session tokens so a stale usage count from the previous session does not
     // leak into the next user's projection window. The usage pill is hidden when not
     // authed, so this does not create a visible blank state for the current user.
@@ -1043,7 +997,7 @@ window.rcSync = (function () {
 
   async function rehydrateDurableData() {
     if (!_ready()) {
-      _clearRemoteState('not-ready');
+      _clearRemoteState();
       _emitHydrated('signout');
       return;
     }
@@ -1072,7 +1026,7 @@ window.rcSync = (function () {
       return;
     }
     if (!signedIn) {
-      _clearRemoteState(source || 'signout');
+      _clearRemoteState();
       _emitHydrated('signout');
     }
   }
