@@ -65,7 +65,7 @@ Maintenance rule:
 | Surface | What it does | Status |
 |---|---|---|
 | Login / Create account surface with pending paid intent | Email step resolves, account state is checked, auth settles, then paid checkout handoff begins | ✅ Inline auth copy stays honest: step-one email fully settles before account creation continues, existing-account emails are steered to `Log In`, signup success uses `Check your email to verify your account`, backing out clears stale paid-intent markers, verified returns land on login, and successful paid auth communicates `Redirecting to … checkout…` while checkout starts |
-| Pricing modal → **Free / Choose Pro / Choose Premium** buttons | `fetchPublicConfig` + `fetchRuntimeSnapshot` | ✅ Neutral inline pending: buttons disable to `Loading…` while config resolves |
+| Pricing modal → **Continue for free / Choose Pro / Choose Premium** buttons | `fetchPublicConfig` + `fetchRuntimeSnapshot` | ✅ Settled modal entry: config/snapshot resolve before the modal appears so button text does not visibly mutate; buttons remain disabled while the hidden settle completes |
 | Profile → Subscription tab (renders on open) | `fetchRuntimeSnapshot` | ✅ Inline copy: `Checking your account…` / `—` while in flight |
 | Pricing modal → **Choose Pro / Choose Premium** (signed in) | `POST /api/billing?action=checkout` | ✅ Inline clicked-button state: `Preparing…` + banner: `Preparing checkout…`; error resolves to `Try again` or `Open login` if auth expired |
 | Profile → Subscription → **Manage Billing** button | `POST /api/billing?action=portal` | ✅ Inline clicked-button state: `Opening…` + banner: `Opening billing…`; error resolves to `Try again` or `Open login` if auth expired |

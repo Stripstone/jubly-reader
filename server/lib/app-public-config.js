@@ -26,8 +26,7 @@ export default async function handler(req, res) {
   const url = String(process.env.SUPABASE_URL || '').trim();
   const anonKey = String(process.env.SUPABASE_ANON_KEY || '').trim();
   const appBaseUrl = requestOrigin(req);
-  const canonicalLoginUrl = appBaseUrl ? `${appBaseUrl}/?view=login-page` : '';
-  const authRedirectUrl = canonicalLoginUrl ? `${canonicalLoginUrl}&auth=verified` : '';
+  const authRedirectUrl = appBaseUrl ? `${appBaseUrl}/?view=login-page&auth=verified` : '';
   const stripe = {
     plans: await getPublicPlanCatalog().catch(() => ({
       pro: { available: !!(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO), amountLabel: 'Configured in Stripe', intervalLabel: '' },
@@ -41,7 +40,6 @@ export default async function handler(req, res) {
       url: '',
       anonKey: '',
       appBaseUrl,
-      canonicalLoginUrl,
       authRedirectUrl,
       stripe,
     });
@@ -52,7 +50,6 @@ export default async function handler(req, res) {
     url,
     anonKey,
     appBaseUrl,
-    canonicalLoginUrl,
     authRedirectUrl,
     stripe,
   });

@@ -1343,15 +1343,13 @@ function setAppearance(mode) {
   return applyAppearance();
 }
 
-function loadAppearance(options) {
-  const opts = options && typeof options === 'object' ? options : {};
+function loadAppearance(opts = {}) {
   appAppearance = opts.fromLocal === true ? readAppearanceModeFromLocal() : 'light';
   return applyAppearance();
 }
 
 function restorePersistedAppearance() {
-  appAppearance = readAppearanceModeFromLocal();
-  return applyAppearance();
+  return loadAppearance({ fromLocal: true });
 }
 
 function getDiagnosticsPreference() {
@@ -1602,8 +1600,6 @@ window.rcEntitlements = {
 };
 
 applyResolvedRuntimePolicy(getFallbackRuntimePolicy(appTier), appTier, { resolved: false });
-// Public boot starts from the safe light appearance. Signed-in users restore
-// their persisted appearance only after auth truth resolves.
 loadAppearance({ fromLocal: false });
 loadTheme();
 

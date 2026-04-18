@@ -3,21 +3,37 @@
 // ============================================================
 //
 // PRE-RUNTIME APPEARANCE BOOTSTRAP (temporary shell bridge):
-//   Public boot now starts from the safe light appearance instead of reusing
-//   client-cached light/dark state before auth truth exists. Signed-in users
-//   can restore their persisted appearance only after auth resolves.
+//   Applies a public-safe appearance class to <html> before CSS paints, then
+//   lets runtime restore persisted local appearance only after signed-in auth
+//   truth is available.
 //   Retirement condition: remove when runtime provides an equally-early
 //   appearance bootstrap seam without using index.html inline script ownership.
 (function applyPublicSafeAppearanceBoot() {
     try {
+        // Public/signed-out surfaces must not inherit a prior account's local
+        // dark appearance before auth truth exists. Runtime restores persisted
+        // appearance after a signed-in account is confirmed.
+        var mode = 'light';
+        try {
+            var params = new URLSearchParams(window.location.search || '');
+            var view = String(params.get('view') || '').trim();
+            if (view === 'dashboard' || view === 'profile-page') {
+                var raw = localStorage.getItem('rc_appearance_prefs');
+                if (raw) {
+                    var parsed = JSON.parse(raw) || {};
+                    var stored = parsed.appearance_mode || parsed.mode || parsed.appearance;
+                    if (stored === 'dark' || stored === 'light') mode = stored;
+                }
+            }
+        } catch (_) {}
         var root = document.documentElement;
         if (!root) return;
         root.classList.remove('app-light', 'app-dark');
-        root.classList.add('app-light');
-        root.setAttribute('data-app-appearance', 'light');
-        root.style.backgroundColor = '#ffffff';
-        root.style.color = '#1e293b';
-        root.style.colorScheme = 'light';
+        root.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
+        root.setAttribute('data-app-appearance', mode);
+        root.style.backgroundColor = mode === 'dark' ? '#0f172a' : '#ffffff';
+        root.style.color = mode === 'dark' ? '#e2e8f0' : '#1e293b';
+        root.style.colorScheme = mode;
     } catch (_) {}
 })();
 
@@ -428,6 +444,18 @@ window.rcInteraction = (function () {
         return !isAuthedUser() && !!_publicIntroLibraryVisible;
     }
 
+    function isPublicAbandonSurface(sectionId) {
+        if (isAuthedUser()) return false;
+        return sectionId === 'landing-page' || (sectionId === 'dashboard' && isIntroLibraryVisible());
+    }
+
+    function clearPaidIntentForPublicAbandon(sectionId) {
+        if (!isPublicAbandonSurface(sectionId)) return;
+        try {
+            if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
+        } catch (_) {}
+    }
+
     function resolveSectionForAuth(id) {
         const normalized = normalizeSection(id);
         if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'login-page')) return 'dashboard';
@@ -544,7 +572,7 @@ window.rcInteraction = (function () {
         const publicSampleSubcopy = document.getElementById('library-public-sample-subcopy');
         if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !(authed || isIntroLibraryVisible()));
         if (librarySample) librarySample.classList.add('hidden-section');
-        if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your library.';
+        if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your own library.';
         if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Start free, keep your place, and come back anytime.';
         renderLibrarySubtitle(authed);
 
@@ -622,6 +650,7 @@ window.rcInteraction = (function () {
             try { syncExplorerMusicSource(); } catch (_) {}
         }
 
+        clearPaidIntentForPublicAbandon(targetId);
         syncShellAuthPresentation(targetId);
         let _sectionRefreshPromise = null;
         if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary('show-section-dashboard');
@@ -658,7 +687,16 @@ window.rcInteraction = (function () {
 
 
     // ── Modals ───────────────────────────────────────────────────
-    function openModal(id)  { const el = document.getElementById(id); if (!el) return; el.classList.remove('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'flex'; if (id === 'pricing-modal' && window.rcBilling && typeof window.rcBilling.renderPricingUi === 'function') window.rcBilling.renderPricingUi().catch(() => {}); }
+    function openModal(id)  {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (id === 'pricing-modal' && window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') {
+            window.rcBilling.openPricingForAccount().catch(() => {});
+            return;
+        }
+        el.classList.remove('hidden-section');
+        if (el.classList.contains('modal-overlay')) el.style.display = 'flex';
+    }
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
     function login() {
@@ -685,6 +723,7 @@ window.rcInteraction = (function () {
     function returnToPublicEntry() {
         closeModal('pricing-modal');
         closeModal('ownership-modal');
+        try { if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan(); } catch (_) {}
         showSection(isIntroLibraryVisible() ? 'dashboard' : 'landing-page');
     }
 
@@ -695,94 +734,10 @@ window.rcInteraction = (function () {
         returnToPublicEntry();
     }
 
-    function readPendingPlanIntent() {
-        try {
-            return window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
-                ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase()
-                : '';
-        } catch (_) {
-            return '';
-        }
-    }
-
-    function buildAuthRedirectForPendingPlan() {
-        try {
-            const config = window.rcAuth && typeof window.rcAuth.getConfig === 'function' ? window.rcAuth.getConfig() : null;
-            const base = String((config && (config.canonicalLoginUrl || config.authRedirectUrl)) || '').trim();
-            if (!base) return '';
-            const url = new URL(base, window.location.origin);
-            url.searchParams.set('view', 'login-page');
-            url.searchParams.set('auth', 'verified');
-            const pendingPlan = readPendingPlanIntent();
-            if (pendingPlan === 'pro' || pendingPlan === 'premium') {
-                url.searchParams.set('next', 'checkout');
-                url.searchParams.set('tier', pendingPlan);
-            } else {
-                url.searchParams.delete('next');
-                url.searchParams.delete('tier');
-            }
-            return `${url.origin}${url.pathname}${url.search}${url.hash}`;
-        } catch (_) {
-            return '';
-        }
-    }
-
-    function readAuthLocationState() {
-        try {
-            const params = new URLSearchParams(window.location.search || '');
-            return String(params.get('auth') || '').trim().toLowerCase();
-        } catch (_) {
-            return '';
-        }
-    }
-
-    function clearAuthLocationState() {
-        try {
-            const url = new URL(window.location.href);
-            if (!url.searchParams.has('auth')) return;
-            url.searchParams.delete('auth');
-            window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-        } catch (_) {}
-    }
-
-    function clearPaidIntentLocationState() {
-        try {
-            if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') {
-                window.rcBilling.clearPendingPlan();
-            }
-            const url = new URL(window.location.href);
-            url.searchParams.delete('tier');
-            if (String(url.searchParams.get('next') || '').trim().toLowerCase() === 'checkout') url.searchParams.delete('next');
-            window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-        } catch (_) {}
-    }
-
-    async function applyAuthLocationState() {
-        const state = readAuthLocationState();
-        if (state !== 'verified') return;
-        const verifiedUser = window.rcAuth && typeof window.rcAuth.getUser === 'function' ? window.rcAuth.getUser() : null;
-        const verifiedEmail = String((verifiedUser && verifiedUser.email) || '').trim();
-        closeModal('pricing-modal');
-        closeModal('ownership-modal');
-        if (window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn() && typeof window.rcAuth.signOut === 'function') {
-            await window.rcAuth.signOut();
-        }
-        _authMode = 'signin';
-        _signupStep = 1;
-        _validatedSignupEmail = '';
-        toggleAuthMode(true);
-        showSection('login-page', { historyMode: 'replace' });
-        const emailField = document.getElementById('loginEmail');
-        if (emailField && verifiedEmail) emailField.value = verifiedEmail;
-        _authShowSuccess('Email verified. Log In to continue.');
-        clearAuthLocationState();
-    }
-
     function authBack() {
         _authClearMessages();
         if (_authMode === 'signup' && _signupStep === 2) {
             _signupStep = 1;
-            _validatedSignupEmail = '';
             applyAuthModeUi();
             try {
                 const emailField = document.getElementById('loginEmail');
@@ -790,8 +745,6 @@ window.rcInteraction = (function () {
             } catch (_) {}
             return;
         }
-        _validatedSignupEmail = '';
-        clearPaidIntentLocationState();
         returnToPublicEntry();
     }
 
@@ -800,7 +753,6 @@ window.rcInteraction = (function () {
         closeModal('pricing-modal');
         _authMode = 'signup';
         _signupStep = 1;
-        _validatedSignupEmail = '';
         toggleAuthMode(true);
         showSection('login-page');
     }
@@ -829,7 +781,7 @@ window.rcInteraction = (function () {
 
     function promptOwnershipAction(kind) {
         if (isAuthedUser()) return false;
-        const message = 'Create an account to import books, save your place, and build your library.';
+        const message = 'Create an account to import books, save your place, and build your own library.';
         if (window.rcBilling && typeof window.rcBilling.showPricingForGatedAction === 'function') {
             window.rcBilling.showPricingForGatedAction(message);
         } else {
@@ -954,6 +906,33 @@ window.rcInteraction = (function () {
         if (ok)  ok.classList.add('hidden-section');
     }
 
+    function buildAuthRedirectForPendingPlan() {
+        let redirect = '';
+        try {
+            const cfg = window.rcAuth && typeof window.rcAuth.getConfig === 'function' ? window.rcAuth.getConfig() : null;
+            redirect = String((cfg && cfg.authRedirectUrl) || '').trim();
+        } catch (_) {}
+        if (!redirect) return '';
+        try {
+            const url = new URL(redirect, window.location.href);
+            url.searchParams.set('view', 'login-page');
+            url.searchParams.set('auth', 'verified');
+            const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
+                ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase()
+                : '';
+            if (pendingPlan === 'pro' || pendingPlan === 'premium') {
+                url.searchParams.set('next', 'checkout');
+                url.searchParams.set('tier', pendingPlan);
+            } else {
+                url.searchParams.delete('next');
+                url.searchParams.delete('tier');
+            }
+            return url.toString();
+        } catch (_) {
+            return redirect;
+        }
+    }
+
     async function authFormSubmit() {
         const email    = ((document.getElementById('loginEmail') || {}).value || '').trim();
         const username = ((document.getElementById('signupUsername') || {}).value || '').trim();
@@ -990,7 +969,6 @@ window.rcInteraction = (function () {
                     _authShowError(pendingPlan && pendingPlan !== 'free'
                         ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
                         : 'An account with this email already exists. Log In to continue.');
-                    if (btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
                     return;
                 }
                 if (!inspected || inspected.ok !== true) {
@@ -1000,7 +978,7 @@ window.rcInteraction = (function () {
                 }
                 _validatedSignupEmail = String(email || '').trim().toLowerCase();
             } finally {
-                if (btn && btn.disabled) {
+                if (btn) {
                     btn.disabled = false;
                     btn.textContent = 'Next';
                 }
@@ -1062,6 +1040,7 @@ window.rcInteraction = (function () {
                     if (/already\s+registered|already\s+exists|user\s+already\s+registered/i.test(message)) {
                         _authMode = 'signin';
                         _signupStep = 1;
+                        _validatedSignupEmail = '';
                         applyAuthModeUi();
                         const emailField = document.getElementById('loginEmail');
                         if (emailField) emailField.value = email;
@@ -1074,6 +1053,7 @@ window.rcInteraction = (function () {
                 } else if (existingAccountLikely) {
                     _authMode = 'signin';
                     _signupStep = 1;
+                    _validatedSignupEmail = '';
                     applyAuthModeUi();
                     _authShowError(pendingPlan && pendingPlan !== 'free'
                         ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
@@ -1140,6 +1120,10 @@ window.rcInteraction = (function () {
     function _handleAuthChanged(e) {
         const { signedIn, source } = e.detail || {};
         const current = getCurrentVisibleSection();
+        try {
+            if (signedIn && window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
+            else if (!signedIn && window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false });
+        } catch (_) {}
 
         if (!_shellAuthBootstrapped) {
             syncShellAuthPresentation(resolveSectionForAuth(current));
@@ -1147,7 +1131,6 @@ window.rcInteraction = (function () {
         }
 
         if (signedIn) {
-            try { if (window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted(); } catch (_) {}
             const pendingPaid = !!(window.rcBilling && typeof window.rcBilling.hasPendingPaidIntent === 'function' && window.rcBilling.hasPendingPaidIntent());
             if (pendingPaid && (current === 'landing-page' || current === 'login-page')) {
                 syncShellAuthPresentation(current === 'landing-page' ? 'login-page' : current);
@@ -1163,7 +1146,6 @@ window.rcInteraction = (function () {
                 try { refreshLibrary('auth-change-signed-in'); } catch(_) {}
             }
         } else {
-            try { if (window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false }); } catch (_) {}
             if (current === 'profile-page') showSection('landing-page', { historyMode: 'replace' });
             else syncShellAuthPresentation(current);
         }
@@ -1191,13 +1173,6 @@ window.rcInteraction = (function () {
                 await window.rcAuth.init();
             }
         } catch (_) {}
-        try {
-            if (window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()) {
-                if (window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
-            } else if (window.rcAppearance && typeof window.rcAppearance.load === 'function') {
-                window.rcAppearance.load({ fromLocal: false });
-            }
-        } catch (_) {}
 
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
@@ -1208,7 +1183,6 @@ window.rcInteraction = (function () {
         // (show the neutral pending surface). No early release — the hold is a
         // minimum, not a cap.
         showSection(settledSection, { historyMode: 'replace' });
-        await applyAuthLocationState();
         const bootHoldMs = 1000;
         try {
             await Promise.all([
@@ -1741,11 +1715,7 @@ window.rcInteraction = (function () {
         try { if (typeof pauseOrResumeReading === 'function') result = !!pauseOrResumeReading(); } catch (_) {}
         setTimeout(syncShellPlaybackControls, 0);
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
-        // Keep the playback page visible even when runtime is still paused
-        // immediately after the action. This covers pause-preserved skip and
-        // timing-sensitive resume paths where the session page is authoritative
-        // before playback has fully flipped to unpaused.
-        if (afterPlayback?.active && (!before.playback?.active || before.playback?.paused || before.countdown?.active)) {
+        if (afterPlayback?.active && !afterPlayback.paused && (!before.playback?.active || before.playback?.paused || before.countdown?.active)) {
             bringPlaybackPageIntoView(afterPlayback);
         }
         shellDebugRemember('lastControlAction', {
@@ -1791,9 +1761,7 @@ window.rcInteraction = (function () {
         } catch (_) {}
         syncShellPlaybackControls();
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
-        // Skip should return the viewport to the playback page even when the
-        // session remains paused after the move (pause-preserve contract).
-        if (moved && afterPlayback?.active) {
+        if (moved && afterPlayback?.active && !afterPlayback.paused) {
             bringPlaybackPageIntoView(afterPlayback);
         }
         shellDebugRemember('lastSkipAction', {

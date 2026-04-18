@@ -123,7 +123,7 @@ window.rcBilling = (function () {
     return ['basic', 'pro', 'premium'].includes(normalized) ? normalized : 'basic';
   }
 
-  function openPricingModalSettled() {
+  function showPricingModalNow() {
     const el = document.getElementById('pricing-modal');
     if (!el) return;
     el.classList.remove('hidden-section');
@@ -135,21 +135,21 @@ window.rcBilling = (function () {
     setMessage('pricing-message', '', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
     await renderPricingUi();
-    openPricingModalSettled();
+    showPricingModalNow();
   }
 
   async function openPricingForAccount(message = '') {
     clearPendingPlan();
     setMessage('pricing-message', message || '', 'info');
     await renderPricingUi();
-    openPricingModalSettled();
+    showPricingModalNow();
   }
 
   async function showPricingForGatedAction(message) {
-    setMessage('pricing-message', message || 'Create an account to import books, save your place, and build your library.', 'info');
+    setMessage('pricing-message', message || 'Create an account to import books, save your place, and build your own library.', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
     await renderPricingUi();
-    openPricingModalSettled();
+    showPricingModalNow();
   }
 
   function rememberPlanAndOpenSignup(plan) {
@@ -176,12 +176,29 @@ window.rcBilling = (function () {
     button.classList.toggle('cursor-not-allowed', !!disabled);
   }
 
-  function setPricingModalSettledPendingState(signedIn) {
+  function setButtonBusy(button, busyLabel) {
+    if (!button) return;
+    if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent || '';
+    button.disabled = true;
+    button.classList.add('opacity-60', 'cursor-not-allowed');
+    if (busyLabel) button.textContent = busyLabel;
+  }
+
+  function clearButtonBusy(button) {
+    if (!button) return;
+    if (button.dataset.idleLabel) button.textContent = button.dataset.idleLabel;
+    delete button.dataset.idleLabel;
+    button.classList.remove('opacity-60', 'cursor-not-allowed');
+  }
+
+  function setPricingModalSettling(signedIn) {
     const modal = document.getElementById('pricing-modal');
     const freeBtn = document.getElementById('pricing-free-btn');
     const proBtn = document.getElementById('pricing-pro-btn');
     const premiumBtn = document.getElementById('pricing-premium-btn');
     if (modal) modal.classList.add('pricing-modal-settling');
+    // Seed the final labels while hidden so the first visible modal paint is
+    // coherent instead of showing Loading... then morphing button text.
     if (signedIn) {
       applyPlanButtonState(freeBtn, 'Basic', null, true);
       applyPlanButtonState(proBtn, 'Pro', null, true);
@@ -193,7 +210,7 @@ window.rcBilling = (function () {
     applyPlanButtonState(premiumBtn, 'Choose Premium', null, true);
   }
 
-  function clearPricingModalSettledPendingState() {
+  function clearPricingModalSettling() {
     const modal = document.getElementById('pricing-modal');
     if (modal) modal.classList.remove('pricing-modal-settling');
   }
@@ -221,21 +238,6 @@ window.rcBilling = (function () {
     };
   }
 
-  function setButtonBusy(button, busyLabel) {
-    if (!button) return;
-    if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent || '';
-    button.disabled = true;
-    button.classList.add('opacity-60', 'cursor-not-allowed');
-    if (busyLabel) button.textContent = busyLabel;
-  }
-
-  function clearButtonBusy(button) {
-    if (!button) return;
-    if (button.dataset.idleLabel) button.textContent = button.dataset.idleLabel;
-    delete button.dataset.idleLabel;
-    button.classList.remove('opacity-60', 'cursor-not-allowed');
-  }
-
   async function renderPricingUi() {
     const token = ++_pricingRenderToken;
     const freeBtn = document.getElementById('pricing-free-btn');
@@ -246,12 +248,11 @@ window.rcBilling = (function () {
     const premiumAmount = document.getElementById('pricing-premium-amount');
     const premiumInterval = document.getElementById('pricing-premium-interval');
     const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
-    setPricingModalSettledPendingState(signedIn);
+    setPricingModalSettling(signedIn);
 
-    const config = await fetchPublicConfig();
-    const snapshot = await fetchRuntimeSnapshot();
+    const [config, snapshot] = await Promise.all([fetchPublicConfig(), fetchRuntimeSnapshot()]);
     if (token !== _pricingRenderToken) return;
-    clearPricingModalSettledPendingState();
+    clearPricingModalSettling();
     const entitlement = snapshot?.meta?.entitlement || null;
     const currentTier = normalizeRuntimeTier(entitlement?.tier || snapshot?.meta?.effectiveTier || snapshot?.policy?.tier || snapshot?.tier || 'basic');
     const plans = config?.stripe?.plans || {};
@@ -550,10 +551,10 @@ window.rcBilling = (function () {
     renderPricingUi,
     rememberPendingPlan,
     showPricingForGatedAction,
+    openPricingForAccount,
     readPendingPlan,
     clearPendingPlan,
     openPricingForSignup,
-    openPricingForAccount,
     continueWithFree,
     hasPendingPaidIntent,
   };

@@ -101,6 +101,18 @@ window.rcAuth = (function () {
       _user = null;
     }
 
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      if (String(params.get('auth') || '').trim().toLowerCase() === 'verified' && _session) {
+        // Supabase may create a browser session during email confirmation.
+        // Jubly's verified continuation contract returns to Login first so paid
+        // intent is preserved but the user explicitly signs in before checkout.
+        try { await _client.auth.signOut({ scope: 'local' }); } catch (_) { try { await _client.auth.signOut(); } catch (__) {} }
+        _session = null;
+        _user = null;
+      }
+    } catch (_) {}
+
     _ready = true;
     _emitAuthChanged('init');
 
@@ -135,16 +147,13 @@ window.rcAuth = (function () {
 
   function _emailValidationMessage(email) {
     const value = String(email || '').trim();
-    if (!value) return 'Enter a valid email address.';
-    if (value.length > 254) return 'Enter a valid email address.';
+    if (!value || value.length > 254) return 'Enter a valid email address.';
     const at = value.indexOf('@');
     if (at <= 0 || at !== value.lastIndexOf('@')) return 'Enter a valid email address.';
 
     const local = value.slice(0, at);
     const domain = value.slice(at + 1);
-
-    if (!local || !domain) return 'Enter a valid email address.';
-    if (local.length > 64) return 'Enter a valid email address.';
+    if (!local || !domain || local.length > 64) return 'Enter a valid email address.';
     if (local.startsWith('.') || local.endsWith('.') || local.includes('..')) return 'Enter a valid email address.';
     if (!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local)) return 'Enter a valid email address.';
 
@@ -258,10 +267,10 @@ window.rcAuth = (function () {
     signUp,
     signIn,
     signOut,
-    updateDisplayName,
-    changePassword,
     looksLikeEmail,
     inspectEmail,
+    updateDisplayName,
+    changePassword,
   };
 })();
 

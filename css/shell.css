@@ -1052,50 +1052,51 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
 }
 
 
+
 /* ── Intro-library CTA sizing and balance ─────────────────── */
 #library-public-sample .section-card > div > div:last-child {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: stretch;
-    gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 12px;
 }
 
 #library-public-sample .section-card > div > div:last-child > button {
-    flex: 0 0 10rem;
-    width: 10rem;
-    min-width: 10rem;
-    min-height: 4.375rem;
-    padding: 0.75rem 1rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    line-height: 1.2;
-    white-space: normal;
+  flex: 0 0 10rem;
+  width: 10rem;
+  min-width: 10rem;
+  min-height: 4.375rem;
+  padding: 0.75rem 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.2;
+  white-space: normal;
 }
 
 #library-public-sample .section-card > div > div:last-child > button:last-child {
-    border-color: #c7d2fe;
-    color: #4338ca;
-    background: #ffffff;
-    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  border-color: #c7d2fe;
+  color: #4338ca;
+  background: #ffffff;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 #library-public-sample .section-card > div > div:last-child > button:last-child:hover {
-    background: #eef2ff;
+  background: #eef2ff;
 }
 
 @media (max-width: 640px) {
-    #library-public-sample .section-card > div > div:last-child {
-        flex-direction: column;
-    }
+  #library-public-sample .section-card > div > div:last-child {
+    flex-direction: column;
+  }
 
-    #library-public-sample .section-card > div > div:last-child > button {
-        flex: 1 1 auto;
-        width: 100%;
-        min-width: 0;
-        min-height: 3.5rem;
-    }
+  #library-public-sample .section-card > div > div:last-child > button {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 3.5rem;
+  }
 }
 
 /* ── Library/import surface cleanup ─────────────────────────── */
@@ -1671,7 +1672,7 @@ body.auth-hydrating #profile-page {
 .rc-banner__close:hover { opacity: 0.85; }
 
 
-/* Group A: pricing modal should open as one settled pending-safe piece */
+/* Group A: pricing modal should first appear only after settled labels are ready. */
 #pricing-modal.pricing-modal-settling .pricing-card {
   opacity: 0.78;
 }

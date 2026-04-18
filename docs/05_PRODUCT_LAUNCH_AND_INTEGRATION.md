@@ -109,8 +109,8 @@ Premium remains intentional and visible even if packaging evolves later.
 3. `Try it now` opens the sample reading experience directly with no account wall
 4. Exiting sample reading reveals the intro library
 5. From the intro library, account-backed actions open pricing
-6. Pricing presents Basic, Pro, or Premium
-7. User chooses plan
+6. Pricing presents Basic, Pro, or Premium with a settled first visible paint
+7. User chooses plan; Basic uses the user-facing `Continue for free` entry
 8. User completes signup or login
 9. If selected plan is Basic, user enters `/app` immediately
 10. If selected plan is Pro or Premium, backend initiates Stripe checkout as needed
@@ -165,6 +165,7 @@ Premium remains intentional and visible even if packaging evolves later.
 - email verification redirects should use the canonical public login URL built from deployed app origin config, not a localhost fallback
 - sample-book reading should remain available pre-account
 - account-only actions should prompt pricing/auth rather than pretending to work
+- intro-library conversion copy should use `Get Started`; pricing Basic entry should use `Continue for free`
 
 ### Signed-in surfaces
 - `Profile` appears only for signed-in users
