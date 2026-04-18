@@ -906,6 +906,51 @@ window.rcInteraction = (function () {
         if (ok)  ok.classList.add('hidden-section');
     }
 
+    function _readAuthPendingPlan() {
+        try {
+            return window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
+                ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase()
+                : '';
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function _existingAccountSteerMessage(pendingPlan) {
+        return pendingPlan && pendingPlan !== 'free'
+            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+            : 'An account with this email already exists. Log In to continue.';
+    }
+
+    function _steerExistingAccountToSignin(email, pendingPlan) {
+        _authMode = 'signin';
+        _signupStep = 1;
+        _validatedSignupEmail = '';
+        applyAuthModeUi();
+        const emailField = document.getElementById('loginEmail');
+        if (emailField) emailField.value = String(email || '').trim();
+        const passwordField = document.getElementById('loginPassword');
+        try { if (passwordField) passwordField.focus(); } catch (_) {}
+        _authShowError(_existingAccountSteerMessage(pendingPlan));
+    }
+
+    async function _inspectSignupEmailOrBlock(email, pendingPlan) {
+        const inspected = window.rcAuth && typeof window.rcAuth.inspectEmail === 'function'
+            ? await window.rcAuth.inspectEmail(email)
+            : { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
+        if (inspected && inspected.exists) {
+            _steerExistingAccountToSignin(email, pendingPlan);
+            return false;
+        }
+        if (!inspected || inspected.ok !== true) {
+            _validatedSignupEmail = '';
+            _authShowError(String((inspected && inspected.error && inspected.error.message) || 'Unable to verify email yet. Please try again.'));
+            return false;
+        }
+        _validatedSignupEmail = String(email || '').trim().toLowerCase();
+        return true;
+    }
+
     function buildAuthRedirectForPendingPlan() {
         let redirect = '';
         try {
@@ -917,9 +962,7 @@ window.rcInteraction = (function () {
             const url = new URL(redirect, window.location.href);
             url.searchParams.set('view', 'login-page');
             url.searchParams.set('auth', 'verified');
-            const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
-                ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase()
-                : '';
+            const pendingPlan = _readAuthPendingPlan();
             if (pendingPlan === 'pro' || pendingPlan === 'premium') {
                 url.searchParams.set('next', 'checkout');
                 url.searchParams.set('tier', pendingPlan);
@@ -953,34 +996,13 @@ window.rcInteraction = (function () {
             }
             if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
             try {
-                const inspected = window.rcAuth && typeof window.rcAuth.inspectEmail === 'function'
-                    ? await window.rcAuth.inspectEmail(email)
-                    : { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
-                const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
-                if (inspected && inspected.exists) {
-                    _authMode = 'signin';
-                    _signupStep = 1;
-                    _validatedSignupEmail = '';
-                    applyAuthModeUi();
-                    const emailField = document.getElementById('loginEmail');
-                    if (emailField) emailField.value = email;
-                    const passwordField = document.getElementById('loginPassword');
-                    try { if (passwordField) passwordField.focus(); } catch (_) {}
-                    _authShowError(pendingPlan && pendingPlan !== 'free'
-                        ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                        : 'An account with this email already exists. Log In to continue.');
-                    return;
-                }
-                if (!inspected || inspected.ok !== true) {
-                    _validatedSignupEmail = '';
-                    _authShowError(String((inspected && inspected.error && inspected.error.message) || 'Unable to verify email yet. Please try again.'));
-                    return;
-                }
-                _validatedSignupEmail = String(email || '').trim().toLowerCase();
+                const pendingPlan = _readAuthPendingPlan();
+                const allowedToContinue = await _inspectSignupEmailOrBlock(email, pendingPlan);
+                if (!allowedToContinue) return;
             } finally {
                 if (btn) {
                     btn.disabled = false;
-                    btn.textContent = 'Next';
+                    btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
                 }
             }
             _signupStep = 2;
@@ -1028,36 +1050,27 @@ window.rcInteraction = (function () {
 
         try {
             if (_authMode === 'signup') {
+                // Re-check here so final submit cannot drift from the email step if an
+                // email was edited, autofilled, or claimed after the first step settled.
+                const pendingPlan = _readAuthPendingPlan();
+                const allowedToCreate = await _inspectSignupEmailOrBlock(email, pendingPlan);
+                if (!allowedToCreate) return;
+
                 const result = await window.rcAuth.signUp(email, password, username, {
                     emailRedirectTo: buildAuthRedirectForPendingPlan(),
                 });
                 const error = result && result.error ? result.error : null;
-                const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                 const identities = Array.isArray(result?.data?.user?.identities) ? result.data.user.identities : null;
                 const existingAccountLikely = !error && !result?.data?.session && Array.isArray(identities) && identities.length === 0;
                 if (error) {
                     const message = String(error.message || 'Account creation failed. Please try again.');
                     if (/already\s+registered|already\s+exists|user\s+already\s+registered/i.test(message)) {
-                        _authMode = 'signin';
-                        _signupStep = 1;
-                        _validatedSignupEmail = '';
-                        applyAuthModeUi();
-                        const emailField = document.getElementById('loginEmail');
-                        if (emailField) emailField.value = email;
-                        _authShowError(pendingPlan && pendingPlan !== 'free'
-                            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                            : 'An account with this email already exists. Log In to continue.');
+                        _steerExistingAccountToSignin(email, pendingPlan);
                     } else {
                         _authShowError(message);
                     }
                 } else if (existingAccountLikely) {
-                    _authMode = 'signin';
-                    _signupStep = 1;
-                    _validatedSignupEmail = '';
-                    applyAuthModeUi();
-                    _authShowError(pendingPlan && pendingPlan !== 'free'
-                        ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                        : 'An account with this email already exists. Log In to continue.');
+                    _steerExistingAccountToSignin(email, pendingPlan);
                 } else if (result?.data?.session) {
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free'
                         ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
