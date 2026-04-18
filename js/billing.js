@@ -64,6 +64,29 @@ window.rcBilling = (function () {
     return data;
   }
 
+  async function authenticatedGet(url, { allowSignedOut = false } = {}) {
+    const token = getAccessToken();
+    if (!token && !allowSignedOut) {
+      const err = new Error('Sign in required.');
+      err.code = 'auth_required';
+      throw err;
+    }
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers,
+      cache: 'no-store',
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const err = new Error(data?.error || `Request failed (${resp.status})`);
+      if (resp.status === 401 || resp.status === 403) err.code = 'auth_required';
+      throw err;
+    }
+    return data;
+  }
+
   function isAuthRequiredError(error) {
     const code = String(error && error.code || '').trim().toLowerCase();
     if (code === 'auth_required') return true;
@@ -175,14 +198,48 @@ window.rcBilling = (function () {
     return Number.isFinite(days) && days > 0 ? Math.trunc(days) : 0;
   }
 
-  function trialCtaLabel(plan, fallback, plans) {
+  function normalizeTrialEligibility(eligibility) {
+    const trial = eligibility?.trial && typeof eligibility.trial === 'object' ? eligibility.trial : eligibility;
+    if (!trial || typeof trial !== 'object') return null;
+    return {
+      eligible: trial.eligible === true,
+      resolved: trial.resolved === true,
+      days: Number.isFinite(Number(trial.days)) ? Math.max(0, Math.trunc(Number(trial.days))) : 0,
+      reason: String(trial.reason || '').trim().toLowerCase(),
+    };
+  }
+
+  function trialEligibilityAllowsTrialCopy(eligibility, signedIn) {
+    const trial = normalizeTrialEligibility(eligibility);
+    if (!trial) return !signedIn;
+    if (trial.eligible && trial.days > 0) return true;
+    // Public/signed-out users may still see trial marketing only when the
+    // server could not resolve account eligibility and did not find a known IP block.
+    return !signedIn && trial.resolved === false && trial.days > 0;
+  }
+
+  function trialCtaLabel(plan, fallback, plans, eligibility = null, signedIn = false) {
     const normalized = normalizePlan(plan);
-    // Pro trial copy is public config projected from server env; it is not an entitlement claim.
     if (normalized === 'pro') {
-      const days = getPlanTrialDays(plans, 'pro');
-      if (days > 0) return `${days}-Day Trial`;
+      const trial = normalizeTrialEligibility(eligibility);
+      const days = trial?.days > 0 ? trial.days : getPlanTrialDays(plans, 'pro');
+      if (days > 0 && trialEligibilityAllowsTrialCopy(eligibility, signedIn)) return `${days}-Day Trial`;
     }
     return fallback;
+  }
+
+  async function fetchTrialEligibility(plan, signedIn) {
+    const normalized = normalizePlan(plan);
+    if (normalized !== 'pro' && normalized !== 'premium') return null;
+    try {
+      return await authenticatedGet(`/api/billing?action=trial-eligibility&plan=${encodeURIComponent(normalized)}`, {
+        allowSignedOut: !signedIn,
+      });
+    } catch (_) {
+      // If signed-in eligibility cannot be verified, avoid advertising a trial.
+      // Public marketing may still show the configured trial because account truth is unknown.
+      return null;
+    }
   }
 
   function delay(ms) {
@@ -271,7 +328,7 @@ window.rcBilling = (function () {
     if (modal) modal.classList.remove('pricing-modal-settling');
   }
 
-  function getSignedInPlanButtonModel(currentTier, plans) {
+  function getSignedInPlanButtonModel(currentTier, plans, proTrialEligibility = null) {
     const tier = normalizeRuntimeTier(currentTier || 'basic');
     const isBasicLocked = tier === 'pro' || tier === 'premium';
     const isProLocked = tier === 'premium';
@@ -282,7 +339,7 @@ window.rcBilling = (function () {
         onclick: tier === 'basic' ? () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); } : null,
       },
       pro: {
-        label: tier === 'pro' ? 'Current Plan' : trialCtaLabel('pro', 'Upgrade to Pro', plans),
+        label: tier === 'pro' ? 'Current Plan' : trialCtaLabel('pro', 'Upgrade to Pro', plans, proTrialEligibility, true),
         disabled: !plans?.pro?.available || tier === 'pro' || isProLocked,
         onclick: tier === 'pro' || isProLocked ? null : () => startCheckout('pro'),
       },
@@ -312,6 +369,10 @@ window.rcBilling = (function () {
     const entitlement = snapshot?.meta?.entitlement || null;
     const currentTier = normalizeRuntimeTier(entitlement?.tier || snapshot?.meta?.effectiveTier || snapshot?.policy?.tier || snapshot?.tier || 'basic');
     const plans = config?.stripe?.plans || {};
+    const proTrialEligibility = plans?.pro?.available && getPlanTrialDays(plans, 'pro') > 0
+      ? await fetchTrialEligibility('pro', signedIn)
+      : null;
+    if (token !== _pricingRenderToken) return;
 
     if (proAmount) proAmount.textContent = plans?.pro?.amountLabel || 'Configured in Stripe';
     if (proInterval) proInterval.textContent = plans?.pro?.intervalLabel || '';
@@ -320,12 +381,12 @@ window.rcBilling = (function () {
 
     if (!signedIn) {
       applyPlanButtonState(freeBtn, 'Continue for free', () => rememberPlanAndOpenSignup('free'));
-      applyPlanButtonState(proBtn, trialCtaLabel('pro', 'Choose Pro', plans), () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
+      applyPlanButtonState(proBtn, trialCtaLabel('pro', 'Choose Pro', plans, proTrialEligibility, false), () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
       applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
       return;
     }
 
-    const buttonModel = getSignedInPlanButtonModel(currentTier, plans);
+    const buttonModel = getSignedInPlanButtonModel(currentTier, plans, proTrialEligibility);
     applyPlanButtonState(freeBtn, buttonModel.free.label, buttonModel.free.onclick, buttonModel.free.disabled);
     applyPlanButtonState(proBtn, buttonModel.pro.label, buttonModel.pro.onclick, buttonModel.pro.disabled);
     applyPlanButtonState(premiumBtn, buttonModel.premium.label, buttonModel.premium.onclick, buttonModel.premium.disabled);

@@ -171,6 +171,7 @@ Premium remains intentional and visible even if packaging evolves later.
 - `Profile` appears only for signed-in users
 - `Manage Billing` should be a thin launcher into Stripe portal
 - subscription summary should display resolved durable entitlement truth, including trialing paid access as paid access with remaining trial time when `period_end` is available
+- signed-in pricing must not present a trial CTA unless server-owned trial eligibility confirms that the user can receive the trial; otherwise it should use ordinary upgrade copy
 - token or usage display should appear only where it is truly helpful and backed by real values
 - manual tier selector buttons are development-only and must not remain production authority
 

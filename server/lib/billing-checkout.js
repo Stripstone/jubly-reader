@@ -3,94 +3,7 @@ import { optionalEnv, requestOrigin } from './env.js';
 import { getAllowedBrowserOrigins } from './origins.js';
 import { deleteTrialClaimById, createTrialClaim, getTrialClaimForIpTier, getTrialClaimForUserTier, getActiveEntitlement, getUserFromAccessToken } from './supabase.js';
 import { getPlanConfig, stripeRequest } from './stripe.js';
-
-function envBool(name, fallback = false) {
-  const raw = String(optionalEnv(name, '')).trim().toLowerCase();
-  if (!raw) return !!fallback;
-  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
-  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
-  return !!fallback;
-}
-
-function envInt(name, fallback = 0) {
-  const raw = String(optionalEnv(name, '')).trim();
-  if (!raw) return fallback;
-  const value = Number(raw);
-  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : fallback;
-}
-
-function normalizeMissingPaymentMethodBehavior() {
-  const raw = String(optionalEnv('PLAN_TRIAL_MISSING_PAYMENT_METHOD_BEHAVIOR', 'cancel')).trim().toLowerCase();
-  if (raw === 'pause' || raw === 'create_invoice') return raw;
-  return 'cancel';
-}
-
-function blockingSubscriptionExists(entitlement) {
-  if (!entitlement || typeof entitlement !== 'object') return false;
-  const provider = String(entitlement.provider || '').trim().toLowerCase();
-  const status = String(entitlement.status || '').trim().toLowerCase();
-  if (provider !== 'stripe') return false;
-  return status === 'active' || status === 'trialing';
-}
-
-function trialDaysForTier(tier) {
-  const normalized = String(tier || '').trim().toLowerCase();
-  if (normalized === 'premium') return envInt('PLAN_PREMIUM_TRIAL_DAYS', 0);
-  if (normalized === 'pro') return envInt('PLAN_PRO_TRIAL_DAYS', 0);
-  return 0;
-}
-
-function getClientIp(req) {
-  const headers = req?.headers || {};
-  const candidates = [
-    headers['x-vercel-forwarded-for'],
-    headers['x-forwarded-for'],
-    headers['cf-connecting-ip'],
-    headers['x-real-ip'],
-    req?.socket?.remoteAddress,
-  ];
-  for (const candidate of candidates) {
-    const first = String(candidate || '').split(',')[0].trim();
-    if (first) return first;
-  }
-  return '';
-}
-
-async function resolveTrialGrant(req, user, plan, requestedTrialDays) {
-  if (!requestedTrialDays || requestedTrialDays < 1) {
-    return { granted: false, days: 0, reason: 'no-trial-configured', claim: null };
-  }
-
-  const priorUserClaim = await getTrialClaimForUserTier(user.id, plan.tier);
-  if (priorUserClaim) {
-    return { granted: false, days: 0, reason: 'prior-account-claim', claim: priorUserClaim };
-  }
-
-  let ipFingerprintHash = '';
-  if (envBool('PLAN_TRIAL_REQUIRE_UNIQUE_IP', false)) {
-    const clientIp = getClientIp(req);
-    if (!clientIp) {
-      return { granted: false, days: 0, reason: 'missing-ip-footprint', claim: null };
-    }
-    ipFingerprintHash = createTrialClaim.ipFingerprintHash(clientIp);
-    const priorIpClaim = await getTrialClaimForIpTier(plan.tier, ipFingerprintHash);
-    if (priorIpClaim) {
-      return { granted: false, days: 0, reason: 'prior-ip-claim', claim: priorIpClaim };
-    }
-  } else {
-    ipFingerprintHash = createTrialClaim.ipFingerprintHash(`user:${user.id}:${plan.tier}`);
-  }
-
-  const now = Date.now();
-  const claim = await createTrialClaim({
-    userId: user.id,
-    tier: plan.tier,
-    ipFingerprintHash,
-    expiresAt: new Date(now + requestedTrialDays * 24 * 60 * 60 * 1000).toISOString(),
-    notes: 'checkout-session-created',
-  });
-  return { granted: true, days: requestedTrialDays, reason: 'granted', claim };
-}
+import { envBool, normalizeMissingPaymentMethodBehavior, resolveTrialGrant, rollbackTrialGrant, trialDaysForTier } from './billing-trials.js';
 
 function getBearer(req) {
   const header = String(req?.headers?.authorization || req?.headers?.Authorization || '').trim();
@@ -167,7 +80,7 @@ export default async function handler(req, res) {
     return json(res, 200, { ok: true, url: session?.url || '', id: session?.id || '' });
   } catch (error) {
     if (trialGrant?.granted && trialGrant?.claim?.id) {
-      await deleteTrialClaimById(trialGrant.claim.id).catch(() => null);
+      await rollbackTrialGrant(trialGrant.claim.id);
     }
     return json(res, error.status || 500, { error: error.message || 'Unable to create checkout session.' });
   }
