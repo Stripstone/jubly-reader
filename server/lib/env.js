@@ -9,14 +9,34 @@ export function optionalEnv(name, fallback = '') {
   return value || fallback;
 }
 
-export function requestOrigin(req) {
-  const explicit = optionalEnv('APP_BASE_URL') || optionalEnv('PUBLIC_APP_URL') || optionalEnv('SITE_URL');
-  if (explicit) return explicit.replace(/\/$/, '');
+function stripTrailingSlash(value) {
+  return String(value || '').trim().replace(/\/$/, '');
+}
 
+function isLocalHost(host) {
+  return /^localhost(?::\d+)?$/i.test(String(host || '').trim()) || /^127\.0\.0\.1(?::\d+)?$/i.test(String(host || '').trim());
+}
+
+function isLocalOrigin(origin) {
+  try {
+    const parsed = new URL(String(origin || '').trim());
+    return isLocalHost(parsed.host);
+  } catch (_) {
+    return false;
+  }
+}
+
+export function requestOrigin(req) {
+  const explicit = stripTrailingSlash(optionalEnv('APP_BASE_URL'));
   const host = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '').trim();
-  if (!host) return 'http://localhost:3000';
   const forwarded = String(req?.headers?.['x-forwarded-proto'] || '').trim().toLowerCase();
-  const isLocal = /^localhost(?::\d+)?$/.test(host) || /^127\.0\.0\.1(?::\d+)?$/.test(host);
-  const proto = forwarded === 'http' || (isLocal && !forwarded) ? 'http' : 'https';
+  const hasNonLocalHost = !!host && !isLocalHost(host);
+
+  if (explicit) {
+    if (!(isLocalOrigin(explicit) && hasNonLocalHost)) return explicit;
+  }
+
+  if (!host) return '';
+  const proto = forwarded === 'http' || (isLocalHost(host) && !forwarded) ? 'http' : 'https';
   return `${proto}://${host}`;
 }
