@@ -1,9 +1,9 @@
 import { json, readJsonBody, withCors } from './http.js';
-import { optionalEnv, requestOrigin } from './env.js';
+import { requestOrigin } from './env.js';
 import { getAllowedBrowserOrigins } from './origins.js';
-import { deleteTrialClaimById, createTrialClaim, getTrialClaimForIpTier, getTrialClaimForUserTier, getActiveEntitlement, getUserFromAccessToken } from './supabase.js';
+import { getActiveEntitlement, getUserFromAccessToken } from './supabase.js';
 import { getPlanConfig, stripeRequest } from './stripe.js';
-import { envBool, normalizeMissingPaymentMethodBehavior, resolveTrialGrant, rollbackTrialGrant, trialDaysForTier } from './billing-trials.js';
+import { blockingSubscriptionExists, envBool, normalizeMissingPaymentMethodBehavior, resolveTrialGrant, rollbackTrialGrant, trialDaysForTier } from './billing-trials.js';
 
 function getBearer(req) {
   const header = String(req?.headers?.authorization || req?.headers?.Authorization || '').trim();

@@ -365,7 +365,6 @@ window.rcBilling = (function () {
 
     const [config, snapshot] = await Promise.all([fetchPublicConfig(), fetchRuntimeSnapshot()]);
     if (token !== _pricingRenderToken) return;
-    clearPricingModalSettling();
     const entitlement = snapshot?.meta?.entitlement || null;
     const currentTier = normalizeRuntimeTier(entitlement?.tier || snapshot?.meta?.effectiveTier || snapshot?.policy?.tier || snapshot?.tier || 'basic');
     const plans = config?.stripe?.plans || {};
@@ -383,6 +382,7 @@ window.rcBilling = (function () {
       applyPlanButtonState(freeBtn, 'Continue for free', () => rememberPlanAndOpenSignup('free'));
       applyPlanButtonState(proBtn, trialCtaLabel('pro', 'Choose Pro', plans, proTrialEligibility, false), () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
       applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
+      clearPricingModalSettling();
       return;
     }
 
@@ -390,6 +390,7 @@ window.rcBilling = (function () {
     applyPlanButtonState(freeBtn, buttonModel.free.label, buttonModel.free.onclick, buttonModel.free.disabled);
     applyPlanButtonState(proBtn, buttonModel.pro.label, buttonModel.pro.onclick, buttonModel.pro.disabled);
     applyPlanButtonState(premiumBtn, buttonModel.premium.label, buttonModel.premium.onclick, buttonModel.premium.disabled);
+    clearPricingModalSettling();
   }
 
   function continueWithFree() {

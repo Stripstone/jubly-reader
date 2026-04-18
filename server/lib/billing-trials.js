@@ -22,6 +22,14 @@ export function normalizeMissingPaymentMethodBehavior() {
   return 'cancel';
 }
 
+export function blockingSubscriptionExists(entitlement) {
+  if (!entitlement || typeof entitlement !== 'object') return false;
+  const provider = String(entitlement.provider || '').trim().toLowerCase();
+  const status = String(entitlement.status || '').trim().toLowerCase();
+  if (provider !== 'stripe') return false;
+  return status === 'active' || status === 'trialing';
+}
+
 export function trialDaysForTier(tier) {
   const normalized = String(tier || '').trim().toLowerCase();
   if (normalized === 'premium') return envInt('PLAN_PREMIUM_TRIAL_DAYS', 0);
