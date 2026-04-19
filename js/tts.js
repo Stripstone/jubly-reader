@@ -141,6 +141,10 @@ const TTS_CLOUD_WINDOW = {
   // handoff in ttsSpeakQueue so the seek targets the intended block, not just the
   // currently-active one.
   pendingSkipBlock: -1,
+  // True while a forward skip has been captured during the block-window →
+  // full-page promotion seam. While set, extra skip clicks are coalesced into
+  // the same pending same-page intent instead of restarting chunk-A audio.
+  pendingSkipSettling: false,
 };
 
 function clearTtsCloudWindow() {
@@ -159,10 +163,69 @@ function clearTtsCloudWindow() {
   TTS_CLOUD_WINDOW.charsFullPage = 0;
   TTS_CLOUD_WINDOW.charsSessionTotal = 0;
   TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
+  TTS_CLOUD_WINDOW.pendingSkipSettling = false;
 }
 
 // Split page text into sentence strings preserving trailing whitespace.
 // Mirrors server-side splitIntoSentenceRanges but returns strings not ranges.
+function ttsWindowRecordForwardSkipIntent(reason, context = {}) {
+  if (!TTS_CLOUD_WINDOW.active) return false;
+  const delta = Number(context.delta || 0);
+  if (delta <= 0) return false;
+
+  const sourceBlock = Number.isFinite(Number(context.sourceBlock))
+    ? Number(context.sourceBlock) : Number(TTS_STATE.activeBlockIndex ?? 0);
+  const sourcePage = Number.isFinite(Number(context.sourcePage)) ? Number(context.sourcePage) : -1;
+  const key = context.key || TTS_STATE.activeKey || TTS_CLOUD_WINDOW.pageKey || '';
+  const minFullPageBlock = Math.max(0, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0));
+  const desiredBlock = Math.max(sourceBlock + 1, minFullPageBlock);
+  const existing = Number.isFinite(Number(TTS_CLOUD_WINDOW.pendingSkipBlock))
+    ? Number(TTS_CLOUD_WINDOW.pendingSkipBlock) : -1;
+  const wasPending = existing >= 0 || TTS_CLOUD_WINDOW.pendingSkipSettling === true;
+  const resolvedBlock = Math.max(existing, desiredBlock);
+
+  TTS_CLOUD_WINDOW.pendingSkipBlock = resolvedBlock;
+  TTS_CLOUD_WINDOW.pendingSkipSettling = true;
+
+  if (!TTS_CLOUD_WINDOW.promotionTriggered) {
+    try { _ttsWindowTriggerPromotion(reason || 'skip-forward-window-deferred'); } catch (_) {}
+  }
+
+  const event = wasPending ? 'window-skip-coalesced' : 'window-skip-deferred';
+  ttsDiagPush(event, {
+    reason,
+    key,
+    delta,
+    sourcePage,
+    sourceBlock,
+    desiredBlock,
+    pendingSkipBlock: TTS_CLOUD_WINDOW.pendingSkipBlock,
+    sessionId: TTS_STATE.activeSessionId,
+    mode: TTS_CLOUD_WINDOW.mode,
+    promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
+    cloudRestartInFlight: !!TTS_STATE.cloudRestartInFlight,
+  });
+
+  const skipResult = {
+    at: new Date().toISOString(),
+    type: 'block',
+    delta,
+    sourcePage,
+    sourceBlock,
+    resolvedPage: sourcePage,
+    resolvedBlock: TTS_CLOUD_WINDOW.pendingSkipBlock,
+    crossPage: false,
+    moved: false,
+    queued: true,
+    path: wasPending ? 'window-forward-skip-coalesced' : 'window-forward-skip-deferred',
+    clippingProtection: false,
+    sessionId: TTS_STATE.activeSessionId,
+  };
+  TTS_DEBUG.lastSkip = skipResult;
+  ttsDiagPush('skip-block', skipResult);
+  return true;
+}
+
 function ttsWindowSplitSentences(text) {
   const src = String(text || '');
   const regex = /[^.!?]*[.!?]+["']?\s*/g;
@@ -2270,6 +2333,7 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
   const _pendingSkip = (Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) && TTS_CLOUD_WINDOW.pendingSkipBlock >= 0)
     ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1;
   TTS_CLOUD_WINDOW.pendingSkipBlock = -1; // consume
+  TTS_CLOUD_WINDOW.pendingSkipSettling = false;
   const resolvedBlock = _pendingSkip >= 0 ? Math.max(currentBlock, _pendingSkip) : currentBlock;
   const targetBlock = Math.min(resolvedBlock, marks ? marks.length - 1 : 0);
   const seekTime = (marks && marks[targetBlock]) ? Math.max(0, Number(marks[targetBlock].time || 0) / 1000) : 0;
@@ -2324,6 +2388,9 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
           audioCurrentTimeMs: audio.currentTime * 1000,
           ttsCloudMode: 'full-page',
         });
+        if (_pendingSkip >= 0) {
+          ttsDiagPush('window-skip-applied-after-promotion', { sessionId, key, targetBlock, pendingSkipBlock: _pendingSkip });
+        }
       }).catch(err => {
         TTS_STATE.cloudRestartInFlight = false;
         ttsDiagPush('window-promotion-play-failed', { sessionId, key, error: String(err?.message || err) });
@@ -2556,6 +2623,7 @@ async function ttsSpeakQueue(key, parts) {
           const _handoffPendingSkip = (Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) && TTS_CLOUD_WINDOW.pendingSkipBlock >= 0)
             ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1;
           TTS_CLOUD_WINDOW.pendingSkipBlock = -1; // consume
+          TTS_CLOUD_WINDOW.pendingSkipSettling = false;
           const startBlock = Math.min(
             _handoffPendingSkip >= 0 ? Math.max(chunkAEnd, _handoffPendingSkip) : chunkAEnd,
             fullMarks ? fullMarks.length - 1 : 0
@@ -2571,6 +2639,9 @@ async function ttsSpeakQueue(key, parts) {
             charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
             ttsCloudMode: 'full-page',
           });
+          if (_handoffPendingSkip >= 0) {
+            ttsDiagPush('window-skip-applied-after-promotion', { sessionId, key, targetBlock: startBlock, pendingSkipBlock: _handoffPendingSkip, handoff: true });
+          }
 
           if (TTS_STATE.activeSessionId !== sessionId) return;
 
@@ -2847,24 +2918,24 @@ function ttsJumpSentence(delta) {
   // ── Cloud path ───────────────────────────────────────────────────────────────
   const audio = TTS_STATE.audio;
 
+  // Window seam guard: while a cloud seek or block-window → full-page promotion
+  // is unsettled, forward skip must not re-enter chunk-A seek/restart logic.
+  // Capture one same-page intent and coalesce rapid extra clicks until full-page
+  // marks/audio are ready.
+  if (audio && delta > 0 && TTS_CLOUD_WINDOW.active && (
+    TTS_STATE.cloudRestartInFlight ||
+    TTS_CLOUD_WINDOW.pendingSkipSettling ||
+    (TTS_CLOUD_WINDOW.promotionTriggered && !TTS_CLOUD_WINDOW.promotionApplied && TTS_CLOUD_WINDOW.mode !== 'promoted')
+  )) {
+    return ttsWindowRecordForwardSkipIntent('skip-forward-window-settling', { delta, key, sourcePage, sourceBlock });
+  }
+
   // ── Window mode: forward skip with no marks ───────────────────────────────
   // Chunk A has ended and the full-page handoff is in progress — marks are
   // temporarily null while the promotion fetch or Case B await is in flight.
   // Record the desired advance block so the handoff/apply path picks it up.
   if (audio && (!marks || blockCount === 0) && TTS_CLOUD_WINDOW.active && delta > 0) {
-    const desiredBlock = sourceBlock + 1;
-    // Keep the highest requested block across multiple rapid skips.
-    TTS_CLOUD_WINDOW.pendingSkipBlock = Math.max(
-      Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1,
-      desiredBlock
-    );
-    if (!TTS_CLOUD_WINDOW.promotionTriggered) {
-      try { _ttsWindowTriggerPromotion('skip-forward-no-marks'); } catch (_) {}
-    }
-    const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: desiredBlock, crossPage: false, moved: true, path: 'window-forward-skip-no-marks', clippingProtection: false, sessionId: TTS_STATE.activeSessionId };
-    TTS_DEBUG.lastSkip = skipResult;
-    ttsDiagPush('skip-block', skipResult);
-    return true;
+    return ttsWindowRecordForwardSkipIntent('skip-forward-no-marks', { delta, key, sourcePage, sourceBlock });
   }
 
   if (audio && marks && blockCount > 0) {
@@ -2874,23 +2945,11 @@ function ttsJumpSentence(delta) {
 
     if (target >= blockCount) {
       if (TTS_CLOUD_WINDOW.active) {
-        // Forward skip past chunk-A boundary is a high-engagement signal.
-        // Record the desired full-page block and trigger promotion so the
-        // seek resolves correctly once full-page marks are available.
-        // _ttsWindowApplyPromotion and the Case B handoff both honour
-        // pendingSkipBlock and will seek to max(currentBlock, pendingSkipBlock).
-        const desiredBlock = sourceBlock + 1;
-        TTS_CLOUD_WINDOW.pendingSkipBlock = Math.max(
-          Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1,
-          desiredBlock
-        );
-        if (!TTS_CLOUD_WINDOW.promotionTriggered) {
-          try { _ttsWindowTriggerPromotion('skip-forward-engagement'); } catch (_) {}
-        }
-        const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: desiredBlock, crossPage: false, moved: true, path: 'window-forward-skip-pending', clippingProtection: false, sessionId: TTS_STATE.activeSessionId };
-        TTS_DEBUG.lastSkip = skipResult;
-        ttsDiagPush('skip-block', skipResult);
-        return true;
+        // Forward skip past the chunk-A boundary is a high-engagement signal,
+        // but full-page marks may not be bound yet. Serialize it as one
+        // pending same-page intent so rapid clicks cannot repeatedly restart
+        // chunk-A audio or fall through to cross-page navigation.
+        return ttsWindowRecordForwardSkipIntent('skip-forward-engagement', { delta, key, sourcePage, sourceBlock });
       }
       // Not in window mode — cross-page navigation disabled.
       /* disabled cross-page path — kept for reference:
