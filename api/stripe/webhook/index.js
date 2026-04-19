@@ -87,6 +87,7 @@ export default async function handler(req, res) {
     }
     return json(res, 200, { received: true });
   } catch (error) {
+    console.error("[stripe-webhook]", error);
     return json(res, 500, { error: error.message || 'Webhook processing failed.' });
   }
 }

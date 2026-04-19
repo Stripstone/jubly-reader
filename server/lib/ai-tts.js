@@ -353,6 +353,9 @@ export default async function handler(req, res) {
     const nocache = body?.nocache === true || String(body?.nocache ?? "").trim() === "1";
     const speechMarks = String(body?.speechMarks ?? "").trim().toLowerCase();
     const wantSentenceMarks = speechMarks === "sentence" || speechMarks === "1" || body?.speechMarks === true;
+    const requestMode = ["block-window", "full-page"].includes(String(body?.requestMode ?? "").trim())
+      ? String(body.requestMode).trim()
+      : "full-page";
 
     if (!text) return json(res, 400, { error: "Missing text" });
     if (text.length > 8000) return json(res, 400, { error: "Text too long", detail: "Max 8000 characters." });
@@ -481,7 +484,16 @@ export default async function handler(req, res) {
       marksProvenance,
     });
 
-    const payload = { url, cacheHit, provider: policy.provider, capability };
+    const payload = {
+      url,
+      cacheHit,
+      provider: policy.provider,
+      capability,
+      cloudCharsRequested: text.length,
+      cloudRequestMode: requestMode,
+      voiceId: policy.voiceId,
+      route: policy.provider,
+    };
     if (wantSentenceMarks && Array.isArray(sentenceMarks)) payload.sentenceMarks = sentenceMarks;
     if (debug) {
       payload.debug = {

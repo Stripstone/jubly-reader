@@ -79,6 +79,7 @@ export default async function handler(req, res) {
     const session = await stripeRequest('/checkout/sessions', { method: 'POST', body: form });
     return json(res, 200, { ok: true, url: session?.url || '', id: session?.id || '' });
   } catch (error) {
+    console.error("[billing-checkout]", error);
     if (trialGrant?.granted && trialGrant?.claim?.id) {
       await rollbackTrialGrant(trialGrant.claim.id);
     }

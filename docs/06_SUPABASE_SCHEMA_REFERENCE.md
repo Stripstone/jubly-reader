@@ -20,6 +20,12 @@ A schema that appears convenient does not legalize wrong ownership in shell, run
 - Content fingerprint is never owned-book identity.
 - Append-only session growth is not the canonical launch persistence model.
 
+## Schema safeguards in place
+- `user_settings.tts_voice_id` is validated and normalized through `normalizeVoiceId()` in both `server/lib/app-durable-sync.js` and `server/lib/app-dev-tools.js` before any write to Supabase. Malformed, empty, or overlong values are coerced to `null`.
+- Client hydration in `js/sync.js` validates `tts_voice_id` against resolved runtime policy before applying it to `window.__rcSessionVoiceSelection`. Cloud-type IDs are rejected when the account does not have `cloudVoiceAccess`.
+- Client write path in `js/sync.js` guards against persisting a tier-incompatible cloud voice ID when the account policy does not permit cloud voices.
+- Session voice selection is cleared on signout in `js/sync.js` to prevent account-to-account voice state leakage.
+
 ## Launch table set
 - `users`
 - `user_settings`
@@ -89,9 +95,9 @@ Durable user preferences that are intentionally synced.
 
 ### Dropped from the canonical launch schema
 Do not recreate these in `user_settings`:
-- `appearance_mode`
-- `tts_speed`
-- `use_source_page_numbers`
+- `appearance_mode` — **dropped from Supabase table 2026-04-19**
+- `tts_speed` — **dropped from Supabase table 2026-04-19**
+- `use_source_page_numbers` — **dropped from Supabase table 2026-04-19**
 - `explorer_accent_swatch`
 - `explorer_background_mode`
 - `particle_preset_id`

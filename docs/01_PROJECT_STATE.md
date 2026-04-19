@@ -108,12 +108,12 @@ Canonical pre-launch durable direction:
 Runtime owns theme truth and appearance truth.
 
 Persistence intent in the current authority stack:
-- `appearance_mode` = client-cache only
+- `appearance_mode` = client-cache only — column dropped from `user_settings` 2026-04-19
 - dismissed local UI affordances = client-cache only when appropriate
 - diagnostics preferences = not durable product truth
 - devtools-only toggles = not durable product truth
-- `tts_speed` = not part of the durable settings contract
-- `use_source_page_numbers` = retired legacy gate, not part of the durable settings contract
+- `tts_speed` = not part of the durable settings contract — column dropped from `user_settings` 2026-04-19
+- `use_source_page_numbers` = retired legacy gate, not part of the durable settings contract — column dropped from `user_settings` 2026-04-19
 
 Page-number behavior intent:
 - displayed page numbers preserve source or actual document numbering when that metadata exists

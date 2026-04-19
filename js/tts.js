@@ -90,6 +90,87 @@ const TTS_DEBUG = {
   lastSkip: null,
 };
 
+// ─── Cloud synthesis window state ─────────────────────────────────────────────
+//
+// Tracks the block-window → full-page promotion lifecycle for a single session.
+// Cleared on every new cloud session start and on ttsStop().
+//
+//   mode:
+//     'idle'         — no active window session
+//     'block-window' — chunk A (sentences 0+1) is synthesising or playing
+//     'promoting'    — full-page fetch is in-flight; chunk A still playing
+//     'promoted'     — full-page result is available; switch has been applied
+//       or is pending the chunk-A onended handoff
+//
+//   promotionApplied — true when _ttsWindowApplyPromotion performed the mid-
+//       playback src-swap; tells the post-loop code the full page already played.
+
+// Engagement gate constants.
+//
+//   TTS_WINDOW_ENGAGEMENT_THRESHOLD_S — minimum seconds of real audio playback
+//     (audio.currentTime on the chunk-A element) before full-page synthesis is
+//     allowed. Uses audio.currentTime so countdown, loading, and pause time are
+//     excluded automatically: currentTime only advances during active playback.
+//
+//   TTS_WINDOW_SMALL_PAGE_CHARS — full-page character threshold below which the
+//     entire page is short enough that window mode adds no meaningful savings and
+//     full-page synthesis is acceptable immediately. This guard is on the FULL
+//     PAGE length, not on chunk A. A page with a short opening sentence but a
+//     long body still uses block-window; only a genuinely short full page skips it.
+
+const TTS_WINDOW_ENGAGEMENT_THRESHOLD_S = 3;
+const TTS_WINDOW_SMALL_PAGE_CHARS = 200;
+
+const TTS_CLOUD_WINDOW = {
+  active: false,
+  mode: 'idle',
+  sessionId: 0,
+  pageKey: null,
+  pageText: '',
+  chunkASentenceCount: 0,
+  promotionTriggered: false,
+  promotionApplied: false,
+  promotionFetchPromise: null,
+  promotionResult: null,
+  engagementSignal: null,
+  charsPhase1: 0,
+  charsFullPage: 0,
+  charsSessionTotal: 0,
+};
+
+function clearTtsCloudWindow() {
+  TTS_CLOUD_WINDOW.active = false;
+  TTS_CLOUD_WINDOW.mode = 'idle';
+  TTS_CLOUD_WINDOW.sessionId = 0;
+  TTS_CLOUD_WINDOW.pageKey = null;
+  TTS_CLOUD_WINDOW.pageText = '';
+  TTS_CLOUD_WINDOW.chunkASentenceCount = 0;
+  TTS_CLOUD_WINDOW.promotionTriggered = false;
+  TTS_CLOUD_WINDOW.promotionApplied = false;
+  TTS_CLOUD_WINDOW.promotionFetchPromise = null;
+  TTS_CLOUD_WINDOW.promotionResult = null;
+  TTS_CLOUD_WINDOW.engagementSignal = null;
+  TTS_CLOUD_WINDOW.charsPhase1 = 0;
+  TTS_CLOUD_WINDOW.charsFullPage = 0;
+  TTS_CLOUD_WINDOW.charsSessionTotal = 0;
+}
+
+// Split page text into sentence strings preserving trailing whitespace.
+// Mirrors server-side splitIntoSentenceRanges but returns strings not ranges.
+function ttsWindowSplitSentences(text) {
+  const src = String(text || '');
+  const regex = /[^.!?]*[.!?]+["']?\s*/g;
+  const results = [];
+  let lastEnd = 0;
+  let match;
+  while ((match = regex.exec(src)) !== null) {
+    results.push(src.slice(match.index, match.index + match[0].length));
+    lastEnd = match.index + match[0].length;
+  }
+  if (lastEnd < src.length) results.push(src.slice(lastEnd));
+  return results.filter(s => s.trim().length > 0);
+}
+
 function ttsDiagPush(event, data = {}) {
   const entry = { seq: ++TTS_DEBUG.seq, at: new Date().toISOString(), event, data };
   TTS_DEBUG.lastAction = entry;
@@ -817,6 +898,26 @@ function ttsStartHighlightLoop(audio) {
       if (idx >= 0) TTS_STATE.activeBlockIndex = idx;
       ttsHighlightBlock(idx);
       lastIdx = idx;
+      // Window promotion gate — checked on every block transition once block 1
+      // is reached. All three conditions must hold simultaneously:
+      //
+      //   1. idx >= 1  — user has progressed past the first block
+      //   2. audio.currentTime >= threshold  — at least 3 s of real audio played;
+      //        currentTime only advances during active playback so countdown,
+      //        loading delays, and paused time are excluded automatically
+      //   3. !audio.paused  — playback is live, not paused
+      //
+      // Pause during block 1 never satisfies (3) so it never promotes.
+      // A pause on block 1+ after threshold is already met is fine: the promotion
+      // fetch launched before the pause and the result will be waiting.
+      if (idx >= 1 && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionTriggered) {
+        const _wa = TTS_STATE.audio;
+        const _playing = !!(_wa && !_wa.paused && !_wa.ended);
+        const _elapsed = _wa ? Number(_wa.currentTime || 0) : 0;
+        if (_playing && _elapsed >= TTS_WINDOW_ENGAGEMENT_THRESHOLD_S) {
+          try { _ttsWindowTriggerPromotion('engagement-threshold-met'); } catch (_) {}
+        }
+      }
     }
     TTS_STATE.highlightRAF = requestAnimationFrame(tick);
   };
@@ -1647,6 +1748,7 @@ function ttsStop() {
   clearPendingCloudSeek();
   clearCloudRestartTransition();
   clearTtsBackendCapabilityState();
+  clearTtsCloudWindow();
 
   ttsDiagPush('stop', {
     outcomeClass: 'full-stop',
@@ -2002,6 +2104,7 @@ async function cloudFetchUrl(text, opts = {}) {
   const selectedVoicePref = getSelectedVoicePreference();
   if (selectedVoicePref.explicitCloud && selectedVoicePref.requestedCloudVoiceId) payload.voiceId = selectedVoicePref.requestedCloudVoiceId;
   if (opts && opts.sentenceMarks) payload.speechMarks = 'sentence';
+  if (opts && opts.requestMode) payload.requestMode = String(opts.requestMode);
   TTS_DEBUG.lastCloudRequest = { chars: String(text || '').length, sentenceMarks: !!(opts && opts.sentenceMarks), selectedVoice: selectedVoicePref.stored, selectedVoiceType: selectedVoicePref.type, requestedVoiceId: selectedVoicePref.requestedCloudVoiceId, variant: TTS_STATE.voiceVariant || 'female' };
   try { const qs = new URLSearchParams(window.location.search); if (qs.get('debug') === '1') payload.debug = '1'; } catch (_) {}
   try { if (String(TTS_STATE.voiceVariant || '').toLowerCase() === 'male') payload.voiceVariant = 'male'; } catch (_) {}
@@ -2045,6 +2148,179 @@ async function cloudFetchUrl(text, opts = {}) {
 
 function clearTtsStartupBanner() {
   try { window.rcInteraction && window.rcInteraction.clear('tts:start'); } catch (_) {}
+}
+
+async function cloudFetchWithRetry(text, opts, { maxAttempts = 3, sessionId, getSessionId } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      await new Promise(resolve => setTimeout(resolve, attempt * 500));
+      if (typeof getSessionId === 'function' && getSessionId() !== sessionId) return null;
+    }
+    try {
+      return await cloudFetchUrl(text, opts);
+    } catch (err) {
+      lastErr = err;
+      if (!isRecoverablePlaybackFailure(err)) throw err;
+      ttsDiagPush('cloud-fetch-retry', { attempt: attempt + 1, maxAttempts, error: String(err?.message || err) });
+    }
+  }
+  throw lastErr;
+}
+
+// ─── Cloud synthesis window — promotion functions ─────────────────────────────
+//
+// _ttsWindowTriggerPromotion: called from the highlight loop when activeBlockIndex
+//   reaches 1. Fires a non-blocking full-page cloud fetch and wires the result
+//   handler that immediately switches the audio src once the data arrives.
+//
+// _ttsWindowApplyPromotion: called from the .then() of the promotion fetch while
+//   chunk A is still playing. Swaps audio.src to the full-page URL, seeks to the
+//   start of the currently-active block, and restarts the highlight loop so skip
+//   and pause immediately see full-page marks.
+
+function _ttsWindowTriggerPromotion(signal) {
+  if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.promotionTriggered) return;
+  const { sessionId, pageKey: key, pageText } = TTS_CLOUD_WINDOW;
+  if (TTS_STATE.activeSessionId !== sessionId) return;
+
+  TTS_CLOUD_WINDOW.promotionTriggered = true;
+  TTS_CLOUD_WINDOW.mode = 'promoting';
+  TTS_CLOUD_WINDOW.engagementSignal = signal;
+
+  ttsDiagPush('window-promotion-trigger', {
+    signal,
+    sessionId,
+    key,
+    charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
+    charsFullPage: TTS_CLOUD_WINDOW.charsFullPage,
+    activeBlockIndex: TTS_STATE.activeBlockIndex,
+    ttsCloudMode: 'block-window',
+  });
+
+  const promise = cloudFetchWithRetry(
+    pageText,
+    { sentenceMarks: true, requestMode: 'full-page' },
+    { maxAttempts: 3, sessionId, getSessionId: () => TTS_STATE.activeSessionId }
+  );
+  TTS_CLOUD_WINDOW.promotionFetchPromise = promise;
+
+  promise.then(result => {
+    if (!result || TTS_STATE.activeSessionId !== sessionId || !TTS_CLOUD_WINDOW.active) return;
+    TTS_CLOUD_WINDOW.promotionResult = result;
+    TTS_CLOUD_WINDOW.mode = 'promoted';
+    TTS_CLOUD_WINDOW.charsSessionTotal = TTS_CLOUD_WINDOW.charsPhase1 + pageText.length;
+
+    ttsDiagPush('window-promotion-ready', {
+      sessionId,
+      key,
+      cacheHit: result.capability?.cache?.audio?.status === 'hit',
+      charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
+      charsFullPage: pageText.length,
+      charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
+      ttsCloudMode: 'full-page',
+      engagementSignal: signal,
+    });
+
+    // If chunk A is still playing: switch immediately so skip/pause see full marks.
+    // If chunk A has already ended: _ttsWindowApplyPromotion is a no-op (audio.ended);
+    // the post-loop handoff path in ttsSpeakQueue will handle it.
+    try { _ttsWindowApplyPromotion(sessionId, key, result); } catch (_) {}
+  }).catch(err => {
+    ttsDiagPush('window-promotion-failed', {
+      sessionId,
+      key,
+      error: String(err?.message || err),
+    });
+    // Promotion failed. chunk A will still play to its natural end.
+    // The post-loop handoff will re-await the promise and re-throw, which
+    // propagates into the outer catch of ttsSpeakQueue.
+  });
+}
+
+function _ttsWindowApplyPromotion(sessionId, key, result) {
+  if (TTS_STATE.activeSessionId !== sessionId) return;
+  if (String(TTS_STATE.activeKey || '') !== String(key || '')) return;
+  const audio = TTS_STATE.audio;
+  // Guard: chunk A already ended — let the post-loop handoff in ttsSpeakQueue handle it.
+  if (!audio || audio.ended) return;
+
+  const currentBlock = Math.max(0, Number(TTS_STATE.activeBlockIndex ?? 0));
+
+  // Apply full-page marks so highlight spans cover the whole page. This calls
+  // ttsClearSentenceHighlight() internally, which cancels the old RAF — we restart
+  // it below after the src swap settles.
+  if (result.sentenceMarks && result.sentenceMarks.length) {
+    ttsMaybePrepareSentenceHighlight(key, TTS_CLOUD_WINDOW.pageText, result.sentenceMarks);
+  }
+  applyCloudCapabilityForRuntime({ key, sessionId, capability: result.capability, sentenceMarks: result.sentenceMarks });
+
+  // Seek target: start of the current block in the full-page audio.
+  // Full-page and chunk-A timings differ (different synthesis context), so we
+  // seek to fullPageMarks[currentBlock].time rather than using audio.currentTime.
+  const marks = TTS_STATE.highlightMarks;
+  const targetBlock = Math.min(currentBlock, marks ? marks.length - 1 : 0);
+  const seekTime = (marks && marks[targetBlock]) ? Math.max(0, Number(marks[targetBlock].time || 0) / 1000) : 0;
+
+  const requestId = ++TTS_STATE.cloudRestartRequestId;
+  TTS_STATE.cloudRestartInFlight = true;
+  TTS_STATE.activeBlockIndex = targetBlock;
+  ttsHighlightBlock(targetBlock);
+
+  if (TTS_STATE.highlightRAF) {
+    try { cancelAnimationFrame(TTS_STATE.highlightRAF); } catch (_) {}
+    TTS_STATE.highlightRAF = null;
+  }
+  clearPendingCloudSeek();
+
+  ttsDiagPush('window-promotion-apply', {
+    sessionId, key, targetBlock, seekTime,
+    charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
+    charsFullPage: TTS_CLOUD_WINDOW.charsFullPage,
+    charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
+    ttsCloudMode: 'full-page',
+  });
+
+  try {
+    audio.pause();
+    if (TTS_STATE.cloudRestartRequestId !== requestId || TTS_STATE.activeSessionId !== sessionId) return;
+
+    audio.src = result.url;
+
+    // Use addEventListener (not oncanplay=) to avoid clobbering the applyPending
+    // handler wired in ttsSpeakQueue. Both can fire; applyPending is a no-op when
+    // no pending seek exists.
+    audio.addEventListener('canplay', function onReady() {
+      audio.removeEventListener('canplay', onReady);
+      if (TTS_STATE.cloudRestartRequestId !== requestId || TTS_STATE.activeSessionId !== sessionId) {
+        TTS_STATE.cloudRestartInFlight = false;
+        return;
+      }
+      audio.currentTime = seekTime;
+      try { audio.defaultPlaybackRate = Number(TTS_STATE.rate || 1); audio.playbackRate = Number(TTS_STATE.rate || 1); } catch (_) {}
+      audio.play().then(() => {
+        if (TTS_STATE.cloudRestartRequestId !== requestId || TTS_STATE.activeSessionId !== sessionId) {
+          TTS_STATE.cloudRestartInFlight = false;
+          return;
+        }
+        TTS_STATE.cloudRestartInFlight = false;
+        TTS_CLOUD_WINDOW.promotionApplied = true;
+        ttsStartHighlightLoop(audio);
+        ttsDiagPush('window-promotion-applied', {
+          sessionId, key, targetBlock, seekTime,
+          audioCurrentTimeMs: audio.currentTime * 1000,
+          ttsCloudMode: 'full-page',
+        });
+      }).catch(err => {
+        TTS_STATE.cloudRestartInFlight = false;
+        ttsDiagPush('window-promotion-play-failed', { sessionId, key, error: String(err?.message || err) });
+      });
+    }, { once: true });
+
+  } catch (err) {
+    TTS_STATE.cloudRestartInFlight = false;
+    ttsDiagPush('window-promotion-apply-failed', { sessionId, key, error: String(err?.message || err) });
+  }
 }
 
 async function ttsSpeakQueue(key, parts) {
@@ -2095,6 +2371,7 @@ async function ttsSpeakQueue(key, parts) {
 
   const sessionId = ++TTS_STATE.activeSessionId;
   clearTtsBackendCapabilityState();
+  clearTtsCloudWindow();
   clearPendingCloudSeek();
   clearCloudRestartTransition();
   TTS_STATE.activeKey = key;
@@ -2105,32 +2382,93 @@ async function ttsSpeakQueue(key, parts) {
   ttsSetButtonActive(key, true);
   ttsSetHintButton(key, true);
 
+  // ── Block-window synthesis setup ──────────────────────────────────────────
+  // For full-page reads (queue.length === 1) where sentence marks are used and
+  // the page contains more than 2 sentences: synthesise only the first 2
+  // sentences (chunk A) initially. The highlight loop triggers a non-blocking
+  // full-page fetch when block 1 is reached. See _ttsWindowTriggerPromotion.
+  const pageText = queue[0];
+  const wantMarksForPage = optsForKeySentenceMarks(key);
+  let useWindowMode = false;
+  let chunkAText = pageText;
+
+  if (wantMarksForPage && queue.length === 1) {
+    const sentences = ttsWindowSplitSentences(pageText);
+    // Use window mode when: page has 3+ sentences AND the full page is long
+    // enough for windowing to save meaningful Azure chars. The length guard is
+    // on the FULL PAGE, not on chunk A — a page with a short opening sentence
+    // but a long body stays in block-window and lets the 3 s engagement gate
+    // decide promotion. Only a genuinely short full page goes direct.
+    if (sentences.length > 2 && pageText.length >= TTS_WINDOW_SMALL_PAGE_CHARS) {
+      useWindowMode = true;
+      chunkAText = sentences.slice(0, 2).join('');
+      TTS_CLOUD_WINDOW.active = true;
+      TTS_CLOUD_WINDOW.mode = 'block-window';
+      TTS_CLOUD_WINDOW.sessionId = sessionId;
+      TTS_CLOUD_WINDOW.pageKey = key;
+      TTS_CLOUD_WINDOW.pageText = pageText;
+      TTS_CLOUD_WINDOW.chunkASentenceCount = 2;
+      TTS_CLOUD_WINDOW.charsPhase1 = chunkAText.length;
+      TTS_CLOUD_WINDOW.charsFullPage = pageText.length;
+      TTS_CLOUD_WINDOW.charsSessionTotal = chunkAText.length;
+      ttsDiagPush('window-init', {
+        sessionId, key,
+        sentences: sentences.length,
+        charsPhase1: chunkAText.length,
+        charsFullPage: pageText.length,
+        ttsCloudMode: 'block-window',
+      });
+    } else if (sentences.length > 2) {
+      // Full page is short (< TTS_WINDOW_SMALL_PAGE_CHARS): window mode would
+      // save negligible chars. Synthesise full page directly.
+      ttsDiagPush('window-skipped-short-page', {
+        sessionId, key,
+        sentences: sentences.length,
+        pageLength: pageText.length,
+        smallPageThreshold: TTS_WINDOW_SMALL_PAGE_CHARS,
+        ttsCloudMode: 'full-page',
+      });
+    }
+  }
+
   try {
-    for (let i = 0; i < queue.length; i++) {
-      const wantMarks = (i === 0 && optsForKeySentenceMarks(key));
-      // Pre-flight usage check before the first cloud TTS request.
-      // Pass 3: server verdict gates the action; client counter is display-only.
-      if (i === 0 && optsForKeySentenceMarks(key)) {
-        if (window.rcUsage && typeof window.rcUsage.check === 'function') {
-          try {
-            const verdict = await window.rcUsage.check('tts');
-            if (!verdict.allowed) {
-              try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
-              ttsSetButtonActive(key, false);
-              ttsSetHintButton(key, false);
-              return;
-            }
-          } catch (_) {} // server unreachable: proceed (safe degraded behavior)
-        }
-        try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
+    // Pre-flight usage check (runs once before any cloud request).
+    // Pass 3: server verdict gates the action; client counter is display-only.
+    if (wantMarksForPage) {
+      if (window.rcUsage && typeof window.rcUsage.check === 'function') {
+        try {
+          const verdict = await window.rcUsage.check('tts');
+          if (!verdict.allowed) {
+            try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
+            ttsSetButtonActive(key, false);
+            ttsSetHintButton(key, false);
+            clearTtsCloudWindow();
+            return;
+          }
+        } catch (_) {} // server unreachable: proceed (safe degraded behavior)
       }
-      const tts = await cloudFetchUrl(queue[i], { sentenceMarks: wantMarks });
-      if (TTS_STATE.activeSessionId !== sessionId) return;
+      try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
+    }
+
+    for (let i = 0; i < queue.length; i++) {
+      const isFirstItem = (i === 0);
+      const wantMarks = isFirstItem && wantMarksForPage;
+      // Window mode: synthesise chunk A (sentences 0+1) for the first request.
+      const textToSynth = (isFirstItem && useWindowMode) ? chunkAText : queue[i];
+      const requestMode = (isFirstItem && useWindowMode) ? 'block-window' : 'full-page';
+
+      const tts = await cloudFetchWithRetry(textToSynth, { sentenceMarks: wantMarks, requestMode }, { maxAttempts: 3, sessionId, getSessionId: () => TTS_STATE.activeSessionId });
+      if (!tts || TTS_STATE.activeSessionId !== sessionId) return;
       applyCloudCapabilityForRuntime({ key, sessionId, capability: tts.capability, sentenceMarks: tts.sentenceMarks });
       const url = tts.url;
       if (wantMarks) {
+        // For window mode: pass the full pageText as rawText so sentence spans are
+        // placed at their correct positions within the full page HTML. Chunk A's
+        // byte offsets are relative to the start of the page text (sentences 0+1
+        // occupy the same byte positions in both chunkAText and pageText).
+        const highlightText = (isFirstItem && useWindowMode) ? pageText : queue[i];
         if (tts.sentenceMarks && tts.sentenceMarks.length) {
-          ttsMaybePrepareSentenceHighlight(key, queue[i], tts.sentenceMarks);
+          ttsMaybePrepareSentenceHighlight(key, highlightText, tts.sentenceMarks);
         } else {
           ttsPrepareEstimatedHighlight(key, queue[i], TTS_AUDIO_ELEMENT);
         }
@@ -2157,6 +2495,85 @@ async function ttsSpeakQueue(key, parts) {
       });
 
       if (TTS_STATE.activeSessionId !== sessionId) return;
+
+      // ── Window post-chunk-A handoff ──────────────────────────────────────
+      // After chunk A's onended fires one of two situations applies:
+      //
+      //   A) _ttsWindowApplyPromotion swapped audio.src mid-playback:
+      //      The onended above actually fired for the FULL PAGE audio — the
+      //      whole page is done. promotionApplied === true signals this.
+      //
+      //   B) Chunk A ended before the full-page fetch resolved:
+      //      Await the in-flight promise, apply marks, seek past sentences 0+1,
+      //      and play the full-page audio to completion.
+      if (isFirstItem && useWindowMode) {
+        if (TTS_CLOUD_WINDOW.promotionApplied) {
+          // Case A: full page already played via mid-playback switch. Done.
+          ttsDiagPush('window-complete-via-promotion', {
+            sessionId, key,
+            charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
+            charsFullPage: TTS_CLOUD_WINDOW.charsFullPage,
+            charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
+            ttsCloudMode: 'full-page',
+          });
+          clearTtsCloudWindow();
+        } else {
+          // Case B: chunk A ended; promotion was triggered but not yet applied.
+          // If promotion was never triggered (edge case: page > 2 sentences but
+          // block 1 was never reached — e.g. user stopped before first block
+          // transition), trigger now so we get the full page.
+          if (!TTS_CLOUD_WINDOW.promotionTriggered) {
+            _ttsWindowTriggerPromotion('chunk-a-ended-no-engagement');
+          }
+
+          const fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
+          if (!fullResult || TTS_STATE.activeSessionId !== sessionId) return;
+
+          applyCloudCapabilityForRuntime({ key, sessionId, capability: fullResult.capability, sentenceMarks: fullResult.sentenceMarks });
+          if (fullResult.sentenceMarks && fullResult.sentenceMarks.length) {
+            ttsMaybePrepareSentenceHighlight(key, pageText, fullResult.sentenceMarks);
+          }
+
+          // Seek into the full-page audio past chunk A's sentences.
+          const fullMarks = TTS_STATE.highlightMarks;
+          const startBlock = Math.min(TTS_CLOUD_WINDOW.chunkASentenceCount, fullMarks ? fullMarks.length - 1 : 0);
+          queuePendingCloudSeek(key, sessionId, startBlock, 0);
+
+          ttsDiagPush('window-handoff-after-chunk-a', {
+            sessionId, key, startBlock,
+            seekTimeMs: (fullMarks && fullMarks[startBlock]) ? fullMarks[startBlock].time : null,
+            charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
+            charsFullPage: pageText.length,
+            charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
+            ttsCloudMode: 'full-page',
+          });
+
+          if (TTS_STATE.activeSessionId !== sessionId) return;
+
+          // Play full-page audio from startBlock onward.
+          await new Promise((resolve, reject) => {
+            const audio = TTS_AUDIO_ELEMENT;
+            try { audio.loop = false; audio.pause(); } catch (_) {}
+            audio.src = fullResult.url;
+            TTS_STATE.audio = audio;
+            try { audio.volume = Math.max(0, Math.min(1, Number(TTS_STATE.volume ?? 1))); } catch (_) {}
+            try { audio.defaultPlaybackRate = Number(TTS_STATE.rate || 1); audio.playbackRate = Number(TTS_STATE.rate || 1); } catch (_) {}
+            ttsStartHighlightLoop(audio);
+            const applyPending = (reason) => { try { applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason); } catch (_) {} };
+            try { audio.onloadedmetadata = () => applyPending('loadedmetadata'); } catch (_) {}
+            try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
+            audio.onended = () => { ttsClearSentenceHighlight(); resolve(); };
+            audio.onerror = () => reject(new Error('Audio playback failed'));
+            audio.play().then(() => {
+              clearTtsStartupBanner();
+              applyPending('play-start');
+            }).catch(reject);
+          });
+
+          if (TTS_STATE.activeSessionId !== sessionId) return;
+          clearTtsCloudWindow();
+        }
+      }
     }
 
     TTS_STATE.activeKey = null;
@@ -2172,6 +2589,7 @@ async function ttsSpeakQueue(key, parts) {
 
   } catch (err) {
     clearTtsStartupBanner();
+    clearTtsCloudWindow();
     if (TTS_STATE.activeSessionId !== sessionId) return;
     if (err && (err.name === 'AbortError' || String(err).includes('aborted'))) return;
     const ri = getPreferredTtsRouteInfo();
