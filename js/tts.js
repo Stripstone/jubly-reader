@@ -307,6 +307,7 @@ const TTS_PREVIEW_STATE = {
   source: null,
   abort: null,
   browserUtterance: null,
+  ignoreBrowserBusyUntil: 0,
 };
 
 function getVoicePreviewStatus() {
@@ -344,7 +345,9 @@ function isReadingAudioSystemBusyForPreview() {
   try {
     if (browserTtsSupported()) {
       const synth = window.speechSynthesis;
-      if (synth.speaking || synth.pending || synth.paused) return true;
+      const previewOwnsBrowser = TTS_PREVIEW_STATE.active && TTS_PREVIEW_STATE.mode === 'browser' && !!TTS_PREVIEW_STATE.browserUtterance;
+      const recentPreviewCancel = Date.now() <= Number(TTS_PREVIEW_STATE.ignoreBrowserBusyUntil || 0);
+      if (!previewOwnsBrowser && !recentPreviewCancel && (synth.speaking || synth.pending || synth.paused)) return true;
     }
   } catch (_) {}
 
@@ -372,9 +375,14 @@ function ttsStopVoicePreview(reason = 'stop-preview') {
   const mode = TTS_PREVIEW_STATE.mode || null;
   const canCancelPreviewBrowser = mode === 'browser' && !!TTS_PREVIEW_STATE.browserUtterance && !isReadingAudioSystemBusyForPreview();
   clearVoicePreviewState();
-  // Browser preview no longer uses speechSynthesis, so cancel() is never
-  // called from the preview stop path. canCancelPreviewBrowser is kept for
-  // safety but will always be false while browser preview is disabled.
+  // speechSynthesis.cancel() is global. Use it only when this preview owns the
+  // browser utterance and reading is idle; never use it as a reading stop path.
+  if (canCancelPreviewBrowser && browserTtsSupported()) {
+    try {
+      TTS_PREVIEW_STATE.ignoreBrowserBusyUntil = Date.now() + 350;
+      window.speechSynthesis.cancel();
+    } catch (_) {}
+  }
   if (wasActive) {
     const payload = { reason, mode };
     TTS_DEBUG.lastPreview = { at: new Date().toISOString(), ...payload };
@@ -444,14 +452,43 @@ async function ttsPlayVoicePreview(meta = {}) {
   ttsDiagPush('voice-preview-start', previewMeta);
 
   if (TTS_PREVIEW_STATE.mode === 'browser') {
-    // Browser preview is intentionally disabled. speechSynthesis is a global
-    // queue shared with reading playback; calling speak() or cancel() here
-    // can silently drop queued reading utterances and leave the second sentence
-    // highlighted but silent. Cloud voices use an isolated Audio element and
-    // are safe to preview; browser voices skip preview instead.
-    clearVoicePreviewState();
-    ttsDiagPush('voice-preview-skip', { ...previewMeta, reason: 'browser-preview-disabled' });
-    return false;
+    if (!browserTtsSupported()) {
+      clearVoicePreviewState();
+      ttsDiagPush('voice-preview-failed', { ...previewMeta, reason: 'browser-tts-unsupported' });
+      return false;
+    }
+    const voice = browserPickVoice();
+    if (!voice) {
+      clearVoicePreviewState();
+      ttsDiagPush('voice-preview-failed', { ...previewMeta, reason: 'browser-voice-unavailable' });
+      return false;
+    }
+    const utter = new SpeechSynthesisUtterance(TTS_PREVIEW_TEXT);
+    TTS_PREVIEW_STATE.browserUtterance = utter;
+    utter.lang = 'en-US';
+    utter.rate = Number(TTS_STATE.rate || 1) || 1;
+    utter.pitch = 1;
+    try { utter.volume = Math.max(0, Math.min(1, Number(TTS_STATE.volume ?? 1))); } catch (_) {}
+    utter.voice = voice;
+    utter.onend = () => {
+      if (Number(TTS_PREVIEW_STATE.requestId || 0) !== requestId) return;
+      clearVoicePreviewState();
+      ttsDiagPush('voice-preview-complete', { ...previewMeta, voiceName: voice.name || null });
+    };
+    utter.onerror = (evt) => {
+      if (Number(TTS_PREVIEW_STATE.requestId || 0) !== requestId) return;
+      const reason = evt && evt.error ? String(evt.error) : 'browser-preview-error';
+      clearVoicePreviewState();
+      ttsDiagPush('voice-preview-failed', { ...previewMeta, reason, voiceName: voice.name || null });
+    };
+    try {
+      window.speechSynthesis.speak(utter);
+      return true;
+    } catch (err) {
+      clearVoicePreviewState();
+      ttsDiagPush('voice-preview-failed', { ...previewMeta, reason: String(err && err.message ? err.message : err), voiceName: voice.name || null });
+      return false;
+    }
   }
 
   try {
