@@ -2382,6 +2382,13 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
         }
         TTS_STATE.cloudRestartInFlight = false;
         TTS_CLOUD_WINDOW.promotionApplied = true;
+        // Disarm the window coalescing machinery now that full-page audio is live.
+        // pendingSkipBlock and pendingSkipSettling were consumed by the apply path,
+        // but a skip that arrived during the brief cloudRestartInFlight window above
+        // could have re-set them. Clear here so post-promotion skips go through the
+        // normal timed-seek path unobstructed.
+        TTS_CLOUD_WINDOW.pendingSkipSettling = false;
+        TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
         ttsStartHighlightLoop(audio);
         ttsDiagPush('window-promotion-applied', {
           sessionId, key, targetBlock, seekTime,
@@ -2922,7 +2929,11 @@ function ttsJumpSentence(delta) {
   // is unsettled, forward skip must not re-enter chunk-A seek/restart logic.
   // Capture one same-page intent and coalesce rapid extra clicks until full-page
   // marks/audio are ready.
-  if (audio && delta > 0 && TTS_CLOUD_WINDOW.active && (
+  //
+  // Guard exits (promotionApplied = true) when the full-page src-swap is fully
+  // settled and normal timed-seek can take over. All three window branches below
+  // are also gated on !promotionApplied for the same reason.
+  if (audio && delta > 0 && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied && (
     TTS_STATE.cloudRestartInFlight ||
     TTS_CLOUD_WINDOW.pendingSkipSettling ||
     (TTS_CLOUD_WINDOW.promotionTriggered && !TTS_CLOUD_WINDOW.promotionApplied && TTS_CLOUD_WINDOW.mode !== 'promoted')
@@ -2934,7 +2945,9 @@ function ttsJumpSentence(delta) {
   // Chunk A has ended and the full-page handoff is in progress — marks are
   // temporarily null while the promotion fetch or Case B await is in flight.
   // Record the desired advance block so the handoff/apply path picks it up.
-  if (audio && (!marks || blockCount === 0) && TTS_CLOUD_WINDOW.active && delta > 0) {
+  // Only applies pre-promotion; after promotionApplied the marks are the full
+  // page marks and a null-marks state would be a separate fault.
+  if (audio && (!marks || blockCount === 0) && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied && delta > 0) {
     return ttsWindowRecordForwardSkipIntent('skip-forward-no-marks', { delta, key, sourcePage, sourceBlock });
   }
 
@@ -2944,7 +2957,7 @@ function ttsJumpSentence(delta) {
     if (target < 0) target = 0; // prev at block 0 → restart block 0
 
     if (target >= blockCount) {
-      if (TTS_CLOUD_WINDOW.active) {
+      if (TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied) {
         // Forward skip past the chunk-A boundary is a high-engagement signal,
         // but full-page marks may not be bound yet. Serialize it as one
         // pending same-page intent so rapid clicks cannot repeatedly restart
