@@ -494,33 +494,6 @@ function applyAutoplayRuntimePreference(enabled, opts = {}) {
   return AUTOPLAY_STATE.enabled;
 }
 
-function ttsClearUnusableActiveSession(reason = 'unusable-active-session') {
-  // Surgical cleanup for sessions that became "active" before a playable
-  // browser/cloud handle existed (usage denial, exhausted page handoff, or
-  // equivalent startup failure). Do not call this from normal block-to-block
-  // progression; that path owns its active session until completion.
-  const key = TTS_STATE.activeKey || TTS_STATE.pausedPageKey || null;
-  try { if (key) ttsSetButtonActive(key, false); } catch (_) {}
-  try { if (key) ttsSetHintButton(key, false); } catch (_) {}
-  try { if (TTS_STATE.audio) { TTS_AUDIO_ELEMENT.pause(); TTS_AUDIO_ELEMENT.removeAttribute('src'); TTS_AUDIO_ELEMENT.load(); } } catch (_) {}
-  try { if (browserTtsSupported()) window.speechSynthesis.cancel(); } catch (_) {}
-  TTS_STATE.audio = null;
-  TTS_STATE.activeKey = null;
-  TTS_STATE.activeBlockIndex = -1;
-  TTS_STATE.pausedBlockIndex = -1;
-  TTS_STATE.pausedPageKey = null;
-  TTS_STATE.browserPaused = false;
-  TTS_STATE.browserSentenceRanges = null;
-  TTS_STATE.browserSpeakFromBlock = null;
-  TTS_STATE.activeBrowserVoiceName = null;
-  resetBrowserRestartOwnership();
-  clearPendingCloudSeek();
-  clearCloudRestartTransition();
-  clearTtsBackendCapabilityState();
-  try { ttsClearSentenceHighlight(); } catch (_) {}
-  ttsDiagPush('unusable-active-session-cleared', { key, reason: String(reason || 'unusable-active-session') });
-}
-
 function ttsBuildPageHandoffTarget(input = {}) {
   const raw = (typeof input === 'number') ? { pageIndex: input } : (input || {});
   const baseFromKey = (typeof readingTargetFromKey === 'function' && raw.key) ? readingTargetFromKey(String(raw.key)) : null;
@@ -548,16 +521,7 @@ function ttsBuildPageHandoffTarget(input = {}) {
 function ttsRunPageHandoff(input = {}) {
   const mode = String(input.mode || 'speak');
   const resolved = ttsBuildPageHandoffTarget(input);
-  if (!resolved) {
-    // Page-boundary exhaustion should not leave controls in an active-but-dead
-    // state. This only runs when an explicit/autoplay page handoff has no
-    // target; normal sentence/block chaining is not touched.
-    if (TTS_STATE.activeKey && (mode === 'speak' || mode === 'paused')) {
-      ttsClearUnusableActiveSession('page-handoff-unavailable');
-    }
-    ttsDiagPush('page-handoff-unavailable', { reason: String(input.reason || ''), key: input.key || TTS_STATE.activeKey || null, delta: input.delta ?? null });
-    return false;
-  }
+  if (!resolved) return false;
   const { currentIndex, nextIndex, sourceType, bookId, chapterIndex, text, targetBlockIndex, behavior, reason } = resolved;
   const focusResult = (typeof window.focusReadingPage === 'function')
     ? window.focusReadingPage(nextIndex, { behavior })
@@ -569,12 +533,8 @@ function ttsRunPageHandoff(input = {}) {
       if (nextPageEl) nextPageEl.scrollIntoView({ behavior, block: 'start' });
     } catch (_) {}
   }
-  if (!focusResult || focusResult.ok === false) {
-    // focusReadingPage()/markActiveReadingPage() is the normal runtime
-    // activation writer. Preserve the legacy fallback only if activation fails.
-    if (typeof setReadingTarget === 'function') {
-      setReadingTarget({ sourceType, bookId, chapterIndex, pageIndex: nextIndex });
-    }
+  if (typeof setReadingTarget === 'function') {
+    setReadingTarget({ sourceType, bookId, chapterIndex, pageIndex: nextIndex });
   }
   const nextTarget = window.__rcReadingTarget || { sourceType, bookId, chapterIndex, pageIndex: nextIndex };
   const nextKey = (typeof readingTargetToKey === 'function') ? readingTargetToKey(nextTarget) : `page-${nextIndex}`;
@@ -2087,73 +2047,6 @@ function clearTtsStartupBanner() {
   try { window.rcInteraction && window.rcInteraction.clear('tts:start'); } catch (_) {}
 }
 
-const TTS_CLOUD_START_RECOVERY_ATTEMPTS = 3;
-const TTS_CLOUD_START_RECOVERY_DELAY_MS = 350;
-
-function ttsDelay(ms) {
-  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
-}
-
-function ttsCurrentSessionMatches(key, sessionId) {
-  return Number(TTS_STATE.activeSessionId || 0) === Number(sessionId || 0) && String(TTS_STATE.activeKey || '') === String(key || '');
-}
-
-async function cloudFetchUrlWithStartupRecovery(text, opts = {}, context = {}) {
-  const attempts = Math.max(1, Math.floor(Number(context.attempts || TTS_CLOUD_START_RECOVERY_ATTEMPTS) || 1));
-  let lastErr = null;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      return await cloudFetchUrl(text, opts);
-    } catch (err) {
-      lastErr = err;
-      const recoverable = isRecoverablePlaybackFailure(err);
-      ttsDiagPush('cloud-startup-recovery-attempt', {
-        key: context.key || null,
-        sessionId: context.sessionId || null,
-        blockIndex: context.blockIndex,
-        attempt,
-        attempts,
-        recoverable,
-        phase: 'fetch',
-        message: String(err && err.message ? err.message : err || ''),
-      });
-      if (!recoverable || attempt >= attempts) break;
-      if (!ttsCurrentSessionMatches(context.key, context.sessionId)) throw err;
-      await ttsDelay(TTS_CLOUD_START_RECOVERY_DELAY_MS * attempt);
-      if (!ttsCurrentSessionMatches(context.key, context.sessionId)) throw err;
-    }
-  }
-  throw lastErr;
-}
-
-async function cloudPlayWithStartupRecovery(audio, context = {}) {
-  const attempts = Math.max(1, Math.floor(Number(context.attempts || TTS_CLOUD_START_RECOVERY_ATTEMPTS) || 1));
-  let lastErr = null;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      return await audio.play();
-    } catch (err) {
-      lastErr = err;
-      const recoverable = isRecoverablePlaybackFailure(err);
-      ttsDiagPush('cloud-startup-recovery-attempt', {
-        key: context.key || null,
-        sessionId: context.sessionId || null,
-        blockIndex: context.blockIndex,
-        attempt,
-        attempts,
-        recoverable,
-        phase: 'audio-play',
-        message: String(err && err.message ? err.message : err || ''),
-      });
-      if (!recoverable || attempt >= attempts) break;
-      if (!ttsCurrentSessionMatches(context.key, context.sessionId)) throw err;
-      await ttsDelay(TTS_CLOUD_START_RECOVERY_DELAY_MS * attempt);
-      if (!ttsCurrentSessionMatches(context.key, context.sessionId)) throw err;
-    }
-  }
-  throw lastErr;
-}
-
 async function ttsSpeakQueue(key, parts) {
   const routeInfo = getPreferredTtsRouteInfo();
   TTS_DEBUG.lastRouteDecision = routeInfo;
@@ -2211,7 +2104,6 @@ async function ttsSpeakQueue(key, parts) {
   TTS_STATE.pausedPageKey = null;
   ttsSetButtonActive(key, true);
   ttsSetHintButton(key, true);
-  clearTtsStartupBanner();
 
   try {
     for (let i = 0; i < queue.length; i++) {
@@ -2223,16 +2115,16 @@ async function ttsSpeakQueue(key, parts) {
           try {
             const verdict = await window.rcUsage.check('tts');
             if (!verdict.allowed) {
-              ttsClearUnusableActiveSession('usage-limit');
               try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
-              try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
+              ttsSetButtonActive(key, false);
+              ttsSetHintButton(key, false);
               return;
             }
           } catch (_) {} // server unreachable: proceed (safe degraded behavior)
         }
         try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
       }
-      const tts = await cloudFetchUrlWithStartupRecovery(queue[i], { sentenceMarks: wantMarks }, { key, sessionId, blockIndex: i });
+      const tts = await cloudFetchUrl(queue[i], { sentenceMarks: wantMarks });
       if (TTS_STATE.activeSessionId !== sessionId) return;
       applyCloudCapabilityForRuntime({ key, sessionId, capability: tts.capability, sentenceMarks: tts.sentenceMarks });
       const url = tts.url;
@@ -2258,7 +2150,7 @@ async function ttsSpeakQueue(key, parts) {
         try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
         audio.onended = () => { ttsClearSentenceHighlight(); resolve(); };
         audio.onerror = () => reject(new Error('Audio playback failed'));
-        cloudPlayWithStartupRecovery(audio, { key, sessionId, blockIndex: i }).then(() => {
+        audio.play().then(() => {
           clearTtsStartupBanner();
           applyPending('play-start');
         }).catch(reject);
@@ -2683,15 +2575,11 @@ function ttsRestartPage(pageIndex, targetContext) {
   const idx = Number(pageIndex);
   if (!Number.isFinite(idx) || idx < 0) return false;
   if (typeof pages === 'undefined' || !pages[idx]) return false;
-  let focusResult = null;
-  try { if (typeof window.focusReadingPage === 'function') focusResult = window.focusReadingPage(idx, { behavior: 'smooth' }); } catch (_) {}
-  // focusReadingPage()/markActiveReadingPage() normally owns activation and
-  // reading-target writes. Fall back only if that activation path is missing or
-  // rejects the target.
-  if (!focusResult || focusResult.ok === false) {
-    const _ctx = targetContext || window.__rcReadingTarget || {};
-    if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType || '', bookId: _ctx.bookId || '', chapterIndex: _ctx.chapterIndex != null ? _ctx.chapterIndex : -1, pageIndex: idx });
-  }
+  try { if (typeof window.focusReadingPage === 'function') window.focusReadingPage(idx, { behavior: 'smooth' }); } catch (_) {}
+  // Set reading target from provided context (preserves source/chapter) or
+  // fall back to current __rcReadingTarget if no context was passed.
+  const _ctx = targetContext || window.__rcReadingTarget || {};
+  if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType || '', bookId: _ctx.bookId || '', chapterIndex: _ctx.chapterIndex != null ? _ctx.chapterIndex : -1, pageIndex: idx });
   ttsSpeakQueue((typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${idx}`, [pages[idx]]);
   ttsDiagPush('restart-page', { pageIndex: idx });
   return true;
