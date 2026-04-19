@@ -344,14 +344,11 @@ window.rcSync = (function () {
     const selectedVoice = (() => {
       try { return String(window.__rcSessionVoiceSelection || '').trim(); } catch (_) { return ''; }
     })();
-    const _isCloudVoice = /^(cloud:|azure:|polly:)/i.test(selectedVoice);
-    const _cloudAllowed = !!(window.rcPolicy && typeof window.rcPolicy.get === 'function' && window.rcPolicy.get()?.features?.cloudVoices);
-    const safeVoiceId = (_isCloudVoice && !_cloudAllowed) ? null : (selectedVoice || null);
 
     const row = {
       theme_id: String(theme.theme_id || 'default'),
       font_id: themeSettings.font ? String(themeSettings.font) : null,
-      tts_voice_id: safeVoiceId,
+      tts_voice_id: selectedVoice || null,
       tts_volume: voiceVolumeEl && voiceVolumeEl.value !== '' ? Number(voiceVolumeEl.value) : null,
       autoplay_enabled: autoplayToggle ? !!autoplayToggle.checked : null,
       music_enabled: typeof themeSettings.music === 'string' ? themeSettings.music !== 'off' : (_remoteSettingsRow && typeof _remoteSettingsRow.music_enabled === 'boolean' ? !!_remoteSettingsRow.music_enabled : true),
@@ -430,19 +427,14 @@ window.rcSync = (function () {
 
 
       if (row.tts_voice_id) {
-        const _voiceId = String(row.tts_voice_id).trim();
-        const _isCloudId = /^(cloud:|azure:|polly:)/i.test(_voiceId);
-        const _cloudAllowed = !!(window.rcPolicy && typeof window.rcPolicy.get === 'function' && window.rcPolicy.get()?.features?.cloudVoices);
-        if (_voiceId && (!_isCloudId || _cloudAllowed)) {
-          try { window.__rcSessionVoiceSelection = _voiceId; } catch (_) {}
-          const female = document.getElementById('voiceFemaleSelect');
-          const male = document.getElementById('voiceMaleSelect');
-          [female, male].forEach((select) => {
-            if (!select) return;
-            const exists = Array.from(select.options || []).some((opt) => String(opt.value) === _voiceId);
-            if (exists) select.value = _voiceId;
-          });
-        }
+        try { window.__rcSessionVoiceSelection = String(row.tts_voice_id); } catch (_) {}
+        const female = document.getElementById('voiceFemaleSelect');
+        const male = document.getElementById('voiceMaleSelect');
+        [female, male].forEach((select) => {
+          if (!select) return;
+          const exists = Array.from(select.options || []).some((opt) => String(opt.value) === String(row.tts_voice_id));
+          if (exists) select.value = String(row.tts_voice_id);
+        });
       }
 
       if (row.tts_volume != null) {
@@ -1001,7 +993,6 @@ window.rcSync = (function () {
         window.rcUsage.applySnapshot({ remaining: null, limit: null, authoritative: false, source: 'signout' });
       }
     } catch (_) {}
-    try { window.__rcSessionVoiceSelection = ''; } catch (_) {}
   }
 
   async function rehydrateDurableData() {

@@ -2079,8 +2079,8 @@ async function ttsSpeakQueue(key, parts) {
     ttsDiagPush('speak-request', TTS_DEBUG.lastPlayRequest);
   }
 
-  // Free tier, or explicit browser voice selection regardless of cloud capability.
-  if (!routeInfo.cloudCapable || routeInfo.requestedPath === 'browser-selected') {
+  // Free tier → browser.
+  if (!routeInfo.cloudCapable) {
     browserSpeakQueue(key, parts);
     ttsDiagPush('speak-action', { action: 'started', route: 'browser', key, before, after: ttsBlockSnapshot() });
     return;
