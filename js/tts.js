@@ -2827,12 +2827,21 @@ function ttsJumpSentence(delta) {
 
     if (target < 0) target = 0; // prev at block 0 → restart block 0
 
-    if (target >= blockCount) { // next at last block → cross to next page
+    if (target >= blockCount) {
+      // Cross-page skip disabled while block-window promotion is in play:
+      // blockCount may reflect only chunk-A marks (2 blocks) on a longer page,
+      // so crossing to the next page here would be incorrect. Clamp forward
+      // skip to the last available block on the current audio instead.
+      // Re-enable once window promotion is stable and full-page marks are
+      // guaranteed to be in place before the user can reach the last block.
+      target = blockCount - 1;
+      /* disabled cross-page path — kept for reference:
       const moved = pausedForContract ? ttsJumpPagePreserve(1) : ttsJumpPage(1);
       const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage + 1, resolvedBlock: 0, crossPage: true, moved, path: pausedForContract ? 'cloud-cross-page-preserve' : 'cloud-cross-page', clippingProtection: false };
       TTS_DEBUG.lastSkip = skipResult;
       ttsDiagPush('skip-block', skipResult);
       return moved;
+      */
     }
 
     const leadMs = 0;
@@ -2907,11 +2916,16 @@ function ttsJumpSentence(delta) {
     if (target < 0) target = 0;
 
     if (target >= rangeCount) {
+      // Cross-page skip disabled — see cloud path comment above for rationale.
+      // Clamp to last block on current page.
+      target = rangeCount - 1;
+      /* disabled cross-page path — kept for reference:
       const moved = pausedForContract ? ttsJumpPagePreserve(1) : ttsJumpPage(1);
       const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage + 1, resolvedBlock: 0, crossPage: true, moved, path: pausedForContract ? 'browser-cross-page-preserve' : 'browser-cross-page', clippingProtection: false };
       TTS_DEBUG.lastSkip = skipResult;
       ttsDiagPush('skip-block', skipResult);
       return moved;
+      */
     }
 
     if (pausedForContract) {
