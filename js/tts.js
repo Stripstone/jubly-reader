@@ -136,6 +136,11 @@ const TTS_CLOUD_WINDOW = {
   charsPhase1: 0,
   charsFullPage: 0,
   charsSessionTotal: 0,
+  // Desired full-page block index from a forward-skip past the chunk-A boundary.
+  // Set by ttsJumpSentence; consumed by _ttsWindowApplyPromotion and the Case B
+  // handoff in ttsSpeakQueue so the seek targets the intended block, not just the
+  // currently-active one.
+  pendingSkipBlock: -1,
 };
 
 function clearTtsCloudWindow() {
@@ -153,6 +158,7 @@ function clearTtsCloudWindow() {
   TTS_CLOUD_WINDOW.charsPhase1 = 0;
   TTS_CLOUD_WINDOW.charsFullPage = 0;
   TTS_CLOUD_WINDOW.charsSessionTotal = 0;
+  TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
 }
 
 // Split page text into sentence strings preserving trailing whitespace.
@@ -2257,9 +2263,15 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
 
   // Seek target: start of the current block in the full-page audio.
   // Full-page and chunk-A timings differ (different synthesis context), so we
-  // seek to fullPageMarks[currentBlock].time rather than using audio.currentTime.
+  // seek to fullPageMarks[targetBlock].time rather than using audio.currentTime.
+  // If a forward-skip arrived while chunk A was still playing (pendingSkipBlock),
+  // advance to that block instead of the currently-active one.
   const marks = TTS_STATE.highlightMarks;
-  const targetBlock = Math.min(currentBlock, marks ? marks.length - 1 : 0);
+  const _pendingSkip = (Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) && TTS_CLOUD_WINDOW.pendingSkipBlock >= 0)
+    ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1;
+  TTS_CLOUD_WINDOW.pendingSkipBlock = -1; // consume
+  const resolvedBlock = _pendingSkip >= 0 ? Math.max(currentBlock, _pendingSkip) : currentBlock;
+  const targetBlock = Math.min(resolvedBlock, marks ? marks.length - 1 : 0);
   const seekTime = (marks && marks[targetBlock]) ? Math.max(0, Number(marks[targetBlock].time || 0) / 1000) : 0;
 
   const requestId = ++TTS_STATE.cloudRestartRequestId;
@@ -2275,6 +2287,7 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
 
   ttsDiagPush('window-promotion-apply', {
     sessionId, key, targetBlock, seekTime,
+    pendingSkipBlock: _pendingSkip,
     charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
     charsFullPage: TTS_CLOUD_WINDOW.charsFullPage,
     charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
@@ -2535,12 +2548,23 @@ async function ttsSpeakQueue(key, parts) {
           }
 
           // Seek into the full-page audio past chunk A's sentences.
+          // If the user skipped forward while waiting for promotion, honour that
+          // intent by jumping to the requested block (pendingSkipBlock) instead of
+          // just the end of chunk A.
           const fullMarks = TTS_STATE.highlightMarks;
-          const startBlock = Math.min(TTS_CLOUD_WINDOW.chunkASentenceCount, fullMarks ? fullMarks.length - 1 : 0);
+          const chunkAEnd = Math.min(TTS_CLOUD_WINDOW.chunkASentenceCount, fullMarks ? fullMarks.length - 1 : 0);
+          const _handoffPendingSkip = (Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) && TTS_CLOUD_WINDOW.pendingSkipBlock >= 0)
+            ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1;
+          TTS_CLOUD_WINDOW.pendingSkipBlock = -1; // consume
+          const startBlock = Math.min(
+            _handoffPendingSkip >= 0 ? Math.max(chunkAEnd, _handoffPendingSkip) : chunkAEnd,
+            fullMarks ? fullMarks.length - 1 : 0
+          );
           queuePendingCloudSeek(key, sessionId, startBlock, 0);
 
           ttsDiagPush('window-handoff-after-chunk-a', {
-            sessionId, key, startBlock,
+            sessionId, key, startBlock, chunkAEnd,
+            pendingSkipBlock: _handoffPendingSkip,
             seekTimeMs: (fullMarks && fullMarks[startBlock]) ? fullMarks[startBlock].time : null,
             charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
             charsFullPage: pageText.length,
@@ -2822,19 +2846,53 @@ function ttsJumpSentence(delta) {
 
   // ── Cloud path ───────────────────────────────────────────────────────────────
   const audio = TTS_STATE.audio;
+
+  // ── Window mode: forward skip with no marks ───────────────────────────────
+  // Chunk A has ended and the full-page handoff is in progress — marks are
+  // temporarily null while the promotion fetch or Case B await is in flight.
+  // Record the desired advance block so the handoff/apply path picks it up.
+  if (audio && (!marks || blockCount === 0) && TTS_CLOUD_WINDOW.active && delta > 0) {
+    const desiredBlock = sourceBlock + 1;
+    // Keep the highest requested block across multiple rapid skips.
+    TTS_CLOUD_WINDOW.pendingSkipBlock = Math.max(
+      Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1,
+      desiredBlock
+    );
+    if (!TTS_CLOUD_WINDOW.promotionTriggered) {
+      try { _ttsWindowTriggerPromotion('skip-forward-no-marks'); } catch (_) {}
+    }
+    const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: desiredBlock, crossPage: false, moved: true, path: 'window-forward-skip-no-marks', clippingProtection: false, sessionId: TTS_STATE.activeSessionId };
+    TTS_DEBUG.lastSkip = skipResult;
+    ttsDiagPush('skip-block', skipResult);
+    return true;
+  }
+
   if (audio && marks && blockCount > 0) {
     let target = sourceBlock + (delta < 0 ? -1 : 1);
 
     if (target < 0) target = 0; // prev at block 0 → restart block 0
 
     if (target >= blockCount) {
-      // Cross-page skip disabled while block-window promotion is in play:
-      // blockCount may reflect only chunk-A marks (2 blocks) on a longer page,
-      // so crossing to the next page here would be incorrect. Clamp forward
-      // skip to the last available block on the current audio instead.
-      // Re-enable once window promotion is stable and full-page marks are
-      // guaranteed to be in place before the user can reach the last block.
-      target = blockCount - 1;
+      if (TTS_CLOUD_WINDOW.active) {
+        // Forward skip past chunk-A boundary is a high-engagement signal.
+        // Record the desired full-page block and trigger promotion so the
+        // seek resolves correctly once full-page marks are available.
+        // _ttsWindowApplyPromotion and the Case B handoff both honour
+        // pendingSkipBlock and will seek to max(currentBlock, pendingSkipBlock).
+        const desiredBlock = sourceBlock + 1;
+        TTS_CLOUD_WINDOW.pendingSkipBlock = Math.max(
+          Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1,
+          desiredBlock
+        );
+        if (!TTS_CLOUD_WINDOW.promotionTriggered) {
+          try { _ttsWindowTriggerPromotion('skip-forward-engagement'); } catch (_) {}
+        }
+        const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: desiredBlock, crossPage: false, moved: true, path: 'window-forward-skip-pending', clippingProtection: false, sessionId: TTS_STATE.activeSessionId };
+        TTS_DEBUG.lastSkip = skipResult;
+        ttsDiagPush('skip-block', skipResult);
+        return true;
+      }
+      // Not in window mode — cross-page navigation disabled.
       /* disabled cross-page path — kept for reference:
       const moved = pausedForContract ? ttsJumpPagePreserve(1) : ttsJumpPage(1);
       const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage + 1, resolvedBlock: 0, crossPage: true, moved, path: pausedForContract ? 'cloud-cross-page-preserve' : 'cloud-cross-page', clippingProtection: false };
@@ -2842,6 +2900,10 @@ function ttsJumpSentence(delta) {
       ttsDiagPush('skip-block', skipResult);
       return moved;
       */
+      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolved: 'unavailable', crossPage: false, path: 'cross-page-disabled', sessionId: TTS_STATE.activeSessionId };
+      TTS_DEBUG.lastSkip = skipResult;
+      ttsDiagPush('skip-block', skipResult);
+      return false;
     }
 
     const leadMs = 0;
@@ -2916,9 +2978,7 @@ function ttsJumpSentence(delta) {
     if (target < 0) target = 0;
 
     if (target >= rangeCount) {
-      // Cross-page skip disabled — see cloud path comment above for rationale.
-      // Clamp to last block on current page.
-      target = rangeCount - 1;
+      // Cross-page navigation disabled — same policy as cloud path.
       /* disabled cross-page path — kept for reference:
       const moved = pausedForContract ? ttsJumpPagePreserve(1) : ttsJumpPage(1);
       const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage + 1, resolvedBlock: 0, crossPage: true, moved, path: pausedForContract ? 'browser-cross-page-preserve' : 'browser-cross-page', clippingProtection: false };
@@ -2926,6 +2986,10 @@ function ttsJumpSentence(delta) {
       ttsDiagPush('skip-block', skipResult);
       return moved;
       */
+      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolved: 'unavailable', crossPage: false, path: 'cross-page-disabled', sessionId: TTS_STATE.activeSessionId };
+      TTS_DEBUG.lastSkip = skipResult;
+      ttsDiagPush('skip-block', skipResult);
+      return false;
     }
 
     if (pausedForContract) {
