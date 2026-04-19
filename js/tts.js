@@ -1596,7 +1596,10 @@ function getPlaybackControlEligibility() {
   // A session that is "paused" with no hook (browserSpeakFromBlock cleared, or
   // audio element gone) cannot actually resume — marking it resumable would show
   // a Resume label that calls ttsResume() and fails silently.
-  const hasRealResumeHook = (!cloudRestartInFlight && !!(TTS_STATE.audio && TTS_STATE.audio.paused)) ||
+  // audio.ended implies audio.paused in all browsers, so exclude ended elements
+  // from the resume hook: an ended audio element has no live position to resume
+  // from, and calling audio.play() on it would restart from t=0 without marks.
+  const hasRealResumeHook = (!cloudRestartInFlight && !!(TTS_STATE.audio && TTS_STATE.audio.paused && !TTS_STATE.audio.ended)) ||
     !!(TTS_STATE.browserPaused && TTS_STATE.browserSpeakFromBlock);
   const canResume = !!playback.active && !!playback.paused && hasSession && hasRealResumeHook;
   const canPause = !!playback.active && !playback.paused;
@@ -1955,6 +1958,51 @@ function ttsResume() {
 
   // Cloud path: resume audio from preserved currentTime.
   if (TTS_STATE.audio && !isCloudRestartTransitionActive() && TTS_STATE.audio.paused) {
+    // Stale-session guard: if the audio element has ended (ended === true implies
+    // paused === true in all browsers), the session completed its playback and the
+    // highlight marks were cleared by the onended handler. Calling audio.play()
+    // would restart the audio from t=0 without marks, producing audio without
+    // highlighting and exposing a corrupt blockCount: 0 / no-highlight state.
+    // Instead, treat this as a fresh Play on the same page.
+    if (TTS_STATE.audio.ended) {
+      const _restartKey = expectedPageKey;
+      const _parsed = _restartKey && typeof readingTargetFromKey === 'function'
+        ? readingTargetFromKey(_restartKey) : null;
+      const _pageIndex = _parsed ? _parsed.pageIndex : -1;
+      // Fully stop the stale session before restarting so ttsSpeakQueue starts
+      // from a clean slate (fresh sessionId, cleared window state, etc.).
+      ttsStop();
+      if (_restartKey && Number.isFinite(_pageIndex) && _pageIndex >= 0 &&
+          typeof pages !== 'undefined' && pages[_pageIndex]) {
+        ttsSpeakQueue(_restartKey, [pages[_pageIndex]]);
+        const after = {
+          playback: getPlaybackStatus(),
+          session: ttsSessionSnapshot(),
+          controls: getPlaybackControlEligibility(),
+        };
+        const payload = {
+          success: true, resumed: false, restarted: true,
+          outcomeClass: 'fresh-restart',
+          route: 'cloud-stale-ended-restart',
+          resumedSessionId: Number(TTS_STATE.activeSessionId || 0),
+          resumedPageKey: _restartKey,
+          resumedBlockIndex: 0,
+          before, after,
+        };
+        ttsDiagPush('resumed', payload);
+        ttsDiagPush('resume-action', payload);
+        ttsDiagPush('control-eligibility', after.controls);
+        return payload;
+      }
+      const failPayload = {
+        success: false, resumed: false, restarted: false,
+        reason: 'stale-ended-no-page-text',
+        before, after: before,
+      };
+      ttsDiagPush('resume-action', failPayload);
+      return failPayload;
+    }
+
     try {
       // Apply current rate (may have changed during pause) before resuming.
       const resumeRate = Number(TTS_STATE.rate || 1) || 1;
