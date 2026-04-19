@@ -311,6 +311,11 @@
             try { window.__rcSessionVoiceSelection = val; } catch(_) {}
           }
           populateBrowserVoicePicker();
+          try {
+            if (typeof window.ttsPreviewSelectedVoice === 'function') {
+              window.ttsPreviewSelectedVoice({ trigger: selectEl.id || 'voice-select' });
+            }
+          } catch (_) {}
         });
       }
 
