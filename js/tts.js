@@ -494,6 +494,33 @@ function applyAutoplayRuntimePreference(enabled, opts = {}) {
   return AUTOPLAY_STATE.enabled;
 }
 
+function ttsClearUnusableActiveSession(reason = 'unusable-active-session') {
+  // Surgical cleanup for sessions that became "active" before a playable
+  // browser/cloud handle existed (usage denial, exhausted page handoff, or
+  // equivalent startup failure). Do not call this from normal block-to-block
+  // progression; that path owns its active session until completion.
+  const key = TTS_STATE.activeKey || TTS_STATE.pausedPageKey || null;
+  try { if (key) ttsSetButtonActive(key, false); } catch (_) {}
+  try { if (key) ttsSetHintButton(key, false); } catch (_) {}
+  try { if (TTS_STATE.audio) { TTS_AUDIO_ELEMENT.pause(); TTS_AUDIO_ELEMENT.removeAttribute('src'); TTS_AUDIO_ELEMENT.load(); } } catch (_) {}
+  try { if (browserTtsSupported()) window.speechSynthesis.cancel(); } catch (_) {}
+  TTS_STATE.audio = null;
+  TTS_STATE.activeKey = null;
+  TTS_STATE.activeBlockIndex = -1;
+  TTS_STATE.pausedBlockIndex = -1;
+  TTS_STATE.pausedPageKey = null;
+  TTS_STATE.browserPaused = false;
+  TTS_STATE.browserSentenceRanges = null;
+  TTS_STATE.browserSpeakFromBlock = null;
+  TTS_STATE.activeBrowserVoiceName = null;
+  resetBrowserRestartOwnership();
+  clearPendingCloudSeek();
+  clearCloudRestartTransition();
+  clearTtsBackendCapabilityState();
+  try { ttsClearSentenceHighlight(); } catch (_) {}
+  ttsDiagPush('unusable-active-session-cleared', { key, reason: String(reason || 'unusable-active-session') });
+}
+
 function ttsBuildPageHandoffTarget(input = {}) {
   const raw = (typeof input === 'number') ? { pageIndex: input } : (input || {});
   const baseFromKey = (typeof readingTargetFromKey === 'function' && raw.key) ? readingTargetFromKey(String(raw.key)) : null;
@@ -521,7 +548,16 @@ function ttsBuildPageHandoffTarget(input = {}) {
 function ttsRunPageHandoff(input = {}) {
   const mode = String(input.mode || 'speak');
   const resolved = ttsBuildPageHandoffTarget(input);
-  if (!resolved) return false;
+  if (!resolved) {
+    // Page-boundary exhaustion should not leave controls in an active-but-dead
+    // state. This only runs when an explicit/autoplay page handoff has no
+    // target; normal sentence/block chaining is not touched.
+    if (TTS_STATE.activeKey && (mode === 'speak' || mode === 'paused')) {
+      ttsClearUnusableActiveSession('page-handoff-unavailable');
+    }
+    ttsDiagPush('page-handoff-unavailable', { reason: String(input.reason || ''), key: input.key || TTS_STATE.activeKey || null, delta: input.delta ?? null });
+    return false;
+  }
   const { currentIndex, nextIndex, sourceType, bookId, chapterIndex, text, targetBlockIndex, behavior, reason } = resolved;
   const focusResult = (typeof window.focusReadingPage === 'function')
     ? window.focusReadingPage(nextIndex, { behavior })
@@ -533,8 +569,12 @@ function ttsRunPageHandoff(input = {}) {
       if (nextPageEl) nextPageEl.scrollIntoView({ behavior, block: 'start' });
     } catch (_) {}
   }
-  if (typeof setReadingTarget === 'function') {
-    setReadingTarget({ sourceType, bookId, chapterIndex, pageIndex: nextIndex });
+  if (!focusResult || focusResult.ok === false) {
+    // focusReadingPage()/markActiveReadingPage() is the normal runtime
+    // activation writer. Preserve the legacy fallback only if activation fails.
+    if (typeof setReadingTarget === 'function') {
+      setReadingTarget({ sourceType, bookId, chapterIndex, pageIndex: nextIndex });
+    }
   }
   const nextTarget = window.__rcReadingTarget || { sourceType, bookId, chapterIndex, pageIndex: nextIndex };
   const nextKey = (typeof readingTargetToKey === 'function') ? readingTargetToKey(nextTarget) : `page-${nextIndex}`;
@@ -2115,9 +2155,9 @@ async function ttsSpeakQueue(key, parts) {
           try {
             const verdict = await window.rcUsage.check('tts');
             if (!verdict.allowed) {
+              ttsClearUnusableActiveSession('usage-limit');
               try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
-              ttsSetButtonActive(key, false);
-              ttsSetHintButton(key, false);
+              try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
               return;
             }
           } catch (_) {} // server unreachable: proceed (safe degraded behavior)
@@ -2575,11 +2615,15 @@ function ttsRestartPage(pageIndex, targetContext) {
   const idx = Number(pageIndex);
   if (!Number.isFinite(idx) || idx < 0) return false;
   if (typeof pages === 'undefined' || !pages[idx]) return false;
-  try { if (typeof window.focusReadingPage === 'function') window.focusReadingPage(idx, { behavior: 'smooth' }); } catch (_) {}
-  // Set reading target from provided context (preserves source/chapter) or
-  // fall back to current __rcReadingTarget if no context was passed.
-  const _ctx = targetContext || window.__rcReadingTarget || {};
-  if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType || '', bookId: _ctx.bookId || '', chapterIndex: _ctx.chapterIndex != null ? _ctx.chapterIndex : -1, pageIndex: idx });
+  let focusResult = null;
+  try { if (typeof window.focusReadingPage === 'function') focusResult = window.focusReadingPage(idx, { behavior: 'smooth' }); } catch (_) {}
+  // focusReadingPage()/markActiveReadingPage() normally owns activation and
+  // reading-target writes. Fall back only if that activation path is missing or
+  // rejects the target.
+  if (!focusResult || focusResult.ok === false) {
+    const _ctx = targetContext || window.__rcReadingTarget || {};
+    if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType || '', bookId: _ctx.bookId || '', chapterIndex: _ctx.chapterIndex != null ? _ctx.chapterIndex : -1, pageIndex: idx });
+  }
   ttsSpeakQueue((typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${idx}`, [pages[idx]]);
   ttsDiagPush('restart-page', { pageIndex: idx });
   return true;
