@@ -497,6 +497,7 @@ export default async function handler(req, res) {
     }
     return json(res, 200, payload);
   } catch (err) {
+    console.error("[ai-tts]", err);
     return json(res, 500, { error: "Server error", detail: String(err) });
   }
 }
