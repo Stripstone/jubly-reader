@@ -244,11 +244,6 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     return runtimePolicy;
   }
 
-  function resetRuntimePolicyToPublic() {
-    // Public/signed-out runtime must not inherit a prior account entitlement.
-    return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', { resolved: false });
-  }
-
   async function refreshRuntimePolicy(requestedTier) {
     const hasExplicitTier = !(typeof requestedTier === 'undefined' || requestedTier === null || String(requestedTier).trim() === '');
     const tier = normalizeAppTier(hasExplicitTier ? requestedTier : getRuntimeTier());
@@ -1459,7 +1454,6 @@ window.rcPolicy = {
   get: getRuntimePolicy,
   refreshForTier: refreshRuntimePolicy,
   apply: applyResolvedRuntimePolicy,
-  resetToPublic: resetRuntimePolicyToPublic,
   canSimulateTier: canSimulateTierSelection,
   getTier: getRuntimeTier,
   getUsageDailyLimit: getRuntimeUsageAllowance,
