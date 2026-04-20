@@ -1147,7 +1147,7 @@ window.rcSync = (function () {
       syncSettingsTheme: _remoteSettingsRow?.theme_id || null,
       pendingPolicyProjection: !!_pendingRuntimePolicyProjection,
       hydrationState: { ..._hydrationState },
-      recentSyncEvents: _eventTrail.slice(-20),
+      recentSyncEvents: Array.isArray(window.__rcEventTrail) ? window.__rcEventTrail.slice(-20) : [],
     };
   }
 
