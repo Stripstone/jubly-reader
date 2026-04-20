@@ -992,21 +992,6 @@ window.rcSync = (function () {
     _lastSyncSnapshotAt = null;
     _requestSeq = 0;
     _appliedSeq = 0;
-    _pendingRuntimePolicyProjection = null;
-    if (_pendingRuntimePolicyFlushTimer) {
-      clearTimeout(_pendingRuntimePolicyFlushTimer);
-      _pendingRuntimePolicyFlushTimer = null;
-    }
-    try {
-      if (window.rcPolicy && typeof window.rcPolicy.resetToPublic === 'function') {
-        window.rcPolicy.resetToPublic('sync-clear-remote-state');
-      }
-    } catch (_) {}
-    _pushEvent('public-projection-cleared', {
-      reason: 'sync-clear-remote-state',
-      signedIn: !!_user(),
-      hasAccessToken: !!_accessToken(),
-    });
     // Clear session tokens so a stale usage count from the previous session does not
     // leak into the next user's projection window. The usage pill is hidden when not
     // authed, so this does not create a visible blank state for the current user.

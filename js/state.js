@@ -230,49 +230,17 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     return !!getRuntimePolicy()?.features?.cloudVoices;
   }
 
-  function dispatchRuntimePolicyChanged(extra = {}) {
-    try {
-      const detail = Object.assign({ policy: runtimePolicy, resolved: runtimePolicyResolved }, extra || {});
-      document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
-      window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
-    } catch (_) {}
-  }
-
   function applyResolvedRuntimePolicy(policyLike, tierHint, options = {}) {
     runtimePolicy = normalizeRuntimePolicy(policyLike, tierHint);
     runtimePolicyResolved = !!options.resolved;
     appTier = runtimePolicy.tier;
     try { tokenReset(); } catch (_) {}
     try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
-    dispatchRuntimePolicyChanged({ source: options.source || 'policy-apply' });
-    return runtimePolicy;
-  }
-
-  function resetRuntimeProjectionToPublic(reason = 'public-reset') {
-    const previousTier = runtimePolicy && runtimePolicy.tier ? String(runtimePolicy.tier) : String(appTier || 'basic');
-    const previousTheme = String(appTheme || 'default');
-    runtimePolicy = getFallbackRuntimePolicy('basic');
-    runtimePolicyResolved = false;
-    appTier = 'basic';
-    try { tokenReset(); } catch (_) {}
-
-    // Public/signed-out runtime must never execute paid theme policy. Do not call
-    // setThemeRuntime('default') here: that would persist over a signed-in user's
-    // durable Explorer preference. This is an effective projection reset only.
-    if (previousTheme !== 'default') appTheme = 'default';
-    try { applyThemeClass(appTheme); } catch (_) {}
-    try { applyThemeSettings(); } catch (_) {}
-    try { syncThemeShellState(); } catch (_) {}
-
-    _trailPush('public-policy-reset', {
-      reason: String(reason || 'public-reset'),
-      previousTier,
-      previousTheme,
-      projectedTier: runtimePolicy.tier,
-      explorerAllowed: !!runtimePolicy.features?.themes?.explorer,
-      cloudVoicesAllowed: !!runtimePolicy.features?.cloudVoices,
-    });
-    dispatchRuntimePolicyChanged({ source: 'public-reset', reason: String(reason || 'public-reset'), publicReset: true });
+    try {
+      const detail = { policy: runtimePolicy, resolved: runtimePolicyResolved };
+      document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
+      window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
+    } catch (_) {}
     return runtimePolicy;
   }
 
@@ -1486,7 +1454,6 @@ window.rcPolicy = {
   get: getRuntimePolicy,
   refreshForTier: refreshRuntimePolicy,
   apply: applyResolvedRuntimePolicy,
-  resetToPublic: resetRuntimeProjectionToPublic,
   canSimulateTier: canSimulateTierSelection,
   getTier: getRuntimeTier,
   getUsageDailyLimit: getRuntimeUsageAllowance,
@@ -1496,43 +1463,6 @@ window.rcPolicy = {
   canUseAiEvaluate,
   canUseAnchors,
   canUseCloudVoices
-};
-
-window.__jrPublicProjectionProbe = function jrPublicProjectionProbe() {
-  const policy = getRuntimePolicy();
-  const theme = getThemeState();
-  let authUser = null;
-  let authSession = null;
-  let syncSnapshot = null;
-  try { authUser = window.rcAuth && typeof window.rcAuth.getUser === 'function' ? window.rcAuth.getUser() : null; } catch (_) {}
-  try { authSession = window.rcAuth && typeof window.rcAuth.getSession === 'function' ? window.rcAuth.getSession() : null; } catch (_) {}
-  try { syncSnapshot = window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function' ? window.rcSync.getDiagnosticsSnapshot() : null; } catch (_) {}
-  const tierPill = document.getElementById('reading-tier-pill');
-  const readingContent = document.querySelector('#reading-mode .reading-content');
-  let ttsSupport = null;
-  try { ttsSupport = typeof getTtsSupportStatus === 'function' ? getTtsSupportStatus() : null; } catch (_) {}
-  return {
-    signedIn: !!authUser,
-    userId: authUser && authUser.id ? authUser.id : null,
-    hasSession: !!authSession,
-    projectedTier: policy?.tier || 'basic',
-    policyResolved: isRuntimePolicyResolved(),
-    policyResolutionMode: policy?.resolutionMode || '',
-    explorerEligible: !!policy?.features?.themes?.explorer,
-    cloudRouteEligible: !!policy?.features?.cloudVoices,
-    badgeText: tierPill ? String(tierPill.textContent || '').trim() : null,
-    badgeSource: 'reading-tier-pill<-rcPolicy.getTier',
-    themeId: theme.themeId,
-    bodyHasExplorerTheme: !!document.body.classList.contains('theme-explorer'),
-    readingExplorerBackground: readingContent ? Array.from(readingContent.classList || []).filter((c) => /^explorer-bg-/.test(c)) : [],
-    sessionVoiceSelection: String(window.__rcSessionVoiceSelection || ''),
-    ttsTier: ttsSupport?.tier || null,
-    ttsCloudAccess: !!ttsSupport?.cloudVoiceAccess,
-    durableCacheEventTrail: syncSnapshot?.eventTrail || [],
-    syncHydrated: syncSnapshot?.hydrated || null,
-    syncUsersRowPresent: !!syncSnapshot?.usersRow,
-    syncSettingsTheme: syncSnapshot?.settingsRow?.theme_id || null,
-  };
 };
 
 // PASS3: Interim server-owned usage capacity API.
