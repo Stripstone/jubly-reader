@@ -63,6 +63,7 @@
       if (!target) return false;
       target.scrollIntoView({ behavior: 'auto', block: 'start' });
       lastFocusedPageIndex = idx;
+      window.__rcRestoreJustApplied = true;
       try { currentPageIndex = idx; } catch (_) {}
       // Advance reading target to the restored page; preserve source context set by render().
       try {
@@ -2796,7 +2797,11 @@ function _installScrollPageTracker() {
         const _pActive = (typeof window.getPlaybackStatus === 'function') && !!window.getPlaybackStatus().active;
         const _cActive = (typeof window.getCountdownStatus === 'function') && !!window.getCountdownStatus().active;
         if (!_pActive && !_cActive) {
-          lastFocusedPageIndex = bestIdx;
+          if (window.__rcRestoreJustApplied) {
+            window.__rcRestoreJustApplied = false;
+          } else {
+            lastFocusedPageIndex = bestIdx;
+          }
         }
         updateReadingMetricsPage(bestIdx);
       } catch (_) {}
@@ -3124,8 +3129,13 @@ window.exitReadingSession = function exitReadingSession() {
   try { flushCurrentReadingProgress('reading-exit').catch(() => {}); } catch (_) {}
   const metrics = finalizeReadingMetricsSession();
   const result = { ttsStopped: false, musicStopped: false, countdownCleared: false, pageCount: Array.isArray(pages) ? pages.length : 0, activePageIndex: getFocusedOrInferredReadingPageIndex(), metrics };
+  let _wasPlaybackActive = false;
+  let _wasCountdownActive = false;
+  try { _wasPlaybackActive = (typeof window.getPlaybackStatus === 'function') && !!window.getPlaybackStatus().active; } catch (_) {}
+  try { _wasCountdownActive = (typeof window.getCountdownStatus === 'function') && !!window.getCountdownStatus().active; } catch (_) {}
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}
   try { if (typeof ttsAutoplayCancelCountdown === 'function') { ttsAutoplayCancelCountdown(); result.countdownCleared = true; } } catch (_) {}
+  try { if (_wasPlaybackActive || _wasCountdownActive) { lastFocusedPageIndex = Math.max(0, currentPageIndex); } } catch (_) {}
   try { const signal = document.getElementById('session-complete'); if (signal) signal.classList.add('hidden-section'); } catch (_) {}
   try { document.querySelectorAll('.page-active').forEach((el) => el.classList.remove('page-active')); } catch (_) {}
   try { const active = document.activeElement; if (active && typeof active.blur === 'function') active.blur(); } catch (_) {}
