@@ -2679,6 +2679,13 @@ async function ttsSpeakQueue(key, parts) {
             ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1;
           TTS_CLOUD_WINDOW.pendingSkipBlock = -1; // consume
           TTS_CLOUD_WINDOW.pendingSkipSettling = false;
+          // Mark full-page marks/audio as the active seek/skip truth (Case B equivalent
+          // of the promotionApplied = true set in _ttsWindowApplyPromotion for Case A).
+          // Without this, all three window-skip guards would see promotionApplied === false
+          // and incorrectly defer/coalesce skips — including attempts to skip past the last
+          // block (target >= blockCount), which would set pendingSkipSettling = true and
+          // lock out every subsequent forward skip for the rest of the session.
+          TTS_CLOUD_WINDOW.promotionApplied = true;
           const startBlock = Math.min(
             _handoffPendingSkip >= 0 ? Math.max(chunkAEnd, _handoffPendingSkip) : chunkAEnd,
             fullMarks ? fullMarks.length - 1 : 0
@@ -2692,6 +2699,11 @@ async function ttsSpeakQueue(key, parts) {
             charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
             charsFullPage: pageText.length,
             charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
+            ttsCloudMode: 'full-page',
+          });
+          ttsDiagPush('window-promotion-applied', {
+            sessionId, key, startBlock,
+            path: 'case-b-handoff',
             ttsCloudMode: 'full-page',
           });
           if (_handoffPendingSkip >= 0) {
