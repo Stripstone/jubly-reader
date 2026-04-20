@@ -1566,7 +1566,18 @@ function computeSkipEligibility(delta) {
   if (!ctx) return { can: false, reason: 'no-active-or-paused-session' };
   const nextPage = ctx.pageIndex + (delta < 0 ? -1 : 1);
   const hasCrossPageTarget = typeof pages !== 'undefined' && !!pages && Number.isFinite(nextPage) && nextPage >= 0 && !!pages[nextPage];
-  if (ctx.blockCount <= 0) return { can: hasCrossPageTarget, reason: hasCrossPageTarget ? 'cross-page-target' : 'no-blocks-or-page-target' };
+  if (ctx.blockCount <= 0) {
+    if (TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied) {
+      return { can: true, reason: 'window-pending-promotion' };
+    }
+    // Runtime skip code does not perform cross-page navigation from an active
+    // no-block cloud session. Do not advertise cross-page skip eligibility when
+    // the live session has no seek/highlight truth.
+    if (TTS_STATE.audio || TTS_STATE.activeKey) {
+      return { can: false, reason: 'no-live-blocks' };
+    }
+    return { can: hasCrossPageTarget, reason: hasCrossPageTarget ? 'cross-page-target' : 'no-blocks-or-page-target' };
+  }
   const targetBlock = ctx.blockIndex + (delta < 0 ? -1 : 1);
   if (targetBlock >= 0 && targetBlock < ctx.blockCount) return { can: true, reason: 'in-page-target' };
   if (targetBlock < 0) return { can: true, reason: 'restart-block-0' };
@@ -2684,7 +2695,16 @@ async function ttsSpeakQueue(key, parts) {
         const applyPending = (reason) => { try { applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason); } catch (_) {} };
         try { audio.onloadedmetadata = () => applyPending('loadedmetadata'); } catch (_) {}
         try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
-        audio.onended = () => { ttsClearSentenceHighlight(); resolve(); };
+        audio.onended = () => {
+          // In window mode this is only chunk-A ending unless the full-page
+          // promotion already swapped src. Keep chunk-A marks live until Case B
+          // either latches full-page marks or fails through normal cleanup;
+          // clearing here creates active/paused/no-marks stale state.
+          if (!(isFirstItem && useWindowMode && !TTS_CLOUD_WINDOW.promotionApplied)) {
+            ttsClearSentenceHighlight();
+          }
+          resolve();
+        };
         audio.onerror = () => reject(new Error('Audio playback failed'));
         audio.play().then(() => {
           clearTtsStartupBanner();
@@ -3064,6 +3084,16 @@ function ttsJumpSentence(delta) {
     blockCount,
     pausedForContract,
     runtimePath: TTS_STATE.audio ? 'cloud-audio' : (TTS_STATE.browserSpeakFromBlock ? 'browser-speech' : 'none'),
+    cloudWindow: {
+      active: !!TTS_CLOUD_WINDOW.active,
+      mode: TTS_CLOUD_WINDOW.mode,
+      sessionId: TTS_CLOUD_WINDOW.sessionId,
+      promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
+      promotionApplied: !!TTS_CLOUD_WINDOW.promotionApplied,
+      chunkASentenceCount: TTS_CLOUD_WINDOW.chunkASentenceCount,
+      pendingSkipBlock: TTS_CLOUD_WINDOW.pendingSkipBlock,
+      pendingSkipSettling: !!TTS_CLOUD_WINDOW.pendingSkipSettling,
+    },
   });
 
   // ── Cloud path ───────────────────────────────────────────────────────────────
@@ -3093,6 +3123,15 @@ function ttsJumpSentence(delta) {
   // page marks and a null-marks state would be a separate fault.
   if (audio && (!marks || blockCount === 0) && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied && delta > 0) {
     return ttsWindowRecordForwardSkipIntent('skip-forward-no-marks', { delta, key, sourcePage, sourceBlock });
+  }
+
+  if (audio && delta > 0 && marks && blockCount > 0 &&
+      TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied &&
+      !TTS_CLOUD_WINDOW.promotionTriggered) {
+    // A manual forward skip is stronger engagement than the elapsed-time gate.
+    // Start full-page promotion immediately, while still allowing the first
+    // in-window skip (0 → 1) to land normally.
+    try { _ttsWindowTriggerPromotion('skip-forward-window-preload'); } catch (_) {}
   }
 
   if (audio && marks && blockCount > 0) {
