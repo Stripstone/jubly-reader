@@ -110,8 +110,8 @@ Maintenance rule:
 
 | Surface | What it does | Status |
 |---|---|---|
-| Reading mode → **Play** / `Read page` cloud start | Cloud TTS `POST /api/ai?action=tts` | ✅ No routine pending banner; preserve normal countdown/flow. Surface only real playback errors with `Try again`. Transient cloud/server transport failures must stop cleanly and leave Play immediately retryable. |
-| Reading mode → **Skip forward / back** buttons | Runtime route decision | — Intentionally no routine pending state; keep immediate response and surface only real failure |
+| Reading mode → **Play** / `Read page` cloud start | Cloud TTS `POST /api/ai?action=tts` | ✅ No routine pending banner for normal start; preserve normal countdown/flow. Surface real playback errors with `Try again`. Transient cloud/server transport failures must stop cleanly and leave Play immediately retryable. |
+| Reading mode → **Skip forward / back** buttons | Runtime route decision and cloud seek/restart | ◐ Immediate by default. During an already-started cloud seek/restart under poor connection, a visible `Loading audio…` / poor-connection pending banner may appear; rapid skip intents received during that pending restart are coalesced so the latest same-page target wins when audio is ready. |
 
 ---
 
@@ -137,7 +137,7 @@ Pending UI should not be added to every control.
 | Usage | 1 | 0 |
 | Importer | 5 | 0 |
 | Library | 5 | 0 |
-| Reading / TTS | 1 wired, 1 intentionally immediate | 0 |
+| Reading / TTS | 1 wired, 1 conditional/local pending | 0 |
 | Settings / persistence | 1 wired, 1 intentionally immediate | 0 |
 | **Total surfaces covered** | **27** | **0 in this bounded pass** |
 
@@ -145,6 +145,6 @@ Pending UI should not be added to every control.
 
 - Button-owned waits prefer inline busy states before any global banner.
 - App-level or cross-surface truth settles may use the bottom interaction banner.
-- Skip controls remain immediate; adding routine pending there would mask a deeper runtime issue.
+- Skip controls remain immediate in routine operation; the only TTS skip pending surface is the poor-connection cloud seek/restart seam, where audio is already in a restart transition and the user needs honest loading visibility.
 - Settings stay optimistic/local first; the shared save-failure seam is enough for this pass.
 - Recoverable error banners now standardize to `Try again`, `Refresh`, `Open login`, or `Dismiss`.

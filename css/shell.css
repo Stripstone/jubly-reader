@@ -157,6 +157,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         body.app-dark #shell-speed:hover,
         body.app-dark .reading-top-settings-btn:hover,
         body.app-dark .reading-top-exit:hover { background: #1e293b; border-color: #475569; color: #f8fafc; }
+        body.app-dark .rs-header { background:#111827; border-color:#1f2937; }
         body.app-dark #devToolsPanel,
         body.app-dark #diagPanel { color: #1e293b; }
         body.app-dark #devToolsPanel input,
@@ -789,7 +790,8 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
   display: none;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) max(1rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+  overflow: auto;
   background: rgba(15, 23, 42, 0.46);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -804,20 +806,22 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
 .reading-settings-card {
   width: min(560px, calc(100vw - 2rem));
   max-width: 100%;
-  max-height: min(88vh, 820px);
-  overflow-y: auto;
+  max-height: min(88dvh, 820px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border-radius: 20px;
 }
 
-.rs-header { display:flex; align-items:center; justify-content:space-between; padding:18px 20px 12px; border-bottom:1px solid #eef2f7; }
+.rs-header { display:flex; align-items:center; justify-content:space-between; flex:0 0 auto; padding:18px 20px 12px; border-bottom:1px solid #eef2f7; background:rgba(255,255,255,0.96); z-index:2; }
 .rs-title { font-size:0.72rem; font-weight:900; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8; }
 .rs-close-btn { background:#f1f5f9; border:none; border-radius:10px; width:30px; height:30px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#64748b; font-size:0.92rem; transition:background 0.15s, color 0.15s; }
 .rs-close-btn:hover { background:#e2e8f0; color:#334155; }
-.rs-tab-strip { display:flex; flex-direction:column; gap:6px; padding:14px 20px 0; }
+.rs-tab-strip { display:flex; flex:0 0 auto; flex-direction:column; gap:6px; padding:14px 20px 0; }
 .rs-tab { border:1px solid #e2e8f0; background:#fff; color:#64748b; border-radius:12px; padding:10px 14px; text-align:left; font-size:0.82rem; font-weight:800; cursor:pointer; transition:border-color 0.15s, background 0.15s, color 0.15s; }
 .rs-tab:hover { border-color:#cbd5e1; background:#f8fafc; }
 .rs-tab.active { border-color:rgba(99,68,245,0.22); background:var(--theme-accent-soft); color:var(--theme-accent); }
-.rs-panel { padding:18px 20px 20px; }
+.rs-panel { flex:1 1 auto; min-height:0; padding:18px 20px 20px; overflow-y:auto; }
 .rs-simple-row, .settings-mode-row, .explorer-panel-row { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .rs-simple-row { padding:8px 0 0; }
 .settings-mode-row { margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid #f1f5f9; }
@@ -877,10 +881,10 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
 @media (min-width: 760px) {
   .reading-settings-card {
     width: min(760px, calc(100vw - 2rem));
-    min-height: clamp(500px, 72vh, 600px);
+    min-height: clamp(500px, 72dvh, 600px);
     display: grid;
     grid-template-columns: 188px minmax(0, 1fr);
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
     overflow: hidden;
   }
   .rs-header { grid-column: 1 / -1; }
@@ -898,6 +902,22 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
     padding: 22px 24px 24px;
     overflow-y: auto;
   }
+}
+
+@media (max-height: 560px) and (orientation: landscape) {
+  .reading-settings-modal {
+    align-items: stretch;
+    padding: max(8px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+  }
+  .reading-settings-card {
+    width: min(760px, calc(100vw - 20px));
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    min-height: 0;
+  }
+  .rs-header { padding: 10px 14px 8px; }
+  .rs-tab-strip { padding: 10px 14px 0; gap: 5px; }
+  .rs-tab { padding: 8px 10px; font-size: 0.76rem; }
+  .rs-panel { padding: 12px 14px 14px; }
 }
 
 @media (max-width: 640px) {
