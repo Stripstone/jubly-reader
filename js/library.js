@@ -2762,7 +2762,6 @@ function _installScrollPageTracker() {
   if (window.__rcScrollPageTrackerInstalled) return;
   window.__rcScrollPageTrackerInstalled = true;
   var raf = 0;
-  var prevIdx = -1;
   var settleTimer = 0;
 
   function reconcileVisiblePage(reason) {
@@ -2794,17 +2793,12 @@ function _installScrollPageTracker() {
         }
         if (!bestEl || !Number.isFinite(bestIdx) || bestIdx < 0) return;
         if (bestEl.getBoundingClientRect().height <= 0) return;
-        lastFocusedPageIndex = bestIdx;
-        try { currentPageIndex = bestIdx; } catch (_) {}
-        updateReadingMetricsPage(bestIdx);
-        try {
-          const _ctx = window.getReadingTargetContext();
-          if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
-        } catch (_) {}
-        if (bestIdx !== prevIdx) {
-          prevIdx = bestIdx;
-          try { queueCurrentReadingProgress(reason || 'scroll-tracker'); } catch (_) {}
+        const _pActive = (typeof window.getPlaybackStatus === 'function') && !!window.getPlaybackStatus().active;
+        const _cActive = (typeof window.getCountdownStatus === 'function') && !!window.getCountdownStatus().active;
+        if (!_pActive && !_cActive) {
+          lastFocusedPageIndex = bestIdx;
         }
+        updateReadingMetricsPage(bestIdx);
       } catch (_) {}
     });
   }
