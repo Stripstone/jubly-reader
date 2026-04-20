@@ -35,7 +35,7 @@
       const bookId = String(ctx.bookId || '').trim();
       if (!bookId) return null;
       const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
-      const pageIndex = getFocusedOrInferredReadingPageIndex();
+      const pageIndex = Math.max(0, currentPageIndex);
       return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'flush') });
     } catch (_) {
       return null;
