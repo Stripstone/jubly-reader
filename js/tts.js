@@ -536,7 +536,7 @@ function isRecoverablePlaybackFailure(err) {
   // playback controls. In particular, transient cloud/server transport issues
   // (for example websocket 1006 / unable-to-contact-server) should leave Play
   // immediately retryable after the failed session is cleaned up.
-  return /audio playback failed|notallowederror|interrupted|notsupportederror|mediaerror|unable to contact server|statuscode:\s*1006|failed to fetch|networkerror|network request failed|timeout|timed out|service unavailable|bad gateway|gateway timeout|tts request failed \(5\d\d\)|server error/i.test(msg);
+  return /audio playback failed|stale-phase1-promotion-result|notallowederror|interrupted|notsupportederror|mediaerror|unable to contact server|statuscode:\s*1006|failed to fetch|networkerror|network request failed|timeout|timed out|service unavailable|bad gateway|gateway timeout|tts request failed \(5\d\d\)|server error/i.test(msg);
 }
 
 function isRecoverableBrowserUtteranceError(evt) {
@@ -1570,6 +1570,18 @@ function computeSkipEligibility(delta) {
   const targetBlock = ctx.blockIndex + (delta < 0 ? -1 : 1);
   if (targetBlock >= 0 && targetBlock < ctx.blockCount) return { can: true, reason: 'in-page-target' };
   if (targetBlock < 0) return { can: true, reason: 'restart-block-0' };
+  if (TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.promotionApplied &&
+      ctx.blockCount <= Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0)) {
+    return { can: true, reason: 'window-stale-promotion' };
+  }
+  // targetBlock >= ctx.blockCount — boundary reached.
+  // If in an active block-window session without a confirmed full-page promotion,
+  // the skip will be deferred (not cross-page-navigated). Expose this explicitly so
+  // controls reflect the actual outcome rather than advertising cross-page-target
+  // while the actual skip fires cross-page-disabled.
+  if (TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied) {
+    return { can: true, reason: 'window-pending-promotion' };
+  }
   return { can: hasCrossPageTarget, reason: hasCrossPageTarget ? 'cross-page-target' : 'no-next-page-target' };
 }
 
@@ -2222,7 +2234,7 @@ async function cloudFetchUrl(text, opts = {}) {
   if (selectedVoicePref.explicitCloud && selectedVoicePref.requestedCloudVoiceId) payload.voiceId = selectedVoicePref.requestedCloudVoiceId;
   if (opts && opts.sentenceMarks) payload.speechMarks = 'sentence';
   if (opts && opts.requestMode) payload.requestMode = String(opts.requestMode);
-  TTS_DEBUG.lastCloudRequest = { chars: String(text || '').length, sentenceMarks: !!(opts && opts.sentenceMarks), selectedVoice: selectedVoicePref.stored, selectedVoiceType: selectedVoicePref.type, requestedVoiceId: selectedVoicePref.requestedCloudVoiceId, variant: TTS_STATE.voiceVariant || 'female' };
+  TTS_DEBUG.lastCloudRequest = { chars: String(text || '').length, sentenceMarks: !!(opts && opts.sentenceMarks), requestMode: opts && opts.requestMode ? String(opts.requestMode) : '', selectedVoice: selectedVoicePref.stored, selectedVoiceType: selectedVoicePref.type, requestedVoiceId: selectedVoicePref.requestedCloudVoiceId, variant: TTS_STATE.voiceVariant || 'female' };
   try { const qs = new URLSearchParams(window.location.search); if (qs.get('debug') === '1') payload.debug = '1'; } catch (_) {}
   try { if (String(TTS_STATE.voiceVariant || '').toLowerCase() === 'male') payload.voiceVariant = 'male'; } catch (_) {}
   try { const saved = getStoredSelectedVoice(); if (saved.startsWith('cloud:')) payload.voiceId = saved.slice('cloud:'.length); } catch (_) {}
@@ -2254,6 +2266,7 @@ async function cloudFetchUrl(text, opts = {}) {
     status: res.status,
     provider: TTS_DEBUG.lastCloudResponse.provider,
     cacheHit: !!data?.cacheHit,
+    requestMode: opts && opts.requestMode ? String(opts.requestMode) : '',
     preciseSeekAvailable: !!capability?.preciseSeek?.available,
     preciseSeekReason: capability?.preciseSeek?.reason || '',
     marksIncludedInResponse: !!capability?.marks?.includedInResponse,
@@ -2324,6 +2337,35 @@ function _ttsWindowTriggerPromotion(signal) {
 
   promise.then(result => {
     if (!result || TTS_STATE.activeSessionId !== sessionId || !TTS_CLOUD_WINDOW.active) return;
+
+    // Validate: the full-page result must contain more sentence marks than chunk A.
+    // If the server/cache returned Phase 1 marks (e.g. the chunk-A artifact hash) in
+    // response to requestMode:'full-page', applying it would set promotionApplied = true
+    // with blockCount ≤ chunkASentenceCount. That prematurely closes the skip-safety
+    // window — subsequent skips at the chunk-A boundary see promotionApplied = true and
+    // fall through to cross-page-disabled instead of window-skip-deferred.
+    const _resultMarkCount = result.sentenceMarks ? result.sentenceMarks.length : 0;
+    const _chunkACount = TTS_CLOUD_WINDOW.chunkASentenceCount;
+    if (_resultMarkCount <= _chunkACount) {
+      ttsDiagPush('window-promotion-stale-phase1', {
+        sessionId,
+        key,
+        returnedMarksCount: _resultMarkCount,
+        chunkASentenceCount: _chunkACount,
+        expectedMin: _chunkACount + 1,
+        requestMode: 'full-page',
+        audioCacheStatus: result.capability?.cache?.audio?.status || null,
+        marksCacheStatus: result.capability?.cache?.marks?.status || null,
+        artifactHash: result.capability?.artifact?.hash || null,
+        phase: 'promotion-fetch',
+        ttsCloudMode: 'stale-phase1-rejected',
+      });
+      // Leave the window state intact so the post-chunk-A handoff can see the
+      // rejected promotion and fail through the normal cleanup path instead of
+      // returning from ttsSpeakQueue with activeKey/audio but no live marks.
+      return;
+    }
+
     TTS_CLOUD_WINDOW.promotionResult = result;
     TTS_CLOUD_WINDOW.mode = 'promoted';
     TTS_CLOUD_WINDOW.charsSessionTotal = TTS_CLOUD_WINDOW.charsPhase1 + pageText.length;
@@ -2332,6 +2374,8 @@ function _ttsWindowTriggerPromotion(signal) {
       sessionId,
       key,
       cacheHit: result.capability?.cache?.audio?.status === 'hit',
+      returnedMarksCount: _resultMarkCount,
+      chunkASentenceCount: _chunkACount,
       charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
       charsFullPage: pageText.length,
       charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
@@ -2363,6 +2407,25 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
   if (!audio || audio.ended) return;
 
   const currentBlock = Math.max(0, Number(TTS_STATE.activeBlockIndex ?? 0));
+
+  // Validate result.sentenceMarks BEFORE mutating runtime state.
+  // Checking after apply (e.g. on TTS_STATE.highlightMarks) is too late — stale
+  // Phase 1 marks would briefly become the live seek truth. Validate on the raw
+  // result first so no state is mutated if the promotion is stale.
+  const _resultMarkCount = result.sentenceMarks ? result.sentenceMarks.length : 0;
+  const _chunkASentCount = TTS_CLOUD_WINDOW.chunkASentenceCount;
+  if (_resultMarkCount <= _chunkASentCount) {
+    ttsDiagPush('window-promotion-stale-phase1', {
+      sessionId, key,
+      returnedMarksCount: _resultMarkCount,
+      chunkASentenceCount: _chunkASentCount,
+      expectedMin: _chunkASentCount + 1,
+      phase: 'apply-promotion',
+      ttsCloudMode: 'stale-phase1-rejected',
+    });
+    // Do not apply — let chunk-A finish naturally. Don't swap src.
+    return;
+  }
 
   // Apply full-page marks so highlight spans cover the whole page. This calls
   // ttsClearSentenceHighlight() internally, which cancels the old RAF — we restart
@@ -2663,6 +2726,27 @@ async function ttsSpeakQueue(key, parts) {
 
           const fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
           if (!fullResult || TTS_STATE.activeSessionId !== sessionId) return;
+
+          // Validate fullResult.sentenceMarks BEFORE mutating runtime state.
+          // Applying stale Phase 1 marks (returned count <= chunkASentenceCount) would
+          // make them briefly live seek truth and corrupt skip boundary detection.
+          const _caseBMarkCount = fullResult.sentenceMarks ? fullResult.sentenceMarks.length : 0;
+          const _caseBChunkACount = TTS_CLOUD_WINDOW.chunkASentenceCount;
+          if (_caseBMarkCount <= _caseBChunkACount) {
+            ttsDiagPush('window-promotion-stale-phase1', {
+              sessionId, key,
+              returnedMarksCount: _caseBMarkCount,
+              chunkASentenceCount: _caseBChunkACount,
+              expectedMin: _caseBChunkACount + 1,
+              requestMode: 'full-page',
+              audioCacheStatus: fullResult.capability?.cache?.audio?.status || null,
+              marksCacheStatus: fullResult.capability?.cache?.marks?.status || null,
+              artifactHash: fullResult.capability?.artifact?.hash || null,
+              phase: 'case-b-handoff',
+              ttsCloudMode: 'stale-phase1-rejected',
+            });
+            throw new Error('stale-phase1-promotion-result');
+          }
 
           applyCloudCapabilityForRuntime({ key, sessionId, capability: fullResult.capability, sentenceMarks: fullResult.sentenceMarks });
           if (fullResult.sentenceMarks && fullResult.sentenceMarks.length) {
@@ -3024,6 +3108,20 @@ function ttsJumpSentence(delta) {
         // chunk-A audio or fall through to cross-page navigation.
         return ttsWindowRecordForwardSkipIntent('skip-forward-engagement', { delta, key, sourcePage, sourceBlock });
       }
+      // Stale-promotion guard: promotionApplied=true but blockCount still equals
+      // chunk-A count means the full-page marks never latched (the Phase 1 result
+      // was returned by the server for a full-page request and was rejected, leaving
+      // blockCount at chunkASentenceCount). Treat as unpromoted so the skip defers
+      // rather than falling through to cross-page-disabled.
+      if (TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.promotionApplied &&
+          blockCount <= TTS_CLOUD_WINDOW.chunkASentenceCount) {
+        ttsDiagPush('window-skip-stale-promotion-reroute', {
+          sessionId: TTS_STATE.activeSessionId, key,
+          sourcePage, sourceBlock, blockCount,
+          chunkASentenceCount: TTS_CLOUD_WINDOW.chunkASentenceCount,
+        });
+        return ttsWindowRecordForwardSkipIntent('skip-forward-stale-promotion', { delta, key, sourcePage, sourceBlock });
+      }
       // Not in window mode — cross-page navigation disabled.
       /* disabled cross-page path — kept for reference:
       const moved = pausedForContract ? ttsJumpPagePreserve(1) : ttsJumpPage(1);
@@ -3236,6 +3334,20 @@ function getTtsDiagnosticsSnapshot() {
     support: { browserTts: browserTtsSupported(), speechSynthesis: !!(typeof window !== 'undefined' && window.speechSynthesis), audioElement: !!TTS_AUDIO_ELEMENT },
     playback: getPlaybackStatus(),
     countdown: getCountdownStatus(),
+    cloudWindow: {
+      active: !!TTS_CLOUD_WINDOW.active,
+      mode: TTS_CLOUD_WINDOW.mode || 'idle',
+      sessionId: Number(TTS_CLOUD_WINDOW.sessionId || 0),
+      pageKey: TTS_CLOUD_WINDOW.pageKey || null,
+      chunkASentenceCount: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
+      promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
+      promotionApplied: !!TTS_CLOUD_WINDOW.promotionApplied,
+      pendingSkipBlock: Number(TTS_CLOUD_WINDOW.pendingSkipBlock ?? -1),
+      pendingSkipSettling: !!TTS_CLOUD_WINDOW.pendingSkipSettling,
+      charsPhase1: Number(TTS_CLOUD_WINDOW.charsPhase1 || 0),
+      charsFullPage: Number(TTS_CLOUD_WINDOW.charsFullPage || 0),
+      charsSessionTotal: Number(TTS_CLOUD_WINDOW.charsSessionTotal || 0),
+    },
     session: {
       id: TTS_STATE.activeSessionId,
       activeKey: TTS_STATE.activeKey || null,
