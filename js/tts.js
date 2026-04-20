@@ -147,6 +147,54 @@ const TTS_CLOUD_WINDOW = {
   pendingSkipSettling: false,
 };
 
+
+// Runtime-only memory of pages that have successfully latched full-page cloud
+// audio/marks in this tab. This avoids re-entering the fragile chunk-A window
+// when the user stops and immediately replays the same page. It is intentionally
+// not persisted and is only set after validated full-page marks are live.
+const TTS_FULL_PAGE_READY_KEYS = new Set();
+
+function markTtsFullPageReady(key, context = {}) {
+  const stableKey = String(key || '');
+  if (!stableKey) return false;
+  TTS_FULL_PAGE_READY_KEYS.add(stableKey);
+  ttsDiagPush('window-full-page-ready-recorded', {
+    key: stableKey,
+    sessionId: Number(context.sessionId || TTS_STATE.activeSessionId || 0),
+    source: String(context.source || 'unknown'),
+    marksCount: Number(context.marksCount || 0),
+  });
+  return true;
+}
+
+function hasTtsFullPageReady(key) {
+  return TTS_FULL_PAGE_READY_KEYS.has(String(key || ''));
+}
+
+function getTtsCloudMarkCount() {
+  return Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0;
+}
+
+function getTtsChunkWindowLimit() {
+  const windowCount = Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0);
+  return Math.max(2, Number.isFinite(windowCount) ? windowCount : 0);
+}
+
+function isStaleChunkWindowCloudSession() {
+  const key = String(TTS_STATE.activeKey || TTS_STATE.pausedPageKey || '');
+  if (!key || !TTS_STATE.audio) return false;
+  const marksCount = getTtsCloudMarkCount();
+  const chunkLimit = getTtsChunkWindowLimit();
+  const lastCapabilityCount = Number(TTS_DEBUG.lastCapability?.returnedMarksCount || 0);
+  const lastRequestMode = String(TTS_DEBUG.lastCloudRequest?.requestMode || '');
+  const audioEnded = !!TTS_STATE.audio.ended;
+  const paused = !!TTS_STATE.audio.paused;
+  const chunkOnlyMarks = marksCount > 0 && marksCount <= chunkLimit;
+  const chunkOnlyCapability = lastCapabilityCount > 0 && lastCapabilityCount <= chunkLimit;
+  const unpromotedWindow = !!TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied;
+  return paused && (audioEnded || unpromotedWindow || lastRequestMode === 'block-window') && (chunkOnlyMarks || chunkOnlyCapability);
+}
+
 function clearTtsCloudWindow() {
   TTS_CLOUD_WINDOW.active = false;
   TTS_CLOUD_WINDOW.mode = 'idle';
@@ -2189,11 +2237,48 @@ function pauseOrResumeReading() {
   }
 
   if (before.playback.paused) {
+    // A paused chunk-window cloud session is not a useful resume target once it
+    // only has Phase 1 marks. Restart the focused page cleanly instead of making
+    // the user spend one Play cycle clearing stale chunk state.
+    if (isStaleChunkWindowCloudSession()) {
+      route = 'stale-window-paused-restart-focused';
+      ttsDiagPush('pause-resume-action', {
+        action: 'stale-window-resume-cleared',
+        route, outcome: 'clearing-stale-window-session',
+        before,
+        stale: {
+          marksCount: getTtsCloudMarkCount(),
+          chunkLimit: getTtsChunkWindowLimit(),
+          audioEnded: !!TTS_STATE.audio?.ended,
+          cloudWindow: {
+            active: !!TTS_CLOUD_WINDOW.active,
+            mode: TTS_CLOUD_WINDOW.mode,
+            promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
+            promotionApplied: !!TTS_CLOUD_WINDOW.promotionApplied,
+          },
+        },
+        after: ttsBlockSnapshot(),
+      });
+      ttsStop();
+      try {
+        if (typeof window.startFocusedPageTts === 'function') {
+          const started = window.startFocusedPageTts();
+          outcome = started ? 'started' : 'failed';
+          ttsDiagPush('pause-resume-action', {
+            action: 'play', route, outcome,
+            outcomeClass: started ? 'full-restart' : 'blocked',
+            before, after: ttsBlockSnapshot(),
+          });
+        }
+      } catch (_) {}
+      return getPlaybackStatus();
+    }
+
     // Check whether the paused session has a real resume hook before attempting.
     // A stale paused session (browserSpeakFromBlock cleared, audio element gone)
     // should restart the current focused page rather than looping into a failed
     // ttsResume() call.
-    const hasRealResumeHook = (!isCloudRestartTransitionActive() && !!(TTS_STATE.audio && TTS_STATE.audio.paused)) ||
+    const hasRealResumeHook = (!isCloudRestartTransitionActive() && !!(TTS_STATE.audio && TTS_STATE.audio.paused && !TTS_STATE.audio.ended)) ||
       !!(TTS_STATE.browserPaused && TTS_STATE.browserSpeakFromBlock);
     if (!hasRealResumeHook) {
       // Stale session: clear paused state so startFocusedPageTts gets a clean run.
@@ -2511,6 +2596,7 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
         // normal timed-seek path unobstructed.
         TTS_CLOUD_WINDOW.pendingSkipSettling = false;
         TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
+        markTtsFullPageReady(key, { sessionId, source: 'promotion-apply', marksCount: _resultMarkCount });
         ttsStartHighlightLoop(audio);
         ttsDiagPush('window-promotion-applied', {
           sessionId, key, targetBlock, seekTime,
@@ -2603,12 +2689,12 @@ async function ttsSpeakQueue(key, parts) {
 
   if (wantMarksForPage && queue.length === 1) {
     const sentences = ttsWindowSplitSentences(pageText);
+    const pageAlreadyPromoted = hasTtsFullPageReady(key);
     // Use window mode when: page has 3+ sentences AND the full page is long
-    // enough for windowing to save meaningful Azure chars. The length guard is
-    // on the FULL PAGE, not on chunk A — a page with a short opening sentence
-    // but a long body stays in block-window and lets the 3 s engagement gate
-    // decide promotion. Only a genuinely short full page goes direct.
-    if (sentences.length > 2 && pageText.length >= TTS_WINDOW_SMALL_PAGE_CHARS) {
+    // enough for windowing to save meaningful Azure chars. Once this tab has
+    // already validated full-page marks for the page, replay goes direct to the
+    // full-page cache instead of re-entering chunk-A and exposing the same seam.
+    if (sentences.length > 2 && pageText.length >= TTS_WINDOW_SMALL_PAGE_CHARS && !pageAlreadyPromoted) {
       useWindowMode = true;
       chunkAText = sentences.slice(0, 2).join('');
       TTS_CLOUD_WINDOW.active = true;
@@ -2628,18 +2714,18 @@ async function ttsSpeakQueue(key, parts) {
         ttsCloudMode: 'block-window',
       });
     } else if (sentences.length > 2) {
-      // Full page is short (< TTS_WINDOW_SMALL_PAGE_CHARS): window mode would
-      // save negligible chars. Synthesise full page directly.
-      ttsDiagPush('window-skipped-short-page', {
+      // Full page is short, or this page already proved full-page marks in this
+      // tab. Synthesise full page directly.
+      ttsDiagPush(pageAlreadyPromoted ? 'window-bypassed-promoted-page' : 'window-skipped-short-page', {
         sessionId, key,
         sentences: sentences.length,
         pageLength: pageText.length,
         smallPageThreshold: TTS_WINDOW_SMALL_PAGE_CHARS,
+        priorFullPageReady: pageAlreadyPromoted,
         ttsCloudMode: 'full-page',
       });
     }
   }
-
   try {
     // Pre-flight usage check (runs once before any cloud request).
     // Pass 3: server verdict gates the action; client counter is display-only.
@@ -2678,6 +2764,9 @@ async function ttsSpeakQueue(key, parts) {
         const highlightText = (isFirstItem && useWindowMode) ? pageText : queue[i];
         if (tts.sentenceMarks && tts.sentenceMarks.length) {
           ttsMaybePrepareSentenceHighlight(key, highlightText, tts.sentenceMarks);
+          if (!useWindowMode && tts.sentenceMarks.length > getTtsChunkWindowLimit()) {
+            markTtsFullPageReady(key, { sessionId, source: 'direct-full-page', marksCount: tts.sentenceMarks.length });
+          }
         } else {
           ttsPrepareEstimatedHighlight(key, queue[i], TTS_AUDIO_ELEMENT);
         }
@@ -2790,6 +2879,7 @@ async function ttsSpeakQueue(key, parts) {
           // block (target >= blockCount), which would set pendingSkipSettling = true and
           // lock out every subsequent forward skip for the rest of the session.
           TTS_CLOUD_WINDOW.promotionApplied = true;
+          markTtsFullPageReady(key, { sessionId, source: 'case-b-handoff', marksCount: _caseBMarkCount });
           const startBlock = Math.min(
             _handoffPendingSkip >= 0 ? Math.max(chunkAEnd, _handoffPendingSkip) : chunkAEnd,
             fullMarks ? fullMarks.length - 1 : 0
