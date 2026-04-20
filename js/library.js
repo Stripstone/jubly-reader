@@ -2795,7 +2795,7 @@ function _installScrollPageTracker() {
         if (bestEl.getBoundingClientRect().height <= 0) return;
         const _pActive = (typeof window.getPlaybackStatus === 'function') && !!window.getPlaybackStatus().active;
         const _cActive = (typeof window.getCountdownStatus === 'function') && !!window.getCountdownStatus().active;
-        if (!_pActive && !_cActive) {
+        if (!_pActive && !_cActive && !window.__rcReadingEntryRestoreSettling) {
           lastFocusedPageIndex = bestIdx;
         }
         updateReadingMetricsPage(bestIdx);
@@ -2987,7 +2987,10 @@ window.startFocusedPageTts = function startFocusedPageTts() {
     try { if (typeof ttsDiagPush === 'function') ttsDiagPush('start-focused-blocked', { reason: 'no-reading-target', pageCount: Array.isArray(pages) ? pages.length : 0 }); } catch (_) {}
     return false;
   }
-  const idx = Math.max(0, Math.min(Number((window.__rcReadingTarget || {}).pageIndex) || 0, (Array.isArray(pages) ? pages.length : 1) - 1));
+  // Bottom Play is an explicit user action: sample the currently viewed/focused
+  // page once at press time, then promote that selection into runtime truth.
+  const sampledIdx = getFocusedOrInferredReadingPageIndex();
+  const idx = Math.max(0, Math.min(Number(sampledIdx) || 0, (Array.isArray(pages) ? pages.length : 1) - 1));
   const text = (Array.isArray(pages) && pages[idx]) ? pages[idx] : '';
   if (!text) return false;
   // Normalize clamped index back into target before deriving key.
@@ -3030,7 +3033,11 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   // ───────────────────────────────────────────────────────────────────────────
 
   // MUST be synchronous — before any await — so reading mode never shows stale
-  // page content while network calls are in flight.
+  // page content while network calls are in flight. Exit/re-enter does not reload
+  // the URL, so also clear the volatile scroll focus and suppress scroll-tracker
+  // focus writes until the runtime restore has painted, matching cold-start entry.
+  try { lastFocusedPageIndex = -1; } catch (_) {}
+  try { window.__rcReadingEntryRestoreSettling = true; } catch (_) {}
   const pagesEl = document.getElementById('pages');
   const readingModeEl = document.getElementById('reading-mode');
   try {
@@ -3094,6 +3101,7 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     try { await window.__rcLoadBook(normalizedId, { restore }); } catch (_) {}
   }
   try { await waitForNextPaint(2); } catch (_) {}
+  try { window.__rcReadingEntryRestoreSettling = false; } catch (_) {}
 
   // Cards are rendered and painted. Clear the message timer (fast load — message
   // never needed), then release the hold and the page guard simultaneously so
