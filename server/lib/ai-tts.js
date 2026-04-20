@@ -41,6 +41,9 @@ function sha256Hex(s) {
   return crypto.createHash("sha256").update(String(s || ""), "utf8").digest("hex");
 }
 
+const TTS_ARTIFACT_VERSION = "v3-s3-sidecar-sentence-marks-trailing-ranges";
+const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-preserve-trailing-text-v1";
+
 function toSafePrefix(prefix) {
   let p = String(prefix || "").trim();
   if (!p) return "tts/";
@@ -87,14 +90,21 @@ function escapeXml(str) {
 }
 
 function splitIntoSentenceRanges(text) {
+  const source = String(text || "");
   const sentenceRegex = /[^.!?]*[.!?]+["']?\s*/g;
   const ranges = [];
   let match;
-  while ((match = sentenceRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
+  let lastEnd = 0;
+  while ((match = sentenceRegex.exec(source)) !== null) {
+    const end = match.index + match[0].length;
+    ranges.push({ start: match.index, end });
+    lastEnd = end;
   }
-  if (!ranges.length) ranges.push({ start: 0, end: text.length });
-  return ranges;
+  // Preserve trailing visible text even when the page ends without terminal
+  // punctuation. Form rows and labels may be final readable content.
+  if (lastEnd < source.length) ranges.push({ start: lastEnd, end: source.length });
+  if (!ranges.length) ranges.push({ start: 0, end: source.length });
+  return ranges.filter((range) => range.end > range.start);
 }
 
 function jsIndexToUtf8ByteOffset(str, jsIndex) {
@@ -152,6 +162,7 @@ function buildCapabilityReason({ preciseSeekCapable, policy, wantSentenceMarks, 
 
 function buildCapabilityPayload({
   artifactVersion,
+  sentenceSplitterVersion,
   hash,
   policy,
   wantSentenceMarks,
@@ -182,6 +193,7 @@ function buildCapabilityPayload({
     },
     artifact: {
       version: artifactVersion,
+      sentenceSplitterVersion,
       hash,
     },
   };
@@ -369,8 +381,9 @@ export default async function handler(req, res) {
     const policy = resolveCloudPolicy(body, debug);
 
     const prefix = toSafePrefix(requiredEnv("AWS_S3_PREFIX"));
-    const artifactVersion = "v2-s3-sidecar-sentence-marks";
-    const identity = JSON.stringify({ artifactVersion, provider: policy.provider, voiceId: policy.voiceId, text });
+    const artifactVersion = TTS_ARTIFACT_VERSION;
+    const sentenceSplitterVersion = TTS_SENTENCE_SPLITTER_VERSION;
+    const identity = JSON.stringify({ artifactVersion, sentenceSplitterVersion, provider: policy.provider, voiceId: policy.voiceId, text });
     const hash = sha256Hex(identity);
     const objectKey = `${prefix}${hash}.mp3`;
     const marksKey = `${prefix}${hash}.sentence.json`;
@@ -474,6 +487,7 @@ export default async function handler(req, res) {
       : (!!marksCacheHitInitial || (Array.isArray(sentenceMarks) && sentenceMarks.length > 0));
     const capability = buildCapabilityPayload({
       artifactVersion,
+      sentenceSplitterVersion,
       hash,
       policy,
       wantSentenceMarks,
@@ -504,6 +518,7 @@ export default async function handler(req, res) {
         cacheHit,
         sentenceMarksMode: policy.sentenceMarksMode,
         artifactVersion,
+        sentenceSplitterVersion,
         capability,
       };
     }

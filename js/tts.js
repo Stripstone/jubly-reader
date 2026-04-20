@@ -171,6 +171,11 @@ function hasTtsFullPageReady(key) {
   return TTS_FULL_PAGE_READY_KEYS.has(String(key || ''));
 }
 
+function isPassiveTtsWindowPromotionSignal(signal) {
+  const value = String(signal || '');
+  return value === 'engagement-threshold-met' || value === 'chunk-a-ended-no-engagement';
+}
+
 function getTtsCloudMarkCount() {
   return Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0;
 }
@@ -186,13 +191,13 @@ function isStaleChunkWindowCloudSession() {
   const marksCount = getTtsCloudMarkCount();
   const chunkLimit = getTtsChunkWindowLimit();
   const lastCapabilityCount = Number(TTS_DEBUG.lastCapability?.returnedMarksCount || 0);
-  const lastRequestMode = String(TTS_DEBUG.lastCloudRequest?.requestMode || '');
   const audioEnded = !!TTS_STATE.audio.ended;
   const paused = !!TTS_STATE.audio.paused;
   const chunkOnlyMarks = marksCount > 0 && marksCount <= chunkLimit;
   const chunkOnlyCapability = lastCapabilityCount > 0 && lastCapabilityCount <= chunkLimit;
-  const unpromotedWindow = !!TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied;
-  return paused && (audioEnded || unpromotedWindow || lastRequestMode === 'block-window') && (chunkOnlyMarks || chunkOnlyCapability);
+  // Only ended chunk-window audio is stale. A paused, non-ended Phase 1 session
+  // with 2 valid marks is a real media pause and must resume from audio.currentTime.
+  return paused && audioEnded && (chunkOnlyMarks || chunkOnlyCapability);
 }
 
 function clearTtsCloudWindow() {
@@ -827,14 +832,22 @@ function escapeHTML(s) {
 }
 
 function splitIntoSentenceRanges(text) {
+  const source = String(text || '');
   const sentenceRegex = /[^.!?]*[.!?]+["']?\s*/g;
   const ranges = [];
   let match;
-  while ((match = sentenceRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length });
+  let lastEnd = 0;
+  while ((match = sentenceRegex.exec(source)) !== null) {
+    const end = match.index + match[0].length;
+    ranges.push({ start: match.index, end });
+    lastEnd = end;
   }
-  if (!ranges.length) ranges.push({ start: 0, end: text.length });
-  return ranges;
+  // Preserve visible trailing text even when it has no terminal punctuation.
+  // This keeps TTS/highlight blocks aligned with .page-text content such as
+  // form rows or box labels that end without a period.
+  if (lastEnd < source.length) ranges.push({ start: lastEnd, end: source.length });
+  if (!ranges.length) ranges.push({ start: 0, end: source.length });
+  return ranges.filter(r => r.end > r.start);
 }
 
 // ─── Highlight ────────────────────────────────────────────────────────────────
@@ -2479,9 +2492,26 @@ function _ttsWindowTriggerPromotion(signal) {
       engagementSignal: signal,
     });
 
-    // If chunk A is still playing: switch immediately so skip/pause see full marks.
-    // If chunk A has already ended: _ttsWindowApplyPromotion is a no-op (audio.ended);
-    // the post-loop handoff path in ttsSpeakQueue will handle it.
+    // Passive engagement should not hot-swap into the currently speaking or
+    // just-spoken Phase 1 block. Leave chunk A playing and let the Case B handoff
+    // start full-page audio at the next unspoken block. Explicit user actions
+    // such as skip keep the immediate apply path so controls remain responsive.
+    const hasPendingExplicitSkip = Number(TTS_CLOUD_WINDOW.pendingSkipBlock || -1) >= 0 || TTS_CLOUD_WINDOW.pendingSkipSettling === true;
+    if (isPassiveTtsWindowPromotionSignal(signal) && !hasPendingExplicitSkip) {
+      ttsDiagPush('window-promotion-passive-handoff-deferred', {
+        sessionId, key,
+        signal,
+        activeBlockIndex: TTS_STATE.activeBlockIndex,
+        chunkASentenceCount: TTS_CLOUD_WINDOW.chunkASentenceCount,
+        returnedMarksCount: _resultMarkCount,
+        ttsCloudMode: 'full-page',
+      });
+      return;
+    }
+
+    // If chunk A is still playing: switch immediately for explicit skip/replay
+    // actions. If chunk A has already ended: _ttsWindowApplyPromotion is a no-op
+    // (audio.ended); the post-loop handoff path in ttsSpeakQueue will handle it.
     try { _ttsWindowApplyPromotion(sessionId, key, result); } catch (_) {}
   }).catch(err => {
     ttsDiagPush('window-promotion-failed', {
@@ -2597,6 +2627,14 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
         TTS_CLOUD_WINDOW.pendingSkipSettling = false;
         TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
         markTtsFullPageReady(key, { sessionId, source: 'promotion-apply', marksCount: _resultMarkCount });
+        const _applyLastMark = result.sentenceMarks[_resultMarkCount - 1] || null;
+        ttsDiagPush('window-full-page-coverage', {
+          sessionId, key,
+          source: 'promotion-apply',
+          marksCount: _resultMarkCount,
+          pageTextLength: TTS_CLOUD_WINDOW.pageText.length,
+          lastMarkEnd: _applyLastMark ? Number(_applyLastMark.end || 0) : 0,
+        });
         ttsStartHighlightLoop(audio);
         ttsDiagPush('window-promotion-applied', {
           sessionId, key, targetBlock, seekTime,
@@ -2766,6 +2804,14 @@ async function ttsSpeakQueue(key, parts) {
           ttsMaybePrepareSentenceHighlight(key, highlightText, tts.sentenceMarks);
           if (!useWindowMode && tts.sentenceMarks.length > getTtsChunkWindowLimit()) {
             markTtsFullPageReady(key, { sessionId, source: 'direct-full-page', marksCount: tts.sentenceMarks.length });
+            const lastMark = tts.sentenceMarks[tts.sentenceMarks.length - 1] || null;
+            ttsDiagPush('window-full-page-coverage', {
+              sessionId, key,
+              source: 'direct-full-page',
+              marksCount: tts.sentenceMarks.length,
+              pageTextLength: highlightText.length,
+              lastMarkEnd: lastMark ? Number(lastMark.end || 0) : 0,
+            });
           }
         } else {
           ttsPrepareEstimatedHighlight(key, queue[i], TTS_AUDIO_ELEMENT);
@@ -2880,6 +2926,14 @@ async function ttsSpeakQueue(key, parts) {
           // lock out every subsequent forward skip for the rest of the session.
           TTS_CLOUD_WINDOW.promotionApplied = true;
           markTtsFullPageReady(key, { sessionId, source: 'case-b-handoff', marksCount: _caseBMarkCount });
+          const _caseBLastMark = fullResult.sentenceMarks[_caseBMarkCount - 1] || null;
+          ttsDiagPush('window-full-page-coverage', {
+            sessionId, key,
+            source: 'case-b-handoff',
+            marksCount: _caseBMarkCount,
+            pageTextLength: pageText.length,
+            lastMarkEnd: _caseBLastMark ? Number(_caseBLastMark.end || 0) : 0,
+          });
           const startBlock = Math.min(
             _handoffPendingSkip >= 0 ? Math.max(chunkAEnd, _handoffPendingSkip) : chunkAEnd,
             fullMarks ? fullMarks.length - 1 : 0
