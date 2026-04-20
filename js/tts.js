@@ -173,7 +173,7 @@ function hasTtsFullPageReady(key) {
 
 function isPassiveTtsWindowPromotionSignal(signal) {
   const value = String(signal || '');
-  return value === 'engagement-threshold-met' || value === 'chunk-a-ended-no-engagement';
+  return value === 'engagement-threshold-met' || value === 'chunk-a-ended-no-engagement' || value === 'chunk-ended-natural';
 }
 
 function getTtsCloudMarkCount() {
@@ -197,7 +197,51 @@ function isStaleChunkWindowCloudSession() {
   const chunkOnlyCapability = lastCapabilityCount > 0 && lastCapabilityCount <= chunkLimit;
   // Only ended chunk-window audio is stale. A paused, non-ended Phase 1 session
   // with 2 valid marks is a real media pause and must resume from audio.currentTime.
+  // If natural chunk-end continuation already triggered promotion, it is an
+  // in-flight handoff, not a stale Resume target.
+  if (TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.promotionTriggered && !TTS_CLOUD_WINDOW.promotionApplied) return false;
+  if (TTS_STATE.cloudRestartInFlight && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied) return false;
   return paused && audioEnded && (chunkOnlyMarks || chunkOnlyCapability);
+}
+
+function ttsBeginNaturalWindowHandoff(sessionId, key, reason = 'chunk-ended-natural') {
+  if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.sessionId !== sessionId) return false;
+  if (TTS_STATE.activeSessionId !== sessionId || String(TTS_STATE.activeKey || '') !== String(key || '')) return false;
+  if (TTS_CLOUD_WINDOW.promotionApplied) return false;
+
+  const promotionTriggeredBefore = !!TTS_CLOUD_WINDOW.promotionTriggered;
+  const promotionReadyBefore = !!TTS_CLOUD_WINDOW.promotionResult;
+
+  if (!promotionTriggeredBefore) {
+    try { _ttsWindowTriggerPromotion(reason); } catch (err) {
+      ttsDiagPush('window-chunk-ended-natural-trigger-failed', { sessionId, key, reason, error: String(err?.message || err) });
+    }
+  }
+
+  const promotionReady = !!TTS_CLOUD_WINDOW.promotionResult;
+  const promotionPending = !!TTS_CLOUD_WINDOW.promotionFetchPromise && !promotionReady;
+  const chunkAEnd = Math.max(0, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0));
+
+  TTS_CLOUD_WINDOW.mode = promotionReady ? 'promoted' : 'handoff-pending';
+  TTS_STATE.cloudRestartInFlight = true;
+
+  ttsDiagPush('window-chunk-ended-natural', {
+    sessionId, key, reason,
+    userInitiated: false,
+    promotionTriggeredBefore,
+    promotionTriggeredAfter: !!TTS_CLOUD_WINDOW.promotionTriggered,
+    promotionReadyBefore,
+    promotionReady,
+    promotionPending,
+    chosenHandoffBlock: chunkAEnd,
+    activeBlockIndex: Number(TTS_STATE.activeBlockIndex ?? -1),
+    chunkASentenceCount: TTS_CLOUD_WINDOW.chunkASentenceCount,
+    audioEnded: !!TTS_STATE.audio?.ended,
+    audioCurrentTimeMs: TTS_STATE.audio ? Number(TTS_STATE.audio.currentTime || 0) * 1000 : null,
+    staleWindowGuard: 'bypassed-natural-continuation',
+    ttsCloudMode: TTS_CLOUD_WINDOW.mode,
+  });
+  return true;
 }
 
 function clearTtsCloudWindow() {
@@ -2835,7 +2879,9 @@ async function ttsSpeakQueue(key, parts) {
           // promotion already swapped src. Keep chunk-A marks live until Case B
           // either latches full-page marks or fails through normal cleanup;
           // clearing here creates active/paused/no-marks stale state.
-          if (!(isFirstItem && useWindowMode && !TTS_CLOUD_WINDOW.promotionApplied)) {
+          if (isFirstItem && useWindowMode && !TTS_CLOUD_WINDOW.promotionApplied) {
+            ttsBeginNaturalWindowHandoff(sessionId, key, 'chunk-ended-natural');
+          } else {
             ttsClearSentenceHighlight();
           }
           resolve();
@@ -2876,11 +2922,34 @@ async function ttsSpeakQueue(key, parts) {
           // block 1 was never reached — e.g. user stopped before first block
           // transition), trigger now so we get the full page.
           if (!TTS_CLOUD_WINDOW.promotionTriggered) {
-            _ttsWindowTriggerPromotion('chunk-a-ended-no-engagement');
+            ttsBeginNaturalWindowHandoff(sessionId, key, 'chunk-ended-natural');
           }
 
+          ttsDiagPush('window-natural-handoff-await', {
+            sessionId, key,
+            userInitiated: false,
+            promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
+            promotionPending: !!TTS_CLOUD_WINDOW.promotionFetchPromise && !TTS_CLOUD_WINDOW.promotionResult,
+            promotionReady: !!TTS_CLOUD_WINDOW.promotionResult,
+            chosenHandoffBlock: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
+            staleWindowGuard: 'avoided-natural-continuation',
+          });
+
           const fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
-          if (!fullResult || TTS_STATE.activeSessionId !== sessionId) return;
+          if (!fullResult || TTS_STATE.activeSessionId !== sessionId) {
+            clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
+            return;
+          }
+
+          ttsDiagPush('window-natural-handoff-ready', {
+            sessionId, key,
+            userInitiated: false,
+            promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
+            promotionPending: false,
+            promotionReady: true,
+            returnedMarksCount: Array.isArray(fullResult.sentenceMarks) ? fullResult.sentenceMarks.length : 0,
+            chosenHandoffBlock: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
+          });
 
           // Validate fullResult.sentenceMarks BEFORE mutating runtime state.
           // Applying stale Phase 1 marks (returned count <= chunkASentenceCount) would
@@ -2900,6 +2969,7 @@ async function ttsSpeakQueue(key, parts) {
               phase: 'case-b-handoff',
               ttsCloudMode: 'stale-phase1-rejected',
             });
+            clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
             throw new Error('stale-phase1-promotion-result');
           }
 
@@ -2938,11 +3008,19 @@ async function ttsSpeakQueue(key, parts) {
             _handoffPendingSkip >= 0 ? Math.max(chunkAEnd, _handoffPendingSkip) : chunkAEnd,
             fullMarks ? fullMarks.length - 1 : 0
           );
+          TTS_STATE.activeBlockIndex = startBlock;
+          try { ttsHighlightBlock(startBlock); } catch (_) {}
           queuePendingCloudSeek(key, sessionId, startBlock, 0);
 
           ttsDiagPush('window-handoff-after-chunk-a', {
             sessionId, key, startBlock, chunkAEnd,
             pendingSkipBlock: _handoffPendingSkip,
+            userInitiated: _handoffPendingSkip >= 0,
+            passiveHandoff: _handoffPendingSkip < 0,
+            promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
+            promotionPending: false,
+            promotionReady: true,
+            staleWindowGuard: _handoffPendingSkip < 0 ? 'avoided-natural-continuation' : 'not-applicable-user-initiated',
             seekTimeMs: (fullMarks && fullMarks[startBlock]) ? fullMarks[startBlock].time : null,
             charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
             charsFullPage: pageText.length,
@@ -2968,7 +3046,6 @@ async function ttsSpeakQueue(key, parts) {
             TTS_STATE.audio = audio;
             try { audio.volume = Math.max(0, Math.min(1, Number(TTS_STATE.volume ?? 1))); } catch (_) {}
             try { audio.defaultPlaybackRate = Number(TTS_STATE.rate || 1); audio.playbackRate = Number(TTS_STATE.rate || 1); } catch (_) {}
-            ttsStartHighlightLoop(audio);
             const applyPending = (reason) => { try { applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason); } catch (_) {} };
             try { audio.onloadedmetadata = () => applyPending('loadedmetadata'); } catch (_) {}
             try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
@@ -2977,7 +3054,12 @@ async function ttsSpeakQueue(key, parts) {
             audio.play().then(() => {
               clearTtsStartupBanner();
               applyPending('play-start');
-            }).catch(reject);
+              ttsStartHighlightLoop(audio);
+              clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
+            }).catch(err => {
+              clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
+              reject(err);
+            });
           });
 
           if (TTS_STATE.activeSessionId !== sessionId) return;
