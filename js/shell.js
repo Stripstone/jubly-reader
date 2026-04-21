@@ -409,17 +409,6 @@ window.rcInteraction = (function () {
         reason: 'boot',
         at: null
     };
-    // Station 2 Slice 2B diagnostics only. Owner: js/shell.js surface reporting.
-    // Purpose: prove dashboard/library release order without changing release behavior.
-    // Retirement: remove or compact after dashboard/library settlement is accepted into
-    // the durable Shell Surface Contract and no longer needs first-writer proof.
-    let _lastDashboardRelease = null;
-    let _lastLibrarySurfaceWrite = null;
-    let _libraryStateAtDashboardRelease = null;
-    let _libraryChangedAfterDashboardRelease = false;
-    let _libraryFirstSettledAt = null;
-    let _libraryFirstSettledState = null;
-
     function shellDebugRemember(slot, data) {
         const entry = Object.assign({ seq: ++SHELL_DEBUG.seq, at: new Date().toISOString() }, data || {});
         SHELL_DEBUG[slot] = entry;
@@ -609,76 +598,6 @@ window.rcInteraction = (function () {
         return !!(el && !el.disabled && el.getAttribute('aria-disabled') !== 'true');
     }
 
-    function nowIso() {
-        try { return new Date().toISOString(); } catch (_) { return null; }
-    }
-
-    function readCurrentLibrarySurfaceState() {
-        const dashboard = document.getElementById('dashboard');
-        return dashboard ? (dashboard.getAttribute('data-library-state') || null) : null;
-    }
-
-    function getLibraryOwnerReady() {
-        return typeof localBooksGetAll === 'function';
-    }
-
-    function buildLibrarySurfaceDiagnostic(reason = 'library-diagnostic') {
-        const rows = document.getElementById('library-rows');
-        const rawState = readCurrentLibrarySurfaceState();
-        return {
-            rawState,
-            state: rawState || (_libraryInitialResolutionComplete ? 'ready-unknown' : 'pending'),
-            ownerReady: getLibraryOwnerReady(),
-            initialResolutionComplete: !!_libraryInitialResolutionComplete,
-            count: rows ? rows.children.length : 0,
-            reason,
-            at: nowIso()
-        };
-    }
-
-    function rememberDashboardRelease(reason = 'dashboard-release') {
-        const libraryAtRelease = buildLibrarySurfaceDiagnostic(reason);
-        _lastDashboardRelease = {
-            reason,
-            at: nowIso(),
-            visibleSection: getCurrentVisibleSection(),
-            authSignedIn: !!isAuthedUser(),
-            libraryOwnerReadyAtRelease: !!libraryAtRelease.ownerReady,
-            libraryStateAtDashboardRelease: libraryAtRelease.state,
-            libraryRawStateAtDashboardRelease: libraryAtRelease.rawState,
-            libraryTruthAtLeastPendingAtRelease: !!libraryAtRelease.rawState,
-            libraryInitialResolutionCompleteAtRelease: !!libraryAtRelease.initialResolutionComplete,
-            libraryCountAtRelease: libraryAtRelease.count
-        };
-        _libraryStateAtDashboardRelease = libraryAtRelease;
-        _libraryChangedAfterDashboardRelease = false;
-        shellTrailPush('dashboard-release-diagnostic', _lastDashboardRelease);
-        return _lastDashboardRelease;
-    }
-
-    function rememberLibrarySurfaceWrite(state, reason = 'library-surface-write') {
-        const normalizedState = String(state || 'unknown');
-        const current = buildLibrarySurfaceDiagnostic(reason);
-        _lastLibrarySurfaceWrite = {
-            state: normalizedState,
-            reason,
-            at: nowIso(),
-            ownerReady: !!current.ownerReady,
-            initialResolutionComplete: !!current.initialResolutionComplete,
-            dashboardVisible: getCurrentVisibleSection() === 'dashboard'
-        };
-        const settled = normalizedState === 'sample' || normalizedState === 'empty' || normalizedState === 'populated';
-        if (settled && !_libraryFirstSettledAt) {
-            _libraryFirstSettledAt = _lastLibrarySurfaceWrite.at;
-            _libraryFirstSettledState = normalizedState;
-        }
-        if (_libraryStateAtDashboardRelease && _lastDashboardRelease && normalizedState !== _libraryStateAtDashboardRelease.state) {
-            _libraryChangedAfterDashboardRelease = true;
-        }
-        shellTrailPush('library-surface-write-diagnostic', _lastLibrarySurfaceWrite);
-        return _lastLibrarySurfaceWrite;
-    }
-
     function readSignedInAccountControlReadiness(reason = 'readiness-read') {
         const controls = getSignedInAccountControlElements();
         const authed = !!isAuthedUser();
@@ -824,6 +743,7 @@ window.rcInteraction = (function () {
         const publicBoundary = ensurePublicRuntimeBeforeRelease(targetId, 'show-section:' + targetId);
         if (!publicBoundary.allowed) return Promise.resolve(publicBoundary.report || null);
         if (targetId === 'landing-page' && !options.preserveIntroLibrary) _publicIntroLibraryVisible = false;
+        if (targetId === 'dashboard') primeDashboardLibrarySurfaceForRelease(options.releaseReason || ('show-section:' + targetId));
         const readingModeEl = document.getElementById('reading-mode');
         const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
 
@@ -842,13 +762,10 @@ window.rcInteraction = (function () {
             at: new Date().toISOString()
         };
         if (targetId === 'dashboard') {
-            rememberDashboardRelease(options.releaseReason || ('show-section:' + targetId));
             shellTrailPush('dashboard-reveal', {
                 historyMode: options.historyMode || 'push',
                 authed: !!isAuthedUser(),
-                hasLocalLibraryOwner: getLibraryOwnerReady(),
-                libraryStateAtRelease: _lastDashboardRelease ? _lastDashboardRelease.libraryStateAtDashboardRelease : null,
-                libraryOwnerReadyAtRelease: _lastDashboardRelease ? _lastDashboardRelease.libraryOwnerReadyAtRelease : null
+                hasLocalLibraryOwner: typeof localBooksGetAll === 'function'
             });
         }
 
@@ -1369,6 +1286,7 @@ window.rcInteraction = (function () {
         const { signedIn, source } = e.detail || {};
         const current = getCurrentVisibleSection();
         _accountControlsTransientBlock = null;
+        resetDashboardLibrarySettlementForAuthChange(signedIn ? 'auth-change-signed-in' : 'auth-change-signed-out');
         try {
             if (signedIn && window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
             else if (!signedIn && window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false });
@@ -2050,6 +1968,116 @@ window.rcInteraction = (function () {
     let _loggedFirstLocalLibraryRead = false;
     let _libraryInitialResolutionComplete = false;
     let _libraryRefreshSequence = 0;
+    let _dashboardLibraryAuthKey = null;
+    // Station 2 Slice 2C diagnostic contract. Owner: js/shell.js.
+    // Purpose: prove dashboard/library release truth during stabilization.
+    // Retirement: compact/remove after dashboard/library settlement is accepted
+    // into the durable Shell Surface Contract.
+    let _dashboardLibrarySettlement = {
+        lastDashboardRelease: null,
+        lastLibrarySurfaceWrite: null,
+        libraryStateAtDashboardRelease: null,
+        libraryChangedAfterDashboardRelease: false,
+        libraryFirstSettledAt: null,
+        libraryFirstSettledState: null,
+        libraryOwnerReadyAtRelease: null,
+        librarySurfaceWriterReason: null,
+        diagnosticOwner: 'js/shell.js',
+        diagnosticPurpose: 'Station 2 Slice 2C dashboard/library settlement validation',
+        retirementCondition: 'Compact or remove after dashboard/library settlement is accepted into the durable Shell Surface Contract.'
+    };
+
+    function getDashboardLibraryAuthKey() {
+        if (!isAuthedUser()) return 'public';
+        const user = getAuthUser();
+        return String((user && (user.id || user.email)) || 'signed-in');
+    }
+
+    function getCurrentLibrarySurfaceState() {
+        const dashboardEl = document.getElementById('dashboard');
+        return dashboardEl ? (dashboardEl.getAttribute('data-library-state') || null) : null;
+    }
+
+    function resetDashboardLibrarySettlementForAuthChange(reason = 'auth-change') {
+        const nextKey = getDashboardLibraryAuthKey();
+        if (_dashboardLibraryAuthKey === nextKey) return;
+        _dashboardLibraryAuthKey = nextKey;
+        _libraryInitialResolutionComplete = false;
+        _libraryRefreshSequence += 1;
+        _dashboardLibrarySettlement.libraryFirstSettledAt = null;
+        _dashboardLibrarySettlement.libraryFirstSettledState = null;
+        if (libraryRefreshRetryTimer) {
+            clearTimeout(libraryRefreshRetryTimer);
+            libraryRefreshRetryTimer = null;
+        }
+        clearLibraryPendingBanner();
+        shellTrailPush('dashboard-library-auth-scope-reset', { reason, authKey: nextKey });
+    }
+
+    function noteDashboardLibrarySurfaceWrite(state, meta = {}) {
+        const at = new Date().toISOString();
+        const normalized = String(state || 'pending');
+        const visibleSection = getCurrentVisibleSection();
+        const write = {
+            state: normalized,
+            reason: meta.reason || 'library-surface-write',
+            writer: meta.writer || 'setLibrarySurfaceState',
+            ownerReady: typeof meta.ownerReady === 'boolean' ? meta.ownerReady : (typeof localBooksGetAll === 'function'),
+            ownerStateKnown: !!meta.ownerStateKnown,
+            settled: !!meta.settled,
+            visibleSection,
+            at
+        };
+        _dashboardLibrarySettlement.lastLibrarySurfaceWrite = write;
+        _dashboardLibrarySettlement.librarySurfaceWriterReason = write.reason;
+        if (!_dashboardLibrarySettlement.libraryFirstSettledAt && write.settled) {
+            _dashboardLibrarySettlement.libraryFirstSettledAt = at;
+            _dashboardLibrarySettlement.libraryFirstSettledState = normalized;
+        }
+        const release = _dashboardLibrarySettlement.lastDashboardRelease;
+        if (release && normalized !== release.libraryStateAtRelease) {
+            _dashboardLibrarySettlement.libraryChangedAfterDashboardRelease = true;
+        }
+        shellTrailPush('dashboard-library-surface-write', write);
+        return write;
+    }
+
+    function noteDashboardLibraryRelease(reason = 'dashboard-release') {
+        const state = getCurrentLibrarySurfaceState() || 'pending';
+        const ownerReady = typeof localBooksGetAll === 'function';
+        const at = new Date().toISOString();
+        const release = {
+            reason,
+            libraryStateAtRelease: state,
+            ownerReady,
+            initialResolutionComplete: !!_libraryInitialResolutionComplete,
+            at
+        };
+        _dashboardLibrarySettlement.lastDashboardRelease = release;
+        _dashboardLibrarySettlement.libraryStateAtDashboardRelease = state;
+        _dashboardLibrarySettlement.libraryChangedAfterDashboardRelease = false;
+        _dashboardLibrarySettlement.libraryOwnerReadyAtRelease = ownerReady;
+        shellTrailPush('dashboard-library-release', release);
+        return release;
+    }
+
+    function primeDashboardLibrarySurfaceForRelease(reason = 'dashboard-release') {
+        resetDashboardLibrarySettlementForAuthChange('dashboard-release-auth-scope');
+        const authed = !!isAuthedUser();
+        const ownerReady = typeof localBooksGetAll === 'function';
+        const currentState = getCurrentLibrarySurfaceState();
+        if (!authed) {
+            setLibrarySurfaceState('sample', { reason, writer: 'dashboard-release', ownerReady: false, ownerStateKnown: true, settled: true });
+            return noteDashboardLibraryRelease(reason);
+        }
+        if (!_libraryInitialResolutionComplete || !ownerReady || currentState === 'sample' || !currentState) {
+            setLibrarySurfaceState('pending', { reason, writer: 'dashboard-release', ownerReady, ownerStateKnown: ownerReady, settled: false });
+            scheduleLibraryPendingBanner();
+            return noteDashboardLibraryRelease(reason);
+        }
+        setLibrarySurfaceState(currentState, { reason, writer: 'dashboard-release', ownerReady, ownerStateKnown: true, settled: currentState !== 'pending' });
+        return noteDashboardLibraryRelease(reason);
+    }
 
     function scheduleLibraryPendingBanner() {
         if (_libraryPendingBannerTimer || _libraryInitialResolutionComplete) return;
@@ -2072,18 +2100,35 @@ window.rcInteraction = (function () {
         try { window.rcInteraction && window.rcInteraction.clear('library:hydrate'); } catch (_) {}
     }
 
-    function setLibrarySurfaceState(state, reason = 'setLibrarySurfaceState') {
+    function setLibrarySurfaceState(state, meta = {}) {
+        const normalized = ['pending', 'populated', 'empty', 'sample', 'error'].includes(String(state || ''))
+            ? String(state)
+            : 'pending';
         const pendingEl = document.getElementById('library-pending');
         const popEl = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
         const sampleEl = document.getElementById('library-public-sample');
-        if (pendingEl) pendingEl.classList.toggle('hidden-section', state !== 'pending');
-        if (popEl) popEl.classList.toggle('hidden-section', state !== 'populated');
-        if (emptyEl) emptyEl.classList.toggle('hidden-section', state !== 'empty');
-        if (sampleEl) sampleEl.classList.toggle('hidden-section', state !== 'sample');
+        if (pendingEl) {
+            pendingEl.classList.toggle('hidden-section', !(normalized === 'pending' || normalized === 'error'));
+            const label = pendingEl.querySelector('.library-pending-label');
+            const title = pendingEl.querySelector('.library-pending-title');
+            const copy = pendingEl.querySelector('.library-pending-copy');
+            if (normalized === 'error') {
+                if (label) label.textContent = 'Library Check Failed';
+                if (title) title.textContent = 'We could not check this device for your books';
+                if (copy) copy.textContent = 'Refresh to try again. Jubly will not show an empty library until local library truth is known.';
+            } else {
+                if (label) label.textContent = 'Loading Library';
+                if (title) title.textContent = 'Checking this device for your books';
+                if (copy) copy.textContent = 'The Library area stays in a neutral pending state until the local library runtime can truthfully resolve books or empty/import guidance.';
+            }
+        }
+        if (popEl) popEl.classList.toggle('hidden-section', normalized !== 'populated');
+        if (emptyEl) emptyEl.classList.toggle('hidden-section', normalized !== 'empty');
+        if (sampleEl) sampleEl.classList.toggle('hidden-section', normalized !== 'sample');
         const dashboardEl = document.getElementById('dashboard');
-        if (dashboardEl) dashboardEl.setAttribute('data-library-state', state);
-        rememberLibrarySurfaceWrite(state, reason);
+        if (dashboardEl) dashboardEl.setAttribute('data-library-state', normalized);
+        noteDashboardLibrarySurfaceWrite(normalized, meta);
     }
 
     async function refreshLibrary(reason = 'unknown') {
@@ -2109,7 +2154,7 @@ window.rcInteraction = (function () {
                 clearTimeout(libraryRefreshRetryTimer);
                 libraryRefreshRetryTimer = null;
             }
-            setLibrarySurfaceState('sample', 'refreshLibrary:signed-out-sample');
+            setLibrarySurfaceState('sample', { reason, writer: 'refreshLibrary:signed-out', ownerReady: false, ownerStateKnown: true, settled: true });
             return;
         }
 
@@ -2120,7 +2165,7 @@ window.rcInteraction = (function () {
         // After that first truthful read, later refreshes keep the current visible
         // surface instead of flashing back through pending.
         if (!_libraryInitialResolutionComplete) {
-            setLibrarySurfaceState('pending', 'refreshLibrary:initial-pending');
+            setLibrarySurfaceState('pending', { reason, writer: 'refreshLibrary:pre-read', ownerReady: hasLocalLibraryOwner, ownerStateKnown: hasLocalLibraryOwner, settled: false });
             scheduleLibraryPendingBanner();
         }
 
@@ -2130,6 +2175,7 @@ window.rcInteraction = (function () {
         // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
         // or successive unavailability creates an infinite chain that hangs the page.
         if (!hasLocalLibraryOwner) {
+            setLibrarySurfaceState('pending', { reason: reason + ':owner-pending', writer: 'refreshLibrary:owner-pending', ownerReady: false, ownerStateKnown: false, settled: false });
             shellTrailPush('dashboard-library-owner-pending', { reason, retryDelayMs: 120 });
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
             return new Promise(resolve => {
@@ -2142,19 +2188,28 @@ window.rcInteraction = (function () {
         }
         const refreshSeq = ++_libraryRefreshSequence;
         let books = [];
-        try { books = await localBooksGetAll(); } catch(_) { books = []; }
+        let localReadError = null;
+        try { books = await localBooksGetAll(); } catch(error) { localReadError = error; books = []; }
         if (refreshSeq !== _libraryRefreshSequence) return;
         shellTrailPush('dashboard-library-local-read', {
             reason,
             count: Array.isArray(books) ? books.length : 0,
+            failed: !!localReadError,
             firstSuccess: !_loggedFirstLocalLibraryRead
         });
+        if (localReadError) {
+            _libraryInitialResolutionComplete = true;
+            clearLibraryPendingBanner();
+            setLibrarySurfaceState('error', { reason: reason + ':local-read-error', writer: 'refreshLibrary:local-read-error', ownerReady: true, ownerStateKnown: true, settled: true });
+            try { renderSubscriptionSurface([]); } catch (_) {}
+            return;
+        }
         _loggedFirstLocalLibraryRead = true;
         _libraryInitialResolutionComplete = true;
         clearLibraryPendingBanner();
         const has = books.length > 0;
         if (!has) {
-            setLibrarySurfaceState('empty', 'refreshLibrary:local-empty');
+            setLibrarySurfaceState('empty', { reason, writer: 'refreshLibrary:local-read-empty', ownerReady: true, ownerStateKnown: true, settled: true });
             try { renderSubscriptionSurface([]); } catch (_) {}
             return;
         }
@@ -2176,7 +2231,7 @@ window.rcInteraction = (function () {
                 <div class="w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
-        setLibrarySurfaceState('populated', 'refreshLibrary:local-populated');
+        setLibrarySurfaceState('populated', { reason, writer: 'refreshLibrary:local-read-populated', ownerReady: true, ownerStateKnown: true, settled: true });
         try { renderSubscriptionSurface(books); } catch (_) {}
 
     }
@@ -2739,25 +2794,25 @@ window.rcInteraction = (function () {
 
 
     function getLibrarySurfaceReport() {
-        const current = buildLibrarySurfaceDiagnostic('surface-report');
+        const dashboard = document.getElementById('dashboard');
+        const rows = document.getElementById('library-rows');
+        const state = dashboard ? (dashboard.getAttribute('data-library-state') || null) : null;
         return {
-            ownerReady: current.ownerReady,
-            state: current.state,
-            initialResolutionComplete: current.initialResolutionComplete,
-            count: current.count,
-            lastDashboardRelease: _lastDashboardRelease || null,
-            lastLibrarySurfaceWrite: _lastLibrarySurfaceWrite || null,
-            libraryStateAtDashboardRelease: _libraryStateAtDashboardRelease || null,
-            libraryRawStateAtDashboardRelease: _libraryStateAtDashboardRelease ? _libraryStateAtDashboardRelease.rawState : null,
-            dashboardReleasedBeforeLibraryTruthAtLeastPending: !!(_lastDashboardRelease && !_lastDashboardRelease.libraryTruthAtLeastPendingAtRelease),
-            libraryChangedAfterDashboardRelease: !!_libraryChangedAfterDashboardRelease,
-            libraryFirstSettledAt: _libraryFirstSettledAt || null,
-            libraryFirstSettledState: _libraryFirstSettledState || null,
-            libraryOwnerReadyAtRelease: _lastDashboardRelease ? _lastDashboardRelease.libraryOwnerReadyAtRelease : null,
-            librarySurfaceWriterReason: _lastLibrarySurfaceWrite ? _lastLibrarySurfaceWrite.reason : null,
-            diagnosticsOwner: 'js/shell.js',
-            diagnosticsPurpose: 'Station 2 Slice 2B dashboard/library surface-settlement proof',
-            diagnosticsRetirementCondition: 'Remove or compact after dashboard/library settlement is accepted into the durable Shell Surface Contract.'
+            ownerReady: typeof localBooksGetAll === 'function',
+            state: state || (_libraryInitialResolutionComplete ? 'ready-unknown' : 'pending'),
+            initialResolutionComplete: !!_libraryInitialResolutionComplete,
+            count: rows ? rows.children.length : 0,
+            lastDashboardRelease: _dashboardLibrarySettlement.lastDashboardRelease,
+            lastLibrarySurfaceWrite: _dashboardLibrarySettlement.lastLibrarySurfaceWrite,
+            libraryStateAtDashboardRelease: _dashboardLibrarySettlement.libraryStateAtDashboardRelease,
+            libraryChangedAfterDashboardRelease: _dashboardLibrarySettlement.libraryChangedAfterDashboardRelease,
+            libraryFirstSettledAt: _dashboardLibrarySettlement.libraryFirstSettledAt,
+            libraryFirstSettledState: _dashboardLibrarySettlement.libraryFirstSettledState,
+            libraryOwnerReadyAtRelease: _dashboardLibrarySettlement.libraryOwnerReadyAtRelease,
+            librarySurfaceWriterReason: _dashboardLibrarySettlement.librarySurfaceWriterReason,
+            diagnosticOwner: _dashboardLibrarySettlement.diagnosticOwner,
+            diagnosticPurpose: _dashboardLibrarySettlement.diagnosticPurpose,
+            retirementCondition: _dashboardLibrarySettlement.retirementCondition
         };
     }
 
