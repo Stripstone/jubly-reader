@@ -4,6 +4,68 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>jubly | Focus-First Reading</title>
+    <script>
+    (function rcAppearancePrePaintResolver() {
+        var STORAGE_KEY = 'rc_appearance_prefs';
+        var COOKIE_KEY = 'rc_appearance_mode';
+        var DARK_BG = '#0f172a';
+        var DARK_COLOR = '#e2e8f0';
+        var LIGHT_BG = '#ffffff';
+        var LIGHT_COLOR = '#1e293b';
+
+        function normalizeMode(value) {
+            return String(value || '').toLowerCase() === 'dark' ? 'dark' : 'light';
+        }
+
+        function readStoredMode() {
+            try {
+                var raw = window.localStorage && window.localStorage.getItem(STORAGE_KEY);
+                if (raw) {
+                    var parsed = JSON.parse(raw) || {};
+                    var stored = parsed.appearance_mode || parsed.mode || parsed.appearance;
+                    if (stored === 'dark' || stored === 'light') {
+                        return { mode: stored, source: 'local-storage' };
+                    }
+                }
+            } catch (_) {}
+            try {
+                var match = String(document.cookie || '').match(new RegExp('(?:^|; )' + COOKIE_KEY + '=([^;]+)'));
+                if (match && match[1]) {
+                    var cookieMode = decodeURIComponent(match[1]);
+                    if (cookieMode === 'dark' || cookieMode === 'light') {
+                        return { mode: cookieMode, source: 'cookie' };
+                    }
+                }
+            } catch (_) {}
+            return { mode: 'light', source: 'default' };
+        }
+
+        try {
+            var resolved = readStoredMode();
+            var mode = normalizeMode(resolved.mode);
+            var root = document.documentElement;
+            if (!root) return;
+            root.classList.remove('app-light', 'app-dark');
+            root.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
+            root.setAttribute('data-app-appearance', mode);
+            root.setAttribute('data-appearance-prepaint-applied', 'true');
+            root.setAttribute('data-appearance-prepaint-mode', mode);
+            root.setAttribute('data-appearance-first-writer', 'index.html');
+            root.style.backgroundColor = mode === 'dark' ? DARK_BG : LIGHT_BG;
+            root.style.color = mode === 'dark' ? DARK_COLOR : LIGHT_COLOR;
+            root.style.colorScheme = mode;
+            window.__rcAppearancePrePaint = {
+                applied: true,
+                mode: mode,
+                source: resolved.source,
+                firstWriter: 'index.html',
+                backgroundColor: mode === 'dark' ? DARK_BG : LIGHT_BG,
+                color: mode === 'dark' ? DARK_COLOR : LIGHT_COLOR,
+                at: Date.now()
+            };
+        } catch (_) {}
+    })();
+    </script>
     <script src="js/shell.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Lora:wght@400;500&family=Crimson+Pro:wght@400;600;700&display=swap" rel="stylesheet">
