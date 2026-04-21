@@ -1,443 +1,219 @@
 # Jubly Reader — Implementation Workflow
 
-This document defines the required development loop for implementation work.
+Required loop for implementation work by OpenAI, Claude, or humans.
 
-Use it whether the work is produced by OpenAI, Claude, or a human.
+This workflow is subordinate to project policy. It cannot justify a patch that violates `02_RUNTIME_CONTRACT.md`, `03_ARCHITECTURE_AND_GUARDRAILS.md`, `05_PRODUCT_LAUNCH_AND_INTEGRATION.md`, `06_SUPABASE_SCHEMA_REFERENCE.md`, `pending-surfaces.md`, or the runtime protection ledger.
 
-This workflow is subordinate to project policy. It cannot be used to justify a patch that violates `03_ARCHITECTURE_AND_GUARDRAILS.md`, `02_RUNTIME_CONTRACT.md`, `05_PRODUCT_LAUNCH_AND_INTEGRATION.md`, or `06_SUPABASE_SCHEMA_REFERENCE.md`.
-Read `03_ARCHITECTURE_AND_GUARDRAILS.md` alongside this workflow when a pass touches scaffold shape, ownership cleanup, or prototype-to-production migration.
+## 1. Operating loop
 
-## Core workflow
+1. Start from the latest accepted base.
+2. Verify scaffold/root shape.
+3. Define one bounded objective.
+4. Identify the rightful owner and preserved behavior.
+5. Assign risk level.
+6. Decide whether proof, perspective review, or normalization comes before code.
+7. Produce one scoped patch artifact.
+8. Validate structure before runtime comfort.
+9. Test at the matching evidence level.
+10. Accept, reclassify, or reject.
+11. Record the next working base.
 
-### 0. Verify current scaffold and artifact reality
-Before planning or editing:
-- start from the latest accepted artifact or current runtime state
-- unpack into a fresh clean workspace
-- verify shape sentinels against current project state
-- confirm the pass is not using a mixed-era scaffold by accident
+Central rule: **test broadly, patch narrowly.**
 
-If the base is wrong, discard the pass and restart from the correct state.
+## 2. Base and scaffold gate
 
-### 0.25 Structural compliance gate
-Before judging whether a patch "works," confirm that it does not violate scaffold authority, file responsibility, ownership boundaries, or duplicate-truth rules.
-If it does, the patch is disqualified even when runtime smoke testing looks good.
+Before editing:
+- unpack a fresh clean workspace from the accepted artifact/current accepted runtime state
+- verify root `index.html`, root `js/`, root `css/` when expected, and `docs/` shape
+- confirm the pass is not using a rejected candidate, stale lane, or mixed-era scaffold as its base
 
-### 0.3 Pending-surface framework check
-When a pass touches auth, billing, usage, restore, account hydration, library hydration, importer-capacity checks, or any other server-backed user-visible surface:
-- read `pending-surfaces.md` alongside `02_RUNTIME_CONTRACT.md` and `05_PRODUCT_LAUNCH_AND_INTEGRATION.md` before coding
-- treat mismatches between code, runtime, and `pending-surfaces.md` as a documentation or implementation discrepancy that must be resolved
-- update `pending-surfaces.md` in the same pass when behavior changes
+Wrong base invalidates the pass. Discard and restart; do not fix forward from an invalid foundation.
 
-### 0.5 Schema-replacement sequencing rule
-When a pass is replacing a drifted durable schema before launch:
-1. rewrite the docs first
-2. run the replacement SQL second
-3. patch the code against that new schema third
+Prior rejected diffs and old candidates are evidence only, not foundations.
 
-Do not finalize a runtime continuity patch against a schema that is about to be retired.
+## 3. Bounded pass and owner gate
 
-### 1. Define one bounded pass
-A pass should cover one coherent runtime-owned system or one contained follow-up inside that system.
+Every pass must state:
+- objective
+- accepted base
+- files in scope and out of scope
+- rightful truth owner
+- behavior that must remain untouched
 
-### 2. Identify the owner layer
-Use the architecture doc, guardrails, and runtime contract to decide where truth belongs.
-Architecture and guardrails decide whether the patch is structurally legal before runtime validation decides whether the user experience is correct.
+Owner order:
+1. upstream authority
+2. first writer / first visible release
+3. nearby regression scan
+4. contained patch
 
-Rule:
-- upstream authority first
-- nearby regression scan second
-- contained patching third
+Do not patch reflection when the truth owner is wrong. Do not let shell, cache, diagnostics, bridges, or fallbacks become accidental owners.
 
-### 2.5 Perspective review gate
-Before accepting a diagnosis, the developer must challenge the frame they are using.
+### Pending-surface gate
 
-In this project, "What are we not considering?" means perspective gaps, not only edge cases. The required question is not merely "what runtime path might break?" but also "what larger owner, architecture, or upstream standard could make this local diagnosis the wrong frame?"
+When a pass touches auth, billing, usage, restore, account hydration, library hydration, importer capacity, checkout, or any server-backed user-visible surface, review `pending-surfaces.md` before coding.
 
-Use this gate when:
-- a symptom crosses more than one owner boundary
-- the proposed fix starts downstream from the visible symptom
-- the diagnosis assumes the current architecture is basically correct
-- a mature outside standard may already exist for the problem
-- the issue appears in boot, auth, sync, billing, TTS, importer/library hydration, theme/appearance, or other timing-sensitive areas
-- a prior fix improved one symptom while creating redundancy, duplicate truth, or a new race
+If behavior changes a documented pending, settled, blocked, or error surface, update `pending-surfaces.md` in the same pass.
 
-Required perspective prompts:
-1. What frame am I currently using?
-2. What would be true if this were an architecture/ownership failure instead of a local bug?
-3. What upstream owner should decide the truth before this downstream surface renders?
-4. What outside standard, vendor documentation, browser/platform norm, or mature-app pattern should challenge our current approach?
-5. What adjacent functionality depends on the same sequence or truth projection?
-6. What first writer or first visible release might be wrong before the symptom appears?
-7. What would make this patch unnecessary because the real fix belongs upstream?
+Do not invent new loading copy, disabled states, banners, or filler behavior when a documented pending surface already owns that state.
 
-The developer must report:
-- current diagnosis
-- alternate architecture-level diagnosis
-- owner that would change if the alternate diagnosis is true
-- outside standard or upstream truth checked, when relevant
-- why the chosen patch is still upstream-enough and not a downstream tweak
+## 4. Risk levels
 
-Common rejected reasoning:
-- "this is still <nearby file> ownership" without proving higher-level owner boundaries
-- "the patch works in the current code" without asking whether the current code shape is the problem
-- "other sites/apps must have custom handling too" without checking established platform practice
-- "we can fix the visible flash/state with a delay, CSS mask, or local tweak" before proving why the wrong state was allowed to exist or render
-- "this monolith owns this because the code is already there" instead of identifying the rightful owner
+Declare risk before code.
 
-If the perspective review reveals a plausible architecture or owner failure, stop implementation and reclassify the pass before coding. Do not continue downstream merely because the local patch is easy.
+**Green:** isolated copy/layout/CSS; no runtime truth, async ownership, or persistence.
 
-### 2.6 Architecture normalization gate
-Do not implement new behavior on top of a non-standard, mutation-prone chain merely because the local patch is possible.
+**Yellow:** one owner file; bounded state/UI behavior; no fragile sequencing or cross-owner truth projection.
 
-A chain is considered mutation-prone when behavior depends on overlapping writers, hidden order-of-execution assumptions, stale bridge code, fallback ownership, timing luck, or side effects spread across multiple files. These chains must be flagged before implementation because they create redundant patchwork and make invalid prior code look like a permanent foundation.
+**Red:** auth, sync, public policy, billing, checkout, durable persistence, boot release, TTS, page/progress truth, external services, live session behavior, or any distrusted mutation chain.
 
-Trigger this gate when:
-- the same bug class reappears in adjacent forms
-- multiple files can write or infer the same truth
-- a bridge, fallback, or diagnostic path has become a de facto owner
-- the proposed fix requires understanding too many side effects before the visible symptom
-- the current behavior relies on timing luck, cached state, auth order, hydration order, or async response order
-- prior rejected or invalid code would remain underneath the new implementation
-- the proposed patch would add behavior to a chain the team already distrusts
-- the current chain differs from standard web/app practice and no one has justified why it should be custom
+Red work requires a runtime-path table or explicit instrumentation-first decision.
 
-Scope guard: the perspective and normalization gates are required when owner ambiguity, repeated symptom patching, non-standard chains, or architecture-level risk exists; they must not be used to inflate clearly isolated, owner-contained fixes into broad architecture reviews.
+## 5. Perspective and normalization gates
 
-When this gate triggers, the developer must pause normal implementation and produce an architecture-normalization note before coding. The note must answer:
-1. What standard pattern should this area follow?
-2. What part of the current chain is non-standard or mutation-prone?
-3. Which file or layer should own the truth?
-4. Which files or layers should only reflect, adapt, or transport that truth?
-5. Which old bridges, fallbacks, duplicate writers, or downstream patches become unnecessary after normalization?
-6. What behavior must be preserved while normalizing?
-7. What downstream cleanup is safe only after the owner chain is normalized?
+Use these gates only for owner ambiguity, repeated symptom patching, non-standard chains, or architecture-level risk. Do not inflate clearly isolated owner-contained fixes into broad reviews.
 
-The normalization note must end with a concrete disposition: proceed with the original bounded patch, instrument first, reclassify to an architecture normalization pass, or block pending clarification/owner decision. It must not end as open-ended analysis.
+### Perspective review
 
-Allowed outcomes:
-- continue with the original patch only if the chain is standard enough and the owner is still correct
-- reclassify the work as an architecture normalization pass
-- instrument first if the first writer or rightful owner is still unknown
-- block the feature or bug patch until the chain is normalized
+Use when the diagnosis may be trapped in the current code shape. Ask:
+- What frame are we assuming?
+- What upstream owner or outside standard could make this diagnosis wrong?
+- What first writer or first visible release happens before the symptom?
+- What adjacent behavior depends on the same truth or sequence?
+- Would normalization make this patch unnecessary?
 
-Architecture normalization is a valid implementation outcome. A pass that removes duplicate writers, retires fallback ownership, clarifies first writers, or aligns a flow with a standard pattern should be treated as progress even when it does not add user-visible features.
+End with one disposition: proceed with bounded patch, instrument first, reclassify to normalization, or block pending owner clarification.
 
-Rejected reasoning:
-- "the code already works this way, so we should patch here"
-- "this file is large, so it must own the behavior"
-- "we can fix the symptom faster downstream"
-- "the current chain is ugly, but changing it is out of scope" when that chain is the reason the bug exists
-- "the previous patch is close, so build on it" when that patch was never accepted as the base
+### Architecture normalization
 
-Use the status `Blocked pending architecture normalization` when a behavior patch would otherwise be built on a chain that is not fit to extend.
+Do not implement new behavior on top of a non-standard, mutation-prone chain just because the local patch is possible.
 
-### 3. Decide whether proof comes before code
-Add temporary diagnostics before patching when:
-- the owner path is ambiguous
-- two or more plausible layers could explain the same symptom
-- a previous patch failed or fixed the wrong layer
-- races, stale state, or competing callers are plausible
-- runtime contradicts code-inspection confidence
+Trigger when multiple files write/infer the same truth, stale bridges own behavior, timing luck matters, invalid prior code remains underneath, or the chain differs from standard web/app practice without justification.
 
-Diagnostics must be:
-- narrow
-- removable
-- aimed at one failing case end-to-end
-- removed after proof is collected
+A normalization note must identify:
+- intended standard pattern
+- rightful owner and reflector/adapter layers
+- duplicate writers/bridges/fallbacks to retire
+- preserved behavior
+- downstream cleanup that becomes safe only after normalization
 
-### 3.25 Careful development rule
-When implementation work encounters a discrepancy between:
-- active documentation
-- canonical SQL or schema
-- runtime behavior
-- diagnostics
-- accepted prior patches
+Use status: `Blocked pending architecture normalization`.
 
-the developer must stop and flag the discrepancy before continuing if it could change:
-- ownership
-- entitlement truth
-- persistence truth
-- runtime gating
-- scaffold authority
-- accepted base assumptions
+## 6. Proof before code
 
-Do not pick the most likely meaning and continue coding.
-Do not normalize conflicting terms into a local convenience interpretation.
-Do not produce a patch that silently resolves ambiguity by mutation.
+Instrument before patching when the owner path is ambiguous, runtime contradicts code confidence, races/stale async responses are plausible, or external provider/schema/deployment truth may be involved.
 
-Required best practice in this project is:
-- stop
-- state the discrepancy clearly
-- identify the affected owner, path, or field
-- request clarification or escalation
-- resume only after the discrepancy is resolved or the pass is explicitly re-scoped
+Diagnostics must be narrow, removable, and aimed at proving one failing path end-to-end. Remove probes after proof unless accepted as devtools-only diagnostics.
 
-A developer is expected to be careful, not merely productive.
-A patch that works by mutating unresolved truth is not a successful patch.
+When replacing or correcting durable schema before launch, update the schema docs first, apply the SQL/schema change second, then patch code against that accepted schema. Do not finalize runtime continuity code against a schema that is about to be retired.
 
-### 3.3 Mutation prevention rule
-Treat any of the following as a stop signal:
-- two fields appear to represent the same truth
-- user-facing terminology and durable terminology differ
-- SQL and active docs define different canonical values
-- a fix requires a layer to temporarily own truth that it does not normally own
-- a patch only works when compared against an older or mixed base
-- runtime truth and diagnostics disagree in a way that changes implementation meaning
+## 7. Red-lane runtime-path table
 
-When one of these appears, do not continue implementation until it is flagged.
+Before coding red work, cover:
+- happy path
+- not-ready/pending path
+- cancel/exit path
+- stale/late async result
+- route/account/session switch
+- failure/recovery
+- preserved behaviors
+- diagnostics or harness needed
 
-### 3.5 Responsiveness-first interaction rules
-When a pass touches a user-visible transition, apply these rules by default:
-- render the safe pending or hidden state before any await that could stall the visible surface
-- open modal shells immediately when local knowledge is enough to present them safely
-- keep gated action buttons locked until server-backed checks settle instead of delaying the whole surface
-- gate account-backed rendering on explicit hydration or confirmation seams, not inferred readiness
-- when using cache for responsiveness, treat it as projection only
-- reserve layout space when late hydration text would otherwise shake the page
+This is a checkpoint tool, not routine message format.
 
-For server-backed or hydration-backed user surfaces, these rules are not complete until the pass also remains aligned with `pending-surfaces.md`.
+## 8. Patch artifact rules
 
-### 4. Create one canonical patch artifact
-The default deliverable for an implementation pass is one scoped `.diff` file.
+Default deliverable: one scoped `.diff`.
 
 Rules:
 - one bounded pass = one canonical diff
-- revise that same diff in place after runtime feedback
+- revise the same diff within the same pass
 - do not stack forward diffs for the same pass
-- produce a `.zip` only when new files or assets make that necessary
-- if new files are introduced, apply the current version-marker rule for the target artifact
+- do not mix unrelated cleanup into behavior work
+- do not widen owner scope without reclassification
+- produce a zip only when delivery/new files/assets require it
 
-### 5. Runtime test
-Served runtime results decide runtime status only after the structural compliance gate passes.
-Do not mark behavior fixed from code inspection alone.
-Do not mark a patch acceptable merely because runtime looks good if the patch is structurally non-compliant.
+A patch can appear to work and still be rejected for wrong base, wrong owner, duplicate truth, scaffold drift, or structural violation.
 
-At minimum, record observations in these categories:
-- state transitions
-- settings
-- value rendering
-- reading continuity
+## 9. Runtime test and acceptance protocol
 
-For each category, note:
-- client immediate
-- mutations
-- server settle
-- later truth
-- must not happen
+Use the full protocol only at decision checkpoints: before red-risk coding, after meaningful runtime results, on failure, on owner ambiguity, before base promotion, or before closure.
 
-Do not mark behavior acceptable merely because it corrected itself later.
+For green updates, use the shortest natural message that still states result, owner, and next action.
 
-### 5.1 Runtime evidence harnesses
-Manual visual runtime testing is not sufficient for fast transitions, auth/session projection, shell boot settlement, billing redirects, or TTS state races when the user-visible state can change too quickly to observe reliably.
+Evidence levels:
+1. **Surface observation** — user-visible behavior.
+2. **Diagnostics** — runtime state snapshot.
+3. **Harness/probe** — structured report for timing/async/ownership issues.
+4. **Live credentialed validation** — required for real auth/session/sync/deployment bugs.
 
-When a runtime issue depends on live browser/session behavior, prefer a dev-only validation harness or diagnostic probe that runs inside the user's browser or staging environment and emits a structured report.
+Do not close a live-session bug from simulated objects when the original failure involved deployed auth, sync, redirect, cookie, local storage, or runtime policy projection.
 
-Use this path when:
-- visual interpretation is slow, ambiguous, or timing-sensitive
-- the issue involves auth, sync, entitlement, checkout, runtime policy, TTS route, shell boot release, or public/signed-out projection
-- a simulated local test is useful but not equivalent to deployed credentialed validation
-- a reviewer needs to evaluate runtime truth without operating the browser manually
+Decision-result format:
+- Result:
+- Classification:
+- Likely owner:
+- Continue or stop:
+- Next test or patch target:
 
-Harness rules:
-- probes must be dev-only, diagnostics-only, or behind an existing devtools gate
-- probes must not become product behavior, durable state, or a second owner of runtime truth
-- probes must not require credentials to be pasted into chat or committed to code
-- credentialed execution should happen in the user's browser, local machine, staging environment, or CI secrets controlled by the project owner
-- the report should be copyable JSON or plain text, not only screenshots
-- the report must identify the runtime state owner and the exact transition being validated
-- remove the probe after proof is collected unless it is accepted as a durable devtools-only diagnostic surface
+Classifications: pass, pass with watch, fail/blocker, diagnostics gap, wrong-owner suspicion.
 
-A runtime evidence report should include, when relevant:
-- artifact or deployed build identifier
-- current route/surface and selected section
-- auth user present or absent
-- entitlement tier and source
-- runtime policy route, cloud capability, and policy source/reason
-- session voice selection present or absent
-- pending/staged/snapshot projection state
-- visible badges or gated controls present or absent
-- boot release reason, relative timestamps, and settlement state
-- user-visible pending/error surface state
-- expected state for the transition and actual state observed
+Harnesses must be dev-only/diagnostics-only, copyable, scoped to the owner under test, and must not require credentials in chat or become product behavior, durable state, or a second truth owner.
 
-For credentialed browser validation, the preferred flow is:
-1. create or use a private staging test account controlled by the project owner
-2. keep it non-admin, disposable, and free of production customer data
-3. execute the login/logout/checkout/TTS flow in the real browser or staging CI
-4. export the structured harness report
-5. review the report against owner boundaries and runtime expectations
-6. only then mark the behavior runtime-accepted or reclassify the failing owner
+For user-visible transitions, prefer an honest pending state over hiding, freezing, or rendering a believable wrong final state. A visible surface must be final, or explicitly pending/blocked with owner and reason. Do not use arbitrary waits, CSS masks, or disabled controls as substitutes for owner readiness.
 
-Do not close a live-session bug solely from simulated auth objects if the original failure involved deployed auth, sync, redirect, cookie, local storage, or runtime policy projection behavior. Simulations may make a patch runtime-testable, but the live harness report is the acceptance evidence.
+## 10. Stop signals
 
-### 6. Revise or reclassify
-- same pass → revise the same diff
-- new pass → create a new diff
+Stop and reclassify when evidence suggests:
+- public state inherits private/account capability
+- stale async result controls a newer route/session
+- passive observation writes authoritative state
+- active runtime state lacks honest owner data or pending/error surface
+- presentation masking is proposed before proving the surface should exist
+- docs, schema, diagnostics, external truth, and runtime disagree on the same value
 
-Reclassify the work when:
-- the owner layer was wrong
-- multiple files outside current scope clearly own the remaining issue
-- the current diff is patching symptoms instead of authority
-- repeated revisions are not reducing the failure surface
+## 11. Watch, blocker, backlog, debt
 
-## Architectural discipline rules for implementation
+Use precise buckets:
+- **Blocker:** violates owner boundary, protected behavior, safety, or acceptance requirement.
+- **Watch:** acceptable for this pass; needs owner and retirement condition.
+- **Backlog:** real issue outside this pass.
+- **Accepted debt:** temporary state explicitly allowed with owner and retirement condition.
 
-### Prototype-to-production rule
-If a pass still depends on a prototype convenience:
-- name it explicitly
-- confirm the real target owner
-- avoid letting it silently become permanent authority
+## 12. Preserve suite
 
-### Bridge rule
-If a bridge remains in place after the pass:
-- say which runtime owner it is waiting on
-- say why it still exists
-- do not add a second bridge casually in the same area
+Each accepted base should maintain a short preserve suite: behavior future patches must not regress.
 
-### Scaffold rule
-Do not quietly patch against the wrong scaffold and “fix it later.”
-Scaffold mismatch invalidates the pass base.
+A patch must state which preserve items it touches, avoids, or requires runtime validation for. Keep preserve suites short and principle-focused; lane-specific lists belong in notes or appendices.
 
-### Anti-pattern rule
-Do not use a pass to normalize bad architecture by accident.
-If the pass would legitimize duplicate truth, reclassify it and fix ownership first.
+## 13. Deliverables and status
 
-### Responsive persistence rule
-For settings and similar durable preferences, prefer this model:
-- confirmed server baseline when the setting is actually durable
-- immediate local projection of user intent
-- dirty tracking for unconfirmed fields
-- replay of dirty unconfirmed mutations after refresh
+Every handoff should include:
+1. base artifact
+2. files changed
+3. behavior changed and preserved
+4. main regression risk
+5. validation performed
+6. structural compliance verdict
+7. runtime evidence level or validation path
+8. temporary debt, with owner and retirement condition
+9. next working base decision
 
-Do not rely on a debounce timer alone as the only protection for user intent.
-Do not let cache become the confirmed baseline unless the server actually confirmed it.
+Valid statuses: investigating, instrumenting, structurally acceptable, runtime-testable, runtime accepted, rejected wrong-base, rejected wrong-owner, rejected overbroad, rejected insufficient simulation, blocked pending architecture normalization, closed.
 
-## Patch-safety rules
-- do not move runtime truth into shell
-- do not remove a bridge until the runtime replacement exists
-- do not widen a pass casually
-- do not let one fix silently redefine ownership
-- do not mix unrelated cleanup into a bounded pass
-- do not treat scaffold changes as harmless file moves
-- do not accept "good enough because it works" as a patch rationale
-- do not let runtime comfort override structural disqualification
+## 14. Reclassify or stop
 
-## Deliverables policy
-Every patch handoff should return:
-1. exact files changed
-2. exact behavior change
-3. main regression risk
-4. concise runtime validation path
-5. structural compliance verdict against `03_ARCHITECTURE_AND_GUARDRAILS.md`
-6. any explicit temporary debt still present, with owner and retirement condition
+Reclassify when the owner was wrong, the base invalid, the patch is downstream symptom relief, revisions are not shrinking failure surface, a bridge/fallback would become permanent owner, or external truth must be verified first.
 
-Every active diff handoff should also say:
-- current objective
-- files in scope
-- passed areas
-- failed areas
-- exact diff filename in play
-- whether the diff is cumulative or follow-up
-- latest runtime caveat, if any
+When in doubt, prefer a smaller proof pass over a broader behavior patch.
 
-## Refactor entry questions
-Before starting a major refactor or redistribution pass, answer:
-- what is the owner layer?
-- what older layer is being retired or narrowed?
-- what scaffold shape is authoritative for this pass?
-- what prototype conveniences still exist here?
-- what runtime behavior must remain unchanged?
+## 15. Minimal diff commands
 
-If these answers are not clear, do proof or documentation sync first.
-
-## When to stop using direct broad implementation
-Stop using broad implementation passes and switch to diff-driven cleanup when:
-- the owner layer is already confirmed
-- the active pass already has one patch artifact
-- runtime feedback is now about correction, refinement, or one remaining behavior
-- the pass is no longer discovering new architecture truth
-
-## Diff and git appendix
-
-### Canonical diff lifecycle
-For one active pass:
-- create one canonical diff
-- runtime-test it
-- revise that same diff in place after feedback
-- do not stack forward diffs for the same pass
-- start a new diff only when the work becomes a new pass
-
-### Repo entry
-```bat
-cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
-```
-
-### Check state before patching
-```bat
-git status
-```
-
-Before editing, also verify:
-- root `index.html` exists
-- root `js/` exists
-- root `css/` exists if current docs expect it
-- `docs/` contains docs only
-
-### Export a scoped diff
-```bat
-git diff -- <file1> <file2> <file3> > quick_patch.diff
-```
-
-Example:
-```bat
-git diff -- index.html css/shell.css js/evaluation.js js/shell.js > quick_patch.diff
-```
-
-### Validate the diff
-```bat
-git apply --check quick_patch.diff
-```
-
-### Open the diff
-```bat
-notepad quick_patch.diff
-```
-
-### Standard review block
 ```bat
 cd C:\Users\Triston Barker\Documents\GitHub\jubly-reader\
 git status
-git diff -- <file1> <file2> <file3> > quick_patch.diff
-git apply --check quick_patch.diff
-notepad quick_patch.diff
-```
-
-### Show changed file names only
-```bat
+git diff -- <file1> <file2> > patch.diff
+git apply --check patch.diff
 git diff --name-only
 ```
 
-### Stage only pass files
-```bat
-git add <file1> <file2> <file3>
-```
-
-### Commit
-```bat
-git commit -m "Polish reading playback follow-up"
-```
-
-### Show latest commit
-```bat
-git log --oneline -1
-```
-
-### Export the last commit
-```bat
-git show --stat --patch HEAD > last-commit.txt
-```
-
-### Compare current branch against main
-```bat
-git diff main...HEAD > branch-vs-main.diff
-```
+Before exporting, confirm root shape and file scope. Stage only files in the accepted pass.
