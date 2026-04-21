@@ -55,6 +55,16 @@ window.rcSync = (function () {
   let _applyingRemoteSettings = false;
   let _pendingRuntimePolicyProjection = null;
   let _pendingRuntimePolicyFlushTimer = null;
+  let _runtimePolicyProjectionDiagnostics = {
+    at: null,
+    action: 'init',
+    reason: 'init',
+    tier: null,
+    fromCache: false,
+    fromSnapshot: false,
+    pendingPresent: false,
+    stagedSnapshotProjectionPresent: false,
+  };
 
   // Dirty settings: field-level record of user mutations not yet confirmed by the server.
   // Persisted to localStorage so uncommitted changes survive page refresh.
@@ -139,6 +149,32 @@ window.rcSync = (function () {
     return _syncDiagnostics[kind];
   }
 
+  function _recordRuntimePolicyProjectionDiagnostic(action, detail = {}) {
+    const pending = _pendingRuntimePolicyProjection;
+    _runtimePolicyProjectionDiagnostics = Object.assign({}, _runtimePolicyProjectionDiagnostics || {}, {
+      at: new Date().toISOString(),
+      action: String(action || 'unknown'),
+      reason: String(detail.reason || ''),
+      tier: detail.tier == null ? (pending && pending.policy ? String(pending.policy.tier || '') : null) : String(detail.tier || ''),
+      fromCache: !!detail.fromCache,
+      fromSnapshot: !!detail.fromSnapshot,
+      pendingPresent: !!pending,
+      stagedSnapshotProjectionPresent: !!pending && (action === 'staged' || !!detail.fromSnapshot),
+    });
+    return _runtimePolicyProjectionDiagnostics;
+  }
+
+  function _getRuntimePolicyProjectionDiagnosticsSnapshot() {
+    const pending = _pendingRuntimePolicyProjection;
+    return {
+      pendingPolicyProjectionPresent: !!pending,
+      pendingPolicyProjectionTier: pending && pending.policy ? String(pending.policy.tier || '') : null,
+      pendingPolicyProjectionFromCache: !!(pending && pending.options && pending.options.fromCache),
+      stagedSnapshotPolicyProjectionPresent: !!pending && !!(_runtimePolicyProjectionDiagnostics && _runtimePolicyProjectionDiagnostics.stagedSnapshotProjectionPresent),
+      lastProjection: Object.assign({}, _runtimePolicyProjectionDiagnostics || {}),
+    };
+  }
+
   document.addEventListener('rc:runtime-policy-changed', () => { try { _flushPendingRuntimePolicyProjection('runtime-policy-changed'); } catch (_) {} });
   try { window.addEventListener('load', () => { try { _flushPendingRuntimePolicyProjection('window-load'); } catch (_) {} }); } catch (_) {}
 
@@ -197,11 +233,41 @@ window.rcSync = (function () {
     return _composeResolvedUsageSummary(local, _remoteUsageSummary);
   }
 
+  function _resetPolicyToPublic(reason) {
+    try {
+      if (window.rcPolicy && typeof window.rcPolicy.resetToPublic === 'function') {
+        window.rcPolicy.resetToPublic(reason || 'sync-public-reset');
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function _clearPendingRuntimePolicyProjection(reason) {
+    const hadPending = !!_pendingRuntimePolicyProjection;
+    _pendingRuntimePolicyProjection = null;
+    if (_pendingRuntimePolicyFlushTimer) {
+      clearTimeout(_pendingRuntimePolicyFlushTimer);
+      _pendingRuntimePolicyFlushTimer = null;
+    }
+    if (hadPending) _pushEvent('policy-projection-cleared-public', { reason: String(reason || 'public-reset') });
+    _recordRuntimePolicyProjectionDiagnostic('cleared', { reason: String(reason || 'public-reset') });
+    return hadPending;
+  }
+
   function _applyRuntimePolicyProjection(policy, options = {}) {
     if (!policy || typeof policy !== 'object') return false;
+    if (!_ready()) {
+      _clearPendingRuntimePolicyProjection('apply-blocked-public');
+      _resetPolicyToPublic('sync-policy-apply-blocked-public');
+      _recordRuntimePolicyProjectionDiagnostic('blocked', { tier: String(policy.tier || ''), fromCache: !!options.fromCache, fromSnapshot: !!options.fromSnapshot, reason: 'apply-blocked-public' });
+      _pushEvent('policy-projection-blocked-public', { tier: String(policy.tier || ''), fromCache: !!options.fromCache });
+      return false;
+    }
     try {
       if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
-        window.rcPolicy.apply(policy, null, { transient: !!options.fromCache, resolved: true });
+        window.rcPolicy.apply(policy, null, { transient: !!options.fromCache, resolved: true, source: options.fromCache ? 'sync-cache' : 'sync-snapshot', reason: options.replayed ? `policy-projection-replay:${options.replayReason || 'owner-ready'}` : 'policy-projection-apply' });
+        _recordRuntimePolicyProjectionDiagnostic('applied', { tier: String(policy.tier || ''), fromCache: !!options.fromCache, fromSnapshot: !!options.fromSnapshot, reason: options.replayed ? `replayed:${options.replayReason || 'owner-ready'}` : 'apply' });
         _pushEvent('policy-projected', {
           tier: String(policy.tier || ''),
           fromCache: !!options.fromCache,
@@ -230,12 +296,21 @@ window.rcSync = (function () {
 
   function _stageRuntimePolicyProjection(policy, options = {}) {
     if (!policy || typeof policy !== 'object') return false;
+    if (!_ready()) {
+      _clearPendingRuntimePolicyProjection('stage-blocked-public');
+      _resetPolicyToPublic('sync-policy-stage-blocked-public');
+      _recordRuntimePolicyProjectionDiagnostic('stage-blocked', { tier: String(policy.tier || ''), fromCache: !!options.fromCache, fromSnapshot: !!options.fromSnapshot, reason: 'stage-blocked-public' });
+      _pushEvent('policy-projection-stage-blocked-public', { tier: String(policy.tier || ''), fromCache: !!options.fromCache });
+      return false;
+    }
     _pendingRuntimePolicyProjection = {
       policy,
       options: {
         fromCache: !!options.fromCache,
+        fromSnapshot: !!options.fromSnapshot,
       },
     };
+    _recordRuntimePolicyProjectionDiagnostic('staged', { tier: String(policy.tier || ''), fromCache: !!options.fromCache, fromSnapshot: !!options.fromSnapshot, reason: 'owner-not-ready' });
     _pushEvent('policy-projection-staged', {
       tier: String(policy.tier || ''),
       fromCache: !!options.fromCache,
@@ -251,6 +326,13 @@ window.rcSync = (function () {
 
   function _flushPendingRuntimePolicyProjection(reason = 'owner-ready') {
     if (!_pendingRuntimePolicyProjection) return false;
+    if (!_ready()) {
+      _clearPendingRuntimePolicyProjection(reason || 'flush-blocked-public');
+      _resetPolicyToPublic('sync-policy-flush-blocked-public');
+      _recordRuntimePolicyProjectionDiagnostic('flush-blocked', { reason: String(reason || 'owner-ready') });
+      _pushEvent('policy-projection-flush-blocked-public', { reason: String(reason || 'owner-ready') });
+      return false;
+    }
     if (!(window.rcPolicy && typeof window.rcPolicy.apply === 'function')) {
       _schedulePendingRuntimePolicyFlush();
       return false;
@@ -471,6 +553,12 @@ window.rcSync = (function () {
   // Bulk-apply a server snapshot to all in-memory state. Rejects stale responses
   // via seq ordering. Persists to localStorage as last-confirmed projection.
   function _applySnapshot(snapshot, options = {}) {
+    if (!_ready()) {
+      _clearPendingRuntimePolicyProjection('snapshot-blocked-public');
+      _resetPolicyToPublic('sync-snapshot-blocked-public');
+      _pushEvent('snapshot-apply-blocked-public', { fromCache: !!options.fromCache, seq: Number(options.seq || 0) });
+      return false;
+    }
     const seq = Number(options.seq || 0);
     if (seq && seq < _appliedSeq) return false;
     if (seq) _appliedSeq = seq;
@@ -496,8 +584,9 @@ window.rcSync = (function () {
     // settings so hydration does not downgrade a valid saved theme back to default
     // simply because the runtime policy has not been projected yet.
     if (snap.runtimePolicy && typeof snap.runtimePolicy === 'object') {
-      if (!_applyRuntimePolicyProjection(snap.runtimePolicy, options)) {
-        _stageRuntimePolicyProjection(snap.runtimePolicy, options);
+      const projectionOptions = Object.assign({}, options, { fromSnapshot: true });
+      if (!_applyRuntimePolicyProjection(snap.runtimePolicy, projectionOptions)) {
+        _stageRuntimePolicyProjection(snap.runtimePolicy, projectionOptions);
       }
     }
     if (_remoteSettingsRow) _applyRemoteSettingsRow(_remoteSettingsRow);
@@ -978,6 +1067,8 @@ window.rcSync = (function () {
 
   // ── State clearing ────────────────────────────────────────────────────────
   function _clearRemoteState() {
+    _clearPendingRuntimePolicyProjection('clear-remote-state');
+    _resetPolicyToPublic('sync-clear-remote-state');
     _remoteUsersRow = null;
     _remoteSettingsRow = null;
     _remoteLibraryItems = [];
@@ -1062,6 +1153,238 @@ window.rcSync = (function () {
     _queueSettingsSync();
   }
 
+  function _createPublicBoundaryProbe() {
+    let active = false;
+    let startedAt = null;
+    let snapshots = [];
+    let autoTimer = null;
+    let lastAutoSignature = '';
+
+    function _devtoolsAllowed() {
+      try {
+        return !!(window.rcDevTools
+          && typeof window.rcDevTools.isDiagnosticsEnabled === 'function'
+          && window.rcDevTools.isDiagnosticsEnabled());
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function _assertCanUse(action) {
+      if (active || _devtoolsAllowed()) return true;
+      throw new Error(`${action || 'Public boundary probe'} requires an active devtools-enabled staging session. Sign in normally with the staging test account first; do not share credentials in chat.`);
+    }
+
+    function _isVisible(el) {
+      if (!el) return false;
+      try {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function _visibleProBadgePresent() {
+      const candidates = [
+        document.getElementById('reading-tier-pill'),
+        ...Array.from(document.querySelectorAll('[data-plan-badge], [data-tier-badge], .tier-pill, .plan-pill, .plan-badge, .tier-badge'))
+      ].filter(Boolean);
+      return candidates.some((el) => {
+        const text = String(el.textContent || '').trim().toLowerCase();
+        return _isVisible(el) && /\b(pro|premium)\b/.test(text);
+      });
+    }
+
+    function _readSessionVoiceSelection() {
+      let value = '';
+      try { value = String(window.__rcSessionVoiceSelection || '').trim(); } catch (_) { value = ''; }
+      return { present: !!value, type: /^(cloud:|azure:|polly:)/i.test(value) ? 'cloud' : (value ? 'browser' : 'none') };
+    }
+
+    function _readRuntimePolicy() {
+      let policy = null;
+      let diag = null;
+      try { policy = window.rcPolicy && typeof window.rcPolicy.get === 'function' ? window.rcPolicy.get() : null; } catch (_) { policy = null; }
+      try { diag = window.rcPolicy && typeof window.rcPolicy.getDiagnosticsSnapshot === 'function' ? window.rcPolicy.getDiagnosticsSnapshot() : null; } catch (_) { diag = null; }
+      const sourcePolicy = (diag && diag.policy) || policy || {};
+      return {
+        raw: sourcePolicy,
+        tier: String(sourcePolicy.tier || (diag && diag.tier) || 'unknown'),
+        cloudVoiceCapability: !!(sourcePolicy.features && sourcePolicy.features.cloudVoices),
+        explorerThemeCapability: !!(sourcePolicy.features && sourcePolicy.features.themes && sourcePolicy.features.themes.explorer),
+        source: diag && diag.source ? String(diag.source) : 'unknown',
+        reason: diag && diag.reason ? String(diag.reason) : '',
+        resolved: !!(diag && diag.resolved),
+        resolutionMode: diag && diag.resolutionMode ? String(diag.resolutionMode) : String(sourcePolicy.resolutionMode || ''),
+      };
+    }
+
+    function _currentTtsRouteMode() {
+      try {
+        const tts = typeof window.getTtsDiagnosticsSnapshot === 'function' ? window.getTtsDiagnosticsSnapshot() : null;
+        const routing = tts && tts.routing ? tts.routing : null;
+        if (routing) {
+          return {
+            mode: routing.requestedPath || (routing.cloudCapable ? 'cloud-capable' : 'browser/public'),
+            cloudCapable: !!routing.cloudCapable,
+            reason: routing.reason || '',
+            selectedType: routing.selected ? routing.selected.type || 'unknown' : 'unknown',
+          };
+        }
+      } catch (_) {}
+      const policy = _readRuntimePolicy();
+      return {
+        mode: policy.cloudVoiceCapability ? 'cloud-capable' : 'browser/public',
+        cloudCapable: !!policy.cloudVoiceCapability,
+        reason: 'derived-from-runtime-policy',
+        selectedType: _readSessionVoiceSelection().present ? 'selected' : 'auto',
+      };
+    }
+
+    function _buildSnapshot(label, trigger) {
+      const user = _user();
+      const policy = _readRuntimePolicy();
+      const voice = _readSessionVoiceSelection();
+      const projection = _getRuntimePolicyProjectionDiagnosticsSnapshot();
+      const ttsRoute = _currentTtsRouteMode();
+      const currentLabel = String(label || `snapshot-${snapshots.length + 1}`);
+      const publicExpected = /signed-out|signout|public|basic/i.test(currentLabel);
+      const signedInExpected = /signed-in|signin|pro|explorer|cloud/i.test(currentLabel) && !publicExpected;
+      const checks = {
+        signedInExpectedPass: signedInExpected ? (!!user && (policy.tier === 'pro' || policy.tier === 'premium') && policy.cloudVoiceCapability && policy.explorerThemeCapability) : null,
+        signedOutExpectedPass: publicExpected ? (!user && policy.tier === 'basic' && !policy.cloudVoiceCapability && !policy.explorerThemeCapability && !voice.present && !projection.pendingPolicyProjectionPresent && !_visibleProBadgePresent()) : null,
+      };
+      return {
+        index: snapshots.length + 1,
+        label: currentLabel,
+        trigger: String(trigger || 'manual'),
+        at: new Date().toISOString(),
+        userPresent: !!user,
+        userIdPresent: !!(user && user.id),
+        currentTier: policy.tier,
+        cloudVoiceCapability: policy.cloudVoiceCapability,
+        explorerThemeCapability: policy.explorerThemeCapability,
+        runtimePolicy: {
+          source: policy.source,
+          reason: policy.reason,
+          resolved: policy.resolved,
+          resolutionMode: policy.resolutionMode,
+        },
+        sessionVoiceSelection: voice,
+        pendingPolicyProjectionPresent: projection.pendingPolicyProjectionPresent,
+        stagedSnapshotPolicyProjectionPresent: projection.stagedSnapshotPolicyProjectionPresent,
+        visibleProBadgePresent: _visibleProBadgePresent(),
+        ttsRoute,
+        projectionDiagnostics: projection.lastProjection || null,
+        checks,
+      };
+    }
+
+    function _record(label, trigger) {
+      const snapshot = _buildSnapshot(label, trigger);
+      snapshots.push(snapshot);
+      try { console.info('[rcPublicBoundaryProbe]', snapshot.label, snapshot); } catch (_) {}
+      return snapshot;
+    }
+
+    function _signature(snapshot) {
+      return JSON.stringify({
+        userPresent: snapshot.userPresent,
+        tier: snapshot.currentTier,
+        cloud: snapshot.cloudVoiceCapability,
+        explorer: snapshot.explorerThemeCapability,
+        voice: snapshot.sessionVoiceSelection && snapshot.sessionVoiceSelection.present,
+        pending: snapshot.pendingPolicyProjectionPresent,
+        staged: snapshot.stagedSnapshotPolicyProjectionPresent,
+        proBadge: snapshot.visibleProBadgePresent,
+        ttsMode: snapshot.ttsRoute && snapshot.ttsRoute.mode,
+      });
+    }
+
+    function _recordAuto(trigger) {
+      if (!active) return;
+      if (autoTimer) clearTimeout(autoTimer);
+      autoTimer = setTimeout(() => {
+        autoTimer = null;
+        const snapshot = _buildSnapshot(`auto:${trigger}`, trigger);
+        const sig = _signature(snapshot);
+        if (sig === lastAutoSignature) return;
+        lastAutoSignature = sig;
+        snapshots.push(snapshot);
+        try { console.info('[rcPublicBoundaryProbe]', snapshot.label, snapshot); } catch (_) {}
+      }, 300);
+    }
+
+    function start(label = 'start') {
+      _assertCanUse('Start public boundary probe');
+      active = true;
+      startedAt = new Date().toISOString();
+      snapshots = [];
+      lastAutoSignature = '';
+      return _record(label, 'start');
+    }
+
+    function mark(label) {
+      _assertCanUse('Mark public boundary probe');
+      if (!active) start('implicit-start');
+      return _record(label || `manual-${snapshots.length + 1}`, 'manual');
+    }
+
+    function reset() {
+      _assertCanUse('Reset public boundary probe');
+      active = false;
+      startedAt = null;
+      snapshots = [];
+      lastAutoSignature = '';
+      if (autoTimer) {
+        clearTimeout(autoTimer);
+        autoTimer = null;
+      }
+      return true;
+    }
+
+    function getReportObject() {
+      return {
+        probe: 'public-boundary-validation',
+        version: 1,
+        startedAt,
+        generatedAt: new Date().toISOString(),
+        active,
+        expected: {
+          cycleSignedIn: 'Pro/Explorer/cloud true',
+          cycleSignedOut: 'Basic/public/cloud false/session voice cleared',
+        },
+        snapshots: snapshots.slice(),
+      };
+    }
+
+    function report() {
+      _assertCanUse('Read public boundary probe report');
+      const text = JSON.stringify(getReportObject(), null, 2);
+      try { console.log(text); } catch (_) {}
+      return text;
+    }
+
+    async function copyReport() {
+      const text = report();
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(text);
+      }
+      return text;
+    }
+
+    try { document.addEventListener('rc:auth-changed', () => _recordAuto('auth-changed')); } catch (_) {}
+    try { document.addEventListener('rc:runtime-policy-changed', () => _recordAuto('runtime-policy-changed')); } catch (_) {}
+    try { document.addEventListener('rc:durable-data-hydrated', () => _recordAuto('durable-data-hydrated')); } catch (_) {}
+
+    return { start, mark, report, copyReport, reset, getSnapshots: () => snapshots.slice(), isActive: () => !!active };
+  }
+
+  const _publicBoundaryProbe = _createPublicBoundaryProbe();
+  try { window.rcPublicBoundaryProbe = _publicBoundaryProbe; } catch (_) {}
+
   try { document.addEventListener('rc:auth-changed', _handleAuthChanged); } catch (_) {}
   try { document.addEventListener('rc:prefs-changed', _handlePrefsChanged); } catch (_) {}
   try { document.addEventListener('change', _handleSettingsControlEvent, true); } catch (_) {}
@@ -1083,6 +1406,7 @@ window.rcSync = (function () {
     getRemoteUsageSummary: () => _remoteUsageSummary,
     getResolvedUsageSummary: () => _getResolvedUsageSummary(),
     getHydrationState: () => ({ ..._hydrationState }),
+    getRuntimePolicyProjectionDiagnostics: () => _getRuntimePolicyProjectionDiagnosticsSnapshot(),
     getDiagnosticsSnapshot: () => ({
       sync: { ..._syncDiagnostics },
       hydrated: { ..._hydrationState },
@@ -1091,6 +1415,8 @@ window.rcSync = (function () {
       settingsRow: _remoteSettingsRow,
       usage: _remoteUsageSummary,
       resolvedUsage: _getResolvedUsageSummary(),
+      runtimePolicyProjection: _getRuntimePolicyProjectionDiagnosticsSnapshot(),
+      publicBoundaryProbe: _publicBoundaryProbe && typeof _publicBoundaryProbe.getSnapshots === 'function' ? { active: _publicBoundaryProbe.isActive(), snapshots: _publicBoundaryProbe.getSnapshots() } : null,
       libraryItemCount: (_remoteLibraryItems || []).length,
       progressCount: (_remoteProgressRows || []).length,
       bookMetricsCount: (_remoteBookMetricsRows || []).length,
