@@ -98,6 +98,19 @@ A normalization note must identify:
 
 Use status: `Blocked pending architecture normalization`.
 
+
+### Stabilization before cleanup/replacement
+
+When architecture normalization creates a contract-backed replacement path, do not treat patch-forward growth as the destination.
+First prove the contract at runtime; then authorize cleanup or replacement as a separate bounded pass.
+
+Cleanup/replacement passes must:
+- preserve accepted behavior
+- remove or compact obsolete bridges only after replacements are proven
+- avoid new behavior unless separately approved
+- keep owner boundaries intact
+- state module boundaries and retirement conditions
+
 ## 6. Proof before code
 
 Instrument before patching when the owner path is ambiguous, runtime contradicts code confidence, races/stale async responses are plausible, or external provider/schema/deployment truth may be involved.
