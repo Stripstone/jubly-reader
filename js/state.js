@@ -851,12 +851,6 @@ let appThemeSettings = {};
 let appAppearance = 'light';
 let appearanceAppliedOnce = false;
 let appearancePaintSignalSeq = 0;
-let appearanceAdoptedByState = false;
-let appearanceAdoptionSource = 'uninitialized';
-let appearanceMutationAfterRelease = false;
-let appearanceMutationObserverInstalled = false;
-let appearanceModeAtFirstPaint = 'light';
-let appearanceModeAfterRuntime = 'light';
 let diagnosticsPrefs = { enabled: false, mode: 'off' };
 
 const EXPLORER_PRESET = {
@@ -1339,87 +1333,15 @@ function loadTheme() {
   return appTheme;
 }
 
-function readAppearanceBootSnapshot() {
-  let root = null;
-  try { root = document.documentElement || null; } catch (_) { root = null; }
-  let boot = null;
-  try { boot = (typeof window !== 'undefined' && window.__rcAppearancePrePaint && typeof window.__rcAppearancePrePaint === 'object') ? window.__rcAppearancePrePaint : null; } catch (_) { boot = null; }
-  const rootMode = root ? (root.getAttribute('data-appearance-prepaint-mode') || root.getAttribute('data-app-appearance')) : '';
-  const mode = normalizeAppearanceMode((boot && boot.mode) || rootMode || 'light');
-  const firstWriter = String((boot && boot.firstWriter) || (root && root.getAttribute('data-appearance-first-writer')) || 'unknown');
-  const prePaintApplied = !!((boot && boot.applied) || (root && root.getAttribute('data-appearance-prepaint-applied') === 'true'));
-  return {
-    appearancePrePaintApplied: prePaintApplied,
-    firstWriter,
-    modeAtFirstPaint: mode,
-    source: (boot && boot.source) || (prePaintApplied ? 'prepaint-root' : 'runtime-root')
-  };
-}
-
-function hasShellReleasedForAppearance() {
-  try {
-    return !!(document.body && !document.body.classList.contains('boot-pending'));
-  } catch (_) {
-    return false;
-  }
-}
-
-function getAppearanceFirstPaintReport() {
-  const boot = readAppearanceBootSnapshot();
-  return {
-    appearancePrePaintApplied: !!boot.appearancePrePaintApplied,
-    appearanceAdoptedByState: !!appearanceAdoptedByState,
-    shellFirstAppearanceWriter: boot.firstWriter === 'shell.js',
-    appearanceMutationAfterRelease: !!appearanceMutationAfterRelease,
-    modeAtFirstPaint: appearanceModeAtFirstPaint || boot.modeAtFirstPaint,
-    modeAfterRuntime: appearanceModeAfterRuntime || appAppearance,
-    stateAdoptionSource: appearanceAdoptionSource,
-    firstWriter: boot.firstWriter,
-    source: boot.source
-  };
-}
-
-function publishAppearanceFirstPaintReport() {
-  const report = getAppearanceFirstPaintReport();
-  try { window.__rcAppearanceFirstPaintReport = report; } catch (_) {}
-  return report;
-}
-
-function installAppearanceMutationObserver() {
-  if (appearanceMutationObserverInstalled) return;
-  appearanceMutationObserverInstalled = true;
-  try {
-    if (typeof MutationObserver !== 'function' || !document.documentElement) return;
-    const observer = new MutationObserver(() => {
-      if (!appearanceAppliedOnce || !hasShellReleasedForAppearance()) return;
-      let rootMode = '';
-      try { rootMode = document.documentElement.getAttribute('data-app-appearance') || ''; } catch (_) { rootMode = ''; }
-      if (rootMode && rootMode !== appAppearance) {
-        appearanceMutationAfterRelease = true;
-        publishAppearanceFirstPaintReport();
-      }
-    });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-app-appearance'] });
-  } catch (_) {}
-}
-
-function applyAppearance(options = {}) {
-  const source = options && options.source ? String(options.source) : 'runtime';
+function applyAppearance() {
   const modeClass = appAppearance === 'dark' ? 'app-dark' : 'app-light';
   const paintSeq = ++appearancePaintSignalSeq;
-  const beforeMode = (() => {
-    try { return document.documentElement && document.documentElement.getAttribute('data-app-appearance'); } catch (_) { return null; }
-  })();
-  if (source !== 'user-set' && appearanceAppliedOnce && hasShellReleasedForAppearance() && beforeMode && beforeMode !== appAppearance) {
-    appearanceMutationAfterRelease = true;
-  }
   try {
     document.documentElement.classList.remove('app-light', 'app-dark');
     document.documentElement.classList.add(modeClass);
     document.documentElement.setAttribute('data-app-appearance', appAppearance);
     document.documentElement.setAttribute('data-appearance-ready', 'true');
     document.documentElement.setAttribute('data-appearance-painted', 'false');
-    document.documentElement.style.colorScheme = appAppearance;
   } catch (_) {}
   document.body.classList.remove('app-light', 'app-dark');
   document.body.classList.add(modeClass);
@@ -1429,16 +1351,13 @@ function applyAppearance(options = {}) {
     document.body.setAttribute('data-appearance-painted', 'false');
   } catch (_) {}
   appearanceAppliedOnce = true;
-  appearanceModeAfterRuntime = appAppearance;
-  publishAppearanceFirstPaintReport();
   syncAppearanceButtons();
-  try { document.dispatchEvent(new CustomEvent('rc:appearance-applied', { detail: { appearance: appAppearance, source } })); } catch (_) {}
+  try { document.dispatchEvent(new CustomEvent('rc:appearance-applied', { detail: { appearance: appAppearance } })); } catch (_) {}
   const dispatchPainted = () => {
     if (paintSeq !== appearancePaintSignalSeq) return;
     try { document.documentElement.setAttribute('data-appearance-painted', 'true'); } catch (_) {}
     try { document.body.setAttribute('data-appearance-painted', 'true'); } catch (_) {}
-    publishAppearanceFirstPaintReport();
-    try { document.dispatchEvent(new CustomEvent('rc:appearance-painted', { detail: { appearance: appAppearance, source } })); } catch (_) {}
+    try { document.dispatchEvent(new CustomEvent('rc:appearance-painted', { detail: { appearance: appAppearance } })); } catch (_) {}
   };
   if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
     window.requestAnimationFrame(() => {
@@ -1483,39 +1402,16 @@ function readAppearanceModeFromLocal() {
   return normalizeAppearanceMode(storedMode);
 }
 
-function resolveBootAppliedAppearanceMode() {
-  const boot = readAppearanceBootSnapshot();
-  appearanceModeAtFirstPaint = boot.modeAtFirstPaint;
-  if (boot.appearancePrePaintApplied) {
-    appearanceAdoptedByState = true;
-    appearanceAdoptionSource = boot.source || 'prepaint-root';
-    return boot.modeAtFirstPaint;
-  }
-  appearanceAdoptedByState = false;
-  appearanceAdoptionSource = 'local-fallback';
-  return readAppearanceModeFromLocal();
-}
-
 function setAppearance(mode) {
   appAppearance = normalizeAppearanceMode(mode);
   writeAppearanceModeToLocal(appAppearance);
   saveAppearancePrefs({ appearance_mode: appAppearance });
-  return applyAppearance({ source: 'user-set' });
+  return applyAppearance();
 }
 
 function loadAppearance(opts = {}) {
-  if (opts.fromLocal === true) {
-    appAppearance = readAppearanceModeFromLocal();
-    appearanceAdoptionSource = 'local-explicit';
-  } else if (appearanceAppliedOnce) {
-    // Shell still calls load({ fromLocal:false }) during auth changes in this
-    // held candidate. Preserve runtime-owned local appearance until the shell
-    // bridge is retired in a separate merge-risk slice.
-    appAppearance = normalizeAppearanceMode(appAppearance);
-  } else {
-    appAppearance = resolveBootAppliedAppearanceMode();
-  }
-  return applyAppearance({ source: appearanceAdoptionSource });
+  appAppearance = opts.fromLocal === true ? readAppearanceModeFromLocal() : 'light';
+  return applyAppearance();
 }
 
 function restorePersistedAppearance() {
@@ -1612,15 +1508,10 @@ window.rcAppearance = {
   restorePersisted: restorePersistedAppearance,
   apply: applyAppearance,
   hasApplied: () => appearanceAppliedOnce,
-  getFirstPaintReport: getAppearanceFirstPaintReport,
   syncButtons: syncAppearanceButtons,
   // Transitional alias for current shell button handlers.
   save: setAppearance
 };
-
-window.getAppearanceFirstPaintReport = getAppearanceFirstPaintReport;
-installAppearanceMutationObserver();
-publishAppearanceFirstPaintReport();
 
 window.rcDiagnosticsPrefs = {
   get: getDiagnosticsPreference,

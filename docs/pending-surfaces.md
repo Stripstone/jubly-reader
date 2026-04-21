@@ -98,7 +98,7 @@ Maintenance rule:
 
 | Surface | What it does | Status |
 |---|---|---|
-| Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ✅ In-surface pending remains the primary seam; dashboard release may show honest pending before population; empty/import guidance appears only after local library owner truth resolves empty and signed-in durable hydration is no longer in flight; local read failure stays in an error/pending surface instead of pretending empty. Delayed banner appears only if hydration noticeably stalls |
+| Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ✅ In-surface pending remains the primary seam; dashboard release may show honest pending before population; empty/import guidance appears only after local library owner truth resolves empty; local read failure stays in an error/pending surface instead of pretending empty. Delayed banner appears only if hydration noticeably stalls |
 | Library modal → **Delete** book button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
 | Deleted files modal → **Restore** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Restoring…` on the clicked row |
 | Deleted files modal → **Delete** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
