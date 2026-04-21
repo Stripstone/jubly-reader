@@ -374,6 +374,7 @@ window.rcInteraction = (function () {
         clearBootPendingMessage();
         try { document.body.classList.remove('boot-pending'); } catch (_) {}
         try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
+        try { applySignedInAccountControlReadiness('boot-release'); } catch (_) {}
         const scrim = document.getElementById('boot-scrim');
         if (!scrim) return;
         try {
@@ -396,6 +397,16 @@ window.rcInteraction = (function () {
         releasedSurface: null,
         releaseReason: 'boot',
         blockedBy: null,
+        at: null
+    };
+    let _accountControlsTransientBlock = null;
+    let _lastSignedInAccountReadiness = {
+        signedInInteractionReady: false,
+        authCallable: false,
+        accountControlsEnabled: false,
+        visibleAccountControlsEnabled: false,
+        blockedBy: 'boot',
+        reason: 'boot',
         at: null
     };
     function shellDebugRemember(slot, data) {
@@ -577,6 +588,77 @@ window.rcInteraction = (function () {
         }
     }
 
+    function getSignedInAccountControlElements() {
+        const logoutButtons = Array.from(document.querySelectorAll('[onclick="shellSignOut()"]')).filter(Boolean);
+        const profileTriggers = Array.from(document.querySelectorAll('#nav-profile-trigger')).filter(Boolean);
+        return { logoutButtons, profileTriggers, all: profileTriggers.concat(logoutButtons) };
+    }
+
+    function isControlEnabled(el) {
+        return !!(el && !el.disabled && el.getAttribute('aria-disabled') !== 'true');
+    }
+
+    function readSignedInAccountControlReadiness(reason = 'readiness-read') {
+        const controls = getSignedInAccountControlElements();
+        const authed = !!isAuthedUser();
+        const authKnown = !!(window.rcAuth && typeof window.rcAuth.isReady === 'function' && window.rcAuth.isReady());
+        const authCallable = !!(window.rcAuth && typeof window.rcAuth.signOut === 'function');
+        const shellPending = !!(document.body.classList.contains('boot-pending') || document.body.classList.contains('auth-hydrating'));
+        let blockedBy = null;
+        if (!authed) blockedBy = 'auth:signed-out';
+        else if (!authKnown) blockedBy = 'auth:not-ready';
+        else if (!authCallable) blockedBy = 'auth:signout-unavailable';
+        else if (_accountControlsTransientBlock) blockedBy = _accountControlsTransientBlock;
+        else if (shellPending) blockedBy = 'shell:boot-pending';
+
+        const signedInInteractionReady = authed && !blockedBy;
+        const visibleControls = controls.all.filter(isElementVisible);
+        return {
+            signedInInteractionReady,
+            authCallable,
+            accountControlsEnabled: signedInInteractionReady && controls.all.length > 0 && controls.all.every(isControlEnabled),
+            visibleAccountControlsEnabled: signedInInteractionReady && visibleControls.length > 0 && visibleControls.every(isControlEnabled),
+            blockedBy,
+            signedIn: authed,
+            authKnown,
+            shellPending,
+            profileControlCount: controls.profileTriggers.length,
+            logoutControlCount: controls.logoutButtons.length,
+            visibleControlCount: visibleControls.length,
+            reason,
+            at: new Date().toISOString()
+        };
+    }
+
+    function applySignedInAccountControlReadiness(reason = 'account-control-settlement') {
+        const initial = readSignedInAccountControlReadiness(reason);
+        const controls = getSignedInAccountControlElements();
+        const shouldEnable = !!initial.signedInInteractionReady;
+        controls.all.forEach((control) => {
+            try {
+                control.disabled = !shouldEnable;
+                if (shouldEnable) {
+                    control.removeAttribute('aria-disabled');
+                    control.removeAttribute('data-shell-blocked-by');
+                } else {
+                    control.setAttribute('aria-disabled', 'true');
+                    if (initial.blockedBy) control.setAttribute('data-shell-blocked-by', initial.blockedBy);
+                }
+            } catch (_) {}
+        });
+        _lastSignedInAccountReadiness = readSignedInAccountControlReadiness(reason);
+        shellTrailPush('account-control-readiness', {
+            reason,
+            signedInInteractionReady: _lastSignedInAccountReadiness.signedInInteractionReady,
+            authCallable: _lastSignedInAccountReadiness.authCallable,
+            accountControlsEnabled: _lastSignedInAccountReadiness.accountControlsEnabled,
+            visibleAccountControlsEnabled: _lastSignedInAccountReadiness.visibleAccountControlsEnabled,
+            blockedBy: _lastSignedInAccountReadiness.blockedBy
+        });
+        return _lastSignedInAccountReadiness;
+    }
+
+
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
         const id = normalizeSection(sectionId);
         const authed = isAuthedUser();
@@ -651,6 +733,9 @@ window.rcInteraction = (function () {
         const avatarSrc = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
         if (profileAvatarMain) profileAvatarMain.src = avatarSrc;
         if (profileAvatarSettings) profileAvatarSettings.src = avatarSrc;
+        // One shared account-control readiness writer owns Logout/Profile
+        // disabled state across dashboard, profile, refresh, and auth cycling.
+        applySignedInAccountControlReadiness('sync-auth-presentation:' + id);
     }
 
     function showSection(id, options = {}) {
@@ -1164,13 +1249,16 @@ window.rcInteraction = (function () {
 
     async function shellSignOut() {
         const logoutBtn = document.querySelector('[onclick="shellSignOut()"]');
+        _accountControlsTransientBlock = 'auth:signout';
+        applySignedInAccountControlReadiness('signout-start');
         if (logoutBtn) logoutBtn.disabled = true;
         try { window.rcInteraction && window.rcInteraction.pending('auth:signout', 'Signing out…'); } catch (_) {}
         try {
             if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
                 const result = await window.rcAuth.signOut();
                 if (result && result.ok === false) {
-                    if (logoutBtn) logoutBtn.disabled = false;
+                    _accountControlsTransientBlock = null;
+                    applySignedInAccountControlReadiness('signout-failed');
                     try {
                         const actions = window.rcInteraction && window.rcInteraction.actions
                             ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
@@ -1182,7 +1270,8 @@ window.rcInteraction = (function () {
             }
             try { window.rcInteraction && window.rcInteraction.clear('auth:signout'); } catch (_) {}
         } catch (_) {
-            if (logoutBtn) logoutBtn.disabled = false;
+            _accountControlsTransientBlock = null;
+            applySignedInAccountControlReadiness('signout-error');
             try {
                 const actions = window.rcInteraction && window.rcInteraction.actions
                     ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
@@ -1195,6 +1284,7 @@ window.rcInteraction = (function () {
     function _handleAuthChanged(e) {
         const { signedIn, source } = e.detail || {};
         const current = getCurrentVisibleSection();
+        _accountControlsTransientBlock = null;
         try {
             if (signedIn && window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
             else if (!signedIn && window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false });
@@ -2551,14 +2641,17 @@ window.rcInteraction = (function () {
         const dashboardControls = dashboardVisible
             ? Array.from(dashboard.querySelectorAll('button, a, [role="button"]')).filter(isElementVisible)
             : [];
-        return {
-            signedIn: !!isAuthedUser(),
-            logoutEnabled: !!(logoutBtn && isElementVisible(logoutBtn) && !logoutBtn.disabled && logoutBtn.getAttribute('aria-disabled') !== 'true'),
-            profileEnabled: !!(profileTrigger && isElementVisible(profileTrigger) && !profileTrigger.disabled && profileTrigger.getAttribute('aria-disabled') !== 'true'),
-            dashboardCtasEnabled: dashboardControls.some((el) => !el.disabled && el.getAttribute('aria-disabled') !== 'true'),
+        const readiness = readSignedInAccountControlReadiness('report');
+        return Object.assign({}, readiness, {
+            lastReadiness: _lastSignedInAccountReadiness,
+            logoutEnabled: !!(logoutBtn && isControlEnabled(logoutBtn)),
+            logoutVisibleAndEnabled: !!(logoutBtn && isElementVisible(logoutBtn) && isControlEnabled(logoutBtn)),
+            profileEnabled: !!(profileTrigger && isElementVisible(profileTrigger) && isControlEnabled(profileTrigger)),
+            dashboardCtasEnabled: dashboardControls.some(isControlEnabled),
             topmostElementAtLogoutCenter: getTopmostElementAtCenter(logoutBtn)
-        };
+        });
     }
+
 
     function getLibrarySurfaceReport() {
         const dashboard = document.getElementById('dashboard');
