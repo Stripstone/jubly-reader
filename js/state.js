@@ -54,14 +54,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   let appTier = 'basic';
   let runtimePolicy = null;
   let runtimePolicyResolved = false;
-  let runtimePolicyDiagnostics = {
-    at: null,
-    source: 'boot',
-    reason: 'initial-basic',
-    tier: 'basic',
-    resolved: false,
-    resolutionMode: 'client-fallback',
-  };
+  let publicRuntimeReset = { at: null, reason: 'boot-default' };
 
   // ---- Token Tracking ----
   // Session token counter. Counts consumption per category for diagnostic purposes.
@@ -238,60 +231,45 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     return !!getRuntimePolicy()?.features?.cloudVoices;
   }
 
-  function hasSignedInRuntimeSession() {
+  function hasRuntimeAuthContext() {
     try {
-      return !!(window.rcAuth
-        && typeof window.rcAuth.isSignedIn === 'function'
-        && window.rcAuth.isSignedIn()
-        && typeof window.rcAuth.getAccessToken === 'function'
-        && String(window.rcAuth.getAccessToken() || '').trim());
+      const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+      const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function'
+        ? String(window.rcAuth.getAccessToken() || '').trim()
+        : '';
+      return signedIn && !!token;
     } catch (_) {
       return false;
     }
   }
 
-  function recordRuntimePolicyDiagnostic(source, reason, policyLike, options = {}) {
-    const policy = policyLike && typeof policyLike === 'object' ? policyLike : runtimePolicy;
-    runtimePolicyDiagnostics = {
-      at: new Date().toISOString(),
-      source: String(source || 'unknown'),
-      reason: String(reason || ''),
-      tier: normalizeAppTier(policy?.tier || appTier || 'basic'),
-      resolved: typeof options.resolved === 'boolean' ? !!options.resolved : !!runtimePolicyResolved,
-      resolutionMode: String(policy?.resolutionMode || ''),
-      transient: !!options.transient,
-    };
-    return runtimePolicyDiagnostics;
-  }
-
-  function getRuntimePolicyDiagnosticsSnapshot() {
-    const policy = getRuntimePolicy();
-    return {
-      policy: policy ? JSON.parse(JSON.stringify(policy)) : null,
-      tier: normalizeAppTier(policy?.tier || appTier || 'basic'),
-      resolved: !!runtimePolicyResolved,
-      source: runtimePolicyDiagnostics.source || 'unknown',
-      reason: runtimePolicyDiagnostics.reason || '',
-      at: runtimePolicyDiagnostics.at || null,
-      resolutionMode: runtimePolicyDiagnostics.resolutionMode || String(policy?.resolutionMode || ''),
-      transient: !!runtimePolicyDiagnostics.transient,
-    };
+  function isNonPublicRuntimePolicy(policy) {
+    const normalized = normalizeRuntimePolicy(policy, policy && policy.tier ? policy.tier : 'basic');
+    return normalized.tier !== 'basic' ||
+      !!normalized.features?.cloudVoices ||
+      !!normalized.features?.themes?.explorer;
   }
 
   function applyResolvedRuntimePolicy(policyLike, tierHint, options = {}) {
     runtimePolicy = normalizeRuntimePolicy(policyLike, tierHint);
     runtimePolicyResolved = !!options.resolved;
     appTier = runtimePolicy.tier;
-    recordRuntimePolicyDiagnostic(
-      options.source || (options.transient ? 'sync-cache' : (options.resolved ? 'server-sync' : 'client-fallback')),
-      options.reason || 'applyResolvedRuntimePolicy',
-      runtimePolicy,
-      options
-    );
     try { tokenReset(); } catch (_) {}
-    try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
     try {
-      const detail = { policy: runtimePolicy, resolved: runtimePolicyResolved };
+      if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') {
+        window.rcTheme.enforceAccess({
+          persist: options.publicReset !== true,
+          reason: String(options.reason || '')
+        });
+      }
+    } catch (_) {}
+    try {
+      const detail = {
+        policy: runtimePolicy,
+        resolved: runtimePolicyResolved,
+        reason: String(options.reason || ''),
+        publicReset: !!options.publicReset
+      };
       document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
       window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
     } catch (_) {}
@@ -299,32 +277,27 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   }
 
   function resetRuntimePolicyToPublic(reason = 'public-reset') {
-    runtimePolicy = normalizeRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic');
-    runtimePolicyResolved = false;
-    appTier = 'basic';
-    recordRuntimePolicyDiagnostic('public-reset', reason || 'public-reset', runtimePolicy, { resolved: false });
-    try { tokenReset(); } catch (_) {}
-    try { window.__rcSessionVoiceSelection = ''; } catch (_) {}
+    const resetReason = String(reason || 'public-reset');
+    publicRuntimeReset = { at: new Date().toISOString(), reason: resetReason };
+    _trailPush('runtime-policy-public-reset', { reason: resetReason });
+    return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', {
+      resolved: false,
+      publicReset: true,
+      reason: resetReason,
+    });
+  }
 
-    // Public reset is executable runtime truth only. If an account-only theme is
-    // currently displayed, remove it without persisting over the signed-in setting.
-    try {
-      if (!canUseTheme(appTheme)) {
-        const previousTheme = appTheme;
-        appTheme = 'default';
-        _trailPush('public-policy-theme-forced-default', { previousTheme, reason, policyTier: runtimePolicy.tier });
-        applyThemeClass(appTheme);
-        applyThemeSettings();
-        syncThemeShellState();
-      }
-    } catch (_) {}
-
-    try {
-      const detail = { policy: runtimePolicy, resolved: runtimePolicyResolved, publicReset: true, reason: String(reason || 'public-reset') };
-      document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
-      window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
-    } catch (_) {}
-    return runtimePolicy;
+  function getRuntimePolicyReport() {
+    const policy = getRuntimePolicy();
+    return {
+      tier: normalizeAppTier(policy?.tier || 'basic'),
+      resolved: isRuntimePolicyResolved(),
+      resolutionMode: String(policy?.resolutionMode || ''),
+      cloudAllowed: !!policy?.features?.cloudVoices,
+      explorerAllowed: !!policy?.features?.themes?.explorer,
+      customMusicAllowed: !!policy?.features?.themes?.customMusic,
+      publicReset: Object.assign({}, publicRuntimeReset || { at: null, reason: null }),
+    };
   }
 
   async function refreshRuntimePolicy(requestedTier) {
@@ -348,20 +321,24 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
         : payload;
       const resolvedTierHint = payload?.meta?.effectiveTier || tier;
       const normalizedPolicy = normalizeRuntimePolicy(policyWithMeta, resolvedTierHint);
-      if (!hasSignedInRuntimeSession() && normalizedPolicy.tier !== 'basic') {
-        _trailPush('policy-refresh-blocked-public', { tier: normalizedPolicy.tier, requestedTier: tier });
-        return resetRuntimePolicyToPublic('policy-refresh-blocked-public');
+      if (!hasRuntimeAuthContext() && isNonPublicRuntimePolicy(normalizedPolicy)) {
+        _trailPush('policy-response-blocked-public', {
+          requestedTier: tier,
+          responseTier: normalizedPolicy.tier,
+          reason: 'auth-context-gone'
+        });
+        return resetRuntimePolicyToPublic('runtime-policy-response-auth-absent');
       }
-      return applyResolvedRuntimePolicy(policyWithMeta, resolvedTierHint, { resolved: true, source: 'runtime-config', reason: hasExplicitTier ? `runtime-config-tier:${tier}` : 'runtime-config' });
+      return applyResolvedRuntimePolicy(normalizedPolicy, normalizedPolicy.tier, { resolved: true });
     } catch (err) {
       // Server unreachable. If we already hold a confirmed non-basic policy (from a
-      // prior successful fetch or durable-sync cache projection), preserve it only
-      // while a signed-in runtime session still exists. Signed-out/public execution
-      // must immediately fall back to safe-basic.
+      // prior successful fetch or durable-sync cache projection), preserve it — a
+      // transient network failure must not strip access the user legitimately holds.
+      // Only fall back to safe-basic when there is no confirmed policy in place.
       _trailPush('policy-fetch-failed', { tier: runtimePolicy && runtimePolicy.tier, reason: String(err?.message || err || 'unknown') });
-      if (!hasSignedInRuntimeSession()) return resetRuntimePolicyToPublic('policy-fetch-failed-public');
+      if (!hasRuntimeAuthContext()) return resetRuntimePolicyToPublic('runtime-policy-fetch-failed-auth-absent');
       if (runtimePolicy && runtimePolicy.tier && runtimePolicy.tier !== 'basic') return runtimePolicy;
-      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', { resolved: false, source: 'client-fallback', reason: 'policy-fetch-failed-basic' });
+      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', { resolved: false });
     }
   }
 
@@ -1452,11 +1429,28 @@ function setDiagnosticsPreference(partial) {
   return getDiagnosticsPreference();
 }
 
-function enforceThemeAccess() {
+function enforceThemeAccess(options = {}) {
   const canUse = canUseTheme(appTheme);
-  _trailPush('enforce-theme-access', { appTheme, canUse, policyTier: runtimePolicy && runtimePolicy.tier, policyResolved: isRuntimePolicyResolved() });
+  const persist = options && options.persist === false ? false : true;
+  _trailPush('enforce-theme-access', {
+    appTheme,
+    canUse,
+    persist,
+    reason: String(options && options.reason || ''),
+    policyTier: runtimePolicy && runtimePolicy.tier,
+    policyResolved: isRuntimePolicyResolved()
+  });
   if (canUse) return true;
-  setThemeRuntime('default');
+  if (persist) {
+    setThemeRuntime('default');
+    return false;
+  }
+  // Public reset must remove gated Explorer/theme visuals without persisting
+  // default over the user's signed-in theme preference.
+  appTheme = 'default';
+  applyThemeClass(appTheme);
+  applyThemeSettings();
+  syncThemeShellState();
   return false;
 }
 
@@ -1543,7 +1537,6 @@ window.rcPolicy = {
   get: getRuntimePolicy,
   refreshForTier: refreshRuntimePolicy,
   apply: applyResolvedRuntimePolicy,
-  resetToPublic: resetRuntimePolicyToPublic,
   canSimulateTier: canSimulateTierSelection,
   getTier: getRuntimeTier,
   getUsageDailyLimit: getRuntimeUsageAllowance,
@@ -1553,7 +1546,8 @@ window.rcPolicy = {
   canUseAiEvaluate,
   canUseAnchors,
   canUseCloudVoices,
-  getDiagnosticsSnapshot: getRuntimePolicyDiagnosticsSnapshot
+  resetToPublic: resetRuntimePolicyToPublic,
+  getReport: getRuntimePolicyReport
 };
 
 // PASS3: Interim server-owned usage capacity API.

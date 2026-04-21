@@ -64,12 +64,6 @@
     let _bootReleaseComplete = false;
     let _bootPendingMessageTimer = null;
     let _libraryPendingBannerTimer = null;
-    const _shellSurfaceBootStartedAt = (() => { try { return performance.now(); } catch (_) { return Date.now(); } })();
-    let _lastShellSurfaceRelease = null;
-    let _lastShellBootRelease = null;
-    let _lastShellAuthChange = null;
-    let _lastShellModalAction = null;
-    let _lastShellLibrarySurface = null;
 
 // Shell-resident interaction banner
 // ─────────────────────────────────────────────────────────────────────────────
@@ -374,17 +368,9 @@ window.rcInteraction = (function () {
         } catch (_) {}
     }
 
-    function releaseBootPending(reason = 'boot-sequence-complete') {
+    function releaseBootPending() {
         if (_bootReleaseComplete) return;
         _bootReleaseComplete = true;
-        _lastShellBootRelease = {
-            at: new Date().toISOString(),
-            atMs: shellSurfaceNowMs(),
-            reason: String(reason || 'boot-sequence-complete'),
-            visibleSection: getCurrentVisibleSection(),
-            bodyClasses: getBodyClassList(),
-        };
-        shellTrailPush('shell-boot-release', _lastShellBootRelease);
         clearBootPendingMessage();
         try { document.body.classList.remove('boot-pending'); } catch (_) {}
         try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
@@ -404,6 +390,13 @@ window.rcInteraction = (function () {
         lastControlAction: null,
         lastSkipAction: null,
         lastProgressSnapshot: null
+    };
+    let _lastShellRelease = {
+        requestedSurface: null,
+        releasedSurface: null,
+        releaseReason: 'boot',
+        blockedBy: null,
+        at: null
     };
     function shellDebugRemember(slot, data) {
         const entry = Object.assign({ seq: ++SHELL_DEBUG.seq, at: new Date().toISOString() }, data || {});
@@ -434,226 +427,6 @@ window.rcInteraction = (function () {
         } catch (_) {}
     }
 
-    function shellSurfaceNowMs() {
-        try { return Math.round(performance.now() - _shellSurfaceBootStartedAt); } catch (_) { return null; }
-    }
-
-    function getBodyClassList() {
-        try { return Array.from(document.body.classList || []); } catch (_) { return []; }
-    }
-
-    function isElementVisible(el) {
-        if (!el) return false;
-        try {
-            const style = window.getComputedStyle(el);
-            const rect = el.getBoundingClientRect();
-            return style.display !== 'none' && style.visibility !== 'hidden' && !el.classList.contains('hidden-section') && rect.width > 0 && rect.height > 0;
-        } catch (_) {
-            return false;
-        }
-    }
-
-    function describeElement(el) {
-        if (!el) return null;
-        try {
-            return {
-                tag: String(el.tagName || '').toLowerCase(),
-                id: el.id || '',
-                className: typeof el.className === 'string' ? el.className : '',
-                text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 90),
-            };
-        } catch (_) {
-            return null;
-        }
-    }
-
-    function describeTopmostAtElement(el) {
-        if (!el || !isElementVisible(el)) return { targetVisible: false, topmost: null, targetIsTopmost: false };
-        try {
-            const rect = el.getBoundingClientRect();
-            const x = Math.max(0, Math.min(window.innerWidth - 1, rect.left + rect.width / 2));
-            const y = Math.max(0, Math.min(window.innerHeight - 1, rect.top + rect.height / 2));
-            const top = document.elementFromPoint(x, y);
-            return {
-                targetVisible: true,
-                point: { x: Math.round(x), y: Math.round(y) },
-                topmost: describeElement(top),
-                target: describeElement(el),
-                targetIsTopmost: top === el || !!(top && typeof el.contains === 'function' && el.contains(top)),
-            };
-        } catch (_) {
-            return { targetVisible: true, topmost: null, targetIsTopmost: false };
-        }
-    }
-
-    function snapshotSurfaceControl(selector) {
-        const el = document.querySelector(selector);
-        if (!el) return null;
-        let rect = null;
-        try {
-            const r = el.getBoundingClientRect();
-            rect = { width: Math.round(r.width), height: Math.round(r.height), top: Math.round(r.top), left: Math.round(r.left) };
-        } catch (_) {}
-        return {
-            present: true,
-            visible: isElementVisible(el),
-            disabled: !!el.disabled,
-            ariaDisabled: el.getAttribute('aria-disabled'),
-            pointerEvents: (() => { try { return window.getComputedStyle(el).pointerEvents; } catch (_) { return null; } })(),
-            text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
-            className: typeof el.className === 'string' ? el.className : '',
-            rect,
-            topmostAtCenter: describeTopmostAtElement(el),
-        };
-    }
-
-    function getOpenModalSnapshot() {
-        const modalIds = ['pricing-modal', 'ownership-modal', 'musicPickerModal', 'import-modal', 'reading-settings-modal', 'preview-modal'];
-        return modalIds.map((id) => {
-            const el = document.getElementById(id);
-            if (!el) return null;
-            const visible = isElementVisible(el) || (!el.classList.contains('hidden-section') && el.style.display !== 'none');
-            return { id, visible, display: (() => { try { return window.getComputedStyle(el).display; } catch (_) { return null; } })(), className: el.className || '' };
-        }).filter(Boolean);
-    }
-
-    function getSyncSurfaceDiagnostics() {
-        try {
-            return window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function' ? window.rcSync.getDiagnosticsSnapshot() : null;
-        } catch (_) {
-            return null;
-        }
-    }
-
-    function getBillingSurfaceDiagnostics() {
-        try {
-            return window.rcBilling && typeof window.rcBilling.getDiagnosticsSnapshot === 'function' ? window.rcBilling.getDiagnosticsSnapshot() : null;
-        } catch (_) {
-            return null;
-        }
-    }
-
-    function getPublicRuntimeReadyReport() {
-        let policy = null;
-        try { policy = window.rcPolicy && typeof window.rcPolicy.get === 'function' ? window.rcPolicy.get() : null; } catch (_) { policy = null; }
-        const sync = getSyncSurfaceDiagnostics();
-        const projection = sync && sync.runtimePolicyProjection ? sync.runtimePolicyProjection : {};
-        const authUserPresent = isAuthedUser();
-        const tier = String((policy && policy.tier) || 'basic').toLowerCase();
-        const cloudAllowed = !!(policy && policy.features && policy.features.cloudVoices);
-        const explorerAllowed = !!(policy && policy.features && policy.features.themes && policy.features.themes.explorer);
-        const pendingSignedInPolicyProjection = !!projection.pending;
-        const signedInCacheExecutable = !!(sync && sync.signedInCacheExecutable);
-        return {
-            publicRuntimeReady: authUserPresent === false
-                && tier === 'basic'
-                && cloudAllowed === false
-                && explorerAllowed === false
-                && pendingSignedInPolicyProjection === false
-                && signedInCacheExecutable === false,
-            authUserPresent,
-            tier,
-            cloudAllowed,
-            explorerAllowed,
-            pendingSignedInPolicyProjection,
-            signedInCacheExecutable,
-            runtimePolicyResolved: (() => {
-                try { return window.rcPolicy && typeof window.rcPolicy.isResolved === 'function' ? window.rcPolicy.isResolved() : null; } catch (_) { return null; }
-            })(),
-            policySource: (policy && policy.resolutionMode) || null,
-        };
-    }
-
-    function getSignedInInteractionReadyReport() {
-        const authed = isAuthedUser();
-        const authCallable = !!(window.rcAuth && typeof window.rcAuth.signOut === 'function');
-        const profile = snapshotSurfaceControl('#nav-profile-trigger');
-        const logout = snapshotSurfaceControl('[onclick="shellSignOut()"]');
-        const navUser = snapshotSurfaceControl('#nav-user-controls');
-        const bodyClasses = getBodyClassList();
-        const blockers = [];
-        if (!authed) blockers.push('auth-user-absent');
-        if (!authCallable) blockers.push('auth-signout-not-callable');
-        if (bodyClasses.includes('boot-pending')) blockers.push('boot-pending');
-        if (bodyClasses.includes('auth-hydrating')) blockers.push('auth-hydrating');
-        if (profile && profile.visible && profile.disabled) blockers.push('profile-disabled');
-        if (logout && logout.visible && logout.disabled) blockers.push('logout-disabled');
-        if (profile && profile.visible && profile.topmostAtCenter && profile.topmostAtCenter.targetIsTopmost === false) blockers.push('profile-blocked-by-topmost');
-        if (logout && logout.visible && logout.topmostAtCenter && logout.topmostAtCenter.targetIsTopmost === false) blockers.push('logout-blocked-by-topmost');
-        const accountControlsEnabled = authed
-            && authCallable
-            && (!profile || !profile.visible || (!profile.disabled && !(profile.topmostAtCenter && profile.topmostAtCenter.targetIsTopmost === false)))
-            && (!logout || !logout.visible || (!logout.disabled && !(logout.topmostAtCenter && logout.topmostAtCenter.targetIsTopmost === false)))
-            && !bodyClasses.includes('boot-pending')
-            && !bodyClasses.includes('auth-hydrating');
-        return {
-            signedInInteractionReady: authed && accountControlsEnabled,
-            authCallable,
-            accountControlsEnabled,
-            blockedBy: blockers.length ? blockers.join(',') : null,
-            controls: { navUser, profile, logout },
-        };
-    }
-
-    function getLibrarySurfaceReport() {
-        const state = _lastShellLibrarySurface ? Object.assign({}, _lastShellLibrarySurface) : null;
-        const pending = document.getElementById('library-pending');
-        const populated = document.getElementById('library-populated');
-        const empty = document.getElementById('library-empty');
-        const sample = document.getElementById('library-public-sample');
-        return {
-            lastWriter: state,
-            dom: {
-                pendingVisible: isElementVisible(pending),
-                populatedVisible: isElementVisible(populated),
-                emptyVisible: isElementVisible(empty),
-                publicSampleVisible: isElementVisible(sample),
-            },
-        };
-    }
-
-    function getShellSurfaceReport(label = '') {
-        const visibleSection = getCurrentVisibleSection();
-        const readingMode = document.getElementById('reading-mode');
-        const billing = getBillingSurfaceDiagnostics();
-        return {
-            version: 1,
-            label: String(label || ''),
-            capturedAt: new Date().toISOString(),
-            elapsedMs: shellSurfaceNowMs(),
-            url: `${window.location.pathname}${window.location.search}${window.location.hash || ''}`,
-            shell: {
-                bootReleaseComplete: _bootReleaseComplete,
-                bodyClasses: getBodyClassList(),
-                currentSection: _currentSection,
-                visibleSection,
-                readingVisible: !!(readingMode && !readingMode.classList.contains('hidden-section')),
-                publicIntroLibraryVisible: !!_publicIntroLibraryVisible,
-                publicSampleSessionActive: !!_publicSampleSessionActive,
-                lastRelease: _lastShellSurfaceRelease,
-                lastBootRelease: _lastShellBootRelease,
-                lastAuthChange: _lastShellAuthChange,
-            },
-            publicRuntime: getPublicRuntimeReadyReport(),
-            signedInInteraction: getSignedInInteractionReadyReport(),
-            appearance: {
-                htmlClass: document.documentElement ? document.documentElement.className : '',
-                bodyClass: document.body ? document.body.className : '',
-                dataAppearance: document.documentElement ? document.documentElement.getAttribute('data-app-appearance') : null,
-                rcAppearance: (() => { try { return window.rcAppearance && typeof window.rcAppearance.get === 'function' ? window.rcAppearance.get() : null; } catch (_) { return null; } })(),
-            },
-            library: getLibrarySurfaceReport(),
-            billing: billing || { available: false },
-            modals: {
-                lastAction: _lastShellModalAction,
-                open: getOpenModalSnapshot(),
-                pricingOverReading: !!(billing && billing.pricingModalVisible && visibleSection === 'reading-mode'),
-            },
-            sync: getSyncSurfaceDiagnostics(),
-            trail: Array.isArray(window.__rcEventTrail) ? window.__rcEventTrail.slice() : [],
-        };
-    }
-
     function isAuthedUser() {
         try { return !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()); } catch (_) { return false; }
     }
@@ -681,6 +454,52 @@ window.rcInteraction = (function () {
     function isPublicAbandonSurface(sectionId) {
         if (isAuthedUser()) return false;
         return sectionId === 'landing-page' || (sectionId === 'dashboard' && isIntroLibraryVisible());
+    }
+
+    function isPublicRuntimeSurface(sectionId) {
+        const section = normalizeSection(sectionId);
+        if (isAuthedUser()) return false;
+        return section === 'landing-page' || section === 'reading-mode' || (section === 'dashboard' && isIntroLibraryVisible());
+    }
+
+    function readPublicRuntimeBoundaryReport() {
+        try {
+            if (window.rcSync && typeof window.rcSync.getPublicRuntimeBoundaryReport === 'function') return window.rcSync.getPublicRuntimeBoundaryReport();
+        } catch (_) {}
+        try {
+            if (typeof window.getPublicRuntimeBoundaryReport === 'function') return window.getPublicRuntimeBoundaryReport();
+        } catch (_) {}
+        return null;
+    }
+
+    function ensurePublicRuntimeBeforeRelease(sectionId, reason) {
+        if (!isPublicRuntimeSurface(sectionId)) return { allowed: true, report: readPublicRuntimeBoundaryReport() };
+        let report = null;
+        try {
+            if (window.rcSync && typeof window.rcSync.ensurePublicRuntimeBoundary === 'function') {
+                report = window.rcSync.ensurePublicRuntimeBoundary(reason || ('shell-release:' + sectionId));
+            } else {
+                report = readPublicRuntimeBoundaryReport();
+            }
+        } catch (_) {
+            report = readPublicRuntimeBoundaryReport();
+        }
+        const allowed = !!(report && report.publicRuntimeReady === true);
+        if (!allowed) {
+            _lastShellRelease = {
+                requestedSurface: sectionId,
+                releasedSurface: getCurrentVisibleSection(),
+                releaseReason: reason || 'shell-release',
+                blockedBy: 'publicRuntime',
+                at: new Date().toISOString()
+            };
+            shellTrailPush('public-release-blocked', {
+                sectionId,
+                reason: reason || 'shell-release',
+                report: report || null,
+            });
+        }
+        return { allowed, report };
     }
 
     function clearPaidIntentForPublicAbandon(sectionId) {
@@ -835,19 +654,9 @@ window.rcInteraction = (function () {
     }
 
     function showSection(id, options = {}) {
-        const previousSection = getCurrentVisibleSection();
         const targetId = resolveSectionForAuth(id);
-        _lastShellSurfaceRelease = {
-            at: new Date().toISOString(),
-            atMs: shellSurfaceNowMs(),
-            requested: String(id || ''),
-            resolved: targetId,
-            previous: previousSection,
-            historyMode: options.historyMode || 'push',
-            preserveIntroLibrary: !!options.preserveIntroLibrary,
-            authed: !!isAuthedUser(),
-        };
-        shellTrailPush('shell-section-release', _lastShellSurfaceRelease);
+        const publicBoundary = ensurePublicRuntimeBeforeRelease(targetId, 'show-section:' + targetId);
+        if (!publicBoundary.allowed) return Promise.resolve(publicBoundary.report || null);
         if (targetId === 'landing-page' && !options.preserveIntroLibrary) _publicIntroLibraryVisible = false;
         const readingModeEl = document.getElementById('reading-mode');
         const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
@@ -859,6 +668,13 @@ window.rcInteraction = (function () {
         const target = document.getElementById(targetId);
         if (target) target.classList.remove('hidden-section');
         _currentSection = targetId;
+        _lastShellRelease = {
+            requestedSurface: id,
+            releasedSurface: targetId,
+            releaseReason: options.releaseReason || ('show-section:' + targetId),
+            blockedBy: null,
+            at: new Date().toISOString()
+        };
         if (targetId === 'dashboard') {
             shellTrailPush('dashboard-reveal', {
                 historyMode: options.historyMode || 'push',
@@ -936,37 +752,14 @@ window.rcInteraction = (function () {
     function openModal(id)  {
         const el = document.getElementById(id);
         if (!el) return;
-        const delegatedToBilling = id === 'pricing-modal' && window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function';
-        _lastShellModalAction = {
-            at: new Date().toISOString(),
-            atMs: shellSurfaceNowMs(),
-            action: 'open',
-            id: String(id || ''),
-            visibleSection: getCurrentVisibleSection(),
-            delegatedToBilling,
-        };
-        shellTrailPush('shell-modal-open-request', _lastShellModalAction);
-        if (delegatedToBilling) {
+        if (id === 'pricing-modal' && window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') {
             window.rcBilling.openPricingForAccount().catch(() => {});
             return;
         }
         el.classList.remove('hidden-section');
         if (el.classList.contains('modal-overlay')) el.style.display = 'flex';
     }
-    function closeModal(id) {
-        const el = document.getElementById(id);
-        if (!el) return;
-        _lastShellModalAction = {
-            at: new Date().toISOString(),
-            atMs: shellSurfaceNowMs(),
-            action: 'close',
-            id: String(id || ''),
-            visibleSection: getCurrentVisibleSection(),
-        };
-        shellTrailPush('shell-modal-close-request', _lastShellModalAction);
-        el.classList.add('hidden-section');
-        if (el.classList.contains('modal-overlay')) el.style.display = 'none';
-    }
+    function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
     function login() {
         showSigninPane();
@@ -1371,11 +1164,6 @@ window.rcInteraction = (function () {
 
     async function shellSignOut() {
         const logoutBtn = document.querySelector('[onclick="shellSignOut()"]');
-        shellTrailPush('shell-signout-start', {
-            atMs: shellSurfaceNowMs(),
-            visibleSection: getCurrentVisibleSection(),
-            interactionReady: getSignedInInteractionReadyReport(),
-        });
         if (logoutBtn) logoutBtn.disabled = true;
         try { window.rcInteraction && window.rcInteraction.pending('auth:signout', 'Signing out…'); } catch (_) {}
         try {
@@ -1393,7 +1181,6 @@ window.rcInteraction = (function () {
                 }
             }
             try { window.rcInteraction && window.rcInteraction.clear('auth:signout'); } catch (_) {}
-            shellTrailPush('shell-signout-complete', { atMs: shellSurfaceNowMs(), visibleSection: getCurrentVisibleSection() });
         } catch (_) {
             if (logoutBtn) logoutBtn.disabled = false;
             try {
@@ -1408,15 +1195,6 @@ window.rcInteraction = (function () {
     function _handleAuthChanged(e) {
         const { signedIn, source } = e.detail || {};
         const current = getCurrentVisibleSection();
-        _lastShellAuthChange = {
-            at: new Date().toISOString(),
-            atMs: shellSurfaceNowMs(),
-            signedIn: !!signedIn,
-            source: source || 'unknown',
-            current,
-            bootstrapped: !!_shellAuthBootstrapped,
-        };
-        shellTrailPush('shell-auth-changed', _lastShellAuthChange);
         try {
             if (signedIn && window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
             else if (!signedIn && window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false });
@@ -1488,7 +1266,7 @@ window.rcInteraction = (function () {
             ]);
             await waitForBootRevealFrame();
         } catch (_) {}
-        releaseBootPending('domcontentloaded-settled-section');
+        releaseBootPending();
     });
     // ── Profile tabs ─────────────────────────────────────────────
     function switchTab(tabId) {
@@ -2121,14 +1899,6 @@ window.rcInteraction = (function () {
     }
 
     function setLibrarySurfaceState(state) {
-        _lastShellLibrarySurface = {
-            at: new Date().toISOString(),
-            atMs: shellSurfaceNowMs(),
-            state: String(state || ''),
-            visibleSection: getCurrentVisibleSection(),
-            authed: !!isAuthedUser(),
-        };
-        shellTrailPush('shell-library-surface-state', _lastShellLibrarySurface);
         const pendingEl = document.getElementById('library-pending');
         const popEl = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
@@ -2711,6 +2481,145 @@ window.rcInteraction = (function () {
         };
     }
 
+    function getVisiblePublicBoundaryFields() {
+        const tierPill = document.getElementById('reading-tier-pill');
+        const explorerBtn = document.getElementById('explorer-swatch-btn');
+        const explorerPanel = document.getElementById('rs-explorer-panel');
+        let tts = null;
+        try { tts = typeof window.getTtsDiagnosticsSnapshot === 'function' ? window.getTtsDiagnosticsSnapshot() : null; } catch (_) { tts = null; }
+        const tierText = String(tierPill ? tierPill.textContent || '' : '').trim().toLowerCase();
+        const requestedPath = String(tts?.routing?.requestedPath || tts?.last?.playRequest?.path || '').trim().toLowerCase();
+        const resolvedPath = String(tts?.last?.resolvedPath || '').trim().toLowerCase();
+        return {
+            publicRuntime: readPublicRuntimeBoundaryReport(),
+            visibleProBadgePresent: /^(pro|premium)$/.test(tierText),
+            visibleExplorerControlsPresent: !!(
+                (explorerBtn && !explorerBtn.classList.contains('explorer-locked')) ||
+                (explorerPanel && explorerPanel.style.display !== 'none') ||
+                document.body.classList.contains('theme-explorer')
+            ),
+            visibleCloudRouteAttempted: requestedPath.indexOf('cloud') !== -1 || resolvedPath.indexOf('cloud') !== -1,
+        };
+    }
+
+
+    function isElementVisible(el) {
+        if (!el) return false;
+        try {
+            const style = window.getComputedStyle(el);
+            if (!style || style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none') return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        } catch (_) { return false; }
+    }
+
+    function getTopmostElementAtCenter(selector) {
+        const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+        if (!el || typeof document.elementFromPoint !== 'function') return null;
+        try {
+            const r = el.getBoundingClientRect();
+            const x = Math.round(r.left + (r.width / 2));
+            const y = Math.round(r.top + (r.height / 2));
+            const top = document.elementFromPoint(x, y);
+            if (!top) return null;
+            return {
+                tag: String(top.tagName || '').toLowerCase(),
+                id: top.id || '',
+                className: String(top.className || ''),
+                text: String(top.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+                matchesTarget: top === el || (typeof el.contains === 'function' && el.contains(top))
+            };
+        } catch (_) { return null; }
+    }
+
+    function getActiveModalReport() {
+        const modals = Array.from(document.querySelectorAll('.modal-overlay'));
+        const open = modals.find((el) => el && !el.classList.contains('hidden-section') && el.style.display !== 'none');
+        return {
+            open: !!open,
+            id: open ? (open.id || '') : null,
+            opener: open && open.id === 'pricing-modal' ? 'pricing' : (open ? 'unknown' : 'none'),
+            allowedSurface: open ? getCurrentVisibleSection() : null
+        };
+    }
+
+    function getSignedInInteractionReport() {
+        const logoutBtn = document.querySelector('[onclick="shellSignOut()"]');
+        const profileTrigger = document.getElementById('nav-profile-trigger');
+        const dashboard = document.getElementById('dashboard');
+        const dashboardVisible = !!(dashboard && !dashboard.classList.contains('hidden-section'));
+        const dashboardControls = dashboardVisible
+            ? Array.from(dashboard.querySelectorAll('button, a, [role="button"]')).filter(isElementVisible)
+            : [];
+        return {
+            signedIn: !!isAuthedUser(),
+            logoutEnabled: !!(logoutBtn && isElementVisible(logoutBtn) && !logoutBtn.disabled && logoutBtn.getAttribute('aria-disabled') !== 'true'),
+            profileEnabled: !!(profileTrigger && isElementVisible(profileTrigger) && !profileTrigger.disabled && profileTrigger.getAttribute('aria-disabled') !== 'true'),
+            dashboardCtasEnabled: dashboardControls.some((el) => !el.disabled && el.getAttribute('aria-disabled') !== 'true'),
+            topmostElementAtLogoutCenter: getTopmostElementAtCenter(logoutBtn)
+        };
+    }
+
+    function getLibrarySurfaceReport() {
+        const dashboard = document.getElementById('dashboard');
+        const rows = document.getElementById('library-rows');
+        const state = dashboard ? (dashboard.getAttribute('data-library-state') || null) : null;
+        return {
+            ownerReady: typeof localBooksGetAll === 'function',
+            state: state || (_libraryInitialResolutionComplete ? 'ready-unknown' : 'pending'),
+            initialResolutionComplete: !!_libraryInitialResolutionComplete,
+            count: rows ? rows.children.length : 0
+        };
+    }
+
+    function getPricingSurfaceReport(modalReport, readingVisible) {
+        let pendingPlan = null;
+        let pendingPaidIntent = false;
+        try { pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? window.rcBilling.readPendingPlan() : null; } catch (_) { pendingPlan = null; }
+        try { pendingPaidIntent = !!(window.rcBilling && typeof window.rcBilling.hasPendingPaidIntent === 'function' && window.rcBilling.hasPendingPaidIntent()); } catch (_) {}
+        const modal = document.getElementById('pricing-modal');
+        const modalOpen = !!(modalReport && modalReport.open && modalReport.id === 'pricing-modal');
+        return {
+            modalOpen,
+            opener: modalOpen ? (pendingPaidIntent ? 'pending-paid-intent' : 'unknown') : 'none',
+            openerAllowed: modalOpen ? !readingVisible : true,
+            pricingOverReading: modalOpen && !!readingVisible,
+            planUiSettledAtOpen: modalOpen ? !(modal && modal.classList.contains('pricing-modal-settling')) : null,
+            pendingPlan: pendingPlan || null
+        };
+    }
+
+    function getShellSurfaceReport() {
+        const visibleSection = getCurrentVisibleSection();
+        const readingMode = document.getElementById('reading-mode');
+        const readingVisible = !!(readingMode && !readingMode.classList.contains('hidden-section'));
+        const modal = getActiveModalReport();
+        const user = getAuthUser();
+        return {
+            shell: {
+                requestedSurface: _lastShellRelease.requestedSurface,
+                releasedSurface: _lastShellRelease.releasedSurface || visibleSection,
+                releaseReason: _lastShellRelease.releaseReason,
+                blockedBy: _lastShellRelease.blockedBy,
+                visibleSection,
+                bootPending: document.body.classList.contains('boot-pending'),
+                authHydrating: document.body.classList.contains('auth-hydrating')
+            },
+            auth: {
+                known: !!(window.rcAuth && typeof window.rcAuth.isReady === 'function' && window.rcAuth.isReady()),
+                signedIn: !!isAuthedUser(),
+                userIdPresent: !!(user && user.id),
+                source: 'rcAuth'
+            },
+            publicRuntime: readPublicRuntimeBoundaryReport(),
+            signedInInteraction: getSignedInInteractionReport(),
+            library: getLibrarySurfaceReport(),
+            modal,
+            pricing: getPricingSurfaceReport(modal, readingVisible),
+            publicBoundary: getVisiblePublicBoundaryFields()
+        };
+    }
+
     window.getShellSurfaceReport = getShellSurfaceReport;
 
     window.getShellDiagnosticsSnapshot = function getShellDiagnosticsSnapshot() {
@@ -2725,6 +2634,8 @@ window.rcInteraction = (function () {
         const progress = document.getElementById('shell-page-progress');
         return {
             readingVisible: !!(readingMode && !readingMode.classList.contains('hidden-section')),
+            publicBoundary: getVisiblePublicBoundaryFields(),
+            surfaceReport: getShellSurfaceReport(),
             settingsOpen: !!(typeof window.isReadingSettingsModalOpen === 'function' && window.isReadingSettingsModalOpen()),
             progressLabel: progress ? progress.textContent : null,
             playback: (typeof window.getPlaybackStatus === 'function') ? window.getPlaybackStatus() : null,

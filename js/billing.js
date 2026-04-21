@@ -6,9 +6,6 @@ window.rcBilling = (function () {
   let _configPromise = null;
   let _pricingRenderToken = 0;
   let _checkoutInFlightPlan = '';
-  let _lastPricingOpener = null;
-  let _lastPricingShown = null;
-  let _lastPricingRender = null;
 
   function setMessage(id, message, tone = 'info') {
     const el = document.getElementById(id);
@@ -150,52 +147,14 @@ window.rcBilling = (function () {
     return ['basic', 'pro', 'premium'].includes(normalized) ? normalized : 'basic';
   }
 
-  function billingNowMs() {
-    try { return Math.round(performance.now()); } catch (_) { return null; }
-  }
-
-  function recordPricingOpener(opener, detail = {}) {
-    _lastPricingOpener = Object.assign({
-      at: new Date().toISOString(),
-      atMs: billingNowMs(),
-      opener: String(opener || 'unknown'),
-      visibleSection: typeof getCurrentVisibleSection === 'function' ? getCurrentVisibleSection() : null,
-      readingVisible: (() => {
-        try {
-          const reading = document.getElementById('reading-mode');
-          return !!(reading && !reading.classList.contains('hidden-section'));
-        } catch (_) { return false; }
-      })(),
-    }, detail || {});
-    try {
-      if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
-      window.__rcEventTrail.push(Object.assign({ t: new Date().toISOString(), tag: 'billing-pricing-opener' }, _lastPricingOpener));
-      if (window.__rcEventTrail.length > 40) window.__rcEventTrail.shift();
-    } catch (_) {}
-    return _lastPricingOpener;
-  }
-
   function showPricingModalNow() {
     const el = document.getElementById('pricing-modal');
     if (!el) return;
-    _lastPricingShown = {
-      at: new Date().toISOString(),
-      atMs: billingNowMs(),
-      opener: _lastPricingOpener,
-      visibleSection: typeof getCurrentVisibleSection === 'function' ? getCurrentVisibleSection() : null,
-      readingVisible: (() => {
-        try {
-          const reading = document.getElementById('reading-mode');
-          return !!(reading && !reading.classList.contains('hidden-section'));
-        } catch (_) { return false; }
-      })(),
-    };
     el.classList.remove('hidden-section');
     if (el.classList.contains('modal-overlay')) el.style.display = 'flex';
   }
 
   async function openPricingForSignup() {
-    recordPricingOpener('signup');
     clearPendingPlan();
     setMessage('pricing-message', '', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
@@ -204,7 +163,6 @@ window.rcBilling = (function () {
   }
 
   async function openPricingForAccount(message = '') {
-    recordPricingOpener('account', { message: String(message || '') });
     clearPendingPlan();
     setMessage('pricing-message', message || '', 'info');
     await renderPricingUi();
@@ -212,7 +170,6 @@ window.rcBilling = (function () {
   }
 
   async function showPricingForGatedAction(message) {
-    recordPricingOpener('gated-action', { message: String(message || '') });
     setMessage('pricing-message', message || 'Create an account to import books, save your place, and build your own library.', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
     await renderPricingUi();
@@ -426,13 +383,6 @@ window.rcBilling = (function () {
       applyPlanButtonState(proBtn, trialCtaLabel('pro', 'Choose Pro', plans, proTrialEligibility, false), () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
       applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
       clearPricingModalSettling();
-      _lastPricingRender = {
-        at: new Date().toISOString(),
-        atMs: billingNowMs(),
-        signedIn,
-        currentTier,
-        token,
-      };
       return;
     }
 
@@ -441,13 +391,6 @@ window.rcBilling = (function () {
     applyPlanButtonState(proBtn, buttonModel.pro.label, buttonModel.pro.onclick, buttonModel.pro.disabled);
     applyPlanButtonState(premiumBtn, buttonModel.premium.label, buttonModel.premium.onclick, buttonModel.premium.disabled);
     clearPricingModalSettling();
-    _lastPricingRender = {
-      at: new Date().toISOString(),
-      atMs: billingNowMs(),
-      signedIn,
-      currentTier,
-      token,
-    };
   }
 
   function continueWithFree() {
@@ -736,19 +679,6 @@ window.rcBilling = (function () {
     renderPricingUi().catch(() => {});
   });
 
-  function getDiagnosticsSnapshot() {
-    const modal = document.getElementById('pricing-modal');
-    return {
-      checkoutInFlightPlan: _checkoutInFlightPlan || '',
-      pendingPlan: readPendingPlan(),
-      pricingModalVisible: !!(modal && !modal.classList.contains('hidden-section') && modal.style.display !== 'none'),
-      pricingModalSettling: !!(modal && modal.classList.contains('pricing-modal-settling')),
-      lastPricingOpener: _lastPricingOpener,
-      lastPricingShown: _lastPricingShown,
-      lastPricingRender: _lastPricingRender,
-    };
-  }
-
   return {
     startCheckout,
     openCustomerPortal,
@@ -763,7 +693,6 @@ window.rcBilling = (function () {
     openPricingForSignup,
     continueWithFree,
     hasPendingPaidIntent,
-    getDiagnosticsSnapshot,
   };
 })();
 

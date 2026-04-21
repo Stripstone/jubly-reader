@@ -55,6 +55,10 @@ window.rcSync = (function () {
   let _applyingRemoteSettings = false;
   let _pendingRuntimePolicyProjection = null;
   let _pendingRuntimePolicyFlushTimer = null;
+  let _signedInCacheExecutable = false;
+  let _signedInCacheUserId = '';
+  let _publicResetInfo = { at: null, reason: 'boot-default' };
+  let _lastBlockedProjectionReason = null;
 
   // Dirty settings: field-level record of user mutations not yet confirmed by the server.
   // Persisted to localStorage so uncommitted changes survive page refresh.
@@ -197,8 +201,158 @@ window.rcSync = (function () {
     return _composeResolvedUsageSummary(local, _remoteUsageSummary);
   }
 
+  function _classifySessionVoiceSelection() {
+    let value = '';
+    try { value = String(window.__rcSessionVoiceSelection || '').trim(); } catch (_) { value = ''; }
+    const isCloud = /^(cloud:|azure:|polly:)/i.test(value);
+    return {
+      state: isCloud ? 'cloud' : (value ? 'browser' : 'none'),
+      valuePresent: !!value,
+      isCloud,
+    };
+  }
+
+  function _getRuntimePolicyReport() {
+    try {
+      if (window.rcPolicy && typeof window.rcPolicy.getReport === 'function') return window.rcPolicy.getReport() || {};
+    } catch (_) {}
+    let policy = null;
+    try { policy = window.rcPolicy && typeof window.rcPolicy.get === 'function' ? window.rcPolicy.get() : null; } catch (_) { policy = null; }
+    let tier = 'basic';
+    try { tier = window.rcPolicy && typeof window.rcPolicy.getTier === 'function' ? window.rcPolicy.getTier() : String(policy?.tier || 'basic'); } catch (_) {}
+    return {
+      tier: String(tier || 'basic').trim().toLowerCase(),
+      resolved: !!policy?.resolved,
+      resolutionMode: String(policy?.resolutionMode || ''),
+      cloudAllowed: !!policy?.features?.cloudVoices,
+      explorerAllowed: !!policy?.features?.themes?.explorer,
+      customMusicAllowed: !!policy?.features?.themes?.customMusic,
+      publicReset: Object.assign({}, _publicResetInfo),
+    };
+  }
+
+  function _clearPendingRuntimePolicyProjection(reason = 'public-reset') {
+    const hadPending = !!(_pendingRuntimePolicyProjection || _pendingRuntimePolicyFlushTimer);
+    _pendingRuntimePolicyProjection = null;
+    if (_pendingRuntimePolicyFlushTimer) {
+      clearTimeout(_pendingRuntimePolicyFlushTimer);
+      _pendingRuntimePolicyFlushTimer = null;
+    }
+    if (hadPending) {
+      _lastBlockedProjectionReason = String(reason || 'public-reset');
+      _pushEvent('policy-projection-cleared-public', { reason: _lastBlockedProjectionReason });
+      _recordSync('snapshot', 'policy-projection-cleared-public', { reason: _lastBlockedProjectionReason });
+    }
+    return hadPending;
+  }
+
+  function _resetToPublicRuntime(reason = 'public-reset') {
+    const resetReason = String(reason || 'public-reset');
+    _publicResetInfo = { at: new Date().toISOString(), reason: resetReason };
+    _clearPendingRuntimePolicyProjection(resetReason);
+    _signedInCacheExecutable = false;
+    _signedInCacheUserId = '';
+    try { window.__rcSessionVoiceSelection = ''; } catch (_) {}
+    try {
+      if (window.rcPolicy && typeof window.rcPolicy.resetToPublic === 'function') {
+        window.rcPolicy.resetToPublic(resetReason);
+      } else if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
+        window.rcPolicy.apply({
+          version: 1,
+          tier: 'basic',
+          simulationAllowed: false,
+          resolutionMode: 'public-reset',
+          usageDailyLimit: 100,
+          importSlotLimit: 2,
+          features: {
+            modes: { reading: true, comprehension: false, research: false },
+            aiEvaluate: false,
+            anchors: false,
+            cloudVoices: false,
+            themes: { explorer: false, customMusic: false },
+          },
+        }, 'basic', { resolved: false, publicReset: true, reason: resetReason });
+      }
+    } catch (_) {}
+    try {
+      if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') {
+        window.rcTheme.enforceAccess({ persist: false, reason: resetReason });
+      }
+    } catch (_) {}
+    _pushEvent('public-runtime-reset', { reason: resetReason });
+    try { if (typeof window.updateDiagnostics === 'function') window.updateDiagnostics(); } catch (_) {}
+    return _getPublicRuntimeBoundaryReport();
+  }
+
+  function _hasRemoteExecutableState() {
+    return !!(
+      _remoteUsersRow ||
+      _remoteSettingsRow ||
+      _remoteEntitlement ||
+      _remoteUsageSummary ||
+      (_remoteLibraryItems && _remoteLibraryItems.length) ||
+      (_remoteProgressRows && _remoteProgressRows.length) ||
+      (_remoteBookMetricsRows && _remoteBookMetricsRows.length) ||
+      (_remoteDailyStatsRows && _remoteDailyStatsRows.length) ||
+      (_remoteSessions && _remoteSessions.length)
+    );
+  }
+
+  function _getPublicRuntimeBoundaryReport() {
+    const user = _user();
+    const authUserPresent = !!(user && user.id);
+    const policyReport = _getRuntimePolicyReport();
+    const tier = String(policyReport.tier || 'basic').trim().toLowerCase();
+    const sessionVoiceSelection = _classifySessionVoiceSelection();
+    const pendingSignedInPolicyProjection = !!(_pendingRuntimePolicyProjection || _pendingRuntimePolicyFlushTimer);
+    const signedInCacheExecutable = !authUserPresent && !!(_signedInCacheExecutable || _hasRemoteExecutableState());
+    const cloudAllowed = !!policyReport.cloudAllowed;
+    const explorerAllowed = !!policyReport.explorerAllowed;
+    const publicRuntimeReady = !authUserPresent &&
+      tier === 'basic' &&
+      !cloudAllowed &&
+      !explorerAllowed &&
+      !pendingSignedInPolicyProjection &&
+      !signedInCacheExecutable &&
+      sessionVoiceSelection.state !== 'cloud';
+    return {
+      publicRuntimeReady,
+      authUserPresent,
+      tier,
+      cloudAllowed,
+      explorerAllowed,
+      pendingSignedInPolicyProjection,
+      signedInCacheExecutable,
+      sessionVoiceSelection,
+      appearanceSource: authUserPresent ? 'runtime' : 'local-device',
+      publicReset: Object.assign({}, _publicResetInfo || { at: null, reason: null }),
+      lastBlockedProjectionReason: _lastBlockedProjectionReason,
+      policy: policyReport,
+      cache: {
+        signedInCacheUserId: _signedInCacheUserId || null,
+        remoteExecutableStatePresent: _hasRemoteExecutableState(),
+      },
+    };
+  }
+
+  function _ensurePublicRuntimeBoundary(reason = 'public-boundary') {
+    if (_ready()) return _getPublicRuntimeBoundaryReport();
+    const before = _getPublicRuntimeBoundaryReport();
+    if (!before.publicRuntimeReady) {
+      _clearRemoteState(reason);
+      return _getPublicRuntimeBoundaryReport();
+    }
+    return before;
+  }
+
   function _applyRuntimePolicyProjection(policy, options = {}) {
     if (!policy || typeof policy !== 'object') return false;
+    if (!_ready()) {
+      _lastBlockedProjectionReason = String(options.replayReason || options.reason || 'auth-absent');
+      _pushEvent('policy-projection-blocked-public', { reason: _lastBlockedProjectionReason, tier: String(policy.tier || '') });
+      _resetToPublicRuntime(`policy-projection-blocked:${_lastBlockedProjectionReason}`);
+      return false;
+    }
     try {
       if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
         window.rcPolicy.apply(policy, null, { transient: !!options.fromCache, resolved: true });
@@ -230,6 +384,12 @@ window.rcSync = (function () {
 
   function _stageRuntimePolicyProjection(policy, options = {}) {
     if (!policy || typeof policy !== 'object') return false;
+    if (!_ready()) {
+      _lastBlockedProjectionReason = String(options.reason || 'stage-auth-absent');
+      _pushEvent('policy-projection-stage-blocked-public', { reason: _lastBlockedProjectionReason, tier: String(policy.tier || '') });
+      _resetToPublicRuntime(`policy-stage-blocked:${_lastBlockedProjectionReason}`);
+      return false;
+    }
     _pendingRuntimePolicyProjection = {
       policy,
       options: {
@@ -251,6 +411,12 @@ window.rcSync = (function () {
 
   function _flushPendingRuntimePolicyProjection(reason = 'owner-ready') {
     if (!_pendingRuntimePolicyProjection) return false;
+    if (!_ready()) {
+      _lastBlockedProjectionReason = String(reason || 'owner-ready');
+      _clearPendingRuntimePolicyProjection(`flush-blocked:${_lastBlockedProjectionReason}`);
+      _resetToPublicRuntime(`policy-flush-blocked:${_lastBlockedProjectionReason}`);
+      return false;
+    }
     if (!(window.rcPolicy && typeof window.rcPolicy.apply === 'function')) {
       _schedulePendingRuntimePolicyFlush();
       return false;
@@ -471,6 +637,11 @@ window.rcSync = (function () {
   // Bulk-apply a server snapshot to all in-memory state. Rejects stale responses
   // via seq ordering. Persists to localStorage as last-confirmed projection.
   function _applySnapshot(snapshot, options = {}) {
+    if (!_ready()) {
+      _pushEvent('snapshot-apply-blocked-public', { fromCache: !!options.fromCache, reason: 'auth-absent' });
+      _clearRemoteState('snapshot-apply-blocked-public');
+      return false;
+    }
     const seq = Number(options.seq || 0);
     if (seq && seq < _appliedSeq) return false;
     if (seq) _appliedSeq = seq;
@@ -487,6 +658,14 @@ window.rcSync = (function () {
     _remoteEntitlement = snap.entitlement || null;
     _hydrationState = { inFlight: false, users: true, settings: true, progress: true, sessions: true, usage: !!snap.usage };
     _lastSyncSnapshotAt = new Date().toISOString();
+    if (options.fromCache) {
+      const cacheUser = _user();
+      _signedInCacheExecutable = !!(cacheUser && cacheUser.id);
+      _signedInCacheUserId = cacheUser && cacheUser.id ? String(cacheUser.id) : '';
+    } else {
+      _signedInCacheExecutable = false;
+      _signedInCacheUserId = '';
+    }
     // Track the server-confirmed settings row separately from the projected row.
     // _confirmedSettingsRow is the baseline for dirty-field diffing and is never
     // overwritten by optimistic projection — only by actual server ACKs.
@@ -532,6 +711,11 @@ window.rcSync = (function () {
   // This is a projection ONLY — it paints the UI without blocking on the server.
   // It must NOT be used as a restore position source.
   function _applyCachedSnapshotForUser(userId) {
+    if (!_ready()) {
+      _signedInCacheExecutable = false;
+      _signedInCacheUserId = '';
+      return false;
+    }
     const key = String(userId || 'unknown');
     _cachedSnapshotApplyCount[key] = (_cachedSnapshotApplyCount[key] || 0) + 1;
     _pushEvent('durable-cache-apply', { count: _cachedSnapshotApplyCount[key], hasUserId: !!userId });
@@ -977,7 +1161,8 @@ window.rcSync = (function () {
   }
 
   // ── State clearing ────────────────────────────────────────────────────────
-  function _clearRemoteState() {
+  function _clearRemoteState(reason = 'public-reset') {
+    _clearPendingRuntimePolicyProjection(reason);
     _remoteUsersRow = null;
     _remoteSettingsRow = null;
     _remoteLibraryItems = [];
@@ -988,6 +1173,9 @@ window.rcSync = (function () {
     _remoteProfileMetrics = null;
     _remoteUsageSummary = null;
     _remoteEntitlement = null;
+    _confirmedSettingsRow = null;
+    _signedInCacheExecutable = false;
+    _signedInCacheUserId = '';
     _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false, usage: false };
     _lastSyncSnapshotAt = null;
     _requestSeq = 0;
@@ -1002,11 +1190,12 @@ window.rcSync = (function () {
       }
     } catch (_) {}
     try { window.__rcSessionVoiceSelection = ''; } catch (_) {}
+    _resetToPublicRuntime(reason);
   }
 
   async function rehydrateDurableData() {
     if (!_ready()) {
-      _clearRemoteState();
+      _clearRemoteState('signout');
       _emitHydrated('signout');
       return;
     }
@@ -1035,7 +1224,7 @@ window.rcSync = (function () {
       return;
     }
     if (!signedIn) {
-      _clearRemoteState();
+      _clearRemoteState('signout');
       _emitHydrated('signout');
     }
   }
@@ -1066,6 +1255,7 @@ window.rcSync = (function () {
   try { document.addEventListener('rc:prefs-changed', _handlePrefsChanged); } catch (_) {}
   try { document.addEventListener('change', _handleSettingsControlEvent, true); } catch (_) {}
   try { document.addEventListener('input', _handleSettingsControlEvent, true); } catch (_) {}
+  try { window.getPublicRuntimeBoundaryReport = () => _getPublicRuntimeBoundaryReport(); } catch (_) {}
 
   return {
     scheduleProgressSync,
@@ -1083,20 +1273,12 @@ window.rcSync = (function () {
     getRemoteUsageSummary: () => _remoteUsageSummary,
     getResolvedUsageSummary: () => _getResolvedUsageSummary(),
     getHydrationState: () => ({ ..._hydrationState }),
+    getPublicRuntimeBoundaryReport: () => _getPublicRuntimeBoundaryReport(),
+    ensurePublicRuntimeBoundary: (reason) => _ensurePublicRuntimeBoundary(reason),
     getDiagnosticsSnapshot: () => ({
       sync: { ..._syncDiagnostics },
       hydrated: { ..._hydrationState },
       snapshotAt: _lastSyncSnapshotAt,
-      runtimePolicyProjection: {
-        pending: !!_pendingRuntimePolicyProjection,
-        pendingTier: _pendingRuntimePolicyProjection && _pendingRuntimePolicyProjection.policy
-          ? String(_pendingRuntimePolicyProjection.policy.tier || '')
-          : '',
-        pendingFromCache: !!(_pendingRuntimePolicyProjection && _pendingRuntimePolicyProjection.options && _pendingRuntimePolicyProjection.options.fromCache),
-        flushTimerActive: !!_pendingRuntimePolicyFlushTimer,
-      },
-      signedInCacheExecutable: !!(_ready() && _remoteUsersRow),
-      readyForSignedInSync: !!_ready(),
       usersRow: _remoteUsersRow,
       settingsRow: _remoteSettingsRow,
       usage: _remoteUsageSummary,
@@ -1107,6 +1289,7 @@ window.rcSync = (function () {
       dailyStatCount: (_remoteDailyStatsRows || []).length,
       sessionCount: (_remoteSessions || []).length,
       eventTrail: Array.isArray(window.__rcEventTrail) ? window.__rcEventTrail.slice() : [],
+      publicRuntime: _getPublicRuntimeBoundaryReport(),
     }),
     deleteLibraryItem: async (bookId, options = {}) => {
       if (!_ready()) return null;
