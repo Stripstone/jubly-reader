@@ -84,16 +84,16 @@ window.rcDevTools = (function () {
   }
 
   async function rehydrate() {
-    try {
-      if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
-        await window.rcPolicy.refreshForTier();
-      }
-    } catch (_) {}
+    // Apply usage snapshot immediately from the dev-tools response so the UI
+    // reflects the change before the durable-sync round-trip completes.
     try {
       if (window.rcUsage && typeof window.rcUsage.applySnapshot === 'function' && state.snapshot && state.snapshot.usage) {
         window.rcUsage.applySnapshot({ remaining: state.snapshot.usage.remaining, limit: state.snapshot.usage.limit });
       }
     } catch (_) {}
+    // rehydrateDurableData fetches a fresh server snapshot which includes
+    // runtimePolicy — _applySnapshot will project the updated policy from there.
+    // A separate refreshForTier() call is not needed and races against this path.
     try {
       if (window.rcSync && typeof window.rcSync.rehydrateDurableData === 'function') {
         await window.rcSync.rehydrateDurableData();
@@ -163,6 +163,7 @@ window.rcDevTools = (function () {
     panel.style.border = '2px solid var(--border)';
     panel.style.borderRadius = '12px';
     panel.style.background = 'var(--secondary-bg)';
+    panel.style.color = 'var(--text-primary)';
     panel.style.boxShadow = '0 14px 32px rgba(0,0,0,0.24)';
     panel.innerHTML = `
       <div id="devToolsTopBar" style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--border); flex-shrink:0;">
@@ -181,7 +182,7 @@ window.rcDevTools = (function () {
         <section style="border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;">
           <strong style="display:block; margin-bottom:8px; font-size:13px;">Plan</strong>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-            <label style="font-size:12px;">Tier<select id="devPlanTier" style="width:100%; margin-top:4px;"><option value="free">Free</option><option value="paid">Pro</option><option value="premium">Premium</option></select></label>
+            <label style="font-size:12px;">Tier<select id="devPlanTier" style="width:100%; margin-top:4px;"><option value="basic">Basic</option><option value="pro">Pro</option><option value="premium">Premium</option></select></label>
             <label style="font-size:12px;">Status<select id="devPlanStatus" style="width:100%; margin-top:4px;"><option value="active">active</option><option value="trialing">trialing</option><option value="canceled">canceled</option><option value="past_due">past_due</option></select></label>
           </div>
           <div style="display:flex; justify-content:flex-end; margin-top:8px;"><button type="button" id="devPlanSaveBtn">Save plan</button></div>
@@ -409,7 +410,8 @@ window.rcDevTools = (function () {
     const resolvedPageIndex = clientActive ? (clientTarget.pageIndex != null ? clientTarget.pageIndex : (clientRestore.currentPageIndex != null ? clientRestore.currentPageIndex : latestProgress.last_page_index)) : latestProgress.last_page_index;
     const resolvedPageVisible = resolvedPageIndex == null || resolvedPageIndex === '' ? '' : (Math.max(0, Number(resolvedPageIndex)) + 1);
     const resolvedPageCount = clientRestore && clientRestore.pageCount ? clientRestore.pageCount : (latestProgress.page_count == null ? 0 : latestProgress.page_count);
-    setValue('devPlanTier', entitlement.tier === 'premium' ? 'premium' : entitlement.tier === 'paid' ? 'paid' : 'free');
+    const entitlementTier = String(entitlement?.tier || '').trim().toLowerCase();
+    setValue('devPlanTier', entitlementTier === 'premium' ? 'premium' : entitlementTier === 'paid' ? 'pro' : entitlementTier === 'free' ? 'basic' : (entitlementTier || 'basic'));
     setValue('devPlanStatus', entitlement.status || 'active');
     setValue('devUsageRemaining', usage.remaining == null ? '' : usage.remaining);
     setValue('devUsageUnits', usage.row && usage.row.used_units != null ? usage.row.used_units : (usage.used_units == null ? 0 : usage.used_units));
@@ -431,7 +433,8 @@ window.rcDevTools = (function () {
     setChecked('devSettingsAutoplay', !!settings.autoplay_enabled);
     if (statusEl) {
       const sessionSummary = snapshot.sessions || {};
-      const plan = entitlement.tier === 'paid' ? 'Pro' : entitlement.tier === 'premium' ? 'Premium' : 'Free';
+      const entitlementTier = String(entitlement?.tier || '').trim().toLowerCase();
+      const plan = entitlementTier === 'premium' ? 'Premium' : (entitlementTier === 'paid' || entitlementTier === 'pro') ? 'Pro' : 'Basic';
       const remaining = usage.remaining == null ? '—' : usage.remaining;
       statusEl.textContent = `${state.email || 'dev'} • ${plan} • ${remaining} left • ${sessionSummary.totalSessions || 0} sessions`;
     }

@@ -1,27 +1,273 @@
 // ============================================================
-    // jubly — Shell + App bridge
-    // ============================================================
-    //
-    // PERMANENT (shell navigation and app wiring):
-    //   showSection(), initFocusMode(), switchTab(), openModal(),
-    //   closeModal(), setTheme(), handleExplorerSwatch(),
-    //   setTier(), updateTierPill(), handlePausePlay(),
-    //   handleAutoplayToggle(), updateProgressBar(),
-    //   showSessionComplete(), renderDashboard(), startReading()
-    //
-    // SCAFFOLD (remove on real auth wiring):
-    //   login() — simulates auth; replace with Supabase auth flow
-    // ============================================================
+// jubly — Shell + App bridge
+// ============================================================
+//
+// PRE-RUNTIME APPEARANCE BOOTSTRAP (temporary shell bridge):
+//   Applies a public-safe appearance class to <html> before CSS paints, then
+//   lets runtime restore persisted local appearance only after signed-in auth
+//   truth is available.
+//   Retirement condition: remove when runtime provides an equally-early
+//   appearance bootstrap seam without using index.html inline script ownership.
+(function applyPublicSafeAppearanceBoot() {
+    try {
+        // Public/signed-out surfaces must not inherit a prior account's local
+        // dark appearance before auth truth exists. Runtime restores persisted
+        // appearance after a signed-in account is confirmed.
+        var mode = 'light';
+        try {
+            var params = new URLSearchParams(window.location.search || '');
+            var view = String(params.get('view') || '').trim();
+            if (view === 'dashboard' || view === 'profile-page') {
+                var raw = localStorage.getItem('rc_appearance_prefs');
+                if (raw) {
+                    var parsed = JSON.parse(raw) || {};
+                    var stored = parsed.appearance_mode || parsed.mode || parsed.appearance;
+                    if (stored === 'dark' || stored === 'light') mode = stored;
+                }
+            }
+        } catch (_) {}
+        var root = document.documentElement;
+        if (!root) return;
+        root.classList.remove('app-light', 'app-dark');
+        root.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
+        root.setAttribute('data-app-appearance', mode);
+        root.style.backgroundColor = mode === 'dark' ? '#0f172a' : '#ffffff';
+        root.style.color = mode === 'dark' ? '#e2e8f0' : '#1e293b';
+        root.style.colorScheme = mode;
+    } catch (_) {}
+})();
+
+// ============================================================
+// PERMANENT (shell navigation and app wiring):
+// ============================================================
+//
+//   showSection(), initFocusMode(), switchTab(), openModal(),
+//   closeModal(), setTheme(), handleExplorerSwatch(),
+//   setTier(), updateTierPill(), handlePausePlay(),
+//   handleAutoplayToggle(), updateProgressBar(),
+//   showSessionComplete(), renderDashboard(), startReading()
+//
+// SCAFFOLD (remove on real auth wiring):
+//   login() — simulates auth; replace with Supabase auth flow
+// ============================================================
 
     // ── Section routing ──────────────────────────────────────────
     const ALL_SECTIONS     = ['landing-page', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
     const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
     const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
-        let _currentSection = 'landing-page';
+    let _currentSection = 'landing-page';
+    let _publicIntroLibraryVisible = false;
+    let _publicSampleSessionActive = false;
     let _shellAuthBootstrapped = false;
 
 
     let _bootReleaseComplete = false;
+    let _bootPendingMessageTimer = null;
+    let _libraryPendingBannerTimer = null;
+
+// Shell-resident interaction banner
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared interaction banner.
+//
+// The single surface where the shell surfaces pending, success, and
+// recoverable-error states for async operations. Shell presents — it does
+// NOT own auth, billing, or runtime truth.
+//
+// Rules (from product docs):
+//   - never stack multiple banners
+//   - newest higher-severity message replaces the older one
+//   - same-key message always replaces, regardless of severity
+//   - pending can upgrade to success or error
+//   - success auto-dismisses (~2.2s)
+//   - recoverable error stays visible until dismissed or retried
+//   - blocking error keeps the action locked until the user acts
+//   - copy must describe the user-visible state, not an internal cause
+//
+// API:
+//   window.rcInteraction.pending(key, message)
+//   window.rcInteraction.success(key, message)
+//   window.rcInteraction.error(key, message, { actions?: [{label, onClick}], blocking?: bool })
+//   window.rcInteraction.actions.retry(onClick)
+//   window.rcInteraction.actions.refresh()
+//   window.rcInteraction.actions.openLogin()
+//   window.rcInteraction.actions.dismiss(key)
+//   window.rcInteraction.clear(key)
+//   window.rcInteraction.clearAll()
+// ─────────────────────────────────────────────────────────────────────────────
+
+window.rcInteraction = (function () {
+
+  // Severity order — higher number wins when two keys compete for the banner
+  const SEV = { pending: 0, success: 1, error: 2, blocking: 3 };
+
+  // Single active slot
+  let _active = null;  // { key, sevName, severity, message, actions, timer }
+  let _el = null;
+
+  function _defaultOpenLogin() {
+    try {
+      if (typeof showSigninPane === 'function') {
+        showSigninPane();
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (typeof showSection === 'function') {
+        showSection('login-page');
+        return;
+      }
+    } catch (_) {}
+  }
+
+  const actionPresets = {
+    retry(onClick) {
+      return { label: 'Try again', onClick: typeof onClick === 'function' ? onClick : function () {} };
+    },
+    refresh() {
+      return { label: 'Refresh', onClick: function () { try { window.location.reload(); } catch (_) {} } };
+    },
+    openLogin(onClick) {
+      return { label: 'Open login', onClick: typeof onClick === 'function' ? onClick : _defaultOpenLogin };
+    },
+    dismiss(key) {
+      return { label: 'Dismiss', onClick: function () { clear(key); } };
+    },
+  };
+
+  // ── DOM ───────────────────────────────────────────────────────────────────
+
+  function _ensureEl() {
+    if (_el && _el.isConnected) return _el;
+    _el = document.createElement('div');
+    _el.id = 'rc-interaction-banner';
+    _el.setAttribute('role', 'status');
+    _el.setAttribute('aria-live', 'polite');
+    _el.setAttribute('aria-atomic', 'true');
+    document.body.appendChild(_el);
+    return _el;
+  }
+
+  function _render() {
+    const el = _ensureEl();
+    if (!_active) {
+      el.removeAttribute('data-sev');
+      el.classList.remove('rc-banner--visible');
+      el.innerHTML = '';
+      return;
+    }
+
+    el.setAttribute('data-sev', _active.sevName);
+    el.classList.add('rc-banner--visible');
+    el.innerHTML = '';
+
+    const msgEl = document.createElement('span');
+    msgEl.className = 'rc-banner__message';
+    msgEl.textContent = _active.message;
+    el.appendChild(msgEl);
+
+    if (_active.actions && _active.actions.length) {
+      const actionsEl = document.createElement('span');
+      actionsEl.className = 'rc-banner__actions';
+      _active.actions.forEach((action) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'rc-banner__action-btn';
+        btn.textContent = action.label;
+        btn.addEventListener('click', () => {
+          try { action.onClick(); } catch (_) {}
+        });
+        actionsEl.appendChild(btn);
+      });
+      el.appendChild(actionsEl);
+    }
+
+    const hasDismissAction = !!(_active.actions && _active.actions.some((action) => String(action && action.label || '').trim().toLowerCase() === 'dismiss'));
+
+    // Dismiss is always available except on blocking errors or when an explicit
+    // Dismiss action button is already present.
+    if (_active.sevName !== 'blocking' && !hasDismissAction) {
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'rc-banner__close';
+      closeBtn.setAttribute('aria-label', 'Dismiss');
+      closeBtn.textContent = '×';
+      const capturedKey = _active.key;
+      closeBtn.addEventListener('click', () => clear(capturedKey));
+      el.appendChild(closeBtn);
+    }
+  }
+
+  // ── Core show logic ───────────────────────────────────────────────────────
+
+  function _show(key, sevName, message, actions) {
+    const sev = SEV[sevName] ?? 0;
+
+    // A different key at higher severity keeps its banner — do not override
+    if (_active && _active.key !== key && sev < _active.severity) return;
+
+    // Clear any existing auto-dismiss timer
+    if (_active && _active.timer) {
+      clearTimeout(_active.timer);
+      _active = Object.assign({}, _active, { timer: null });
+    }
+
+    _active = {
+      key,
+      sevName,
+      severity: sev,
+      message,
+      actions: Array.isArray(actions) ? actions : [],
+      timer: null,
+    };
+
+    if (sevName === 'success') {
+      _active.timer = setTimeout(() => {
+        if (_active && _active.key === key && _active.sevName === 'success') {
+          _active = null;
+          _render();
+        }
+      }, 2200);
+    }
+
+    _render();
+  }
+
+  // ── Public API ────────────────────────────────────────────────────────────
+
+  function pending(key, message) {
+    _show(key, 'pending', message);
+  }
+
+  function success(key, message) {
+    _show(key, 'success', message);
+  }
+
+  function error(key, message, opts) {
+    const blocking = !!(opts && opts.blocking);
+    const actions = opts && Array.isArray(opts.actions) ? opts.actions.slice() : [];
+    if (!blocking && actions.length === 0) actions.push(actionPresets.dismiss(key));
+    _show(key, blocking ? 'blocking' : 'error', message, actions);
+  }
+
+  function clear(key) {
+    if (!_active) return;
+    if (!key || _active.key === key) {
+      if (_active.timer) clearTimeout(_active.timer);
+      _active = null;
+      _render();
+    }
+  }
+
+  function clearAll() {
+    if (_active && _active.timer) clearTimeout(_active.timer);
+    _active = null;
+    _render();
+  }
+
+  return { pending, success, error, clear, clearAll, actions: actionPresets };
+})();
+
+
 
     function isRuntimeAppearanceReady() {
         try {
@@ -96,9 +342,36 @@
         });
     }
 
+    function scheduleBootPendingMessage() {
+        if (_bootPendingMessageTimer) return;
+        _bootPendingMessageTimer = window.setTimeout(() => {
+            _bootPendingMessageTimer = null;
+            try {
+                const copy = document.getElementById('boot-scrim-copy');
+                if (!copy) return;
+                copy.textContent = 'Checking your account…';
+                copy.classList.add('boot-scrim-copy--visible');
+            } catch (_) {}
+        }, 1200);
+    }
+
+    function clearBootPendingMessage() {
+        if (_bootPendingMessageTimer) {
+            window.clearTimeout(_bootPendingMessageTimer);
+            _bootPendingMessageTimer = null;
+        }
+        try {
+            const copy = document.getElementById('boot-scrim-copy');
+            if (!copy) return;
+            copy.classList.remove('boot-scrim-copy--visible');
+            copy.textContent = '';
+        } catch (_) {}
+    }
+
     function releaseBootPending() {
         if (_bootReleaseComplete) return;
         _bootReleaseComplete = true;
+        clearBootPendingMessage();
         try { document.body.classList.remove('boot-pending'); } catch (_) {}
         try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
         const scrim = document.getElementById('boot-scrim');
@@ -125,6 +398,28 @@
         return entry;
     }
 
+    function setInlineBusy(button, busyLabel, enabledLabel, disabled) {
+        if (!button) return;
+        if (busyLabel) {
+            if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent || '';
+            button.textContent = busyLabel;
+            button.disabled = true;
+            return;
+        }
+        button.textContent = enabledLabel || button.dataset.idleLabel || button.textContent || '';
+        delete button.dataset.idleLabel;
+        if (typeof disabled === 'boolean') button.disabled = disabled;
+    }
+
+    function shellTrailPush(tag, data) {
+        try {
+            if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
+            window.__rcEventTrail.push(Object.assign({ t: new Date().toISOString(), tag }, data || {}));
+            if (window.__rcEventTrail.length > 40) window.__rcEventTrail.shift();
+            if (typeof updateDiagnostics === 'function') updateDiagnostics();
+        } catch (_) {}
+    }
+
     function isAuthedUser() {
         try { return !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()); } catch (_) { return false; }
     }
@@ -145,10 +440,27 @@
         return ALL_SECTIONS.includes(id) ? id : 'landing-page';
     }
 
+    function isIntroLibraryVisible() {
+        return !isAuthedUser() && !!_publicIntroLibraryVisible;
+    }
+
+    function isPublicAbandonSurface(sectionId) {
+        if (isAuthedUser()) return false;
+        return sectionId === 'landing-page' || (sectionId === 'dashboard' && isIntroLibraryVisible());
+    }
+
+    function clearPaidIntentForPublicAbandon(sectionId) {
+        if (!isPublicAbandonSurface(sectionId)) return;
+        try {
+            if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
+        } catch (_) {}
+    }
+
     function resolveSectionForAuth(id) {
         const normalized = normalizeSection(id);
         if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'login-page')) return 'dashboard';
         if (!isAuthedUser() && normalized === 'profile-page') return 'landing-page';
+        if (!isAuthedUser() && normalized === 'dashboard' && !isIntroLibraryVisible()) return 'landing-page';
         return normalized;
     }
 
@@ -195,7 +507,7 @@
         // Do not toggle display — CSS min-height on #dashboard-subtitle reserves
         // a fixed line of space so text changes never cause layout shift.
         if (!authed) {
-            subtitle.innerHTML = 'Create an account to enter your library and keep your settings, billing, and progress in one place.';
+            subtitle.innerHTML = 'Bring in your own books or text and make this reading space yours.';
             return;
         }
         const remoteMetrics = (window.rcSync && typeof window.rcSync.getRemoteProfileMetrics === 'function') ? window.rcSync.getRemoteProfileMetrics() : null;
@@ -256,8 +568,12 @@
 
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
-        if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !authed);
+        const publicSampleCopy = document.getElementById('library-public-sample-copy');
+        const publicSampleSubcopy = document.getElementById('library-public-sample-subcopy');
+        if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !(authed || isIntroLibraryVisible()));
         if (librarySample) librarySample.classList.add('hidden-section');
+        if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your own library.';
+        if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Start free, keep your place, and come back anytime.';
         renderLibrarySubtitle(authed);
 
         const profileGuestCard = document.getElementById('profile-guest-card');
@@ -286,6 +602,7 @@
 
     function showSection(id, options = {}) {
         const targetId = resolveSectionForAuth(id);
+        if (targetId === 'landing-page' && !options.preserveIntroLibrary) _publicIntroLibraryVisible = false;
         const readingModeEl = document.getElementById('reading-mode');
         const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
 
@@ -296,6 +613,13 @@
         const target = document.getElementById(targetId);
         if (target) target.classList.remove('hidden-section');
         _currentSection = targetId;
+        if (targetId === 'dashboard') {
+            shellTrailPush('dashboard-reveal', {
+                historyMode: options.historyMode || 'push',
+                authed: !!isAuthedUser(),
+                hasLocalLibraryOwner: typeof localBooksGetAll === 'function'
+            });
+        }
 
         const footer = document.getElementById('landing-footer');
         if (footer) footer.classList.toggle('hidden-section', targetId !== 'landing-page');
@@ -326,9 +650,10 @@
             try { syncExplorerMusicSource(); } catch (_) {}
         }
 
+        clearPaidIntentForPublicAbandon(targetId);
         syncShellAuthPresentation(targetId);
         let _sectionRefreshPromise = null;
-        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary();
+        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary('show-section-dashboard');
         if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
@@ -362,15 +687,20 @@
 
 
     // ── Modals ───────────────────────────────────────────────────
-    function openModal(id)  { const el = document.getElementById(id); if (!el) return; el.classList.remove('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'flex'; if (id === 'pricing-modal' && window.rcBilling && typeof window.rcBilling.renderPricingUi === 'function') window.rcBilling.renderPricingUi().catch(() => {}); }
+    function openModal(id)  {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (id === 'pricing-modal' && window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') {
+            window.rcBilling.openPricingForAccount().catch(() => {});
+            return;
+        }
+        el.classList.remove('hidden-section');
+        if (el.classList.contains('modal-overlay')) el.style.display = 'flex';
+    }
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
     function login() {
-        if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
-        closeModal('pricing-modal');
-        closeModal('ownership-modal');
-        showSection('dashboard');
-        try { refreshLibrary(); } catch(_) {}
+        showSigninPane();
     }
 
     function continueWithFree() {
@@ -390,11 +720,18 @@
         showSection('login-page');
     }
 
-    function returnToLanding() {
-        if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
+    function returnToPublicEntry() {
         closeModal('pricing-modal');
         closeModal('ownership-modal');
-        showSection('landing-page');
+        try { if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan(); } catch (_) {}
+        showSection(isIntroLibraryVisible() ? 'dashboard' : 'landing-page');
+    }
+
+    function returnToLanding() {
+        if (window.rcBilling && typeof window.rcBilling.clearPendingPlan === 'function') window.rcBilling.clearPendingPlan();
+        _publicIntroLibraryVisible = false;
+        _publicSampleSessionActive = false;
+        returnToPublicEntry();
     }
 
     function authBack() {
@@ -408,7 +745,7 @@
             } catch (_) {}
             return;
         }
-        returnToLanding();
+        returnToPublicEntry();
     }
 
     function showSignupPane(forceDirect = false) {
@@ -420,19 +757,42 @@
         showSection('login-page');
     }
 
+    async function startPublicSampleReading() {
+        _publicSampleSessionActive = true;
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        const signal = document.getElementById('session-complete');
+        if (signal) signal.classList.add('hidden-section');
+        showSection('reading-mode');
+        try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(PUBLIC_SAMPLE_BOOK_ID); } catch (_) {}
+    }
+
     function openSampleBookPreview() {
-        try { openPreview(PUBLIC_SAMPLE_BOOK_ID, 'Reading Training'); } catch (_) {}
+        startPublicSampleReading().catch(() => {});
+    }
+
+    function goToPostReadingSurface() {
+        if (!isAuthedUser() && _publicSampleSessionActive) {
+            _publicIntroLibraryVisible = true;
+            _publicSampleSessionActive = false;
+        }
+        showSection(isIntroLibraryVisible() ? 'dashboard' : 'landing-page');
     }
 
     function promptOwnershipAction(kind) {
         if (isAuthedUser()) return false;
-        const copy = document.getElementById('ownership-copy');
-        if (copy) {
-            copy.textContent = kind === 'manage'
-                ? 'Managing your personal library belongs to your signed-in account. You can still explore the sample book without creating one.'
-                : 'Importing books belongs to your signed-in account. You can still explore the sample book without creating one.';
+        const message = 'Create an account to import books, save your place, and build your own library.';
+        if (window.rcBilling && typeof window.rcBilling.showPricingForGatedAction === 'function') {
+            window.rcBilling.showPricingForGatedAction(message);
+        } else {
+            const pricingMessage = document.getElementById('pricing-message');
+            if (pricingMessage) {
+                pricingMessage.textContent = message;
+                pricingMessage.classList.remove('hidden-section');
+                pricingMessage.style.color = '#4338ca';
+            }
+            openModal('pricing-modal');
         }
-        openModal('ownership-modal');
         return true;
     }
 
@@ -461,6 +821,7 @@
 
     let _authMode = 'signin'; // 'signin' | 'signup'
     let _signupStep = 1; // 1=email, 2=username+password
+    let _validatedSignupEmail = '';
 
     function applyAuthModeUi() {
         const heading       = document.getElementById('auth-form-heading');
@@ -489,7 +850,7 @@
                 if (usernameWrap) usernameWrap.classList.add('hidden-section');
                 if (passwordWrap) passwordWrap.classList.add('hidden-section');
                 if (confirmWrap) confirmWrap.classList.add('hidden-section');
-                if (submitBtn) submitBtn.textContent = 'Submit';
+                if (submitBtn) submitBtn.textContent = 'Next';
             } else {
                 if (emailWrap) emailWrap.classList.add('hidden-section');
                 if (subheading) subheading.textContent = 'Choose a username and password.';
@@ -516,6 +877,7 @@
     function toggleAuthMode(forceApply = false) {
         if (!forceApply) _authMode = _authMode === 'signin' ? 'signup' : 'signin';
         _signupStep = 1;
+        _validatedSignupEmail = '';
         applyAuthModeUi();
     }
 
@@ -544,6 +906,76 @@
         if (ok)  ok.classList.add('hidden-section');
     }
 
+    function _readAuthPendingPlan() {
+        try {
+            return window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
+                ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase()
+                : '';
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function _existingAccountSteerMessage(pendingPlan) {
+        return pendingPlan && pendingPlan !== 'free'
+            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+            : 'An account with this email already exists. Log In to continue.';
+    }
+
+    function _steerExistingAccountToSignin(email, pendingPlan) {
+        _authMode = 'signin';
+        _signupStep = 1;
+        _validatedSignupEmail = '';
+        applyAuthModeUi();
+        const emailField = document.getElementById('loginEmail');
+        if (emailField) emailField.value = String(email || '').trim();
+        const passwordField = document.getElementById('loginPassword');
+        try { if (passwordField) passwordField.focus(); } catch (_) {}
+        _authShowError(_existingAccountSteerMessage(pendingPlan));
+    }
+
+    async function _inspectSignupEmailOrBlock(email, pendingPlan) {
+        const inspected = window.rcAuth && typeof window.rcAuth.inspectEmail === 'function'
+            ? await window.rcAuth.inspectEmail(email)
+            : { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
+        if (inspected && inspected.exists) {
+            _steerExistingAccountToSignin(email, pendingPlan);
+            return false;
+        }
+        if (!inspected || inspected.ok !== true) {
+            _validatedSignupEmail = '';
+            _authShowError(String((inspected && inspected.error && inspected.error.message) || 'Unable to verify email yet. Please try again.'));
+            return false;
+        }
+        _validatedSignupEmail = String(email || '').trim().toLowerCase();
+        return true;
+    }
+
+    function buildAuthRedirectForPendingPlan() {
+        let redirect = '';
+        try {
+            const cfg = window.rcAuth && typeof window.rcAuth.getConfig === 'function' ? window.rcAuth.getConfig() : null;
+            redirect = String((cfg && cfg.authRedirectUrl) || '').trim();
+        } catch (_) {}
+        if (!redirect) return '';
+        try {
+            const url = new URL(redirect, window.location.href);
+            url.searchParams.set('view', 'login-page');
+            url.searchParams.set('auth', 'verified');
+            const pendingPlan = _readAuthPendingPlan();
+            if (pendingPlan === 'pro' || pendingPlan === 'premium') {
+                url.searchParams.set('next', 'checkout');
+                url.searchParams.set('tier', pendingPlan);
+            } else {
+                url.searchParams.delete('next');
+                url.searchParams.delete('tier');
+            }
+            return url.toString();
+        } catch (_) {
+            return redirect;
+        }
+    }
+
     async function authFormSubmit() {
         const email    = ((document.getElementById('loginEmail') || {}).value || '').trim();
         const username = ((document.getElementById('signupUsername') || {}).value || '').trim();
@@ -557,6 +989,21 @@
             if (!email) {
                 _authShowError('Email is required.');
                 return;
+            }
+            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
+                _authShowError('Enter a valid email address.');
+                return;
+            }
+            if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+            try {
+                const pendingPlan = _readAuthPendingPlan();
+                const allowedToContinue = await _inspectSignupEmailOrBlock(email, pendingPlan);
+                if (!allowedToContinue) return;
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
+                }
             }
             _signupStep = 2;
             applyAuthModeUi();
@@ -574,6 +1021,20 @@
                 _authShowError('Username, password, and confirmation are required.');
                 return;
             }
+            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
+                _signupStep = 1;
+                _validatedSignupEmail = '';
+                applyAuthModeUi();
+                _authShowError('Enter a valid email address.');
+                return;
+            }
+            if (String(_validatedSignupEmail || '') !== String(email || '').trim().toLowerCase()) {
+                _signupStep = 1;
+                _validatedSignupEmail = '';
+                applyAuthModeUi();
+                _authShowError('Finish the email step before creating your account.');
+                return;
+            }
             if (password !== confirm) {
                 _authShowError('Passwords do not match.');
                 return;
@@ -589,17 +1050,44 @@
 
         try {
             if (_authMode === 'signup') {
-                const { error } = await window.rcAuth.signUp(email, password, username);
+                // Re-check here so final submit cannot drift from the email step if an
+                // email was edited, autofilled, or claimed after the first step settled.
+                const pendingPlan = _readAuthPendingPlan();
+                const allowedToCreate = await _inspectSignupEmailOrBlock(email, pendingPlan);
+                if (!allowedToCreate) return;
+
+                const result = await window.rcAuth.signUp(email, password, username, {
+                    emailRedirectTo: buildAuthRedirectForPendingPlan(),
+                });
+                const error = result && result.error ? result.error : null;
+                const identities = Array.isArray(result?.data?.user?.identities) ? result.data.user.identities : null;
+                const existingAccountLikely = !error && !result?.data?.session && Array.isArray(identities) && identities.length === 0;
                 if (error) {
-                    _authShowError(error.message || 'Account creation failed. Please try again.');
+                    const message = String(error.message || 'Account creation failed. Please try again.');
+                    if (/already\s+registered|already\s+exists|user\s+already\s+registered/i.test(message)) {
+                        _steerExistingAccountToSignin(email, pendingPlan);
+                    } else {
+                        _authShowError(message);
+                    }
+                } else if (existingAccountLikely) {
+                    _steerExistingAccountToSignin(email, pendingPlan);
+                } else if (result?.data?.session) {
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free'
+                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
+                        : 'Account created. Continuing to your library…');
                 } else {
-                    const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
-                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Account created. Check your email, then sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Account created. Check your email, then sign in.');
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Check your email to verify your account.');
                 }
             } else {
                 const { error } = await window.rcAuth.signIn(email, password);
                 if (error) {
-                    _authShowError(error.message || 'Sign-in failed. Check your email and password.');
+                    const message = String(error.message || 'Sign-in failed. Check your email and password.');
+                    _authShowError(/email\s+not\s+confirmed/i.test(message) ? 'Check your email to verify your account before signing in.' : message);
+                } else {
+                    const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
+                    if (pendingPlan === 'pro' || pendingPlan === 'premium') {
+                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`);
+                    }
                 }
             }
         } catch (_) {
@@ -607,20 +1095,48 @@
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Submit' : 'Create Account') : 'Sign In';
+                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
             }
         }
     }
 
     async function shellSignOut() {
-        if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
-            await window.rcAuth.signOut();
+        const logoutBtn = document.querySelector('[onclick="shellSignOut()"]');
+        if (logoutBtn) logoutBtn.disabled = true;
+        try { window.rcInteraction && window.rcInteraction.pending('auth:signout', 'Signing out…'); } catch (_) {}
+        try {
+            if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
+                const result = await window.rcAuth.signOut();
+                if (result && result.ok === false) {
+                    if (logoutBtn) logoutBtn.disabled = false;
+                    try {
+                        const actions = window.rcInteraction && window.rcInteraction.actions
+                            ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
+                            : [];
+                        window.rcInteraction && window.rcInteraction.error('auth:signout', 'We couldn\'t confirm sign-out yet.', { actions });
+                    } catch (_) {}
+                    return;
+                }
+            }
+            try { window.rcInteraction && window.rcInteraction.clear('auth:signout'); } catch (_) {}
+        } catch (_) {
+            if (logoutBtn) logoutBtn.disabled = false;
+            try {
+                const actions = window.rcInteraction && window.rcInteraction.actions
+                    ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
+                    : [];
+                window.rcInteraction && window.rcInteraction.error('auth:signout', 'We couldn\'t confirm sign-out yet.', { actions });
+            } catch (_) {}
         }
     }
 
     function _handleAuthChanged(e) {
         const { signedIn, source } = e.detail || {};
         const current = getCurrentVisibleSection();
+        try {
+            if (signedIn && window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
+            else if (!signedIn && window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false });
+        } catch (_) {}
 
         if (!_shellAuthBootstrapped) {
             syncShellAuthPresentation(resolveSectionForAuth(current));
@@ -635,12 +1151,12 @@
             }
             if (current === 'landing-page' || current === 'login-page') {
                 showSection('dashboard', { historyMode: 'replace' });
-                try { refreshLibrary(); } catch(_) {}
+                try { refreshLibrary('auth-change-dashboard-redirect'); } catch(_) {}
                 return;
             }
             syncShellAuthPresentation(current);
             if (source === 'SIGNED_IN') {
-                try { refreshLibrary(); } catch(_) {}
+                try { refreshLibrary('auth-change-signed-in'); } catch(_) {}
             }
         } else {
             if (current === 'profile-page') showSection('landing-page', { historyMode: 'replace' });
@@ -662,6 +1178,7 @@
             document.body.classList.add('auth-hydrating');
             document.body.classList.add('boot-pending');
         } catch (_) {}
+        scheduleBootPendingMessage();
         const appearanceReady = waitForRuntimeAppearanceReady();
         const appearancePainted = Promise.resolve(appearanceReady).then(() => waitForRuntimeAppearancePainted());
         try {
@@ -673,17 +1190,16 @@
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
-        // Await the section's async work (e.g. refreshLibrary on dashboard) before
-        // releasing the boot hold, so the correct section is chosen before any
-        // visible shell surface appears.
-        // Race section settlement against a hard 500ms cap: the closeout is about
-        // wrong first paint, not widening into deeper runtime boot redesign.
+        // Start the library refresh immediately behind the boot hold, then always
+        // wait the full 1000ms before revealing. At reveal time the library is
+        // either settled (show books or empty state directly) or still pending
+        // (show the neutral pending surface). No early release — the hold is a
+        // minimum, not a cap.
+        showSection(settledSection, { historyMode: 'replace' });
+        const bootHoldMs = 1000;
         try {
             await Promise.all([
-                Promise.race([
-                    showSection(settledSection, { historyMode: 'replace' }),
-                    new Promise(resolve => setTimeout(resolve, 500))
-                ]),
+                new Promise(resolve => setTimeout(resolve, bootHoldMs)),
                 appearancePainted
             ]);
             await waitForBootRevealFrame();
@@ -701,7 +1217,7 @@
         if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
     }
 
-    // ── Tier — drives #tierSelect so ui.js applyTierAccess() fires ──
+    // ── Tier simulation (dev/localhost only, gated by canSimulateTierSelection) ──
     function canSimulateTierSelection() {
         return !!(window.rcPolicy && typeof window.rcPolicy.canSimulateTier === 'function' && window.rcPolicy.canSimulateTier());
     }
@@ -709,8 +1225,8 @@
     function syncTierButtonState() {
         const current = (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function')
             ? window.rcEntitlements.getTier()
-            : ((typeof appTier !== 'undefined' && appTier) ? appTier : 'free');
-        const map = { free: 'Basic', paid: 'Pro', premium: 'Premium' };
+            : ((window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic');
+        const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' };
         document.querySelectorAll('.tier-btn').forEach((btn) => {
             const next = map[current] || 'Basic';
             btn.classList.toggle('active', btn.textContent.trim() === next);
@@ -725,32 +1241,30 @@
         if (!canSimulateTierSelection()) return;
         document.querySelectorAll('.tier-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        const map = { 'Basic': 'free', 'Pro': 'paid', 'Premium': 'premium' };
-        const value = map[btn.textContent.trim()] || 'free';
-        const sel = document.getElementById('tierSelect');
-        if (sel && sel.value !== value) { sel.value = value; sel.dispatchEvent(new Event('change')); }
-        const pill = document.getElementById('reading-tier-pill');
-        if (pill) pill.textContent = btn.textContent.trim();
+        const map = { 'Basic': 'basic', 'Pro': 'pro', 'Premium': 'premium' };
+        const value = map[btn.textContent.trim()] || 'basic';
+        // Call the runtime policy API directly — do not dispatch through #tierSelect DOM element.
+        if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
+            window.rcPolicy.refreshForTier(value).catch(() => {});
+        }
         updateExplorerSwatchState();
-        try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
         try { syncExplorerMusicSource(); } catch (_) {}
     }
 
     function updateTierPill() {
-        const sel  = document.getElementById('tierSelect');
+        const tier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
         const pill = document.getElementById('reading-tier-pill');
-        if (!sel || !pill) return;
-        const map = { free: 'Basic', paid: 'Pro', premium: 'Premium' };
-        pill.textContent = map[sel.value] || 'Basic';
+        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' }; pill.textContent = map[tier] || 'Basic'; }
     }
 
     function getCurrentTier() {
         if (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function') {
             try { return window.rcEntitlements.getTier(); } catch (_) {}
         }
-        const sel = document.getElementById('tierSelect');
-        if (sel && sel.value) return sel.value;
-        return (typeof appTier !== 'undefined' && appTier) ? appTier : 'free';
+        if (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') {
+            try { return window.rcPolicy.getTier(); } catch (_) {}
+        }
+        return 'basic';
     }
 
     // ── Theme ────────────────────────────────────────────────────
@@ -1297,52 +1811,113 @@
     // ── Library table — populated by __jublyLibraryRefresh hook called from library.js ──
     function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     let libraryRefreshRetryTimer = null;
+    let _loggedFirstLocalLibraryRead = false;
+    let _libraryInitialResolutionComplete = false;
+    let _libraryRefreshSequence = 0;
 
-    async function refreshLibrary() {
-        const rowsEl  = document.getElementById('library-rows');
-        const popEl   = document.getElementById('library-populated');
+    function scheduleLibraryPendingBanner() {
+        if (_libraryPendingBannerTimer || _libraryInitialResolutionComplete) return;
+        _libraryPendingBannerTimer = window.setTimeout(() => {
+            _libraryPendingBannerTimer = null;
+            if (_libraryInitialResolutionComplete) return;
+            if (!isAuthedUser()) return;
+            if (getCurrentVisibleSection() !== 'dashboard') return;
+            try {
+                window.rcInteraction && window.rcInteraction.pending('library:hydrate', 'Books are still loading…');
+            } catch (_) {}
+        }, 1400);
+    }
+
+    function clearLibraryPendingBanner() {
+        if (_libraryPendingBannerTimer) {
+            window.clearTimeout(_libraryPendingBannerTimer);
+            _libraryPendingBannerTimer = null;
+        }
+        try { window.rcInteraction && window.rcInteraction.clear('library:hydrate'); } catch (_) {}
+    }
+
+    function setLibrarySurfaceState(state) {
+        const pendingEl = document.getElementById('library-pending');
+        const popEl = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
         const sampleEl = document.getElementById('library-public-sample');
+        if (pendingEl) pendingEl.classList.toggle('hidden-section', state !== 'pending');
+        if (popEl) popEl.classList.toggle('hidden-section', state !== 'populated');
+        if (emptyEl) emptyEl.classList.toggle('hidden-section', state !== 'empty');
+        if (sampleEl) sampleEl.classList.toggle('hidden-section', state !== 'sample');
+        const dashboardEl = document.getElementById('dashboard');
+        if (dashboardEl) dashboardEl.setAttribute('data-library-state', state);
+    }
+
+    async function refreshLibrary(reason = 'unknown') {
+        const rowsEl  = document.getElementById('library-rows');
         // NOTE: #dashboard-subtitle is NOT owned by refreshLibrary.
         // renderLibrarySubtitle() is the single owner of that element.
         // CSS min-height on #dashboard-subtitle ensures it never causes layout shift.
         if (!rowsEl) return;
+        const authed = !!isAuthedUser();
+        const hasLocalLibraryOwner = typeof localBooksGetAll === 'function';
+        shellTrailPush('dashboard-library-refresh', {
+            reason,
+            section: getCurrentVisibleSection(),
+            authed,
+            hasLocalLibraryOwner,
+            initialResolved: _libraryInitialResolutionComplete
+        });
 
-        // Hide all library states at the very start — the correct state is revealed
-        // only when we actually know what to show. This prevents flash of stale data
-        // on navigation and prevents intermediate DOM states being visible during
-        // async resolution. On boot, auth-hydrating covers this; on navigation it does not.
-        if (popEl) popEl.classList.add('hidden-section');
-        if (emptyEl) emptyEl.classList.add('hidden-section');
-        if (sampleEl) sampleEl.classList.add('hidden-section');
-
-        if (!isAuthedUser()) {
-            if (sampleEl) sampleEl.classList.remove('hidden-section');
+        if (!authed) {
+            _libraryInitialResolutionComplete = false;
+            clearLibraryPendingBanner();
+            if (libraryRefreshRetryTimer) {
+                clearTimeout(libraryRefreshRetryTimer);
+                libraryRefreshRetryTimer = null;
+            }
+            setLibrarySurfaceState('sample');
             return;
         }
 
-        // Keep the library surface honest during boot. Until runtime book storage is
-        // actually available, do not imply an empty library by showing the empty/import CTA.
-        // Return a promise that resolves after one retry tick so DOMContentLoaded's
-        // auth-hydrating removal is delayed until the retry has had a chance to render.
+        // Runtime honesty contract for the dashboard books area:
+        // keep the container visible immediately, keep books truth owned by the
+        // local library runtime, and show a neutral pending state until the first
+        // truthful local-library read resolves to populated vs empty/importer.
+        // After that first truthful read, later refreshes keep the current visible
+        // surface instead of flashing back through pending.
+        if (!_libraryInitialResolutionComplete) {
+            setLibrarySurfaceState('pending');
+            scheduleLibraryPendingBanner();
+        }
+
+        // Until runtime book storage is actually available, do not imply an empty
+        // library and do not leave a blank gap. Keep the pending surface visible
+        // and retry owner discovery.
         // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
         // or successive unavailability creates an infinite chain that hangs the page.
-        if (typeof localBooksGetAll !== 'function') {
+        if (!hasLocalLibraryOwner) {
+            shellTrailPush('dashboard-library-owner-pending', { reason, retryDelayMs: 120 });
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
             return new Promise(resolve => {
                 libraryRefreshRetryTimer = setTimeout(() => {
                     libraryRefreshRetryTimer = null;
-                    try { refreshLibrary(); } catch (_) {}
+                    try { refreshLibrary('owner-retry'); } catch (_) {}
                     resolve();
                 }, 120);
             });
         }
+        const refreshSeq = ++_libraryRefreshSequence;
         let books = [];
         try { books = await localBooksGetAll(); } catch(_) { books = []; }
+        if (refreshSeq !== _libraryRefreshSequence) return;
+        shellTrailPush('dashboard-library-local-read', {
+            reason,
+            count: Array.isArray(books) ? books.length : 0,
+            firstSuccess: !_loggedFirstLocalLibraryRead
+        });
+        _loggedFirstLocalLibraryRead = true;
+        _libraryInitialResolutionComplete = true;
+        clearLibraryPendingBanner();
         const has = books.length > 0;
-        if (popEl)   popEl.classList.toggle('hidden-section', !has);
-        if (emptyEl) emptyEl.classList.toggle('hidden-section', has);
         if (!has) {
+            setLibrarySurfaceState('empty');
             try { renderSubscriptionSurface([]); } catch (_) {}
             return;
         }
@@ -1364,6 +1939,7 @@
                 <div class="w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
+        setLibrarySurfaceState('populated');
         try { renderSubscriptionSurface(books); } catch (_) {}
 
     }
@@ -1380,7 +1956,7 @@
                 if (prev.__jublyWrapped) return;
                 const wrapped = async function() {
                     const out = await prev.apply(this, arguments);
-                    try { await refreshLibrary(); } catch(_) {}
+                    try { await refreshLibrary('book-select-refresh-hook'); } catch(_) {}
                     return out;
                 };
                 wrapped.__jublyWrapped = true;
@@ -1480,8 +2056,14 @@
         const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
             ? window.rcUsage.getSnapshot()
             : { remaining: null, allowance: null, authoritative: false };
-        const remaining = Number(snapshot?.remaining);
-        valueEl.textContent = Number.isFinite(remaining) ? `${Math.max(0, remaining)} left today` : 'Usage';
+        const remaining = snapshot?.remaining != null ? Number(snapshot.remaining) : null;
+        if (Number.isFinite(remaining)) {
+            valueEl.textContent = `${Math.max(0, remaining)} left today`;
+        } else {
+            // authoritative: false means usage truth is still settling — do not
+            // show a believable number. Show neutral pending copy instead.
+            valueEl.textContent = snapshot?.authoritative === false ? 'Checking…' : 'Usage';
+        }
     }
 
     function renderProfileSurface() {
@@ -1656,9 +2238,12 @@
             setSettingsStatus('', 'success');
             const nextName = String(nameInput?.value || '').trim();
             if (!nextName) { setSettingsStatus('Username is required.', 'error'); return; }
+            const saveBtn = document.getElementById('profile-name-save-btn');
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
             const result = await (window.rcAuth && typeof window.rcAuth.updateDisplayName === 'function'
                 ? window.rcAuth.updateDisplayName(nextName)
                 : Promise.resolve({ error: { message: 'Profile editing is not available.' } }));
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
             if (result?.error) { setSettingsStatus(result.error.message || 'Unable to update username.', 'error'); return; }
             setNameEdit(false);
             syncShellAuthPresentation();
@@ -1670,15 +2255,50 @@
             e.preventDefault();
             setSettingsStatus('', 'success');
             const nextPassword = String(passwordInput?.value || '');
+            const saveBtn = document.getElementById('profile-password-save-btn');
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
             const result = await (window.rcAuth && typeof window.rcAuth.changePassword === 'function'
                 ? window.rcAuth.changePassword(nextPassword)
                 : Promise.resolve({ error: { message: 'Password changes are not available.' } }));
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Password'; }
             if (result?.error) { setSettingsStatus(result.error.message || 'Unable to change password.', 'error'); return; }
             setPasswordEdit(false);
             setSettingsStatus('Password updated.', 'success');
         });
-        document.getElementById('profile-help-chat-btn')?.addEventListener('click', async (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openChat === 'function') await window.rcHelp.openChat(); } catch (_) {} });
-        document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => { e.preventDefault(); try { if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') await window.rcHelp.openFeedback(); } catch (_) {} });
+        document.getElementById('profile-help-chat-btn')?.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const btn = e.currentTarget;
+            setInlineBusy(btn, 'Opening…');
+            try {
+                if (window.rcHelp && typeof window.rcHelp.openChat === 'function') {
+                    const ok = await window.rcHelp.openChat();
+                    if (!ok) {
+                        try { window.rcInteraction && window.rcInteraction.error('help:chat', 'Support chat couldn\'t be opened right now.'); } catch (_) {}
+                    }
+                }
+            } catch (_) {
+                try { window.rcInteraction && window.rcInteraction.error('help:chat', 'Support chat couldn\'t be opened right now.'); } catch (_) {}
+            } finally {
+                setInlineBusy(btn, null, null, false);
+            }
+        });
+        document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const btn = e.currentTarget;
+            setInlineBusy(btn, 'Opening…');
+            try {
+                if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
+                    const ok = await window.rcHelp.openFeedback();
+                    if (!ok) {
+                        try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
+                    }
+                }
+            } catch (_) {
+                try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
+            } finally {
+                setInlineBusy(btn, null, null, false);
+            }
+        });
         const tierSel = document.getElementById('tierSelect');
         if (tierSel) {
             tierSel.addEventListener('change', () => {
@@ -1698,8 +2318,8 @@
             refreshExplorerPanel();
         });
         document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} });
-        document.addEventListener('rc:durable-data-hydrated', () => { const section = getCurrentVisibleSection(); try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (section === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} } if (section === 'dashboard') { try { refreshLibrary(); } catch (_) {} } });
-        window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (getCurrentVisibleSection() === 'dashboard') { try { refreshLibrary(); } catch (_) {} } });
+        document.addEventListener('rc:durable-data-hydrated', (e) => { const section = getCurrentVisibleSection(); const kind = e && e.detail ? String(e.detail.kind || 'sync') : 'sync'; try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (section === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} } if (section === 'dashboard') { try { refreshLibrary(`durable-hydrated:${kind}`); } catch (_) {} } });
+        window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (getCurrentVisibleSection() === 'dashboard') { try { refreshLibrary('local-library-changed'); } catch (_) {} } });
         window.addEventListener('rc:deleted-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
         window.addEventListener('rc:usage-changed', () => { try { renderUsageSurface(); } catch (_) {} });
         try { switchReadingSettingsTab('general'); } catch (_) {}
@@ -1730,34 +2350,8 @@
             pagesEl.addEventListener('focusin', () => updateProgressBar());
         }
 
-        // F2: Autoplay countdown badge — polls AUTOPLAY_STATE every 300ms, shows badge on button.
-        let _countdownInterval = null;
-        function _startCountdownPoll() {
-            if (_countdownInterval) return;
-            _countdownInterval = setInterval(() => {
-                const btn = document.getElementById('shell-next-btn');
-                if (!btn) return;
-                let badge = document.getElementById('shell-countdown-badge');
-                try {
-                    if (!hasActiveReadingCards()) { if (badge) badge.remove(); return; }
-                    const countdown = (typeof getCountdownStatus === 'function') ? getCountdownStatus() : { pageIndex: -1, seconds: 0 };
-                    const idx = countdown.pageIndex;
-                    const sec = countdown.seconds;
-                    if (idx !== -1 && sec > 0) {
-                        if (!badge) {
-                            badge = document.createElement('span');
-                            badge.id = 'shell-countdown-badge';
-                            badge.style.cssText = 'margin-left:4px; font-size:0.65rem; font-weight:800; color:var(--theme-accent); background:var(--theme-accent-soft); border-radius:999px; padding:1px 6px;';
-                            btn.appendChild(badge);
-                        }
-                        badge.textContent = `Next: ${sec}…`;
-                    } else if (badge) {
-                        badge.remove();
-                    }
-                } catch(_) { if (badge) badge.remove(); }
-            }, 300);
-        }
-        _startCountdownPoll();
+        // Countdown ownership remains on the page-level Read button in tts.js.
+        // The shell next/skip button must not mirror countdown state.
 
         // F3: Page advance pulse + end-of-book detection via MutationObserver.
         let _sessionCompletePending = false;

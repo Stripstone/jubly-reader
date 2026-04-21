@@ -2,6 +2,15 @@
 // File: library.js
 // Note: This is still global-script architecture (no bundler/modules required).
 
+  function libraryTrailPush(tag, data) {
+    try {
+      if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
+      window.__rcEventTrail.push(Object.assign({ t: new Date().toISOString(), tag }, data || {}));
+      if (window.__rcEventTrail.length > 40) window.__rcEventTrail.shift();
+      if (typeof updateDiagnostics === 'function') updateDiagnostics();
+    } catch (_) {}
+  }
+
   // LOCAL LIBRARY (IndexedDB)
   // ===================================
   const LOCAL_DB_NAME = 'rc_local_library_v1';
@@ -26,7 +35,7 @@
       const bookId = String(ctx.bookId || '').trim();
       if (!bookId) return null;
       const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
-      const pageIndex = getFocusedOrInferredReadingPageIndex();
+      const pageIndex = Math.max(0, currentPageIndex);
       return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'flush') });
     } catch (_) {
       return null;
@@ -180,6 +189,19 @@
     return task;
   }
 
+  function setButtonBusy(btn, busy, busyLabel) {
+    if (!btn) return;
+    if (busy) {
+      if (!btn.dataset.idleLabel) btn.dataset.idleLabel = btn.textContent || '';
+      btn.disabled = true;
+      if (busyLabel) btn.textContent = busyLabel;
+      return;
+    }
+    btn.textContent = btn.dataset.idleLabel || btn.textContent || '';
+    delete btn.dataset.idleLabel;
+    btn.disabled = false;
+  }
+
   function waitForNextPaint(count = 2) {
     const frames = Math.max(1, Number(count) || 1);
     return new Promise((resolve) => {
@@ -272,6 +294,7 @@
   window.__rcLocalBookPut = localBookPut;
   window.__rcLocalBooksGetAll = localBooksGetAll;
   window.__rcLocalDeletedBooksGetAll = localDeletedBooksGetAll;
+  libraryTrailPush('library-owner-available', { hasLocalBooksGetAll: typeof localBooksGetAll === 'function' });
 
   const _bookPreviewCache = new Map();
 
@@ -2152,6 +2175,15 @@
             const _ctx = getReadingTargetContext();
             if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: i });
           } catch (_) {}
+          // Read Page is an explicit activation just like Bottom Play. Persist
+          // the selected page immediately so quick Exit/re-enter does not depend
+          // on TTS speaking long enough for another progress path to run.
+          try {
+            const _t = window.__rcReadingTarget || {};
+            if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
+              window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, i, { reason: 'read-page' });
+            }
+          } catch (_) {}
           ttsSpeakQueue(
             (typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${i}`,
             [text]
@@ -2630,12 +2662,14 @@
 
 This removes them from Deleted Files and frees the device storage.`);
         if (!ok) return;
+        setButtonBusy(deleteAll, true, 'Deleting…');
         try {
           await permanentlyDeleteAllLocalBooks(deleted.map((entry) => entry.id));
           emitDeletedChanged();
           await renderDeletedCount();
           renderDeleted();
         } catch (_) {
+          setButtonBusy(deleteAll, false);
           alert('Delete all failed.');
         }
       });
@@ -2666,6 +2700,7 @@ This removes them from Deleted Files and frees the device storage.`);
           restore.type = 'button';
           restore.textContent = 'Restore';
           restore.addEventListener('click', async () => {
+            setButtonBusy(restore, true, 'Restoring…');
             try {
               await restoreDeletedLocalBook(b.id);
               await refreshBookSelect();
@@ -2674,6 +2709,7 @@ This removes them from Deleted Files and frees the device storage.`);
               await renderDeletedCount();
               renderDeleted();
             } catch (_) {
+              setButtonBusy(restore, false);
               alert('Restore failed.');
             }
           });
@@ -2735,7 +2771,6 @@ function _installScrollPageTracker() {
   if (window.__rcScrollPageTrackerInstalled) return;
   window.__rcScrollPageTrackerInstalled = true;
   var raf = 0;
-  var prevIdx = -1;
   var settleTimer = 0;
 
   function reconcileVisiblePage(reason) {
@@ -2767,17 +2802,12 @@ function _installScrollPageTracker() {
         }
         if (!bestEl || !Number.isFinite(bestIdx) || bestIdx < 0) return;
         if (bestEl.getBoundingClientRect().height <= 0) return;
-        lastFocusedPageIndex = bestIdx;
-        try { currentPageIndex = bestIdx; } catch (_) {}
-        updateReadingMetricsPage(bestIdx);
-        try {
-          const _ctx = window.getReadingTargetContext();
-          if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
-        } catch (_) {}
-        if (bestIdx !== prevIdx) {
-          prevIdx = bestIdx;
-          try { queueCurrentReadingProgress(reason || 'scroll-tracker'); } catch (_) {}
+        const _pActive = (typeof window.getPlaybackStatus === 'function') && !!window.getPlaybackStatus().active;
+        const _cActive = (typeof window.getCountdownStatus === 'function') && !!window.getCountdownStatus().active;
+        if (!_pActive && !_cActive && !window.__rcReadingEntryRestoreSettling) {
+          lastFocusedPageIndex = bestIdx;
         }
+        updateReadingMetricsPage(bestIdx);
       } catch (_) {}
     });
   }
@@ -2966,13 +2996,27 @@ window.startFocusedPageTts = function startFocusedPageTts() {
     try { if (typeof ttsDiagPush === 'function') ttsDiagPush('start-focused-blocked', { reason: 'no-reading-target', pageCount: Array.isArray(pages) ? pages.length : 0 }); } catch (_) {}
     return false;
   }
-  const idx = Math.max(0, Math.min(Number((window.__rcReadingTarget || {}).pageIndex) || 0, (Array.isArray(pages) ? pages.length : 1) - 1));
+  // Bottom Play is an explicit user action. Sample the page the user is actually
+  // viewing at press time, bypassing lastFocusedPageIndex because that value is
+  // allowed to be a volatile restore/runtime hint and may intentionally lag
+  // passive scroll during re-entry settling.
+  let sampledIdx = -1;
+  try {
+    if (typeof inferCurrentPageIndex === 'function') sampledIdx = Number(inferCurrentPageIndex());
+  } catch (_) {}
+  if (!Number.isFinite(sampledIdx) || sampledIdx < 0) sampledIdx = getFocusedOrInferredReadingPageIndex();
+  const idx = Math.max(0, Math.min(Number(sampledIdx) || 0, (Array.isArray(pages) ? pages.length : 1) - 1));
   const text = (Array.isArray(pages) && pages[idx]) ? pages[idx] : '';
   if (!text) return false;
-  // Normalize clamped index back into target before deriving key.
+  // Normalize the explicitly sampled page into runtime truth before deriving key.
   if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: baseTarget.sourceType, bookId: baseTarget.bookId, chapterIndex: baseTarget.chapterIndex, pageIndex: idx });
   try { currentPageIndex = idx; } catch (_) {}
   lastFocusedPageIndex = idx;
+  try {
+    if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
+      window.rcSync.scheduleProgressSync(baseTarget.bookId || '', baseTarget.chapterIndex != null ? baseTarget.chapterIndex : -1, idx, { reason: 'bottom-play' });
+    }
+  } catch (_) {}
   try { if (window.TTS_STATE) window.TTS_STATE.playbackBlockedReason = ''; } catch (_) {}
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
   ttsSpeakQueue(
@@ -2991,13 +3035,37 @@ window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
   if (!bookId) return false;
 
+  // ── Intro hold ─────────────────────────────────────────────────────────────
+  // Activated synchronously before any await so the reading surface is covered
+  // from the very first frame. Texture and Wallpaper prepare behind it and
+  // never become the visible first phase. Released after cards are confirmed
+  // ready (after __rcLoadBook + waitForNextPaint). Message appears on the hold
+  // after 1000 ms if loading is still in progress.
+  const holdEl = document.getElementById('reading-intro-hold');
+  const holdMsgEl = document.getElementById('reading-intro-message');
+  let _holdMsgTimer = null;
+  try {
+    if (holdEl) {
+      holdEl.classList.remove('intro-hold-fading', 'intro-hold-message-visible');
+      holdEl.classList.add('intro-hold-active');
+    }
+  } catch (_) {}
+  // ───────────────────────────────────────────────────────────────────────────
+
   // MUST be synchronous — before any await — so reading mode never shows stale
-  // page content while network calls are in flight.
+  // page content while network calls are in flight. Exit/re-enter does not reload
+  // the URL, so clear the stale volatile scroll hint and suppress scroll-tracker
+  // focus writes until restore has painted, matching cold-start behavior.
+  try { lastFocusedPageIndex = -1; } catch (_) {}
+  try { window.__rcReadingEntryRestoreSettling = true; } catch (_) {}
   const pagesEl = document.getElementById('pages');
   const readingModeEl = document.getElementById('reading-mode');
   try {
     if (pagesEl) pagesEl.innerHTML = '';
-    if (readingModeEl) readingModeEl.classList.add('reading-restore-pending');
+    if (readingModeEl) {
+      readingModeEl.classList.add('reading-restore-pending');
+      readingModeEl.setAttribute('data-restore-kind', 'opening');
+    }
   } catch (_) {}
 
   // Fire-and-forget: the current reading target is safe in memory and will be
@@ -3029,13 +3097,22 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     }
   } catch (_) {}
 
-  // Compute restore truth. data-restore-kind is intentionally NOT set — with
-  // the blocking flush removed the render is near-instant, so the overlay text
-  // "Returning to your place…" would only flash for a frame. The hide/reveal
-  // is silent: pages stay invisible via reading-restore-pending until scrolled
-  // to the correct position, then fade in. No visible loading message needed.
+  // Compute restore truth. Keep a visible neutral pending surface while the
+  // runtime-owned load/restore path is unresolved so cold entry never presents
+  // a blank reading view. Returning restores get a more specific label.
   const hasRestore = !!(restore && Number.isFinite(Number(restore.pageIndex)) && Number(restore.pageIndex) > 0);
-  try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
+  try {
+    if (readingModeEl) readingModeEl.setAttribute('data-restore-kind', hasRestore ? 'returning' : 'opening');
+  } catch (_) {}
+
+  // Start the 1000 ms message timer now that we know if this is a fresh open or
+  // a return. If cards are ready before 1000 ms the timer is cleared and the
+  // message never appears. If not, the message fades in on the existing hold.
+  try {
+    const msgText = hasRestore ? 'Returning to your place\u2026' : 'Preparing reading view\u2026';
+    if (holdMsgEl) holdMsgEl.textContent = msgText;
+    if (holdEl) _holdMsgTimer = setTimeout(() => holdEl.classList.add('intro-hold-message-visible'), 1000);
+  } catch (_) {}
 
   // Await the runtime-owned book load path. This resolves only after render()
   // and applyPendingReadingRestore() have both completed, so #pages is already
@@ -3044,9 +3121,27 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     try { await window.__rcLoadBook(normalizedId, { restore }); } catch (_) {}
   }
   try { await waitForNextPaint(2); } catch (_) {}
+  try { window.__rcReadingEntryRestoreSettling = false; } catch (_) {}
 
-  // Remove pending state and clean up the restore-kind attribute.
-  // The opacity transition on #pages produces a smooth fade-in from this point.
+  // Cards are rendered and painted. Clear the message timer (fast load — message
+  // never needed), then release the hold and the page guard simultaneously so
+  // the reading surface and the hold cross-fade in a single motion.
+  if (_holdMsgTimer) { clearTimeout(_holdMsgTimer); _holdMsgTimer = null; }
+
+  // Fade out the hold. JS removes the active classes once the transition ends
+  // (with a 400 ms hard fallback in case transitionend does not fire).
+  try {
+    if (holdEl) {
+      holdEl.classList.remove('intro-hold-message-visible');
+      holdEl.classList.add('intro-hold-fading');
+      const releaseHold = () => holdEl.classList.remove('intro-hold-active', 'intro-hold-fading');
+      holdEl.addEventListener('transitionend', releaseHold, { once: true });
+      setTimeout(releaseHold, 400);
+    }
+  } catch (_) {}
+
+  // Remove restore-pending — triggers the #pages opacity fade-in (0.14 s),
+  // which runs simultaneously with the hold fade-out above.
   try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
   try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
   try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}

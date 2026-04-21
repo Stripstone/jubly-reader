@@ -56,7 +56,22 @@ Canonical pre-launch durable schema and the replacement procedure.
 
 Use this for table roles, durable ownership, replacement sequencing, and post-reset validation.
 
-## Non-authority companion artifacts
+## Maintained framework companions
+
+### Pending-surfaces framework
+- `pending-surfaces.md`
+
+This is the maintained runtime-experience framework companion to `02_RUNTIME_CONTRACT.md` and `05_PRODUCT_LAUNCH_AND_INTEGRATION.md`.
+Treat it as required project framework for any pass that touches user-visible pending, loading, hydration, re-auth, restore, usage, entitlement, or other server-backed shell/value surfaces.
+It does not override the main authority stack, but it must remain aligned with it and updated when those surfaces change.
+
+### SQL companion
+- `app_tables_canonical.sql`
+
+This is the canonical SQL companion to `06_SUPABASE_SCHEMA_REFERENCE.md`.
+Treat the SQL and schema reference as a pair.
+
+## Informational companion artifacts
 
 ### Operational reference
 - `ops/ENVIRONMENT_VARIABLES_REFERENCE.md`
@@ -68,12 +83,6 @@ This is useful during setup, but it is not a project truth document.
 
 This remains an audit note only.
 It does not override the active authority stack unless its findings are deliberately promoted into the docs above.
-
-### SQL companion
-- `app_tables_canonical.sql`
-
-This is the canonical SQL companion to `06_SUPABASE_SCHEMA_REFERENCE.md`.
-Treat the SQL and schema reference as a pair.
 
 ## Reduction map
 The previous stack was reduced as follows:
@@ -115,14 +124,16 @@ The previous stack was reduced as follows:
 - Update `03_ARCHITECTURE_AND_GUARDRAILS.md` when ownership or scaffold rules change.
 - Update `04_IMPLEMENTATION_WORKFLOW.md` when the default implementation loop changes.
 - Update `05_PRODUCT_LAUNCH_AND_INTEGRATION.md` when product flow, launch gate, or protection policy changes.
+- Update `pending-surfaces.md` when pending, loading, hydration, restore, re-auth, account, billing, usage, or other server-backed shell/value surfaces change. Keep it aligned with `02_RUNTIME_CONTRACT.md` and `05_PRODUCT_LAUNCH_AND_INTEGRATION.md`.
 - Update `06_SUPABASE_SCHEMA_REFERENCE.md` and `app_tables_canonical.sql` together when durable schema changes.
 
 ## Audit and implementation gate order
 1. verify the current scaffold and artifact base
 2. identify the owner layer and forbidden authority surfaces
 3. reject structural breaches before judging runtime comfort
-4. confirm runtime behavior in served testing
-5. decide whether the next move is proof, a bounded patch, or diff-driven cleanup
+4. for passes touching server-backed or hydration-backed user surfaces, verify `pending-surfaces.md` is still aligned
+5. confirm runtime behavior in served testing
+6. decide whether the next move is proof, a bounded patch, or diff-driven cleanup
 
 Do not send broad implementation work based only on code suspicion.
 Do not treat runtime comfort as permission to ignore architectural non-compliance.

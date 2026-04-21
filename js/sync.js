@@ -38,12 +38,23 @@ window.rcSync = (function () {
   let _remoteProfileMetrics = null;
   let _remoteUsageSummary = null;
   let _remoteEntitlement = null;
+  const _cachedSnapshotApplyCount = Object.create(null);
   let _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false, usage: false };
   let _lastSyncSnapshotAt = null;
   let _syncDiagnostics = { users: null, settings: null, progress: null, sessions: null, restore: null, snapshot: null };
+  const RC_EVENT_TRAIL_MAX = 40;
+  if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
+  function _pushEvent(tag, data) {
+    const entry = { t: new Date().toISOString(), tag, ...data };
+    window.__rcEventTrail.push(entry);
+    if (window.__rcEventTrail.length > RC_EVENT_TRAIL_MAX) window.__rcEventTrail.shift();
+    try { if (typeof window.updateDiagnostics === 'function') window.updateDiagnostics(); } catch (_) {}
+  }
   let _requestSeq = 0;
   let _appliedSeq = 0;
   let _applyingRemoteSettings = false;
+  let _pendingRuntimePolicyProjection = null;
+  let _pendingRuntimePolicyFlushTimer = null;
 
   // Dirty settings: field-level record of user mutations not yet confirmed by the server.
   // Persisted to localStorage so uncommitted changes survive page refresh.
@@ -117,13 +128,143 @@ window.rcSync = (function () {
   }
 
   function _emitHydrated(kind) {
-    try { document.dispatchEvent(new CustomEvent('rc:durable-data-hydrated', { detail: { kind: String(kind || 'sync') } })); } catch (_) {}
+    const hydratedKind = String(kind || 'sync');
+    _pushEvent('durable-data-hydrated', { kind: hydratedKind });
+    try { document.dispatchEvent(new CustomEvent('rc:durable-data-hydrated', { detail: { kind: hydratedKind } })); } catch (_) {}
   }
 
   function _recordSync(kind, status, detail = {}) {
     _syncDiagnostics[kind] = Object.assign({ status: String(status || 'idle'), at: new Date().toISOString() }, detail || {});
     try { if (typeof window.updateDiagnostics === 'function') window.updateDiagnostics(); } catch (_) {}
     return _syncDiagnostics[kind];
+  }
+
+  document.addEventListener('rc:runtime-policy-changed', () => { try { _flushPendingRuntimePolicyProjection('runtime-policy-changed'); } catch (_) {} });
+  try { window.addEventListener('load', () => { try { _flushPendingRuntimePolicyProjection('window-load'); } catch (_) {} }); } catch (_) {}
+
+  function _normalizeUsageValue(value) {
+    if (value == null || value === '') return null;
+    const num = Number(value);
+    return Number.isFinite(num) ? Math.max(0, num) : null;
+  }
+
+  function _composeResolvedUsageSummary(local, remote) {
+    const localRemaining = _normalizeUsageValue(local?.remaining);
+    const localAllowance = _normalizeUsageValue(local?.allowance != null ? local.allowance : local?.limit);
+    const remoteRemaining = _normalizeUsageValue(remote?.remaining);
+    const remoteAllowance = _normalizeUsageValue(remote?.allowance != null ? remote.allowance : remote?.limit);
+
+    const localHasValue = localRemaining != null || localAllowance != null;
+    const remoteHasValue = remoteRemaining != null || remoteAllowance != null;
+    const localAuthoritative = !!(local?.authoritative && localHasValue);
+    const remoteAuthoritative = !!(remote?.authoritative && remoteHasValue);
+
+    let primary = null;
+    let source = null;
+    if (localAuthoritative) {
+      primary = local;
+      source = local?.source || 'local-authoritative';
+    } else if (remoteAuthoritative) {
+      primary = remote;
+      source = remote?.source || 'remote-authoritative';
+    } else if (localHasValue) {
+      primary = local;
+      source = local?.source || 'local-projected';
+    } else if (remoteHasValue) {
+      primary = remote;
+      source = remote?.source || 'remote-projected';
+    }
+
+    const primaryRemaining = _normalizeUsageValue(primary?.remaining);
+    const primaryAllowance = _normalizeUsageValue(primary?.allowance != null ? primary.allowance : primary?.limit);
+    return {
+      remaining: primaryRemaining,
+      allowance: primaryAllowance,
+      authoritative: !!((localAuthoritative || remoteAuthoritative) && (primaryRemaining != null || primaryAllowance != null)),
+      source,
+      local,
+      remote,
+    };
+  }
+
+  function _getResolvedUsageSummary() {
+    let local = null;
+    try {
+      local = window.rcUsage && typeof window.rcUsage.getSnapshot === 'function' ? window.rcUsage.getSnapshot() : null;
+    } catch (_) {
+      local = null;
+    }
+    return _composeResolvedUsageSummary(local, _remoteUsageSummary);
+  }
+
+  function _applyRuntimePolicyProjection(policy, options = {}) {
+    if (!policy || typeof policy !== 'object') return false;
+    try {
+      if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
+        window.rcPolicy.apply(policy, null, { transient: !!options.fromCache, resolved: true });
+        _pushEvent('policy-projected', {
+          tier: String(policy.tier || ''),
+          fromCache: !!options.fromCache,
+          explorer: !!(policy.features?.themes?.explorer),
+          replayed: !!options.replayed,
+          replayReason: String(options.replayReason || ''),
+        });
+        _recordSync('snapshot', options.fromCache ? 'cache-policy-projected' : 'policy-projected', {
+          policyTier: String(policy.tier || ''),
+          source: options.fromCache ? 'server-cache' : 'server-sync',
+          replayed: !!options.replayed,
+        });
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function _schedulePendingRuntimePolicyFlush() {
+    if (_pendingRuntimePolicyFlushTimer || !_pendingRuntimePolicyProjection) return;
+    _pendingRuntimePolicyFlushTimer = setTimeout(() => {
+      _pendingRuntimePolicyFlushTimer = null;
+      _flushPendingRuntimePolicyProjection('owner-ready-retry');
+    }, 50);
+  }
+
+  function _stageRuntimePolicyProjection(policy, options = {}) {
+    if (!policy || typeof policy !== 'object') return false;
+    _pendingRuntimePolicyProjection = {
+      policy,
+      options: {
+        fromCache: !!options.fromCache,
+      },
+    };
+    _pushEvent('policy-projection-staged', {
+      tier: String(policy.tier || ''),
+      fromCache: !!options.fromCache,
+      explorer: !!(policy.features?.themes?.explorer),
+    });
+    _recordSync('snapshot', options.fromCache ? 'cache-policy-staged' : 'policy-staged', {
+      policyTier: String(policy.tier || ''),
+      source: options.fromCache ? 'server-cache' : 'server-sync',
+    });
+    _schedulePendingRuntimePolicyFlush();
+    return true;
+  }
+
+  function _flushPendingRuntimePolicyProjection(reason = 'owner-ready') {
+    if (!_pendingRuntimePolicyProjection) return false;
+    if (!(window.rcPolicy && typeof window.rcPolicy.apply === 'function')) {
+      _schedulePendingRuntimePolicyFlush();
+      return false;
+    }
+    const pending = _pendingRuntimePolicyProjection;
+    _pendingRuntimePolicyProjection = null;
+    if (_pendingRuntimePolicyFlushTimer) {
+      clearTimeout(_pendingRuntimePolicyFlushTimer);
+      _pendingRuntimePolicyFlushTimer = null;
+    }
+    return _applyRuntimePolicyProjection(pending.policy, Object.assign({}, pending.options, {
+      replayed: true,
+      replayReason: reason,
+    }));
   }
 
   function _cacheKey(userId) {
@@ -203,11 +344,14 @@ window.rcSync = (function () {
     const selectedVoice = (() => {
       try { return String(window.__rcSessionVoiceSelection || '').trim(); } catch (_) { return ''; }
     })();
+    const _isCloudVoice = /^(cloud:|azure:|polly:)/i.test(selectedVoice);
+    const _cloudAllowed = !!(window.rcPolicy && typeof window.rcPolicy.get === 'function' && window.rcPolicy.get()?.features?.cloudVoices);
+    const safeVoiceId = (_isCloudVoice && !_cloudAllowed) ? null : (selectedVoice || null);
 
     const row = {
       theme_id: String(theme.theme_id || 'default'),
       font_id: themeSettings.font ? String(themeSettings.font) : null,
-      tts_voice_id: selectedVoice || null,
+      tts_voice_id: safeVoiceId,
       tts_volume: voiceVolumeEl && voiceVolumeEl.value !== '' ? Number(voiceVolumeEl.value) : null,
       autoplay_enabled: autoplayToggle ? !!autoplayToggle.checked : null,
       music_enabled: typeof themeSettings.music === 'string' ? themeSettings.music !== 'off' : (_remoteSettingsRow && typeof _remoteSettingsRow.music_enabled === 'boolean' ? !!_remoteSettingsRow.music_enabled : true),
@@ -286,14 +430,19 @@ window.rcSync = (function () {
 
 
       if (row.tts_voice_id) {
-        try { window.__rcSessionVoiceSelection = String(row.tts_voice_id); } catch (_) {}
-        const female = document.getElementById('voiceFemaleSelect');
-        const male = document.getElementById('voiceMaleSelect');
-        [female, male].forEach((select) => {
-          if (!select) return;
-          const exists = Array.from(select.options || []).some((opt) => String(opt.value) === String(row.tts_voice_id));
-          if (exists) select.value = String(row.tts_voice_id);
-        });
+        const _voiceId = String(row.tts_voice_id).trim();
+        const _isCloudId = /^(cloud:|azure:|polly:)/i.test(_voiceId);
+        const _cloudAllowed = !!(window.rcPolicy && typeof window.rcPolicy.get === 'function' && window.rcPolicy.get()?.features?.cloudVoices);
+        if (_voiceId && (!_isCloudId || _cloudAllowed)) {
+          try { window.__rcSessionVoiceSelection = _voiceId; } catch (_) {}
+          const female = document.getElementById('voiceFemaleSelect');
+          const male = document.getElementById('voiceMaleSelect');
+          [female, male].forEach((select) => {
+            if (!select) return;
+            const exists = Array.from(select.options || []).some((opt) => String(opt.value) === _voiceId);
+            if (exists) select.value = _voiceId;
+          });
+        }
       }
 
       if (row.tts_volume != null) {
@@ -305,9 +454,13 @@ window.rcSync = (function () {
       }
 
       if (typeof row.autoplay_enabled === 'boolean') {
-        const autoplayToggle = document.getElementById('autoplayToggle');
-        if (autoplayToggle) autoplayToggle.checked = !!row.autoplay_enabled;
-        try { localStorage.setItem('rc_autoplay', row.autoplay_enabled ? '1' : '0'); } catch (_) {}
+        if (window.applyAutoplayRuntimePreference && typeof window.applyAutoplayRuntimePreference === 'function') {
+          try { window.applyAutoplayRuntimePreference(!!row.autoplay_enabled, { source: 'durable-settings-sync' }); } catch (_) {}
+        } else {
+          const autoplayToggle = document.getElementById('autoplayToggle');
+          if (autoplayToggle) autoplayToggle.checked = !!row.autoplay_enabled;
+          try { localStorage.setItem('rc_autoplay', row.autoplay_enabled ? '1' : '0'); } catch (_) {}
+        }
       }
     } finally {
       _applyingRemoteSettings = false;
@@ -338,6 +491,15 @@ window.rcSync = (function () {
     // _confirmedSettingsRow is the baseline for dirty-field diffing and is never
     // overwritten by optimistic projection — only by actual server ACKs.
     if (!options.fromCache && _remoteSettingsRow) _confirmedSettingsRow = _remoteSettingsRow;
+    // Theme access can be policy-gated (Explorer). Apply the last-confirmed or
+    // fresh server runtime policy projection before reloading persisted theme
+    // settings so hydration does not downgrade a valid saved theme back to default
+    // simply because the runtime policy has not been projected yet.
+    if (snap.runtimePolicy && typeof snap.runtimePolicy === 'object') {
+      if (!_applyRuntimePolicyProjection(snap.runtimePolicy, options)) {
+        _stageRuntimePolicyProjection(snap.runtimePolicy, options);
+      }
+    }
     if (_remoteSettingsRow) _applyRemoteSettingsRow(_remoteSettingsRow);
     else _deriveRemoteProfileMetrics();
     // Replay any dirty user mutations on top of the server-confirmed settings so
@@ -354,20 +516,10 @@ window.rcSync = (function () {
         });
       }
     } catch (_) {}
-    // Apply server-resolved runtime policy from snapshot.
-    // buildSnapshot() on the server already resolves the correct policy for this user.
-    // Applying it here keeps tier/entitlement state current after every durable sync —
-    // not only on auth events (which refresh policy via billing.js separately).
-    // Guard: skip cached snapshots to avoid applying a potentially stale tier from storage.
-    // The rc:runtime-policy-changed event dispatched by applyResolvedRuntimePolicy()
-    // triggers shell UI updates (tier pill, explorer gating, etc.) automatically.
-    if (!options.fromCache && snap.runtimePolicy && typeof snap.runtimePolicy === 'object') {
-      try {
-        if (window.rcPolicy && typeof window.rcPolicy.apply === 'function') {
-          window.rcPolicy.apply(snap.runtimePolicy);
-        }
-      } catch (_) {}
-    }
+    // runtimePolicy was already projected before settings hydration above so
+    // policy-gated persisted settings (like Explorer theme) reload against the
+    // same truth surface that produced the snapshot. The next fresh server snapshot
+    // still wins if a cached projection was stale.
     // Persist as last-confirmed display projection (not restore authority).
     try {
       const u = _user();
@@ -380,6 +532,9 @@ window.rcSync = (function () {
   // This is a projection ONLY — it paints the UI without blocking on the server.
   // It must NOT be used as a restore position source.
   function _applyCachedSnapshotForUser(userId) {
+    const key = String(userId || 'unknown');
+    _cachedSnapshotApplyCount[key] = (_cachedSnapshotApplyCount[key] || 0) + 1;
+    _pushEvent('durable-cache-apply', { count: _cachedSnapshotApplyCount[key], hasUserId: !!userId });
     const cached = _readDurableCache(userId);
     if (!cached || !cached.snapshot) return false;
     const applied = _applySnapshot(cached.snapshot, { seq: 0, persist: false, fromCache: true });
@@ -473,6 +628,7 @@ window.rcSync = (function () {
     // Payload: full collected row merged with dirty values (dirty wins).
     // This sends authoritative user intent rather than blindly resending cached values.
     const payload = Object.assign(_collectSettingsRow(), dirtyValues);
+    _pushEvent('settings-sync-start', { theme_id: payload.theme_id, dirtyKeys: [...syncingKeys] });
     _projectCurrentSettingsLocal();
     _recordSync('settings', 'pending', { payload, dirtyFields: [...syncingKeys] });
     try {
@@ -483,11 +639,21 @@ window.rcSync = (function () {
       if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
       // Update confirmed baseline to whatever the server just settled.
       if (_remoteSettingsRow) _confirmedSettingsRow = _remoteSettingsRow;
+      _pushEvent('settings-sync-ok', { theme_id: _remoteSettingsRow?.theme_id });
       _recordSync('settings', 'success', { row: data && data.row ? data.row : null, snapshotAt: _lastSyncSnapshotAt });
+      try { window.rcInteraction && window.rcInteraction.clear('settings:sync'); } catch (_) {}
       _emitHydrated('settings');
       return data && data.row ? data.row : null;
     } catch (error) {
       _recordSync('settings', 'error', { message: String(error?.message || error || 'settings sync failed') });
+      try {
+        if (window.rcInteraction && syncingKeys.size > 0) {
+          const actions = window.rcInteraction.actions
+            ? [window.rcInteraction.actions.retry(() => { try { syncSettings().catch(() => {}); } catch (_) {} })]
+            : [];
+          window.rcInteraction.error('settings:sync', 'Your changes weren\'t saved yet.', { actions });
+        }
+      } catch (_) {}
       // Do NOT snap back. The dirty set preserves user intent and will be retried.
       // Snapping back on transient server errors (503, network timeout) violates the
       // runtime contract: "no setting that changes and then snaps back for no reason."
@@ -725,6 +891,7 @@ window.rcSync = (function () {
             dailyStatsRows: _remoteDailyStatsRows,
             sessions: { rows: _remoteSessions, latest: _remoteSessions[0] || null, totalSessions: (_remoteSessions || []).length },
             usage: _remoteUsageSummary,
+      resolvedUsage: _getResolvedUsageSummary(),
             entitlement: _remoteEntitlement,
           });
         }
@@ -834,6 +1001,7 @@ window.rcSync = (function () {
         window.rcUsage.applySnapshot({ remaining: null, limit: null, authoritative: false, source: 'signout' });
       }
     } catch (_) {}
+    try { window.__rcSessionVoiceSelection = ''; } catch (_) {}
   }
 
   async function rehydrateDurableData() {
@@ -858,6 +1026,7 @@ window.rcSync = (function () {
   // ── Event handlers ────────────────────────────────────────────────────────
   function _handleAuthChanged(e) {
     const { signedIn, source } = e.detail || {};
+    _pushEvent('auth-changed', { signedIn: !!signedIn, source: source || 'unknown' });
     if (signedIn && source !== 'init-unconfigured' && source !== 'init-client-error') {
       const u = _user();
       _hydrationState = { inFlight: true, users: false, settings: false, progress: false, sessions: false, usage: false };
@@ -875,7 +1044,11 @@ window.rcSync = (function () {
     if (_applyingRemoteSettings) return;
     // Record dirty fields before projecting — diff against confirmed server truth,
     // not the projected row (_remoteSettingsRow would include previous projections).
-    try { _recordDirtyFields(_collectSettingsRow()); } catch (_) {}
+    try {
+      const collected = _collectSettingsRow();
+      _pushEvent('prefs-changed', { theme_id: collected.theme_id, applyingRemote: false });
+      _recordDirtyFields(collected);
+    } catch (_) {}
     _projectCurrentSettingsLocal();
     _queueSettingsSync();
   }
@@ -908,6 +1081,7 @@ window.rcSync = (function () {
     rehydrateDurableData,
     getRemoteUsersRow: () => _remoteUsersRow,
     getRemoteUsageSummary: () => _remoteUsageSummary,
+    getResolvedUsageSummary: () => _getResolvedUsageSummary(),
     getHydrationState: () => ({ ..._hydrationState }),
     getDiagnosticsSnapshot: () => ({
       sync: { ..._syncDiagnostics },
@@ -916,11 +1090,13 @@ window.rcSync = (function () {
       usersRow: _remoteUsersRow,
       settingsRow: _remoteSettingsRow,
       usage: _remoteUsageSummary,
+      resolvedUsage: _getResolvedUsageSummary(),
       libraryItemCount: (_remoteLibraryItems || []).length,
       progressCount: (_remoteProgressRows || []).length,
       bookMetricsCount: (_remoteBookMetricsRows || []).length,
       dailyStatCount: (_remoteDailyStatsRows || []).length,
       sessionCount: (_remoteSessions || []).length,
+      eventTrail: Array.isArray(window.__rcEventTrail) ? window.__rcEventTrail.slice() : [],
     }),
     deleteLibraryItem: async (bookId, options = {}) => {
       if (!_ready()) return null;

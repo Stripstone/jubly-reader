@@ -21,6 +21,7 @@ end;
 $$;
 
 drop table if exists public.user_sessions cascade;
+drop table if exists public.user_trial_claims cascade;
 drop table if exists public.user_usage cascade;
 drop table if exists public.user_entitlements cascade;
 drop table if exists public.user_daily_stats cascade;
@@ -170,10 +171,9 @@ for each row execute function public.set_updated_at();
 
 create table public.user_entitlements (
   user_id uuid primary key references public.users(id) on delete cascade,
-  provider text not null default 'manual',
-  plan_id text not null default 'free',
-  tier text not null default 'free' check (tier in ('free', 'paid', 'premium')),
-  status text not null default 'inactive',
+  provider text not null default 'system' check (provider in ('system', 'stripe')),
+  tier text not null default 'basic' check (tier in ('basic', 'pro', 'premium')),
+  status text not null default 'active' check (status in ('active', 'trialing', 'past_due', 'inactive')),
   stripe_customer_id text,
   stripe_subscription_id text,
   period_start timestamptz,
@@ -187,6 +187,34 @@ create index idx_user_entitlements_tier_status
 
 create trigger trg_user_entitlements_set_updated_at
 before update on public.user_entitlements
+for each row execute function public.set_updated_at();
+
+create table public.user_trial_claims (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  tier text not null check (tier in ('pro', 'premium')),
+  ip_fingerprint_hash text not null,
+  claim_status text not null default 'granted' check (claim_status in ('granted', 'blocked', 'expired')),
+  claimed_at timestamptz not null default now(),
+  expires_at timestamptz,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, tier),
+  unique (tier, ip_fingerprint_hash)
+);
+
+create index idx_user_trial_claims_user_tier
+  on public.user_trial_claims (user_id, tier);
+
+create index idx_user_trial_claims_tier_ip
+  on public.user_trial_claims (tier, ip_fingerprint_hash);
+
+create index idx_user_trial_claims_claimed_at_desc
+  on public.user_trial_claims (claimed_at desc);
+
+create trigger trg_user_trial_claims_set_updated_at
+before update on public.user_trial_claims
 for each row execute function public.set_updated_at();
 
 create table public.user_usage (
@@ -216,6 +244,7 @@ alter table public.user_book_metrics enable row level security;
 alter table public.user_daily_stats enable row level security;
 alter table public.user_entitlements enable row level security;
 alter table public.user_usage enable row level security;
+alter table public.user_trial_claims enable row level security;
 
 create policy users_select_own
   on public.users for select to authenticated using (auth.uid() = id);
@@ -249,6 +278,7 @@ revoke all on table public.user_book_metrics from anon, authenticated;
 revoke all on table public.user_daily_stats from anon, authenticated;
 revoke all on table public.user_entitlements from anon, authenticated;
 revoke all on table public.user_usage from anon, authenticated;
+revoke all on table public.user_trial_claims from anon, authenticated;
 
 grant select on table public.users to authenticated;
 grant select on table public.user_settings to authenticated;

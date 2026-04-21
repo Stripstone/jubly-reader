@@ -1,3 +1,56 @@
+/* ── Early boot scrim / pre-runtime appearance settle ─────────────────────── */
+html, body { min-height: 100%; }
+html.app-light,
+html.app-light body { background: #ffffff; color: #1e293b; }
+html.app-dark,
+html.app-dark body { background: #0f172a; color: #e2e8f0; }
+body.boot-pending > :not(#boot-scrim) { visibility: hidden !important; }
+#boot-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  opacity: 1;
+  transition: opacity 0.16s ease;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 16px 28px;
+  box-sizing: border-box;
+}
+#boot-scrim-copy {
+  max-width: 420px;
+  width: min(100%, 420px);
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+  color: #475569;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: center;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+#boot-scrim-copy.boot-scrim-copy--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+html.app-dark #boot-scrim {
+  background: radial-gradient(circle at top, #1e293b 0%, #0f172a 68%);
+}
+html.app-dark #boot-scrim-copy {
+  background: rgba(15, 23, 42, 0.78);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.16);
+  box-shadow: 0 18px 44px rgba(2, 6, 23, 0.36);
+}
+body:not(.boot-pending) #boot-scrim { opacity: 0; }
+
 /*
          * ── COLOR SYSTEM ────────────────────────────────────────────────────────
          *
@@ -104,6 +157,15 @@
         body.app-dark #shell-speed:hover,
         body.app-dark .reading-top-settings-btn:hover,
         body.app-dark .reading-top-exit:hover { background: #1e293b; border-color: #475569; color: #f8fafc; }
+        body.app-dark .rs-header { background:#111827; border-color:#1f2937; }
+        body.app-dark #devToolsPanel,
+        body.app-dark #diagPanel { color: #1e293b; }
+        body.app-dark #devToolsPanel input,
+        body.app-dark #devToolsPanel select,
+        body.app-dark #devToolsPanel textarea,
+        body.app-dark #diagPanel textarea { background: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; }
+        body.app-dark #devToolsPanel button,
+        body.app-dark #diagPanel button { color: #1e293b; }
 
         /* Utility classes for consistent brand/theme color usage */
         .text-brand      { color: var(--jubly-purple); }
@@ -728,7 +790,8 @@
   display: none;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) max(1rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+  overflow: auto;
   background: rgba(15, 23, 42, 0.46);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -743,20 +806,22 @@
 .reading-settings-card {
   width: min(560px, calc(100vw - 2rem));
   max-width: 100%;
-  max-height: min(88vh, 820px);
-  overflow-y: auto;
+  max-height: min(88dvh, 820px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border-radius: 20px;
 }
 
-.rs-header { display:flex; align-items:center; justify-content:space-between; padding:18px 20px 12px; border-bottom:1px solid #eef2f7; }
+.rs-header { display:flex; align-items:center; justify-content:space-between; flex:0 0 auto; padding:18px 20px 12px; border-bottom:1px solid #eef2f7; background:rgba(255,255,255,0.96); z-index:2; }
 .rs-title { font-size:0.72rem; font-weight:900; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8; }
 .rs-close-btn { background:#f1f5f9; border:none; border-radius:10px; width:30px; height:30px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#64748b; font-size:0.92rem; transition:background 0.15s, color 0.15s; }
 .rs-close-btn:hover { background:#e2e8f0; color:#334155; }
-.rs-tab-strip { display:flex; flex-direction:column; gap:6px; padding:14px 20px 0; }
+.rs-tab-strip { display:flex; flex:0 0 auto; flex-direction:column; gap:6px; padding:14px 20px 0; }
 .rs-tab { border:1px solid #e2e8f0; background:#fff; color:#64748b; border-radius:12px; padding:10px 14px; text-align:left; font-size:0.82rem; font-weight:800; cursor:pointer; transition:border-color 0.15s, background 0.15s, color 0.15s; }
 .rs-tab:hover { border-color:#cbd5e1; background:#f8fafc; }
 .rs-tab.active { border-color:rgba(99,68,245,0.22); background:var(--theme-accent-soft); color:var(--theme-accent); }
-.rs-panel { padding:18px 20px 20px; }
+.rs-panel { flex:1 1 auto; min-height:0; padding:18px 20px 20px; overflow-y:auto; }
 .rs-simple-row, .settings-mode-row, .explorer-panel-row { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .rs-simple-row { padding:8px 0 0; }
 .settings-mode-row { margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid #f1f5f9; }
@@ -816,10 +881,10 @@
 @media (min-width: 760px) {
   .reading-settings-card {
     width: min(760px, calc(100vw - 2rem));
-    min-height: clamp(500px, 72vh, 600px);
+    min-height: clamp(500px, 72dvh, 600px);
     display: grid;
     grid-template-columns: 188px minmax(0, 1fr);
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
     overflow: hidden;
   }
   .rs-header { grid-column: 1 / -1; }
@@ -837,6 +902,22 @@
     padding: 22px 24px 24px;
     overflow-y: auto;
   }
+}
+
+@media (max-height: 560px) and (orientation: landscape) {
+  .reading-settings-modal {
+    align-items: stretch;
+    padding: max(8px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+  }
+  .reading-settings-card {
+    width: min(760px, calc(100vw - 20px));
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    min-height: 0;
+  }
+  .rs-header { padding: 10px 14px 8px; }
+  .rs-tab-strip { padding: 10px 14px 0; gap: 5px; }
+  .rs-tab { padding: 8px 10px; font-size: 0.76rem; }
+  .rs-panel { padding: 12px 14px 14px; }
 }
 
 @media (max-width: 640px) {
@@ -990,6 +1071,54 @@
   }
 }
 
+
+
+/* ── Intro-library CTA sizing and balance ─────────────────── */
+#library-public-sample .section-card > div > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 12px;
+}
+
+#library-public-sample .section-card > div > div:last-child > button {
+  flex: 0 0 10rem;
+  width: 10rem;
+  min-width: 10rem;
+  min-height: 4.375rem;
+  padding: 0.75rem 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.2;
+  white-space: normal;
+}
+
+#library-public-sample .section-card > div > div:last-child > button:last-child {
+  border-color: #c7d2fe;
+  color: #4338ca;
+  background: #ffffff;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+#library-public-sample .section-card > div > div:last-child > button:last-child:hover {
+  background: #eef2ff;
+}
+
+@media (max-width: 640px) {
+  #library-public-sample .section-card > div > div:last-child {
+    flex-direction: column;
+  }
+
+  #library-public-sample .section-card > div > div:last-child > button {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 3.5rem;
+  }
+}
+
 /* ── Library/import surface cleanup ─────────────────────────── */
 .library-toolbar {
   margin-left: auto;
@@ -1055,6 +1184,134 @@
 #dashboard-subtitle {
   min-height: 1.4em;
   display: block;
+}
+
+#dashboard[data-library-state="pending"] #library-toolbar {
+  opacity: 1;
+}
+
+.library-pending-card {
+  border: 1px solid #e2e8f0;
+  padding: 22px 24px;
+}
+
+.library-pending-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.library-pending-label {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.library-pending-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.library-pending-copy {
+  margin: 8px 0 0;
+  max-width: 40rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: #64748b;
+}
+
+.library-pending-list {
+  margin-top: 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.library-pending-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 92px 108px;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.library-pending-row:last-child {
+  border-bottom: 0;
+}
+
+.library-pending-icon,
+.library-pending-line,
+.library-pending-pill,
+.library-pending-time {
+  display: block;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f8fafc 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: libraryPendingPulse 1.4s ease-in-out infinite;
+}
+
+.library-pending-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+}
+
+.library-pending-lines {
+  min-width: 0;
+}
+
+.library-pending-line {
+  border-radius: 999px;
+}
+
+.library-pending-line-title {
+  width: min(280px, 72%);
+  height: 13px;
+}
+
+.library-pending-line-meta {
+  width: min(180px, 48%);
+  height: 10px;
+  margin-top: 10px;
+}
+
+.library-pending-pill {
+  width: 74px;
+  height: 24px;
+  border-radius: 999px;
+}
+
+.library-pending-time {
+  width: 88px;
+  height: 12px;
+  border-radius: 999px;
+}
+
+@keyframes libraryPendingPulse {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@media (max-width: 760px) {
+  .library-pending-card {
+    padding: 18px;
+  }
+
+  .library-pending-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .library-pending-pill,
+  .library-pending-time {
+    display: none;
+  }
 }
 
 /* Auth hydration gate: avoid flashing signed-out landing/profile truth before
@@ -1265,7 +1522,64 @@ body.auth-hydrating #profile-page {
   }
 }
 
-/* Restore-pending overlay: hide pages until restore position is known and applied */
+/* =============================================================================
+   READING INTRO HOLD
+   Universal cover shown at the start of every reading session, for all themes
+   (Basic/Default and all Explorer variants — Plain, Texture, Wallpaper).
+   Uses only var(--rm-page-bg) — the Plain/Default base color for the active
+   theme. Texture and Wallpaper load behind it and never become the first phase.
+
+   Owned by: startReadingFromPreview() in js/library.js
+   Sits at z-index 20 — above reading content, below the fixed bars (z-index 30).
+   Does NOT use ::before or ::after. Does NOT compete with themeExplorer.css.
+
+   States (JS-driven class toggles on #reading-intro-hold):
+     .intro-hold-active         — hold is visible, covering the reading surface
+     .intro-hold-active
+     + .intro-hold-message-visible — message shown after 1000 ms if still loading
+     .intro-hold-fading         — opacity transitions to 0, then classes removed
+   ============================================================================= */
+#reading-intro-hold {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: #1f2329;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+#reading-intro-hold.intro-hold-active {
+  display: flex;
+}
+
+#reading-intro-hold.intro-hold-fading {
+  opacity: 0;
+}
+
+/* Message — appears on the hold after 1000 ms via JS if cards aren't ready yet.
+   Uses the same neutral text style as the former ::after message it replaces. */
+.reading-intro-message {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.68);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+#reading-intro-hold.intro-hold-message-visible .reading-intro-message {
+  opacity: 0.65;
+}
+
+
+/* =============================================================================
+   RESTORE-PENDING — page card guard (defense in depth)
+   Keeps #pages hidden while startReadingFromPreview() is resolving, preventing
+   stale or partially-rendered cards from flashing under the intro hold.
+   The visible pending surface is now owned by #reading-intro-hold above.
+   ============================================================================= */
 #pages {
   transition: opacity 0.14s ease;
 }
@@ -1274,17 +1588,114 @@ body.auth-hydrating #profile-page {
   opacity: 0;
   transition: none; /* suppress transition while hidden; runs on reveal */
 }
-/* Overlay text only when genuinely returning to a saved place (data-restore-kind="returning").
-   Fresh opens are silent — pages are hidden during render but no text is shown,
-   so the experience feels like a clean appearance rather than a loading state. */
-#reading-mode.reading-restore-pending[data-restore-kind="returning"] .reading-content::after {
-  content: 'Returning to your place\2026';
-  position: absolute;
-  inset: 0;
+
+/* ── Interaction banner ──────────────────────────────────────────────────────
+ * Shared bottom-of-viewport pending / success / error surface.
+ * Shell presents — does not own auth, billing, or runtime truth.
+ * Shell injects #rc-interaction-banner and drives data-sev.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+#rc-interaction-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 9000;
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  opacity: 0.6;
+  gap: 12px;
+  padding: 11px 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.4;
+  /* Hidden by default — slides up when .rc-banner--visible is added */
+  transform: translateY(100%);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+              background-color 160ms ease,
+              border-color 160ms ease,
+              color 160ms ease;
   pointer-events: none;
+}
+
+#rc-interaction-banner.rc-banner--visible {
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* Pending — slate, muted, no urgency */
+#rc-interaction-banner[data-sev="pending"] {
+  background: #f1f5f9;
+  color: #475569;
+  border-top: 1px solid #e2e8f0;
+}
+
+/* Success — brief green, auto-dismisses */
+#rc-interaction-banner[data-sev="success"] {
+  background: #f0fdf4;
+  color: #166534;
+  border-top: 1px solid #bbf7d0;
+}
+
+/* Recoverable error — amber, stays until dismissed or retried */
+#rc-interaction-banner[data-sev="error"] {
+  background: #fffbeb;
+  color: #92400e;
+  border-top: 1px solid #fde68a;
+}
+
+/* Blocking error — stronger, no dismiss, user must act */
+#rc-interaction-banner[data-sev="blocking"] {
+  background: #fef2f2;
+  color: #991b1b;
+  border-top: 1px solid #fecaca;
+}
+
+.rc-banner__message {
+  flex: 1;
+  min-width: 0;
+}
+
+.rc-banner__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.rc-banner__action-btn {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 120ms;
+  white-space: nowrap;
+}
+.rc-banner__action-btn:hover { opacity: 1; }
+
+.rc-banner__close {
+  font-size: 1.125rem;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.45;
+  flex-shrink: 0;
+  transition: opacity 120ms;
+}
+.rc-banner__close:hover { opacity: 0.85; }
+
+
+/* Group A: pricing modal should first appear only after settled labels are ready. */
+#pricing-modal.pricing-modal-settling .pricing-card {
+  opacity: 0.78;
+}
+#pricing-modal.pricing-modal-settling .pricing-card button {
+  visibility: hidden;
 }
