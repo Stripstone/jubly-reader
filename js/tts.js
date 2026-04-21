@@ -1861,8 +1861,41 @@ function browserSpeakQueue(key, parts, opts = {}) {
 
     const requestId = Number.isFinite(Number(opts.restartRequestId)) ? Number(opts.restartRequestId) : 0;
     const entryReason = String(opts.reason || (requestId > 0 ? 'restart-from-block' : 'queue-progress'));
+    const entrySource = entryReason === 'queue-progress'
+      ? 'natural'
+      : (entryReason.indexOf('skip') >= 0
+        ? 'skip'
+        : (entryReason.indexOf('resume') >= 0 ? 'resume' : (requestId > 0 ? 'restart' : entryReason)));
     const r = ranges[blockIdx];
     const sentenceText = text.slice(r.start, r.end);
+    const scheduledAt = Date.now();
+    const expectedBefore = Number(TTS_STATE.browserExpectedEntryBlockIndex);
+    ttsDiagPush('browser-entry-scheduled', {
+      key,
+      sessionId,
+      pageKey: key,
+      blockIndex: blockIdx,
+      source: entrySource,
+      requestId,
+      expectedBefore,
+      activeBlockIndex: TTS_STATE.activeBlockIndex,
+      pausedBlockIndex: TTS_STATE.pausedBlockIndex,
+      sentenceTextPreview: ttsExcerptText(sentenceText),
+    });
+    // Claim the live browser entry before onstart validation. Natural queue
+    // progression must not be rejected as stale just because the prior block
+    // was the previous expected entry.
+    TTS_STATE.browserExpectedEntryBlockIndex = blockIdx;
+    ttsDiagPush('browser-entry-expected-claimed', {
+      key,
+      sessionId,
+      pageKey: key,
+      blockIndex: blockIdx,
+      source: entrySource,
+      requestId,
+      expectedBefore,
+      expectedAfter: TTS_STATE.browserExpectedEntryBlockIndex,
+    });
     const utter = new SpeechSynthesisUtterance(sentenceText);
     utter.lang = 'en-US';
     utter.onstart = () => {
@@ -1879,6 +1912,13 @@ function browserSpeakQueue(key, parts, opts = {}) {
           pageIndex: startPreview?.pageIndex ?? -1,
           excerpt: startPreview?.excerpt || ttsExcerptText(sentenceText),
           reason: 'session-or-page-replaced',
+        });
+        ttsDiagPush('browser-entry-start', {
+          key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
+          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
+          activeBlockIndex: TTS_STATE.activeBlockIndex,
+          accepted: false,
+          rejectReason: 'session-mismatch',
         });
         try {
           markIntentionalBrowserCancel('discard-stale-utterance-start-session-replaced', { key, staleBlock: blockIdx, expectedBlock: TTS_STATE.browserExpectedEntryBlockIndex, requestId });
@@ -1898,6 +1938,13 @@ function browserSpeakQueue(key, parts, opts = {}) {
           excerpt: startPreview?.excerpt || ttsExcerptText(sentenceText),
           reason: 'superseded-by-newer-request',
         });
+        ttsDiagPush('browser-entry-start', {
+          key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
+          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
+          activeBlockIndex: TTS_STATE.activeBlockIndex,
+          accepted: false,
+          rejectReason: 'session-mismatch',
+        });
         try {
           markIntentionalBrowserCancel('discard-stale-utterance-start-superseded', { key, staleBlock: blockIdx, expectedBlock: TTS_STATE.browserExpectedEntryBlockIndex, requestId });
           window.speechSynthesis.cancel();
@@ -1916,6 +1963,13 @@ function browserSpeakQueue(key, parts, opts = {}) {
           excerpt: startPreview?.excerpt || ttsExcerptText(sentenceText),
           reason: entryReason,
         });
+        ttsDiagPush('browser-entry-start', {
+          key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
+          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
+          activeBlockIndex: TTS_STATE.activeBlockIndex,
+          accepted: false,
+          rejectReason: 'expected-entry-mismatch',
+        });
         try {
           markIntentionalBrowserCancel('discard-stale-utterance-start', { key, staleBlock: blockIdx, expectedBlock: TTS_STATE.browserExpectedEntryBlockIndex, requestId });
           window.speechSynthesis.cancel();
@@ -1925,7 +1979,13 @@ function browserSpeakQueue(key, parts, opts = {}) {
       if (requestId > 0 && Number(TTS_STATE.browserRestartRequestId || 0) === requestId) {
         TTS_STATE.browserRestarting = false;
       }
-      TTS_STATE.browserExpectedEntryBlockIndex = blockIdx;
+      ttsDiagPush('browser-entry-start', {
+        key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
+        expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
+        activeBlockIndex: TTS_STATE.activeBlockIndex,
+        accepted: true,
+        rejectReason: null,
+      });
       ttsDiagPush('browser-utterance-start', {
         key,
         blockIdx,
@@ -1950,10 +2010,11 @@ function browserSpeakQueue(key, parts, opts = {}) {
       if (TTS_STATE.activeSessionId !== sessionId) return;
       if (TTS_STATE.activeKey !== key) return;
       if (TTS_STATE.browserPaused) return; // pause captured this slot
-      if (isIntentionalBrowserCancelForSession(sessionId)) {
+      if (isIntentionalBrowserCancelForSession(sessionId) && TTS_STATE.browserRestarting) {
         ttsDiagPush('browser-end-transition', {
           key, blockIdx, sessionId, requestId,
           reason: TTS_STATE.browserIntentionalCancelReason || 'intentional-cancel',
+          browserRestarting: !!TTS_STATE.browserRestarting,
         });
         return;
       }
@@ -1964,6 +2025,15 @@ function browserSpeakQueue(key, parts, opts = {}) {
         });
         return;
       }
+      ttsDiagPush('browser-entry-end', {
+        key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
+        elapsedMs: Math.max(0, Date.now() - scheduledAt),
+        nextBlockIndex: blockIdx + 1,
+        willContinue: blockIdx + 1 < ranges.length,
+        speechSynthesisSpeaking: !!window.speechSynthesis.speaking,
+        speechSynthesisPaused: !!window.speechSynthesis.paused,
+        speechSynthesisPending: !!window.speechSynthesis.pending,
+      });
       speakFromBlock(blockIdx + 1, { reason: 'queue-progress' });
     };
 
@@ -2008,6 +2078,15 @@ function browserSpeakQueue(key, parts, opts = {}) {
         blockIdx,
         recoverable,
       };
+      ttsDiagPush('browser-entry-error', {
+        key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
+        error: errorCode || 'unknown',
+        expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
+        activeBlockIndex: TTS_STATE.activeBlockIndex,
+        speechSynthesisSpeaking: !!window.speechSynthesis.speaking,
+        speechSynthesisPaused: !!window.speechSynthesis.paused,
+        speechSynthesisPending: !!window.speechSynthesis.pending,
+      });
       ttsDiagPush('browser-utterance-error', { key, blockIdx, sessionId, errorCode, recoverable });
       ttsReconcileAfterRuntimeError('browser-utterance-error', { key, blockIdx, sessionId, errorCode, recoverable });
       if (recoverable) TTS_STATE.playbackBlockedReason = '';
