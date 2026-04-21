@@ -137,42 +137,6 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     };
   }
 
-  function getPublicRuntimePolicy() {
-    const policy = getFallbackRuntimePolicy('basic');
-    policy.tier = 'basic';
-    policy.resolutionMode = 'public';
-    return policy;
-  }
-
-  function hasAuthenticatedRuntimeSession() {
-    try {
-      const user = window.rcAuth && typeof window.rcAuth.getUser === 'function' ? window.rcAuth.getUser() : null;
-      const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function' ? String(window.rcAuth.getAccessToken() || '').trim() : '';
-      return !!(user && user.id && token);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function policyHasExecutablePaidAccess(policyLike) {
-    const policy = policyLike && typeof policyLike === 'object' ? policyLike : {};
-    const tier = normalizeAppTier(policy.tier || 'basic');
-    return tier !== 'basic' ||
-      !!policy?.features?.cloudVoices ||
-      !!policy?.features?.themes?.explorer ||
-      !!policy?.features?.themes?.customMusic ||
-      !!policy?.features?.aiEvaluate ||
-      !!policy?.features?.anchors;
-  }
-
-  function normalizePolicyForPublicBoundary(policyLike, tierHint) {
-    // No authenticated user/session means runtime is executing in public mode.
-    // Do not preserve any client-fallback/cache policy here, even if it happens
-    // to be Basic-shaped. Public mode must be explicit so all read seams agree.
-    if (!hasAuthenticatedRuntimeSession()) return getPublicRuntimePolicy();
-    return normalizeRuntimePolicy(policyLike, tierHint);
-  }
-
   function normalizeRuntimePolicy(raw, tierHint) {
     const fallback = getFallbackRuntimePolicy(tierHint);
     const source = raw && typeof raw === 'object' ? raw : {};
@@ -219,17 +183,6 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   }
 
   function getRuntimePolicy() {
-    if (!hasAuthenticatedRuntimeSession()) {
-      // Public/signed-out runtime must never execute stale signed-in policy or
-      // generic client fallback. Keep this read seam authoritative because it is
-      // used by theme/cloud eligibility and downstream policy consumers.
-      if (!runtimePolicy || runtimePolicy.resolutionMode !== 'public' || policyHasExecutablePaidAccess(runtimePolicy)) {
-        runtimePolicy = getPublicRuntimePolicy();
-        runtimePolicyResolved = true;
-        appTier = 'basic';
-      }
-      return runtimePolicy;
-    }
     if (runtimePolicy && typeof runtimePolicy === 'object') return runtimePolicy;
     runtimePolicy = getFallbackRuntimePolicy(appTier);
     runtimePolicyResolved = false;
@@ -278,33 +231,13 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   }
 
   function applyResolvedRuntimePolicy(policyLike, tierHint, options = {}) {
-    runtimePolicy = normalizePolicyForPublicBoundary(policyLike, tierHint);
-    runtimePolicyResolved = !!options.resolved || runtimePolicy.resolutionMode === 'public';
+    runtimePolicy = normalizeRuntimePolicy(policyLike, tierHint);
+    runtimePolicyResolved = !!options.resolved;
     appTier = runtimePolicy.tier;
     try { tokenReset(); } catch (_) {}
     try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
     try {
       const detail = { policy: runtimePolicy, resolved: runtimePolicyResolved };
-      document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
-      window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
-    } catch (_) {}
-    return runtimePolicy;
-  }
-
-  function resetRuntimePolicyToPublic(reason = 'public-reset') {
-    runtimePolicy = getPublicRuntimePolicy();
-    runtimePolicyResolved = true;
-    appTier = 'basic';
-    try { tokenReset(); } catch (_) {}
-    try { window.__rcSessionVoiceSelection = null; } catch (_) {}
-    try {
-      appTheme = 'default';
-      applyThemeClass(appTheme);
-      applyThemeSettings();
-      syncThemeShellState();
-    } catch (_) {}
-    try {
-      const detail = { policy: runtimePolicy, resolved: runtimePolicyResolved, reason: String(reason || 'public-reset'), publicReset: true };
       document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
       window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
     } catch (_) {}
@@ -337,11 +270,9 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       // prior successful fetch or durable-sync cache projection), preserve it — a
       // transient network failure must not strip access the user legitimately holds.
       // Only fall back to safe-basic when there is no confirmed policy in place.
-      _trailPush('policy-fetch-failed', { tier: runtimePolicy && runtimePolicy.tier, authed: hasAuthenticatedRuntimeSession(), reason: String(err?.message || err || 'unknown') });
-      if (hasAuthenticatedRuntimeSession() && runtimePolicy && runtimePolicy.tier && runtimePolicy.tier !== 'basic') return runtimePolicy;
-      return hasAuthenticatedRuntimeSession()
-        ? applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', { resolved: false })
-        : resetRuntimePolicyToPublic('policy-fetch-failed-public');
+      _trailPush('policy-fetch-failed', { tier: runtimePolicy && runtimePolicy.tier, reason: String(err?.message || err || 'unknown') });
+      if (runtimePolicy && runtimePolicy.tier && runtimePolicy.tier !== 'basic') return runtimePolicy;
+      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', { resolved: false });
     }
   }
 
@@ -1160,14 +1091,13 @@ function getReadingProfileMetrics() {
 }
 
 function getRuntimeTier() {
-  // Runtime tier is an executable policy read seam, not just a display helper.
-  // Always route through getRuntimePolicy() so signed-out/public state cannot
-  // read a stale Pro/Premium runtimePolicy before rcPolicy.get() happens to
-  // self-correct it. This is the source used by rcPolicy.getTier(),
-  // rcEntitlements.getTier(), and the reading tier pill.
+  // PASS3: Read exclusively from server-resolved runtimePolicy.
+  // Previously fell back to reading #tierSelect DOM value, which made DOM
+  // an authority for policy tier. Tier simulation now routes through
+  // refreshForTier (ui.js owns #tierSelect → syncTierPolicy → refreshForTier),
+  // which fetches from the server and sets runtimePolicy directly.
   try {
-    const policy = getRuntimePolicy();
-    return normalizeAppTier(policy?.tier || 'basic');
+    return normalizeAppTier(runtimePolicy?.tier || 'basic');
   } catch (_) {
     return 'basic';
   }
@@ -1524,7 +1454,6 @@ window.rcPolicy = {
   get: getRuntimePolicy,
   refreshForTier: refreshRuntimePolicy,
   apply: applyResolvedRuntimePolicy,
-  resetToPublic: resetRuntimePolicyToPublic,
   canSimulateTier: canSimulateTierSelection,
   getTier: getRuntimeTier,
   getUsageDailyLimit: getRuntimeUsageAllowance,
