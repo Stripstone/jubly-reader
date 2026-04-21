@@ -368,40 +368,9 @@ window.rcInteraction = (function () {
         } catch (_) {}
     }
 
-    function waitForInitialSurfaceSettlement(surfacePromise, context = {}) {
-        const startedAt = Date.now();
-        const section = String(context.section || 'unknown');
-        const timeoutMs = section === 'dashboard' ? 2200 : 0;
-        shellDebugRemember('lastBootSettlement', {
-            type: 'surface-settlement-start',
-            section,
-            requestedSection: context.requestedSection || null,
-            hasSurfacePromise: !!surfacePromise
-        });
-        if (!surfacePromise || typeof surfacePromise.then !== 'function') {
-            shellDebugRemember('lastBootSettlement', { type: 'surface-settlement-none', section, elapsedMs: Date.now() - startedAt });
-            return Promise.resolve({ status: 'none', elapsedMs: Date.now() - startedAt });
-        }
-        const settled = Promise.resolve(surfacePromise).then(() => ({ status: 'settled', elapsedMs: Date.now() - startedAt }));
-        if (!timeoutMs) return settled;
-        return Promise.race([
-            settled,
-            new Promise(resolve => setTimeout(() => resolve({ status: 'timeout-pending', elapsedMs: Date.now() - startedAt, timeoutMs }), timeoutMs))
-        ]).then((result) => {
-            shellDebugRemember('lastBootSettlement', Object.assign({ type: 'surface-settlement-complete', section }, result || {}));
-            return result;
-        });
-    }
-
-    function releaseBootPending(reason = 'unknown', context = {}) {
+    function releaseBootPending() {
         if (_bootReleaseComplete) return;
         _bootReleaseComplete = true;
-        shellDebugRemember('lastBootSettlement', Object.assign({
-            type: 'boot-release',
-            reason,
-            currentSection: getCurrentVisibleSection(),
-            bodyHadBootPending: !!document.body?.classList?.contains('boot-pending')
-        }, context || {}));
         clearBootPendingMessage();
         try { document.body.classList.remove('boot-pending'); } catch (_) {}
         try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
@@ -1221,31 +1190,21 @@ window.rcInteraction = (function () {
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
-        // Start the selected surface while boot is still held, then release only
-        // after the minimum hold, appearance paint, and the selected surface's
-        // first settlement signal. For the dashboard this means either the first
-        // truthful library read completed, or the library is honestly pending
-        // because its owner is not ready yet.
-        const initialSurfacePromise = showSection(settledSection, { historyMode: 'replace' });
+        // Start the library refresh immediately behind the boot hold, then always
+        // wait the full 1000ms before revealing. At reveal time the library is
+        // either settled (show books or empty state directly) or still pending
+        // (show the neutral pending surface). No early release — the hold is a
+        // minimum, not a cap.
+        showSection(settledSection, { historyMode: 'replace' });
         const bootHoldMs = 1000;
-        let surfaceSettlement = null;
         try {
-            const [, , surfaceResult] = await Promise.all([
+            await Promise.all([
                 new Promise(resolve => setTimeout(resolve, bootHoldMs)),
-                appearancePainted,
-                waitForInitialSurfaceSettlement(initialSurfacePromise, { requestedSection, section: settledSection })
+                appearancePainted
             ]);
-            surfaceSettlement = surfaceResult || null;
             await waitForBootRevealFrame();
-        } catch (err) {
-            shellDebugRemember('lastBootSettlement', {
-                type: 'surface-settlement-error',
-                requestedSection,
-                settledSection,
-                message: String(err?.message || err || 'unknown')
-            });
-        }
-        releaseBootPending('initial-surface-settled', { requestedSection, settledSection, surfaceSettlement });
+        } catch (_) {}
+        releaseBootPending();
     });
     // ── Profile tabs ─────────────────────────────────────────────
     function switchTab(tabId) {
@@ -1924,10 +1883,6 @@ window.rcInteraction = (function () {
         // After that first truthful read, later refreshes keep the current visible
         // surface instead of flashing back through pending.
         if (!_libraryInitialResolutionComplete) {
-            // Cold-start honesty: while the first real local-library read is
-            // unresolved, remove stale row DOM and show the neutral pending
-            // surface instead of briefly exposing cached/old populated rows.
-            try { rowsEl.innerHTML = ''; } catch (_) {}
             setLibrarySurfaceState('pending');
             scheduleLibraryPendingBanner();
         }
