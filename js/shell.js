@@ -398,6 +398,14 @@ window.rcInteraction = (function () {
         blockedBy: null,
         at: null
     };
+    let _lastSignedInInteractionReadiness = {
+        signedInInteractionReady: false,
+        authCallable: false,
+        accountControlsEnabled: false,
+        blockedBy: 'auth:not-signed-in',
+        reason: 'boot',
+        at: null
+    };
     function shellDebugRemember(slot, data) {
         const entry = Object.assign({ seq: ++SHELL_DEBUG.seq, at: new Date().toISOString() }, data || {});
         SHELL_DEBUG[slot] = entry;
@@ -577,6 +585,90 @@ window.rcInteraction = (function () {
         }
     }
 
+    // Account controls can retain disabled DOM state across rapid auth
+    // transitions; this central readiness pass makes visibility match auth callability.
+    function getSignedInAccountControlElements() {
+        return {
+            logoutBtn: document.querySelector('[onclick="shellSignOut()"]'),
+            profileTrigger: document.getElementById('nav-profile-trigger')
+        };
+    }
+
+    function readSignedInInteractionOwnerState(reason) {
+        const signedIn = !!isAuthedUser();
+        let authReady = false;
+        try { authReady = !!(window.rcAuth && typeof window.rcAuth.isReady === 'function' && window.rcAuth.isReady()); } catch (_) { authReady = false; }
+        const signOutCallable = !!(window.rcAuth && typeof window.rcAuth.signOut === 'function');
+        let blockedBy = null;
+        if (!signedIn) blockedBy = 'auth:not-signed-in';
+        else if (!authReady) blockedBy = 'auth:not-ready';
+        else if (!signOutCallable) blockedBy = 'auth:signout-unavailable';
+        return {
+            signedIn,
+            authReady,
+            signOutCallable,
+            authCallable: signedIn && authReady && signOutCallable,
+            blockedBy,
+            reason: reason || 'sync'
+        };
+    }
+
+    function setAccountControlAvailability(el, enabled, blockedBy) {
+        if (!el) return;
+        if (enabled) {
+            el.disabled = false;
+            el.removeAttribute('aria-disabled');
+            if (el.dataset.shellBlockedBy) delete el.dataset.shellBlockedBy;
+            if (el.dataset.shellBlockedTitle) {
+                el.setAttribute('title', el.dataset.shellBlockedTitle);
+                delete el.dataset.shellBlockedTitle;
+            } else if (el.getAttribute('title') === 'Checking your account…') {
+                el.removeAttribute('title');
+            }
+            return;
+        }
+        el.disabled = true;
+        el.setAttribute('aria-disabled', 'true');
+        if (blockedBy) el.dataset.shellBlockedBy = blockedBy;
+        if (!el.dataset.shellBlockedTitle && el.hasAttribute('title')) el.dataset.shellBlockedTitle = el.getAttribute('title') || '';
+        el.setAttribute('title', 'Checking your account…');
+    }
+
+    function syncSignedInInteractionReadiness(reason) {
+        const owner = readSignedInInteractionOwnerState(reason);
+        const controls = getSignedInAccountControlElements();
+        const shouldEnable = owner.authCallable;
+        setAccountControlAvailability(controls.logoutBtn, shouldEnable, owner.blockedBy);
+        setAccountControlAvailability(controls.profileTrigger, shouldEnable, owner.blockedBy);
+        _lastSignedInInteractionReadiness = {
+            signedInInteractionReady: !!shouldEnable,
+            authCallable: !!owner.authCallable,
+            accountControlsEnabled: !!shouldEnable,
+            blockedBy: owner.blockedBy,
+            reason: reason || owner.reason,
+            at: new Date().toISOString()
+        };
+        shellTrailPush('signed-in-interaction-readiness', _lastSignedInInteractionReadiness);
+        return _lastSignedInInteractionReadiness;
+    }
+
+    function markSignedInInteractionPending(blockedBy, reason) {
+        const controls = getSignedInAccountControlElements();
+        const blocker = blockedBy || 'auth:pending';
+        setAccountControlAvailability(controls.logoutBtn, false, blocker);
+        setAccountControlAvailability(controls.profileTrigger, false, blocker);
+        _lastSignedInInteractionReadiness = {
+            signedInInteractionReady: false,
+            authCallable: false,
+            accountControlsEnabled: false,
+            blockedBy: blocker,
+            reason: reason || 'pending',
+            at: new Date().toISOString()
+        };
+        shellTrailPush('signed-in-interaction-pending', _lastSignedInInteractionReadiness);
+        return _lastSignedInInteractionReadiness;
+    }
+
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
         const id = normalizeSection(sectionId);
         const authed = isAuthedUser();
@@ -651,6 +743,7 @@ window.rcInteraction = (function () {
         const avatarSrc = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
         if (profileAvatarMain) profileAvatarMain.src = avatarSrc;
         if (profileAvatarSettings) profileAvatarSettings.src = avatarSrc;
+        syncSignedInInteractionReadiness('auth-presentation:' + id);
     }
 
     function showSection(id, options = {}) {
@@ -1163,14 +1256,13 @@ window.rcInteraction = (function () {
     }
 
     async function shellSignOut() {
-        const logoutBtn = document.querySelector('[onclick="shellSignOut()"]');
-        if (logoutBtn) logoutBtn.disabled = true;
+        markSignedInInteractionPending('auth:signout', 'shell-signout');
         try { window.rcInteraction && window.rcInteraction.pending('auth:signout', 'Signing out…'); } catch (_) {}
         try {
             if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
                 const result = await window.rcAuth.signOut();
                 if (result && result.ok === false) {
-                    if (logoutBtn) logoutBtn.disabled = false;
+                    syncSignedInInteractionReadiness('signout-failed');
                     try {
                         const actions = window.rcInteraction && window.rcInteraction.actions
                             ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
@@ -1182,7 +1274,7 @@ window.rcInteraction = (function () {
             }
             try { window.rcInteraction && window.rcInteraction.clear('auth:signout'); } catch (_) {}
         } catch (_) {
-            if (logoutBtn) logoutBtn.disabled = false;
+            syncSignedInInteractionReadiness('signout-error');
             try {
                 const actions = window.rcInteraction && window.rcInteraction.actions
                     ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
@@ -2551,12 +2643,23 @@ window.rcInteraction = (function () {
         const dashboardControls = dashboardVisible
             ? Array.from(dashboard.querySelectorAll('button, a, [role="button"]')).filter(isElementVisible)
             : [];
+        const logoutEnabled = !!(logoutBtn && isElementVisible(logoutBtn) && !logoutBtn.disabled && logoutBtn.getAttribute('aria-disabled') !== 'true');
+        const profileEnabled = !!(profileTrigger && isElementVisible(profileTrigger) && !profileTrigger.disabled && profileTrigger.getAttribute('aria-disabled') !== 'true');
+        const owner = readSignedInInteractionOwnerState('report');
+        const blockedBy = owner.signedIn && !(logoutEnabled && profileEnabled)
+            ? (logoutBtn && logoutBtn.dataset && logoutBtn.dataset.shellBlockedBy) || (profileTrigger && profileTrigger.dataset && profileTrigger.dataset.shellBlockedBy) || _lastSignedInInteractionReadiness.blockedBy || 'account-controls:disabled'
+            : _lastSignedInInteractionReadiness.blockedBy;
         return {
-            signedIn: !!isAuthedUser(),
-            logoutEnabled: !!(logoutBtn && isElementVisible(logoutBtn) && !logoutBtn.disabled && logoutBtn.getAttribute('aria-disabled') !== 'true'),
-            profileEnabled: !!(profileTrigger && isElementVisible(profileTrigger) && !profileTrigger.disabled && profileTrigger.getAttribute('aria-disabled') !== 'true'),
+            signedIn: !!owner.signedIn,
+            signedInInteractionReady: !!(owner.authCallable && logoutEnabled && profileEnabled),
+            authCallable: !!owner.authCallable,
+            accountControlsEnabled: !!(logoutEnabled && profileEnabled),
+            blockedBy: owner.signedIn && !(owner.authCallable && logoutEnabled && profileEnabled) ? blockedBy : null,
+            logoutEnabled,
+            profileEnabled,
             dashboardCtasEnabled: dashboardControls.some((el) => !el.disabled && el.getAttribute('aria-disabled') !== 'true'),
-            topmostElementAtLogoutCenter: getTopmostElementAtCenter(logoutBtn)
+            topmostElementAtLogoutCenter: getTopmostElementAtCenter(logoutBtn),
+            lastReadiness: _lastSignedInInteractionReadiness
         };
     }
 
