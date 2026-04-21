@@ -409,6 +409,17 @@ window.rcInteraction = (function () {
         reason: 'boot',
         at: null
     };
+    // Station 2 Slice 2B diagnostics only. Owner: js/shell.js surface reporting.
+    // Purpose: prove dashboard/library release order without changing release behavior.
+    // Retirement: remove or compact after dashboard/library settlement is accepted into
+    // the durable Shell Surface Contract and no longer needs first-writer proof.
+    let _lastDashboardRelease = null;
+    let _lastLibrarySurfaceWrite = null;
+    let _libraryStateAtDashboardRelease = null;
+    let _libraryChangedAfterDashboardRelease = false;
+    let _libraryFirstSettledAt = null;
+    let _libraryFirstSettledState = null;
+
     function shellDebugRemember(slot, data) {
         const entry = Object.assign({ seq: ++SHELL_DEBUG.seq, at: new Date().toISOString() }, data || {});
         SHELL_DEBUG[slot] = entry;
@@ -598,6 +609,76 @@ window.rcInteraction = (function () {
         return !!(el && !el.disabled && el.getAttribute('aria-disabled') !== 'true');
     }
 
+    function nowIso() {
+        try { return new Date().toISOString(); } catch (_) { return null; }
+    }
+
+    function readCurrentLibrarySurfaceState() {
+        const dashboard = document.getElementById('dashboard');
+        return dashboard ? (dashboard.getAttribute('data-library-state') || null) : null;
+    }
+
+    function getLibraryOwnerReady() {
+        return typeof localBooksGetAll === 'function';
+    }
+
+    function buildLibrarySurfaceDiagnostic(reason = 'library-diagnostic') {
+        const rows = document.getElementById('library-rows');
+        const rawState = readCurrentLibrarySurfaceState();
+        return {
+            rawState,
+            state: rawState || (_libraryInitialResolutionComplete ? 'ready-unknown' : 'pending'),
+            ownerReady: getLibraryOwnerReady(),
+            initialResolutionComplete: !!_libraryInitialResolutionComplete,
+            count: rows ? rows.children.length : 0,
+            reason,
+            at: nowIso()
+        };
+    }
+
+    function rememberDashboardRelease(reason = 'dashboard-release') {
+        const libraryAtRelease = buildLibrarySurfaceDiagnostic(reason);
+        _lastDashboardRelease = {
+            reason,
+            at: nowIso(),
+            visibleSection: getCurrentVisibleSection(),
+            authSignedIn: !!isAuthedUser(),
+            libraryOwnerReadyAtRelease: !!libraryAtRelease.ownerReady,
+            libraryStateAtDashboardRelease: libraryAtRelease.state,
+            libraryRawStateAtDashboardRelease: libraryAtRelease.rawState,
+            libraryTruthAtLeastPendingAtRelease: !!libraryAtRelease.rawState,
+            libraryInitialResolutionCompleteAtRelease: !!libraryAtRelease.initialResolutionComplete,
+            libraryCountAtRelease: libraryAtRelease.count
+        };
+        _libraryStateAtDashboardRelease = libraryAtRelease;
+        _libraryChangedAfterDashboardRelease = false;
+        shellTrailPush('dashboard-release-diagnostic', _lastDashboardRelease);
+        return _lastDashboardRelease;
+    }
+
+    function rememberLibrarySurfaceWrite(state, reason = 'library-surface-write') {
+        const normalizedState = String(state || 'unknown');
+        const current = buildLibrarySurfaceDiagnostic(reason);
+        _lastLibrarySurfaceWrite = {
+            state: normalizedState,
+            reason,
+            at: nowIso(),
+            ownerReady: !!current.ownerReady,
+            initialResolutionComplete: !!current.initialResolutionComplete,
+            dashboardVisible: getCurrentVisibleSection() === 'dashboard'
+        };
+        const settled = normalizedState === 'sample' || normalizedState === 'empty' || normalizedState === 'populated';
+        if (settled && !_libraryFirstSettledAt) {
+            _libraryFirstSettledAt = _lastLibrarySurfaceWrite.at;
+            _libraryFirstSettledState = normalizedState;
+        }
+        if (_libraryStateAtDashboardRelease && _lastDashboardRelease && normalizedState !== _libraryStateAtDashboardRelease.state) {
+            _libraryChangedAfterDashboardRelease = true;
+        }
+        shellTrailPush('library-surface-write-diagnostic', _lastLibrarySurfaceWrite);
+        return _lastLibrarySurfaceWrite;
+    }
+
     function readSignedInAccountControlReadiness(reason = 'readiness-read') {
         const controls = getSignedInAccountControlElements();
         const authed = !!isAuthedUser();
@@ -761,10 +842,13 @@ window.rcInteraction = (function () {
             at: new Date().toISOString()
         };
         if (targetId === 'dashboard') {
+            rememberDashboardRelease(options.releaseReason || ('show-section:' + targetId));
             shellTrailPush('dashboard-reveal', {
                 historyMode: options.historyMode || 'push',
                 authed: !!isAuthedUser(),
-                hasLocalLibraryOwner: typeof localBooksGetAll === 'function'
+                hasLocalLibraryOwner: getLibraryOwnerReady(),
+                libraryStateAtRelease: _lastDashboardRelease ? _lastDashboardRelease.libraryStateAtDashboardRelease : null,
+                libraryOwnerReadyAtRelease: _lastDashboardRelease ? _lastDashboardRelease.libraryOwnerReadyAtRelease : null
             });
         }
 
@@ -1988,7 +2072,7 @@ window.rcInteraction = (function () {
         try { window.rcInteraction && window.rcInteraction.clear('library:hydrate'); } catch (_) {}
     }
 
-    function setLibrarySurfaceState(state) {
+    function setLibrarySurfaceState(state, reason = 'setLibrarySurfaceState') {
         const pendingEl = document.getElementById('library-pending');
         const popEl = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
@@ -1999,6 +2083,7 @@ window.rcInteraction = (function () {
         if (sampleEl) sampleEl.classList.toggle('hidden-section', state !== 'sample');
         const dashboardEl = document.getElementById('dashboard');
         if (dashboardEl) dashboardEl.setAttribute('data-library-state', state);
+        rememberLibrarySurfaceWrite(state, reason);
     }
 
     async function refreshLibrary(reason = 'unknown') {
@@ -2024,7 +2109,7 @@ window.rcInteraction = (function () {
                 clearTimeout(libraryRefreshRetryTimer);
                 libraryRefreshRetryTimer = null;
             }
-            setLibrarySurfaceState('sample');
+            setLibrarySurfaceState('sample', 'refreshLibrary:signed-out-sample');
             return;
         }
 
@@ -2035,7 +2120,7 @@ window.rcInteraction = (function () {
         // After that first truthful read, later refreshes keep the current visible
         // surface instead of flashing back through pending.
         if (!_libraryInitialResolutionComplete) {
-            setLibrarySurfaceState('pending');
+            setLibrarySurfaceState('pending', 'refreshLibrary:initial-pending');
             scheduleLibraryPendingBanner();
         }
 
@@ -2069,7 +2154,7 @@ window.rcInteraction = (function () {
         clearLibraryPendingBanner();
         const has = books.length > 0;
         if (!has) {
-            setLibrarySurfaceState('empty');
+            setLibrarySurfaceState('empty', 'refreshLibrary:local-empty');
             try { renderSubscriptionSurface([]); } catch (_) {}
             return;
         }
@@ -2091,7 +2176,7 @@ window.rcInteraction = (function () {
                 <div class="w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
-        setLibrarySurfaceState('populated');
+        setLibrarySurfaceState('populated', 'refreshLibrary:local-populated');
         try { renderSubscriptionSurface(books); } catch (_) {}
 
     }
@@ -2654,14 +2739,25 @@ window.rcInteraction = (function () {
 
 
     function getLibrarySurfaceReport() {
-        const dashboard = document.getElementById('dashboard');
-        const rows = document.getElementById('library-rows');
-        const state = dashboard ? (dashboard.getAttribute('data-library-state') || null) : null;
+        const current = buildLibrarySurfaceDiagnostic('surface-report');
         return {
-            ownerReady: typeof localBooksGetAll === 'function',
-            state: state || (_libraryInitialResolutionComplete ? 'ready-unknown' : 'pending'),
-            initialResolutionComplete: !!_libraryInitialResolutionComplete,
-            count: rows ? rows.children.length : 0
+            ownerReady: current.ownerReady,
+            state: current.state,
+            initialResolutionComplete: current.initialResolutionComplete,
+            count: current.count,
+            lastDashboardRelease: _lastDashboardRelease || null,
+            lastLibrarySurfaceWrite: _lastLibrarySurfaceWrite || null,
+            libraryStateAtDashboardRelease: _libraryStateAtDashboardRelease || null,
+            libraryRawStateAtDashboardRelease: _libraryStateAtDashboardRelease ? _libraryStateAtDashboardRelease.rawState : null,
+            dashboardReleasedBeforeLibraryTruthAtLeastPending: !!(_lastDashboardRelease && !_lastDashboardRelease.libraryTruthAtLeastPendingAtRelease),
+            libraryChangedAfterDashboardRelease: !!_libraryChangedAfterDashboardRelease,
+            libraryFirstSettledAt: _libraryFirstSettledAt || null,
+            libraryFirstSettledState: _libraryFirstSettledState || null,
+            libraryOwnerReadyAtRelease: _lastDashboardRelease ? _lastDashboardRelease.libraryOwnerReadyAtRelease : null,
+            librarySurfaceWriterReason: _lastLibrarySurfaceWrite ? _lastLibrarySurfaceWrite.reason : null,
+            diagnosticsOwner: 'js/shell.js',
+            diagnosticsPurpose: 'Station 2 Slice 2B dashboard/library surface-settlement proof',
+            diagnosticsRetirementCondition: 'Remove or compact after dashboard/library settlement is accepted into the durable Shell Surface Contract.'
         };
     }
 
