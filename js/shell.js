@@ -64,6 +64,14 @@
     let _bootReleaseComplete = false;
     let _bootPendingMessageTimer = null;
     let _libraryPendingBannerTimer = null;
+    let _lastDashboardRelease = {
+        requestedSurface: null,
+        libraryStateAtRelease: null,
+        visibleStateAtRelease: null,
+        releaseReason: null,
+        blockedBy: null,
+        at: null
+    };
 
 // Shell-resident interaction banner
 // ─────────────────────────────────────────────────────────────────────────────
@@ -659,6 +667,79 @@ window.rcInteraction = (function () {
     }
 
 
+    function readDashboardLibraryState() {
+        const dashboardEl = document.getElementById('dashboard');
+        const raw = dashboardEl ? String(dashboardEl.getAttribute('data-library-state') || '').trim() : '';
+        return raw || null;
+    }
+
+    function isSettledDashboardLibraryState(state) {
+        return state === 'populated' || state === 'empty' || state === 'error';
+    }
+
+    function applyDashboardLibraryChrome(state, reason = 'dashboard-library-chrome') {
+        const normalized = state || readDashboardLibraryState() || 'pending';
+        const authed = !!isAuthedUser();
+        const libraryToolbar = document.getElementById('library-toolbar');
+        const manageBtn = document.getElementById('manageLibraryBtn');
+        const importBtn = document.getElementById('importBookBtn');
+
+        // Shell coordinates chrome visibility only. Library/import truth remains
+        // owned by refreshLibrary(), localBooksGetAll(), and importer guards.
+        const toolbarAllowed = authed && isSettledDashboardLibraryState(normalized);
+        if (libraryToolbar) {
+            libraryToolbar.classList.toggle('hidden-section', !toolbarAllowed);
+            libraryToolbar.setAttribute('data-shell-library-state', normalized);
+        }
+        [manageBtn, importBtn].forEach((btn) => {
+            if (!btn) return;
+            try {
+                btn.disabled = !toolbarAllowed;
+                if (toolbarAllowed) btn.removeAttribute('aria-disabled');
+                else btn.setAttribute('aria-disabled', 'true');
+                btn.setAttribute('data-shell-library-state', normalized);
+            } catch (_) {}
+        });
+        shellTrailPush('dashboard-library-chrome', {
+            reason,
+            state: normalized,
+            authed,
+            toolbarAllowed
+        });
+        return { state: normalized, toolbarAllowed };
+    }
+
+    function prepareDashboardRelease(reason = 'dashboard-release') {
+        const authed = !!isAuthedUser();
+        let state = readDashboardLibraryState();
+        if (!authed) {
+            setLibrarySurfaceState('sample');
+            state = 'sample';
+        } else if (!state || state === 'sample' || (!_libraryInitialResolutionComplete && !isSettledDashboardLibraryState(state))) {
+            setLibrarySurfaceState('pending');
+            state = 'pending';
+            scheduleLibraryPendingBanner();
+        }
+        const chrome = applyDashboardLibraryChrome(state, reason);
+        _lastDashboardRelease = {
+            requestedSurface: 'dashboard',
+            libraryStateAtRelease: state,
+            visibleStateAtRelease: state,
+            releaseReason: reason,
+            blockedBy: null,
+            at: new Date().toISOString(),
+            toolbarAllowed: chrome.toolbarAllowed
+        };
+        shellTrailPush('dashboard-release-preflight', {
+            reason,
+            authed,
+            libraryStateAtRelease: state,
+            toolbarAllowed: chrome.toolbarAllowed,
+            initialResolved: !!_libraryInitialResolutionComplete
+        });
+        return _lastDashboardRelease;
+    }
+
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
         const id = normalizeSection(sectionId);
         const authed = isAuthedUser();
@@ -701,18 +782,13 @@ window.rcInteraction = (function () {
         const sbLibrary = document.getElementById('sb-library');
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
 
-        const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
         const publicSampleCopy = document.getElementById('library-public-sample-copy');
         const publicSampleSubcopy = document.getElementById('library-public-sample-subcopy');
-        if (id === 'dashboard') {
-            applyLibraryToolbarVisibility(getCurrentLibrarySurfaceState() || (authed ? 'pending' : 'sample'), 'sync-auth-presentation:' + id);
-        } else if (libraryToolbar) {
-            libraryToolbar.classList.toggle('hidden-section', !(authed || isIntroLibraryVisible()));
-        }
-        if (librarySample && id !== 'dashboard') librarySample.classList.add('hidden-section');
+        if (librarySample) librarySample.classList.add('hidden-section');
         if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your own library.';
         if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Start free, keep your place, and come back anytime.';
+        applyDashboardLibraryChrome(readDashboardLibraryState(), 'sync-auth-presentation:' + id);
         renderLibrarySubtitle(authed);
 
         const profileGuestCard = document.getElementById('profile-guest-card');
@@ -749,9 +825,9 @@ window.rcInteraction = (function () {
         if (targetId === 'landing-page' && !options.preserveIntroLibrary) _publicIntroLibraryVisible = false;
         const readingModeEl = document.getElementById('reading-mode');
         const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
-        let dashboardReleasePreflight = null;
+        let dashboardRelease = null;
         if (targetId === 'dashboard') {
-            dashboardReleasePreflight = preflightDashboardLibrarySurfaceForRelease(options.releaseReason || 'show-section-dashboard');
+            dashboardRelease = prepareDashboardRelease(options.releaseReason || ('show-section:' + targetId));
         }
 
         ALL_SECTIONS.forEach((s) => {
@@ -765,15 +841,16 @@ window.rcInteraction = (function () {
             requestedSurface: id,
             releasedSurface: targetId,
             releaseReason: options.releaseReason || ('show-section:' + targetId),
-            blockedBy: dashboardReleasePreflight && dashboardReleasePreflight.blockedBy ? dashboardReleasePreflight.blockedBy : null,
-            at: new Date().toISOString(),
-            dashboardPreflight: dashboardReleasePreflight || null
+            blockedBy: null,
+            at: new Date().toISOString()
         };
         if (targetId === 'dashboard') {
             shellTrailPush('dashboard-reveal', {
                 historyMode: options.historyMode || 'push',
                 authed: !!isAuthedUser(),
-                hasLocalLibraryOwner: typeof localBooksGetAll === 'function'
+                hasLocalLibraryOwner: typeof localBooksGetAll === 'function',
+                libraryStateAtRelease: dashboardRelease ? dashboardRelease.libraryStateAtRelease : readDashboardLibraryState(),
+                toolbarAllowedAtRelease: dashboardRelease ? dashboardRelease.toolbarAllowed : null
             });
         }
 
@@ -809,7 +886,7 @@ window.rcInteraction = (function () {
         clearPaidIntentForPublicAbandon(targetId);
         syncShellAuthPresentation(targetId);
         let _sectionRefreshPromise = null;
-        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary('show-section-dashboard');
+        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary(options.releaseReason || 'show-section-dashboard');
         if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
@@ -1311,8 +1388,7 @@ window.rcInteraction = (function () {
                 return;
             }
             if (current === 'landing-page' || current === 'login-page') {
-                showSection('dashboard', { historyMode: 'replace' });
-                try { refreshLibrary('auth-change-dashboard-redirect'); } catch(_) {}
+                showSection('dashboard', { historyMode: 'replace', releaseReason: 'auth-change-dashboard-redirect' });
                 return;
             }
             syncShellAuthPresentation(current);
@@ -1975,70 +2051,6 @@ window.rcInteraction = (function () {
     let _loggedFirstLocalLibraryRead = false;
     let _libraryInitialResolutionComplete = false;
     let _libraryRefreshSequence = 0;
-    let _lastLibrarySurfaceWrite = null;
-
-    const LIBRARY_SURFACE_STATES = ['pending', 'populated', 'empty', 'sample', 'error'];
-
-    function normalizeLibrarySurfaceState(state) {
-        const normalized = String(state || '').trim();
-        return LIBRARY_SURFACE_STATES.includes(normalized) ? normalized : 'pending';
-    }
-
-    function getCurrentLibrarySurfaceState() {
-        const dashboardEl = document.getElementById('dashboard');
-        const state = dashboardEl ? dashboardEl.getAttribute('data-library-state') : null;
-        return LIBRARY_SURFACE_STATES.includes(String(state || '')) ? state : null;
-    }
-
-    function applyLibraryToolbarVisibility(state, reason = 'library-surface') {
-        const toolbar = document.getElementById('library-toolbar');
-        if (!toolbar) return;
-        const surfaceState = normalizeLibrarySurfaceState(state);
-        const authed = !!isAuthedUser();
-        const introLibrary = isIntroLibraryVisible();
-        // Import/manage controls are a settled dashboard affordance. They must
-        // not be the first visible signed-in library surface while owner truth
-        // is still pending.
-        const allowToolbar = authed
-            ? (surfaceState === 'populated' || surfaceState === 'empty' || surfaceState === 'error')
-            : introLibrary;
-        toolbar.classList.toggle('hidden-section', !allowToolbar);
-        toolbar.setAttribute('data-library-toolbar-state', allowToolbar ? 'ready' : 'pending');
-        toolbar.setAttribute('data-library-toolbar-reason', String(reason || 'library-surface'));
-    }
-
-    function preflightDashboardLibrarySurfaceForRelease(reason = 'dashboard-release-preflight') {
-        if (!isAuthedUser()) {
-            if (isIntroLibraryVisible()) setLibrarySurfaceState('sample', reason + ':public-intro');
-            return { state: getCurrentLibrarySurfaceState(), blockedBy: null };
-        }
-        const current = getCurrentLibrarySurfaceState();
-        const ownerReady = typeof localBooksGetAll === 'function';
-        const settledSignedIn = current === 'pending' || current === 'populated' || current === 'empty' || current === 'error';
-        if (settledSignedIn) {
-            applyLibraryToolbarVisibility(current, reason + ':already-settled');
-            if (current === 'pending') scheduleLibraryPendingBanner();
-            return {
-                state: current,
-                blockedBy: null,
-                pendingReason: current === 'pending' ? 'library:initial-resolution' : null,
-                ownerReady,
-                initialResolutionComplete: !!_libraryInitialResolutionComplete
-            };
-        }
-        // The dashboard may release before the first IndexedDB read completes,
-        // but only as an honest signed-in pending surface. Shell owns this
-        // visible preflight; library/runtime still owns the eventual books truth.
-        setLibrarySurfaceState('pending', reason + ':pending-before-visible');
-        scheduleLibraryPendingBanner();
-        return {
-            state: 'pending',
-            blockedBy: null,
-            pendingReason: ownerReady ? 'library:initial-resolution' : 'library:owner-not-ready',
-            ownerReady,
-            initialResolutionComplete: !!_libraryInitialResolutionComplete
-        };
-    }
 
     function scheduleLibraryPendingBanner() {
         if (_libraryPendingBannerTimer || _libraryInitialResolutionComplete) return;
@@ -2061,30 +2073,21 @@ window.rcInteraction = (function () {
         try { window.rcInteraction && window.rcInteraction.clear('library:hydrate'); } catch (_) {}
     }
 
-    function setLibrarySurfaceState(state, reason = 'library-surface') {
-        const surfaceState = normalizeLibrarySurfaceState(state);
+    function setLibrarySurfaceState(state) {
         const pendingEl = document.getElementById('library-pending');
         const popEl = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
         const sampleEl = document.getElementById('library-public-sample');
-        if (pendingEl) pendingEl.classList.toggle('hidden-section', surfaceState !== 'pending');
-        if (popEl) popEl.classList.toggle('hidden-section', surfaceState !== 'populated');
-        if (emptyEl) emptyEl.classList.toggle('hidden-section', surfaceState !== 'empty');
-        if (sampleEl) sampleEl.classList.toggle('hidden-section', surfaceState !== 'sample');
-        applyLibraryToolbarVisibility(surfaceState, reason);
+        const normalized = state === 'populated' || state === 'empty' || state === 'error' || state === 'sample'
+            ? state
+            : 'pending';
+        if (pendingEl) pendingEl.classList.toggle('hidden-section', normalized !== 'pending' && normalized !== 'error');
+        if (popEl) popEl.classList.toggle('hidden-section', normalized !== 'populated');
+        if (emptyEl) emptyEl.classList.toggle('hidden-section', normalized !== 'empty');
+        if (sampleEl) sampleEl.classList.toggle('hidden-section', normalized !== 'sample');
         const dashboardEl = document.getElementById('dashboard');
-        if (dashboardEl) dashboardEl.setAttribute('data-library-state', surfaceState);
-        _lastLibrarySurfaceWrite = {
-            state: surfaceState,
-            reason: String(reason || 'library-surface'),
-            ownerReady: typeof localBooksGetAll === 'function',
-            initialResolutionComplete: !!_libraryInitialResolutionComplete,
-            at: new Date().toISOString(),
-            diagnosticOwner: 'Station 2 shell visible-surface release',
-            diagnosticPurpose: 'Validate dashboard/library preflight before first visible release',
-            diagnosticRetirementCondition: 'Remove or keep devtools-only after Slice 2C runtime acceptance and cleanup phase'
-        };
-        shellTrailPush('library-surface-state', _lastLibrarySurfaceWrite);
+        if (dashboardEl) dashboardEl.setAttribute('data-library-state', normalized);
+        applyDashboardLibraryChrome(normalized, 'library-surface-state:' + normalized);
     }
 
     async function refreshLibrary(reason = 'unknown') {
@@ -2110,7 +2113,7 @@ window.rcInteraction = (function () {
                 clearTimeout(libraryRefreshRetryTimer);
                 libraryRefreshRetryTimer = null;
             }
-            setLibrarySurfaceState('sample', reason);
+            setLibrarySurfaceState('sample');
             return;
         }
 
@@ -2121,7 +2124,7 @@ window.rcInteraction = (function () {
         // After that first truthful read, later refreshes keep the current visible
         // surface instead of flashing back through pending.
         if (!_libraryInitialResolutionComplete) {
-            setLibrarySurfaceState('pending', reason);
+            setLibrarySurfaceState('pending');
             scheduleLibraryPendingBanner();
         }
 
@@ -2155,7 +2158,7 @@ window.rcInteraction = (function () {
         clearLibraryPendingBanner();
         const has = books.length > 0;
         if (!has) {
-            setLibrarySurfaceState('empty', reason);
+            setLibrarySurfaceState('empty');
             try { renderSubscriptionSurface([]); } catch (_) {}
             return;
         }
@@ -2177,7 +2180,7 @@ window.rcInteraction = (function () {
                 <div class="w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
-        setLibrarySurfaceState('populated', reason);
+        setLibrarySurfaceState('populated');
         try { renderSubscriptionSurface(books); } catch (_) {}
 
     }
@@ -2743,32 +2746,11 @@ window.rcInteraction = (function () {
         const dashboard = document.getElementById('dashboard');
         const rows = document.getElementById('library-rows');
         const state = dashboard ? (dashboard.getAttribute('data-library-state') || null) : null;
-        const pendingEl = document.getElementById('library-pending');
-        const popEl = document.getElementById('library-populated');
-        const emptyEl = document.getElementById('library-empty');
-        const sampleEl = document.getElementById('library-public-sample');
-        const toolbar = document.getElementById('library-toolbar');
-        const importBtn = document.getElementById('importBookBtn');
-        const visiblePanels = {
-            pending: !!(pendingEl && !pendingEl.classList.contains('hidden-section')),
-            populated: !!(popEl && !popEl.classList.contains('hidden-section')),
-            empty: !!(emptyEl && !emptyEl.classList.contains('hidden-section')),
-            sample: !!(sampleEl && !sampleEl.classList.contains('hidden-section'))
-        };
         return {
             ownerReady: typeof localBooksGetAll === 'function',
             state: state || (_libraryInitialResolutionComplete ? 'ready-unknown' : 'pending'),
             initialResolutionComplete: !!_libraryInitialResolutionComplete,
-            count: rows ? rows.children.length : 0,
-            toolbarVisible: !!(toolbar && !toolbar.classList.contains('hidden-section')),
-            importCtaVisible: !!(importBtn && isElementVisible(importBtn)),
-            visiblePanels,
-            lastSurfaceWrite: _lastLibrarySurfaceWrite,
-            diagnostics: {
-                owner: 'Station 2 shell visible-surface release',
-                purpose: 'Validate dashboard/library preflight before first visible release',
-                retirementCondition: 'Remove or keep devtools-only after Slice 2C runtime acceptance and cleanup phase'
-            }
+            count: rows ? rows.children.length : 0
         };
     }
 
@@ -2813,6 +2795,7 @@ window.rcInteraction = (function () {
             },
             publicRuntime: readPublicRuntimeBoundaryReport(),
             signedInInteraction: getSignedInInteractionReport(),
+            dashboardRelease: _lastDashboardRelease,
             library: getLibrarySurfaceReport(),
             modal,
             pricing: getPricingSurfaceReport(modal, readingVisible),
