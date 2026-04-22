@@ -11,6 +11,14 @@
   --explorer-paper-wallpaper: url('https://wallpapers.com/images/hd/world-map-in-old-paper-tjbf6z87cm5gxsru.jpg');
 }
 
+/* Explorer reading overscroll background guard.
+   Mirrors the reading parchment color on the browser canvas only while reading. */
+html:has(body.theme-explorer.reading-active),
+body.theme-explorer.reading-active,
+body.theme-explorer.reading-active #reading-mode {
+  background: var(--rm-page-bg);
+}
+
 body.theme-explorer {
   --theme-accent:      #c17d4a;
   --theme-accent-deep: #8B2500;

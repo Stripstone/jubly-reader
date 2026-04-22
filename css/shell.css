@@ -363,6 +363,15 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             }
             #landing-footer span { white-space: nowrap; }
         }
+        /* Reading view overscroll background guard.
+           Preserve existing scroll ownership and scrollbar behavior; only ensure
+           the browser canvas exposed during reading overscroll matches reading. */
+        html:has(body.reading-active),
+        body.reading-active,
+        body.reading-active #reading-mode {
+            background: var(--theme-accent-soft);
+        }
+
         /* ── Focus Mode reading UI ── */
         #reading-mode { background: var(--theme-accent-soft); min-height: 100vh; padding: 0; }
         /* Reading bar layout — see consolidated system at end of file */
