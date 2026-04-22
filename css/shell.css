@@ -402,6 +402,13 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             overflow-y: auto;
             overscroll-behavior: contain;
             -webkit-overflow-scrolling: touch;
+            /* Future reading-scrollbar customization hook.
+               Defaults preserve native browser behavior and do not paint or size
+               scrollbars in this hotfix. The later scrollbar slice may override
+               these scoped variables/rules without touching dashboard scrollbars. */
+            scrollbar-gutter: var(--reading-scrollbar-gutter, auto);
+            scrollbar-width: var(--reading-scrollbar-width, auto);
+            scrollbar-color: var(--reading-scrollbar-color, auto);
         }
 
         @supports not (height: 100dvh) {
