@@ -371,8 +371,8 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
          * rather than inheriting the dark app chrome.
          * overscroll-behavior: none on body prevents the dark html background from
          * bleeding through at the scroll boundary during the reading session. */
-        body:not(.reading-active)                    { scrollbar-width: none; }
-        body:not(.reading-active)::-webkit-scrollbar { display: none; }
+        html:not(:has(body.reading-active))                    { scrollbar-width: none; -ms-overflow-style: none; }
+        html:not(:has(body.reading-active))::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
         html:has(body.reading-active) {
             color-scheme: light;
@@ -381,6 +381,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         body.reading-active {
             background: var(--theme-accent-soft);
             overscroll-behavior: none;
+            scrollbar-color: #94a3b8 transparent;
         }
         body.reading-active #reading-mode { background: var(--theme-accent-soft); }
 
