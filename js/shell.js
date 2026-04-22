@@ -2968,6 +2968,84 @@ window.rcInteraction = (function () {
         };
     }
 
+    // Dev/reporting-only layout snapshot for Reading View Layout Hotfix validation.
+    // Owner: shell diagnostics. Purpose: prove scroll-owner/layout facts during runtime validation.
+    // Retirement: remove after hotfix runtime acceptance unless Central explicitly retains it as devtools-only.
+    // This reports layout facts only; it must not drive reading/page/TTS behavior.
+    function getReadingLayoutSnapshot() {
+        const html = document.documentElement;
+        const body = document.body;
+        const scrollingEl = document.scrollingElement || html || body;
+        const readingMode = document.getElementById('reading-mode');
+        const readingContent = readingMode ? readingMode.querySelector('.reading-content') : null;
+        const settingsModal = document.getElementById('volumePanel');
+        const topBar = document.getElementById('reading-top-bar');
+        const bottomBar = document.querySelector('.reading-bottom-bar');
+
+        function styleValue(el, prop) {
+            try { return el ? window.getComputedStyle(el)[prop] : null; } catch (_) { return null; }
+        }
+        function rectHeight(el) {
+            try { return el ? Math.round(el.getBoundingClientRect().height) : null; } catch (_) { return null; }
+        }
+        function maxScroll(el) {
+            if (!el) return null;
+            try { return Math.max(0, Math.round((el.scrollHeight || 0) - (el.clientHeight || 0))); } catch (_) { return null; }
+        }
+        function scrollTop(el) {
+            if (!el) return null;
+            try { return Math.round(el.scrollTop || 0); } catch (_) { return null; }
+        }
+        function fixedAndVisible(el) {
+            const position = styleValue(el, 'position');
+            let visible = false;
+            try {
+                if (el) {
+                    const style = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    visible = style.display !== 'none'
+                        && style.visibility !== 'hidden'
+                        && rect.width > 0
+                        && rect.height > 0
+                        && rect.bottom > 0
+                        && rect.top < window.innerHeight;
+                }
+            } catch (_) {}
+            return { fixed: position === 'fixed', visible };
+        }
+
+        const top = fixedAndVisible(topBar);
+        const bottom = fixedAndVisible(bottomBar);
+        return {
+            _diagnostic: {
+                owner: 'shell diagnostics',
+                purpose: 'reading-view scroll-owner hotfix runtime validation',
+                behavior: 'reporting-only',
+                retirementCondition: 'remove after hotfix runtime acceptance unless Central explicitly retains as devtools-only'
+            },
+            bodyReadingActive: !!(body && body.classList.contains('reading-active')),
+            documentScrollTop: scrollTop(scrollingEl),
+            documentMaxScroll: maxScroll(scrollingEl),
+            htmlOverflow: styleValue(html, 'overflowY'),
+            bodyOverflow: styleValue(body, 'overflowY'),
+            readingModePosition: styleValue(readingMode, 'position'),
+            readingModeOverflow: styleValue(readingMode, 'overflowY'),
+            readingModeHeight: rectHeight(readingMode),
+            readingContentScrollTop: scrollTop(readingContent),
+            readingContentMaxScroll: maxScroll(readingContent),
+            readingContentOverflow: styleValue(readingContent, 'overflowY'),
+            readingContentHeight: rectHeight(readingContent),
+            settingsOpen: !!(typeof window.isReadingSettingsModalOpen === 'function' && window.isReadingSettingsModalOpen()),
+            settingsModalScrollTop: scrollTop(settingsModal),
+            settingsModalMaxScroll: maxScroll(settingsModal),
+            settingsModalOverflow: styleValue(settingsModal, 'overflowY'),
+            topBarFixed: top.fixed,
+            topBarVisible: top.visible,
+            bottomBarFixed: bottom.fixed,
+            bottomBarVisible: bottom.visible
+        };
+    }
+
     function getShellSurfaceReport() {
         const visibleSection = getCurrentVisibleSection();
         const readingMode = document.getElementById('reading-mode');
@@ -3001,6 +3079,7 @@ window.rcInteraction = (function () {
     }
 
     window.getShellSurfaceReport = getShellSurfaceReport;
+    window.getReadingLayoutSnapshot = getReadingLayoutSnapshot;
 
     window.getShellDiagnosticsSnapshot = function getShellDiagnosticsSnapshot() {
         const topBar = document.getElementById('reading-top-bar');
@@ -3043,7 +3122,8 @@ window.rcInteraction = (function () {
                 topActions: topActions ? { clientWidth: topActions.clientWidth, offsetLeft: topActions.offsetLeft } : null,
                 bottomBar: bottomBar ? { clientWidth: bottomBar.clientWidth, scrollWidth: bottomBar.scrollWidth } : null,
                 bottomCluster: bottomCluster ? { clientWidth: bottomCluster.clientWidth, scrollWidth: bottomCluster.scrollWidth, offsetLeft: bottomCluster.offsetLeft } : null,
-                bottomActions: bottomActions ? { clientWidth: bottomActions.clientWidth, offsetLeft: bottomActions.offsetLeft } : null
+                bottomActions: bottomActions ? { clientWidth: bottomActions.clientWidth, offsetLeft: bottomActions.offsetLeft } : null,
+                readingLayoutSnapshot: getReadingLayoutSnapshot()
             }
         };
     };

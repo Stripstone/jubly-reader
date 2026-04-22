@@ -36,11 +36,14 @@ body.theme-explorer {
 body.theme-explorer.reading-active #reading-mode .reading-content {
   position: relative;
   isolation: isolate;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: linear-gradient(180deg, rgba(235,231,222,0.97) 0%, rgba(223,221,216,0.98) 100%);
 }
 
-/* Both background layers hidden by default. Each mode reveals its own layer. */
+/* Both background layers hidden by default. Each mode reveals its own layer.
+   They are viewport-fixed because .reading-content is the single scroll owner;
+   this keeps Explorer texture/wallpaper coverage stable through scroll. */
 body.theme-explorer.reading-active #reading-mode .reading-content::before,
 body.theme-explorer.reading-active #reading-mode .reading-content::after {
   z-index: 0;
@@ -67,7 +70,7 @@ body.theme-explorer.reading-active #reading-mode .reading-content > :not(#fireCa
 
 body.theme-explorer.reading-active #reading-mode .reading-content::before {
   content: '';
-  position: absolute;
+  position: fixed;
   inset: 0;
   pointer-events: none;
   background:
@@ -130,7 +133,7 @@ body.theme-explorer.reading-active #reading-mode .reading-content.explorer-bg-te
 
 body.theme-explorer.reading-active #reading-mode .reading-content::after {
   content: '';
-  position: absolute;
+  position: fixed;
   inset: 0;
   pointer-events: none;
   background-image: var(--explorer-paper-wallpaper);
