@@ -98,11 +98,23 @@ Maintenance rule:
 
 | Surface | What it does | Status |
 |---|---|---|
-| Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ✅ In-surface pending remains the primary seam; dashboard release may show honest pending before population; empty/import guidance appears only after local library owner truth resolves empty; local read failure stays in an error/pending surface instead of pretending empty. Delayed banner appears only if hydration noticeably stalls |
+| Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ✅ Dashboard/library release is a settlement transaction: refresh/login begins behind the boot/settlement boundary; quick `populated`/`empty`/`error` truth may release directly; otherwise release neutral pending, keep it readable for a minimum duration, then replace with final truth. Empty/import guidance appears only after owner-empty truth plus empty grace. Local read failure stays in error/pending rather than pretending empty. Delayed banner appears only if hydration noticeably stalls |
 | Library modal → **Delete** book button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
 | Deleted files modal → **Restore** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Restoring…` on the clicked row |
 | Deleted files modal → **Delete** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
 | Deleted files modal → **Delete All** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` while batch delete runs |
+
+### Dashboard/library release transaction
+
+The signed-in dashboard must not become visible as importer-neutral or fake-empty while library truth is still resolving. On refresh/login:
+
+1. Start dashboard/library settlement behind the boot/settlement boundary.
+2. If `populated`, `empty`, or `error` resolves quickly, release dashboard directly in that final state.
+3. If not resolved by the threshold, release a neutral pending dashboard/library state.
+4. Once pending is visible, keep pending for a minimum readable duration before replacing it.
+5. If empty resolves, show library-empty/import guidance only after empty truth plus empty grace.
+
+Allowed first visible dashboard/library states are `pending`, `populated`, `empty`, or `error`. Importer-neutral is not a default first visible signed-in dashboard state.
 
 ---
 

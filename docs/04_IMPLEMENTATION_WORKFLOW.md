@@ -174,6 +174,18 @@ Harnesses must be dev-only/diagnostics-only, copyable, scoped to the owner under
 
 For user-visible transitions, prefer an honest pending state over hiding, freezing, or rendering a believable wrong final state. A visible surface must be final, or explicitly pending/blocked with owner and reason. Do not use arbitrary waits, CSS masks, or disabled controls as substitutes for owner readiness.
 
+### Dashboard/library release settlement
+
+When signed-in dashboard release depends on library/importer hydration, treat release as a surface transaction, not a direct `showSection('dashboard')` reveal. Start refresh/login settlement while the dashboard remains behind the boot/settlement boundary.
+
+Release rules:
+- If `populated`, `empty`, or `error` owner truth resolves inside the quick settlement threshold, release dashboard directly in that final visible state.
+- If final truth has not resolved by the threshold, release a neutral signed-in pending dashboard/library surface with owner/reason.
+- Once neutral pending is shown, keep it visible for a minimum readable duration before replacing it with final truth, so the first visible frame is not a flicker.
+- If owner truth resolves `empty`, show library-empty/import guidance only after empty truth plus the documented empty grace.
+
+This threshold/grace is allowed only as a documented release transaction. It must not become arbitrary delay, CSS masking, or a substitute for owner truth. Shell owns the release/presentation decision; library/import owners still own book/import truth.
+
 ## 10. Stop signals
 
 Stop and reclassify when evidence suggests:
