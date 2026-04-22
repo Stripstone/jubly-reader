@@ -363,6 +363,27 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             }
             #landing-footer span { white-space: nowrap; }
         }
+        /* ── Scrollbar visibility — reading mode only ──────────────────────────────
+         * Hide the document scrollbar on all non-reading surfaces (dashboard,
+         * landing, profile, etc.). Reading mode keeps its scrollbar for page
+         * navigation. color-scheme: light on html ensures the reading scrollbar
+         * renders in the normal white style that matches the light reading surface,
+         * rather than inheriting the dark app chrome.
+         * overscroll-behavior: none on body prevents the dark html background from
+         * bleeding through at the scroll boundary during the reading session. */
+        body:not(.reading-active)                    { scrollbar-width: none; }
+        body:not(.reading-active)::-webkit-scrollbar { display: none; }
+
+        html:has(body.reading-active) {
+            color-scheme: light;
+            background: var(--theme-accent-soft);
+        }
+        body.reading-active {
+            background: var(--theme-accent-soft);
+            overscroll-behavior: none;
+        }
+        body.reading-active #reading-mode { background: var(--theme-accent-soft); }
+
         /* ── Focus Mode reading UI ── */
         #reading-mode { background: var(--theme-accent-soft); min-height: 100vh; padding: 0; }
         /* Reading bar layout — see consolidated system at end of file */
