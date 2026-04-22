@@ -66,15 +66,10 @@
     let _libraryPendingBannerTimer = null;
     let _lastDashboardRelease = {
         requestedSurface: null,
-        releasedSurface: null,
-        releaseReason: 'boot',
-        firstVisibleLibraryState: null,
-        source: null,
-        ownerReady: false,
+        libraryStateAtRelease: null,
+        visibleStateAtRelease: null,
+        releaseReason: null,
         blockedBy: null,
-        hiddenSectionOwner: 'releaseDashboardSectionVisibility',
-        diagnosticPurpose: 'validate first-visible dashboard library state; signed-in surface must never be sample',
-        retirementCondition: 'remove or narrow after dashboard release contract is runtime-accepted and direct reveal paths are retired',
         at: null
     };
 
@@ -671,14 +666,6 @@ window.rcInteraction = (function () {
         return _lastSignedInAccountReadiness;
     }
 
-    // ── Dashboard release seam ────────────────────────────────────────────────
-    // Shell owns the first-visible dashboard state decision before the section
-    // is made visible. Dashboard hidden-section removal is owned exclusively by
-    // releaseDashboardSectionVisibility(). showSection() is the requester, not
-    // the release authority, for the dashboard surface.
-    //
-    // Retirement condition: remove or narrow after dashboard release contract is
-    // runtime-accepted and direct reveal paths are retired.
 
     function readDashboardLibraryState() {
         const dashboardEl = document.getElementById('dashboard');
@@ -690,42 +677,19 @@ window.rcInteraction = (function () {
         return state === 'populated' || state === 'empty' || state === 'error';
     }
 
-    // Derives release state from authoritative owner signals only — never from
-    // shell-held mirror state. Signed-in path can never produce 'sample'.
-    function readDashboardLibraryOwnerReport(reason = 'dashboard-release') {
-        const authed = !!isAuthedUser();
-        const intro = isIntroLibraryVisible();
-        const ownerReady = typeof localBooksGetAll === 'function';
-        const initialResolved = !!_libraryInitialResolutionComplete;
-        if (!authed) {
-            const state = intro ? 'sample' : 'pending';
-            return { state, ownerReady: false, initialResolved, authed, source: intro ? 'public-sample' : 'public-blocked', reason, at: new Date().toISOString() };
-        }
-        if (!ownerReady) {
-            return { state: 'pending', ownerReady, initialResolved, authed, source: 'signed-in-pending', pendingReason: 'owner-not-ready', reason, at: new Date().toISOString() };
-        }
-        if (!initialResolved) {
-            return { state: 'pending', ownerReady, initialResolved, authed, source: 'signed-in-pending', pendingReason: 'resolution-pending', reason, at: new Date().toISOString() };
-        }
-        // Only read committed DOM state after owner has resolved — not before.
-        const committed = readDashboardLibraryState();
-        const state = isSettledDashboardLibraryState(committed) ? committed : 'pending';
-        return { state, ownerReady, initialResolved, authed, source: 'signed-in-settled', reason, at: new Date().toISOString() };
-    }
-
     function applyDashboardLibraryChrome(state, reason = 'dashboard-library-chrome') {
+        const normalized = state || readDashboardLibraryState() || 'pending';
         const authed = !!isAuthedUser();
         const libraryToolbar = document.getElementById('library-toolbar');
         const manageBtn = document.getElementById('manageLibraryBtn');
         const importBtn = document.getElementById('importBookBtn');
+
         // Shell coordinates chrome visibility only. Library/import truth remains
         // owned by refreshLibrary(), localBooksGetAll(), and importer guards.
-        const toolbarAllowed = authed
-            ? isSettledDashboardLibraryState(state)
-            : (state === 'sample' && isIntroLibraryVisible());
+        const toolbarAllowed = authed && isSettledDashboardLibraryState(normalized);
         if (libraryToolbar) {
             libraryToolbar.classList.toggle('hidden-section', !toolbarAllowed);
-            libraryToolbar.setAttribute('data-shell-library-state', state || 'pending');
+            libraryToolbar.setAttribute('data-shell-library-state', normalized);
         }
         [manageBtn, importBtn].forEach((btn) => {
             if (!btn) return;
@@ -733,89 +697,47 @@ window.rcInteraction = (function () {
                 btn.disabled = !toolbarAllowed;
                 if (toolbarAllowed) btn.removeAttribute('aria-disabled');
                 else btn.setAttribute('aria-disabled', 'true');
-                btn.setAttribute('data-shell-library-state', state || 'pending');
+                btn.setAttribute('data-shell-library-state', normalized);
             } catch (_) {}
         });
-        shellTrailPush('dashboard-library-chrome', { reason, state, authed, toolbarAllowed });
-        return { state, toolbarAllowed };
+        shellTrailPush('dashboard-library-chrome', {
+            reason,
+            state: normalized,
+            authed,
+            toolbarAllowed
+        });
+        return { state: normalized, toolbarAllowed };
     }
 
-    function prepareDashboardRelease(requestedSurface, options = {}) {
-        const reason = options.releaseReason || 'dashboard-release';
-        const report = readDashboardLibraryOwnerReport(reason);
-        const firstVisibleState = report.state;
-        setLibrarySurfaceState(firstVisibleState, reason);
-        if (firstVisibleState === 'pending') scheduleLibraryPendingBanner();
-        const chrome = applyDashboardLibraryChrome(firstVisibleState, reason);
+    function prepareDashboardRelease(reason = 'dashboard-release') {
+        const authed = !!isAuthedUser();
+        let state = readDashboardLibraryState();
+        if (!authed) {
+            setLibrarySurfaceState('sample');
+            state = 'sample';
+        } else if (!state || state === 'sample' || (!_libraryInitialResolutionComplete && !isSettledDashboardLibraryState(state))) {
+            setLibrarySurfaceState('pending');
+            state = 'pending';
+            scheduleLibraryPendingBanner();
+        }
+        const chrome = applyDashboardLibraryChrome(state, reason);
         _lastDashboardRelease = {
-            requestedSurface,
-            releasedSurface: 'dashboard',
+            requestedSurface: 'dashboard',
+            libraryStateAtRelease: state,
+            visibleStateAtRelease: state,
             releaseReason: reason,
-            firstVisibleLibraryState: firstVisibleState,
-            source: report.source,
-            ownerReady: !!report.ownerReady,
             blockedBy: null,
-            toolbarAllowed: chrome.toolbarAllowed,
-            hiddenSectionOwner: 'releaseDashboardSectionVisibility',
-            diagnosticPurpose: 'validate first-visible dashboard library state; signed-in surface must never be sample',
-            retirementCondition: 'remove or narrow after dashboard release contract is runtime-accepted and direct reveal paths are retired',
-            at: new Date().toISOString()
+            at: new Date().toISOString(),
+            toolbarAllowed: chrome.toolbarAllowed
         };
         shellTrailPush('dashboard-release-preflight', {
             reason,
-            source: report.source,
-            firstVisibleLibraryState: firstVisibleState,
-            ownerReady: report.ownerReady,
+            authed,
+            libraryStateAtRelease: state,
             toolbarAllowed: chrome.toolbarAllowed,
             initialResolved: !!_libraryInitialResolutionComplete
         });
         return _lastDashboardRelease;
-    }
-
-    // Single owner of dashboard hidden-section removal. showSection() is the
-    // requester only — it must not directly remove hidden-section from dashboard.
-    function releaseDashboardSectionVisibility(requestedSurface, options = {}) {
-        const release = prepareDashboardRelease(requestedSurface, options);
-        ALL_SECTIONS.forEach((sectionId) => {
-            const el = document.getElementById(sectionId);
-            if (el) el.classList.add('hidden-section');
-        });
-        const target = document.getElementById('dashboard');
-        if (target) target.classList.remove('hidden-section');
-        _currentSection = 'dashboard';
-        _lastShellRelease = {
-            requestedSurface,
-            releasedSurface: 'dashboard',
-            releaseReason: release.releaseReason,
-            blockedBy: null,
-            at: new Date().toISOString()
-        };
-        shellTrailPush('dashboard-release', {
-            requestedSurface,
-            firstVisibleLibraryState: release.firstVisibleLibraryState,
-            source: release.source,
-            ownerReady: release.ownerReady,
-            toolbarAllowed: release.toolbarAllowed,
-            hiddenSectionOwner: 'releaseDashboardSectionVisibility'
-        });
-        return release;
-    }
-
-    function releaseStandardSectionVisibility(requestedSurface, targetId, options = {}) {
-        ALL_SECTIONS.forEach((sectionId) => {
-            const el = document.getElementById(sectionId);
-            if (el) el.classList.add('hidden-section');
-        });
-        const target = document.getElementById(targetId);
-        if (target) target.classList.remove('hidden-section');
-        _currentSection = targetId;
-        _lastShellRelease = {
-            requestedSurface,
-            releasedSurface: targetId,
-            releaseReason: options.releaseReason || ('show-section:' + targetId),
-            blockedBy: null,
-            at: new Date().toISOString()
-        };
     }
 
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
@@ -860,18 +782,13 @@ window.rcInteraction = (function () {
         const sbLibrary = document.getElementById('sb-library');
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
 
-        const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
         const publicSampleCopy = document.getElementById('library-public-sample-copy');
         const publicSampleSubcopy = document.getElementById('library-public-sample-subcopy');
-        if (id === 'dashboard') {
-            applyDashboardLibraryChrome(readDashboardLibraryState() || (authed ? 'pending' : 'sample'), 'sync-auth-presentation:' + id);
-        } else if (libraryToolbar) {
-            libraryToolbar.classList.toggle('hidden-section', !(authed || isIntroLibraryVisible()));
-        }
-        if (librarySample && id !== 'dashboard') librarySample.classList.add('hidden-section');
+        if (librarySample) librarySample.classList.add('hidden-section');
         if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your own library.';
         if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Start free, keep your place, and come back anytime.';
+        applyDashboardLibraryChrome(readDashboardLibraryState(), 'sync-auth-presentation:' + id);
         renderLibrarySubtitle(authed);
 
         const profileGuestCard = document.getElementById('profile-guest-card');
@@ -908,15 +825,33 @@ window.rcInteraction = (function () {
         if (targetId === 'landing-page' && !options.preserveIntroLibrary) _publicIntroLibraryVisible = false;
         const readingModeEl = document.getElementById('reading-mode');
         const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
-
-        // showSection is the requester only. Dashboard hidden-section removal is
-        // owned exclusively by releaseDashboardSectionVisibility().
+        let dashboardRelease = null;
         if (targetId === 'dashboard') {
-            releaseDashboardSectionVisibility(id, Object.assign({
-                releaseReason: options.releaseReason || 'dashboard-release:show-section'
-            }, options));
-        } else {
-            releaseStandardSectionVisibility(id, targetId, options);
+            dashboardRelease = prepareDashboardRelease(options.releaseReason || ('show-section:' + targetId));
+        }
+
+        ALL_SECTIONS.forEach((s) => {
+            const el = document.getElementById(s);
+            if (el) el.classList.add('hidden-section');
+        });
+        const target = document.getElementById(targetId);
+        if (target) target.classList.remove('hidden-section');
+        _currentSection = targetId;
+        _lastShellRelease = {
+            requestedSurface: id,
+            releasedSurface: targetId,
+            releaseReason: options.releaseReason || ('show-section:' + targetId),
+            blockedBy: null,
+            at: new Date().toISOString()
+        };
+        if (targetId === 'dashboard') {
+            shellTrailPush('dashboard-reveal', {
+                historyMode: options.historyMode || 'push',
+                authed: !!isAuthedUser(),
+                hasLocalLibraryOwner: typeof localBooksGetAll === 'function',
+                libraryStateAtRelease: dashboardRelease ? dashboardRelease.libraryStateAtRelease : readDashboardLibraryState(),
+                toolbarAllowedAtRelease: dashboardRelease ? dashboardRelease.toolbarAllowed : null
+            });
         }
 
         const footer = document.getElementById('landing-footer');
@@ -951,7 +886,7 @@ window.rcInteraction = (function () {
         clearPaidIntentForPublicAbandon(targetId);
         syncShellAuthPresentation(targetId);
         let _sectionRefreshPromise = null;
-        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary('show-section-dashboard');
+        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary(options.releaseReason || 'show-section-dashboard');
         if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
@@ -1453,7 +1388,7 @@ window.rcInteraction = (function () {
                 return;
             }
             if (current === 'landing-page' || current === 'login-page') {
-                showSection('dashboard', { historyMode: 'replace', releaseReason: 'dashboard-release:auth-change' });
+                showSection('dashboard', { historyMode: 'replace', releaseReason: 'auth-change-dashboard-redirect' });
                 return;
             }
             syncShellAuthPresentation(current);
@@ -2138,21 +2073,21 @@ window.rcInteraction = (function () {
         try { window.rcInteraction && window.rcInteraction.clear('library:hydrate'); } catch (_) {}
     }
 
-    function setLibrarySurfaceState(state, reason = 'library-surface') {
-        const normalized = (state === 'populated' || state === 'empty' || state === 'error' || state === 'sample')
-            ? state : 'pending';
+    function setLibrarySurfaceState(state) {
         const pendingEl = document.getElementById('library-pending');
         const popEl = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
         const sampleEl = document.getElementById('library-public-sample');
-        // pending panel serves both 'pending' and 'error' states
+        const normalized = state === 'populated' || state === 'empty' || state === 'error' || state === 'sample'
+            ? state
+            : 'pending';
         if (pendingEl) pendingEl.classList.toggle('hidden-section', normalized !== 'pending' && normalized !== 'error');
         if (popEl) popEl.classList.toggle('hidden-section', normalized !== 'populated');
         if (emptyEl) emptyEl.classList.toggle('hidden-section', normalized !== 'empty');
         if (sampleEl) sampleEl.classList.toggle('hidden-section', normalized !== 'sample');
         const dashboardEl = document.getElementById('dashboard');
         if (dashboardEl) dashboardEl.setAttribute('data-library-state', normalized);
-        applyDashboardLibraryChrome(normalized, reason);
+        applyDashboardLibraryChrome(normalized, 'library-surface-state:' + normalized);
     }
 
     async function refreshLibrary(reason = 'unknown') {
@@ -2178,7 +2113,7 @@ window.rcInteraction = (function () {
                 clearTimeout(libraryRefreshRetryTimer);
                 libraryRefreshRetryTimer = null;
             }
-            setLibrarySurfaceState('sample', reason);
+            setLibrarySurfaceState('sample');
             return;
         }
 
@@ -2189,7 +2124,7 @@ window.rcInteraction = (function () {
         // After that first truthful read, later refreshes keep the current visible
         // surface instead of flashing back through pending.
         if (!_libraryInitialResolutionComplete) {
-            setLibrarySurfaceState('pending', reason);
+            setLibrarySurfaceState('pending');
             scheduleLibraryPendingBanner();
         }
 
@@ -2223,7 +2158,7 @@ window.rcInteraction = (function () {
         clearLibraryPendingBanner();
         const has = books.length > 0;
         if (!has) {
-            setLibrarySurfaceState('empty', reason);
+            setLibrarySurfaceState('empty');
             try { renderSubscriptionSurface([]); } catch (_) {}
             return;
         }
@@ -2245,7 +2180,7 @@ window.rcInteraction = (function () {
                 <div class="w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
-        setLibrarySurfaceState('populated', reason);
+        setLibrarySurfaceState('populated');
         try { renderSubscriptionSurface(books); } catch (_) {}
 
     }
@@ -2811,14 +2746,11 @@ window.rcInteraction = (function () {
         const dashboard = document.getElementById('dashboard');
         const rows = document.getElementById('library-rows');
         const state = dashboard ? (dashboard.getAttribute('data-library-state') || null) : null;
-        const ownerReport = readDashboardLibraryOwnerReport('report');
         return {
             ownerReady: typeof localBooksGetAll === 'function',
             state: state || (_libraryInitialResolutionComplete ? 'ready-unknown' : 'pending'),
             initialResolutionComplete: !!_libraryInitialResolutionComplete,
-            count: rows ? rows.children.length : 0,
-            source: ownerReport.source,
-            dashboardRelease: _lastDashboardRelease
+            count: rows ? rows.children.length : 0
         };
     }
 
