@@ -43,8 +43,6 @@
         ownerReady: false,
         blockedBy: null,
         hiddenSectionOwner: 'releaseDashboardSectionVisibility',
-        diagnosticPurpose: 'validate first-visible dashboard library state; signed-in surface must never be sample',
-        retirementCondition: 'remove or narrow after dashboard release contract is runtime-accepted and direct reveal paths are retired',
         at: null
     };
 
@@ -369,13 +367,6 @@ window.rcInteraction = (function () {
         } catch (_) {}
     }
 
-    let SHELL_DEBUG = {
-        seq: 0,
-        lastPlaybackSync: null,
-        lastControlAction: null,
-        lastSkipAction: null,
-        lastProgressSnapshot: null
-    };
     let _lastShellRelease = {
         requestedSurface: null,
         releasedSurface: null,
@@ -393,13 +384,6 @@ window.rcInteraction = (function () {
         reason: 'boot',
         at: null
     };
-    function shellDebugRemember(slot, data) {
-        const entry = Object.assign({ seq: ++SHELL_DEBUG.seq, at: new Date().toISOString() }, data || {});
-        SHELL_DEBUG[slot] = entry;
-        try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
-        return entry;
-    }
-
     function setInlineBusy(button, busyLabel, enabledLabel, disabled) {
         if (!button) return;
         if (busyLabel) {
@@ -707,7 +691,6 @@ window.rcInteraction = (function () {
                 btn.setAttribute('data-shell-library-state', state || 'pending');
             } catch (_) {}
         });
-        shellTrailPush('dashboard-library-chrome', { reason, state, authed, toolbarAllowed });
         return { state, toolbarAllowed };
     }
 
@@ -728,18 +711,8 @@ window.rcInteraction = (function () {
             blockedBy: null,
             toolbarAllowed: chrome.toolbarAllowed,
             hiddenSectionOwner: 'releaseDashboardSectionVisibility',
-            diagnosticPurpose: 'validate first-visible dashboard library state; signed-in surface must never be sample',
-            retirementCondition: 'remove or narrow after dashboard release contract is runtime-accepted and direct reveal paths are retired',
             at: new Date().toISOString()
         };
-        shellTrailPush('dashboard-release-preflight', {
-            reason,
-            source: report.source,
-            firstVisibleLibraryState: firstVisibleState,
-            ownerReady: report.ownerReady,
-            toolbarAllowed: chrome.toolbarAllowed,
-            initialResolved: !!_libraryInitialResolutionComplete
-        });
         return _lastDashboardRelease;
     }
 
@@ -761,14 +734,6 @@ window.rcInteraction = (function () {
             blockedBy: null,
             at: new Date().toISOString()
         };
-        shellTrailPush('dashboard-release', {
-            requestedSurface,
-            firstVisibleLibraryState: release.firstVisibleLibraryState,
-            source: release.source,
-            ownerReady: release.ownerReady,
-            toolbarAllowed: release.toolbarAllowed,
-            hiddenSectionOwner: 'releaseDashboardSectionVisibility'
-        });
         return release;
     }
 
@@ -782,7 +747,6 @@ window.rcInteraction = (function () {
                 const elapsedMs = Math.round(performance.now() - started);
                 const report = { targetId, settled, state, elapsedMs, thresholdMs, reason, at: new Date().toISOString() };
                 _lastDashboardLibraryRevealTransaction = Object.assign({}, _lastDashboardLibraryRevealTransaction || {}, report);
-                shellTrailPush('dashboard-library-reveal-transaction', report);
                 resolve(report);
             };
             const check = () => {
@@ -930,10 +894,8 @@ window.rcInteraction = (function () {
         if (mainNav) mainNav.style.display = targetId === 'reading-mode' ? 'none' : '';
         if (wasReading && targetId !== 'reading-mode') {
             try {
-                let exitResult = null;
-                if (typeof exitReadingSession === 'function') exitResult = exitReadingSession();
+                if (typeof exitReadingSession === 'function') exitReadingSession();
                 else cleanupReadingTransientState();
-                shellDebugRemember('lastControlAction', { type: 'exit-reading', exitResult });
             } catch(_) {}
         }
         document.body.classList.toggle('reading-active', targetId === 'reading-mode');
@@ -1067,10 +1029,6 @@ window.rcInteraction = (function () {
         if (signal) signal.classList.add('hidden-section');
         showSection('reading-mode');
         try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(PUBLIC_SAMPLE_BOOK_ID); } catch (_) {}
-    }
-
-    function openSampleBookPreview() {
-        startPublicSampleReading().catch(() => {});
     }
 
     function goToPostReadingSurface() {
@@ -1811,8 +1769,6 @@ window.rcInteraction = (function () {
         return true;
     }
 
-    function promptExplorerUpgrade() { openModal('pricing-modal'); }
-
     // ── F1: TTS Speed Control bridge ─────────────────────────────
     function shellSetSpeed(value) {
         const rate = parseFloat(value) || 1;
@@ -1867,25 +1823,6 @@ window.rcInteraction = (function () {
             if (typeof lastFocusedPageIndex === 'number' && lastFocusedPageIndex >= 0) return lastFocusedPageIndex;
         } catch (_) {}
         return 0;
-    }
-
-    // RETIRED (Pass 2): syncVisiblePageAsPlayTarget is no longer called.
-    // Its only call site was handlePausePlay(), which has been updated to
-    // delegate without pre-empting runtime page truth. Runtime owns current-
-    // page targeting through _installScrollPageTracker + __rcReadingTarget.
-    // getVisibleReadingPageIndex() below is kept because it still feeds the
-    // progress display (not launch-critical truth). If progress display is
-    // later moved to a runtime-owned readout, both functions can be deleted.
-    function syncVisiblePageAsPlayTarget() {
-        const idx = getVisibleReadingPageIndex();
-        if (!Number.isFinite(idx) || idx < 0) return false;
-        try {
-            if (typeof window.focusReadingPage === 'function') {
-                const result = window.focusReadingPage(idx, { behavior: 'smooth' });
-                return !!(result && result.ok !== false);
-            }
-        } catch (_) {}
-        return false;
     }
 
     function bringPlaybackPageIntoView(playbackStatus) {
@@ -1997,36 +1934,13 @@ window.rcInteraction = (function () {
                 if (hasOpt) speedSel.value = runtimeRate;
             }
         } catch (_) {}
-
-        shellDebugRemember('lastPlaybackSync', {
-            type: 'playback-sync',
-            playback: status,
-            countdown,
-            support,
-            eligibility,
-            speedSynced: true,
-            controls: {
-                playDisabled: !!(btn && btn.disabled),
-                prevDisabled: !!(prevBtn && prevBtn.disabled),
-                nextDisabled: !!(nextBtn && nextBtn.disabled),
-                blockedReasons: {
-                    play: (!canPlay && eligibility.reasons) ? (eligibility.reasons.canPlay || '') : null,
-                    prev: (!eligibility.canSkipPrev && eligibility.reasons) ? (eligibility.reasons.canSkipPrev || '') : null,
-                    next: (!eligibility.canSkipNext && eligibility.reasons) ? (eligibility.reasons.canSkipNext || '') : null,
-                }
-            }
-        });
     }
 
     function handlePausePlay() {
         // Shell is a pure delegate. All routing — resume, pause, countdown
         // cancel+restart, and fresh-start — is owned by pauseOrResumeReading()
         // in tts.js. Shell does not inspect eligibility or countdown here.
-        // PASS2: Removed syncVisiblePageAsPlayTarget() call. Runtime owns
-        // current-page truth via _installScrollPageTracker (library.js), which
-        // keeps __rcReadingTarget.pageIndex current on every scroll frame.
-        // startFocusedPageTts() reads that directly. Shell must not pre-empt
-        // the runtime's page truth with a DOM-visibility inference.
+        // Runtime owns current-page truth; shell only forwards play/pause intent.
         const before = {
             playback: (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null,
             countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
@@ -2038,12 +1952,6 @@ window.rcInteraction = (function () {
         if (afterPlayback?.active && !afterPlayback.paused && (!before.playback?.active || before.playback?.paused || before.countdown?.active)) {
             bringPlaybackPageIntoView(afterPlayback);
         }
-        shellDebugRemember('lastControlAction', {
-            type: 'play-toggle',
-            before,
-            result,
-            after: afterPlayback,
-        });
         return result;
     }
 
@@ -2058,45 +1966,21 @@ window.rcInteraction = (function () {
             const cb = document.getElementById('autoplayToggle');
             if (cb) cb.checked = next;
         } catch(_) {}
-        shellDebugRemember('lastControlAction', { type: 'autoplay-toggle', enabled: next });
         return next;
     }
 
 
 
     function handleTtsStep(delta) {
-        const before = {
-            playback: (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null,
-            countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
-            runtime: (typeof getRuntimeUiState === 'function') ? getRuntimeUiState() : null
-        };
         let moved = false;
-        let route = 'unavailable';
         try {
-            if (typeof ttsJumpSentence === 'function') {
-                moved = !!ttsJumpSentence(delta);
-                if (moved) route = 'block-session-transition';
-                else route = 'block-session-unavailable';
-            }
+            if (typeof ttsJumpSentence === 'function') moved = !!ttsJumpSentence(delta);
         } catch (_) {}
         syncShellPlaybackControls();
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
         if (moved && afterPlayback?.active && !afterPlayback.paused) {
             bringPlaybackPageIntoView(afterPlayback);
         }
-        shellDebugRemember('lastSkipAction', {
-            type: 'skip',
-            delta,
-            route,
-            moved,
-            before,
-            after: {
-                playback: afterPlayback,
-                countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
-                runtime: (typeof getRuntimeUiState === 'function') ? getRuntimeUiState() : null,
-                tts: (typeof getTtsDiagnosticsSnapshot === 'function') ? getTtsDiagnosticsSnapshot() : null
-            }
-        });
         return moved;
     }
 
@@ -2176,10 +2060,6 @@ window.rcInteraction = (function () {
                 pendingVisibleReason: reason,
                 at: new Date().toISOString()
             });
-            shellTrailPush('dashboard-library-pending-visible', {
-                reason,
-                pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS
-            });
         }
         return true;
     }
@@ -2219,11 +2099,6 @@ window.rcInteraction = (function () {
             const deferred = _dashboardLibraryDeferredFinalState;
             clearDeferredDashboardLibraryFinalState();
             if (!deferred) return;
-            shellTrailPush('dashboard-library-deferred-final-commit', {
-                state: deferred.state,
-                reason: deferred.reason,
-                pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS
-            });
             applyLibrarySurfaceStateNow(deferred.state, deferred.reason + ':deferred-final');
         }, Math.max(0, remaining));
         _lastDashboardLibraryRevealTransaction = Object.assign({}, _lastDashboardLibraryRevealTransaction || {}, {
@@ -2232,12 +2107,6 @@ window.rcInteraction = (function () {
             deferredRemainingMs: Math.round(remaining),
             pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS,
             at: new Date().toISOString()
-        });
-        shellTrailPush('dashboard-library-final-deferred', {
-            state: normalized,
-            reason,
-            elapsedMs: Math.round(elapsed),
-            remainingMs: Math.round(remaining)
         });
         return true;
     }
@@ -2257,13 +2126,6 @@ window.rcInteraction = (function () {
         if (!rowsEl) return;
         const authed = !!isAuthedUser();
         const hasLocalLibraryOwner = typeof localBooksGetAll === 'function';
-        shellTrailPush('dashboard-library-refresh', {
-            reason,
-            section: getCurrentVisibleSection(),
-            authed,
-            hasLocalLibraryOwner,
-            initialResolved: _libraryInitialResolutionComplete
-        });
 
         if (!authed) {
             _libraryInitialResolutionComplete = false;
@@ -2293,7 +2155,6 @@ window.rcInteraction = (function () {
         // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
         // or successive unavailability creates an infinite chain that hangs the page.
         if (!hasLocalLibraryOwner) {
-            shellTrailPush('dashboard-library-owner-pending', { reason, retryDelayMs: 120 });
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
             return new Promise(resolve => {
                 libraryRefreshRetryTimer = setTimeout(() => {
@@ -2307,11 +2168,6 @@ window.rcInteraction = (function () {
         let books = [];
         try { books = await localBooksGetAll(); } catch(_) { books = []; }
         if (refreshSeq !== _libraryRefreshSequence) return;
-        shellTrailPush('dashboard-library-local-read', {
-            reason,
-            count: Array.isArray(books) ? books.length : 0,
-            firstSuccess: !_loggedFirstLocalLibraryRead
-        });
         _loggedFirstLocalLibraryRead = true;
         _libraryInitialResolutionComplete = true;
         clearLibraryPendingBanner();
@@ -2563,7 +2419,7 @@ window.rcInteraction = (function () {
     function updateProgressBar() {
         const prog  = document.getElementById('shell-page-progress');
         if (!prog) return;
-        if (!hasActiveReadingCards()) { prog.textContent = '—'; shellDebugRemember('lastProgressSnapshot', { type: 'progress', visible: false, label: '—' }); return; }
+        if (!hasActiveReadingCards()) { prog.textContent = '—'; return; }
         const total = (typeof pages !== 'undefined' && Array.isArray(pages)) ? pages.length : 0;
         let playback = { active: false, paused: false, key: null };
         try { if (typeof getPlaybackStatus === 'function') playback = getPlaybackStatus() || playback; } catch (_) {}
@@ -2573,7 +2429,6 @@ window.rcInteraction = (function () {
         const currentLabel = (typeof getDisplayPageNumber === 'function') ? getDisplayPageNumber(cur) : (cur + 1);
         const totalLabel = (typeof getDisplayPageTotal === 'function') ? getDisplayPageTotal(total) : total;
         prog.textContent = total > 0 ? `Page ${currentLabel} / ${totalLabel}` : '—';
-        shellDebugRemember('lastProgressSnapshot', { type: 'progress', visible: true, label: prog.textContent, current: cur, total });
     }
 
     // ── App event bridge ─────────────────────────────────────────
@@ -3005,7 +2860,6 @@ window.rcInteraction = (function () {
                 activeCount: pageBtns.filter((btn) => btn.classList.contains('tts-active')).length,
                 sample: pageBtns.slice(0, 3).map((btn) => snapshotShellControl(btn))
             },
-            debug: SHELL_DEBUG,
             layout: {
                 topBar: topBar ? { clientWidth: topBar.clientWidth, scrollWidth: topBar.scrollWidth } : null,
                 topCluster: topCluster ? { clientWidth: topCluster.clientWidth, scrollWidth: topCluster.scrollWidth, offsetLeft: topCluster.offsetLeft } : null,
