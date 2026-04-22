@@ -848,7 +848,7 @@ const RC_PROFILE_PREFS_KEY = 'rc_profile_prefs';
 
 let appTheme = 'default';
 let appThemeSettings = {};
-let appAppearance = 'light';
+let appAppearance = getBootAppliedAppearanceMode();
 let appearanceAppliedOnce = false;
 let appearancePaintSignalSeq = 0;
 let diagnosticsPrefs = { enabled: false, mode: 'off' };
@@ -1308,6 +1308,66 @@ function syncThemeShellState() {
   syncAppearanceButtons();
 }
 
+function getMutableAppearanceFirstPaintReport() {
+  try {
+    if (!window.__rcAppearanceFirstPaint || typeof window.__rcAppearanceFirstPaint !== 'object') {
+      window.__rcAppearanceFirstPaint = {
+        appearancePrePaintApplied: false,
+        modeAtFirstPaint: 'light',
+        modeAfterRuntime: null,
+        changedAfterPaint: false,
+        shellFirstAppearanceWriter: false,
+        firstWriter: 'state.js-fallback',
+        source: 'runtime-fallback'
+      };
+    }
+    return window.__rcAppearanceFirstPaint;
+  } catch (_) {
+    return {
+      appearancePrePaintApplied: false,
+      modeAtFirstPaint: 'light',
+      modeAfterRuntime: null,
+      changedAfterPaint: false,
+      shellFirstAppearanceWriter: false,
+      firstWriter: 'state.js-fallback',
+      source: 'runtime-fallback'
+    };
+  }
+}
+
+function getAppearanceFirstPaintReport() {
+  const report = getMutableAppearanceFirstPaintReport();
+  return Object.assign({}, report, {
+    modeAfterRuntime: appAppearance,
+    changedAfterPaint: normalizeAppearanceMode(report.modeAtFirstPaint) !== normalizeAppearanceMode(appAppearance),
+    shellFirstAppearanceWriter: false
+  });
+}
+
+function getBootAppliedAppearanceMode() {
+  try {
+    const report = window.__rcAppearanceFirstPaint;
+    const reported = report && typeof report === 'object' ? report.modeAtFirstPaint : null;
+    if (reported === 'dark' || reported === 'light') return normalizeAppearanceMode(reported);
+  } catch (_) {}
+  try {
+    const rootMode = document.documentElement && document.documentElement.getAttribute('data-app-appearance');
+    if (rootMode === 'dark' || rootMode === 'light') return normalizeAppearanceMode(rootMode);
+  } catch (_) {}
+  return 'light';
+}
+
+function updateAppearanceFirstPaintReport() {
+  const report = getMutableAppearanceFirstPaintReport();
+  try {
+    report.modeAfterRuntime = appAppearance;
+    report.changedAfterPaint = normalizeAppearanceMode(report.modeAtFirstPaint) !== normalizeAppearanceMode(appAppearance);
+    report.shellFirstAppearanceWriter = false;
+    report.runtimeAdoptedAtMs = (window.performance && typeof window.performance.now === 'function') ? window.performance.now() : null;
+  } catch (_) {}
+  return getAppearanceFirstPaintReport();
+}
+
 function loadTheme() {
   const stored = loadThemePrefs() || {};
   const storedDiagPrefs = loadDiagnosticsPrefs() || {};
@@ -1342,6 +1402,7 @@ function applyAppearance() {
     document.documentElement.setAttribute('data-app-appearance', appAppearance);
     document.documentElement.setAttribute('data-appearance-ready', 'true');
     document.documentElement.setAttribute('data-appearance-painted', 'false');
+    document.documentElement.style.colorScheme = appAppearance;
   } catch (_) {}
   document.body.classList.remove('app-light', 'app-dark');
   document.body.classList.add(modeClass);
@@ -1351,6 +1412,7 @@ function applyAppearance() {
     document.body.setAttribute('data-appearance-painted', 'false');
   } catch (_) {}
   appearanceAppliedOnce = true;
+  updateAppearanceFirstPaintReport();
   syncAppearanceButtons();
   try { document.dispatchEvent(new CustomEvent('rc:appearance-applied', { detail: { appearance: appAppearance } })); } catch (_) {}
   const dispatchPainted = () => {
@@ -1410,7 +1472,13 @@ function setAppearance(mode) {
 }
 
 function loadAppearance(opts = {}) {
-  appAppearance = opts.fromLocal === true ? readAppearanceModeFromLocal() : 'light';
+  if (opts.fromLocal === true) {
+    appAppearance = readAppearanceModeFromLocal();
+  } else if (opts.fromBoot === false) {
+    appAppearance = 'light';
+  } else {
+    appAppearance = getBootAppliedAppearanceMode();
+  }
   return applyAppearance();
 }
 
@@ -1509,9 +1577,12 @@ window.rcAppearance = {
   apply: applyAppearance,
   hasApplied: () => appearanceAppliedOnce,
   syncButtons: syncAppearanceButtons,
+  getFirstPaintReport: getAppearanceFirstPaintReport,
   // Transitional alias for current shell button handlers.
   save: setAppearance
 };
+
+window.getAppearanceFirstPaintReport = getAppearanceFirstPaintReport;
 
 window.rcDiagnosticsPrefs = {
   get: getDiagnosticsPreference,
@@ -1685,6 +1756,6 @@ window.rcEntitlements = {
 };
 
 applyResolvedRuntimePolicy(getFallbackRuntimePolicy(appTier), appTier, { resolved: false });
-loadAppearance({ fromLocal: false });
+loadAppearance({ fromBoot: true });
 loadTheme();
 

@@ -2,40 +2,10 @@
 // jubly — Shell + App bridge
 // ============================================================
 //
-// PRE-RUNTIME APPEARANCE BOOTSTRAP (temporary shell bridge):
-//   Applies a public-safe appearance class to <html> before CSS paints, then
-//   lets runtime restore persisted local appearance only after signed-in auth
-//   truth is available.
-//   Retirement condition: remove when runtime provides an equally-early
-//   appearance bootstrap seam without using index.html inline script ownership.
-(function applyPublicSafeAppearanceBoot() {
-    try {
-        // Public/signed-out surfaces must not inherit a prior account's local
-        // dark appearance before auth truth exists. Runtime restores persisted
-        // appearance after a signed-in account is confirmed.
-        var mode = 'light';
-        try {
-            var params = new URLSearchParams(window.location.search || '');
-            var view = String(params.get('view') || '').trim();
-            if (view === 'dashboard' || view === 'profile-page') {
-                var raw = localStorage.getItem('rc_appearance_prefs');
-                if (raw) {
-                    var parsed = JSON.parse(raw) || {};
-                    var stored = parsed.appearance_mode || parsed.mode || parsed.appearance;
-                    if (stored === 'dark' || stored === 'light') mode = stored;
-                }
-            }
-        } catch (_) {}
-        var root = document.documentElement;
-        if (!root) return;
-        root.classList.remove('app-light', 'app-dark');
-        root.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
-        root.setAttribute('data-app-appearance', mode);
-        root.style.backgroundColor = mode === 'dark' ? '#0f172a' : '#ffffff';
-        root.style.color = mode === 'dark' ? '#e2e8f0' : '#1e293b';
-        root.style.colorScheme = mode;
-    } catch (_) {}
-})();
+// PRE-RUNTIME APPEARANCE BOOTSTRAP RETIRED:
+//   index.html is now the only first-paint appearance writer. Runtime/state.js
+//   adopts that boot-applied mode. Shell must not apply an appearance fallback
+//   or reset appearance during boot/auth transitions.
 
 // ============================================================
 // PERMANENT (shell navigation and app wiring):
@@ -1470,10 +1440,9 @@ window.rcInteraction = (function () {
         const { signedIn, source } = e.detail || {};
         const current = getCurrentVisibleSection();
         _accountControlsTransientBlock = null;
-        try {
-            if (signedIn && window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
-            else if (!signedIn && window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false });
-        } catch (_) {}
+        // Appearance ownership stays outside shell auth transitions.
+        // index.html owns first paint, state.js owns runtime adoption, and shell
+        // appearance controls remain user-intent bridges through rcAppearance.set().
 
         if (!_shellAuthBootstrapped) {
             syncShellAuthPresentation(resolveSectionForAuth(current));
