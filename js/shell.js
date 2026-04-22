@@ -64,6 +64,14 @@
     let _bootReleaseComplete = false;
     let _bootPendingMessageTimer = null;
     let _libraryPendingBannerTimer = null;
+    let _lastDashboardRelease = {
+        requestedSurface: null,
+        libraryStateAtRelease: null,
+        visibleStateAtRelease: null,
+        releaseReason: null,
+        blockedBy: null,
+        at: null
+    };
 
 // Shell-resident interaction banner
 // ─────────────────────────────────────────────────────────────────────────────
@@ -659,6 +667,79 @@ window.rcInteraction = (function () {
     }
 
 
+    function readDashboardLibraryState() {
+        const dashboardEl = document.getElementById('dashboard');
+        const raw = dashboardEl ? String(dashboardEl.getAttribute('data-library-state') || '').trim() : '';
+        return raw || null;
+    }
+
+    function isSettledDashboardLibraryState(state) {
+        return state === 'populated' || state === 'empty' || state === 'error';
+    }
+
+    function applyDashboardLibraryChrome(state, reason = 'dashboard-library-chrome') {
+        const normalized = state || readDashboardLibraryState() || 'pending';
+        const authed = !!isAuthedUser();
+        const libraryToolbar = document.getElementById('library-toolbar');
+        const manageBtn = document.getElementById('manageLibraryBtn');
+        const importBtn = document.getElementById('importBookBtn');
+
+        // Shell coordinates chrome visibility only. Library/import truth remains
+        // owned by refreshLibrary(), localBooksGetAll(), and importer guards.
+        const toolbarAllowed = authed && isSettledDashboardLibraryState(normalized);
+        if (libraryToolbar) {
+            libraryToolbar.classList.toggle('hidden-section', !toolbarAllowed);
+            libraryToolbar.setAttribute('data-shell-library-state', normalized);
+        }
+        [manageBtn, importBtn].forEach((btn) => {
+            if (!btn) return;
+            try {
+                btn.disabled = !toolbarAllowed;
+                if (toolbarAllowed) btn.removeAttribute('aria-disabled');
+                else btn.setAttribute('aria-disabled', 'true');
+                btn.setAttribute('data-shell-library-state', normalized);
+            } catch (_) {}
+        });
+        shellTrailPush('dashboard-library-chrome', {
+            reason,
+            state: normalized,
+            authed,
+            toolbarAllowed
+        });
+        return { state: normalized, toolbarAllowed };
+    }
+
+    function prepareDashboardRelease(reason = 'dashboard-release') {
+        const authed = !!isAuthedUser();
+        let state = readDashboardLibraryState();
+        if (!authed) {
+            setLibrarySurfaceState('sample');
+            state = 'sample';
+        } else if (!state || state === 'sample' || (!_libraryInitialResolutionComplete && !isSettledDashboardLibraryState(state))) {
+            setLibrarySurfaceState('pending');
+            state = 'pending';
+            scheduleLibraryPendingBanner();
+        }
+        const chrome = applyDashboardLibraryChrome(state, reason);
+        _lastDashboardRelease = {
+            requestedSurface: 'dashboard',
+            libraryStateAtRelease: state,
+            visibleStateAtRelease: state,
+            releaseReason: reason,
+            blockedBy: null,
+            at: new Date().toISOString(),
+            toolbarAllowed: chrome.toolbarAllowed
+        };
+        shellTrailPush('dashboard-release-preflight', {
+            reason,
+            authed,
+            libraryStateAtRelease: state,
+            toolbarAllowed: chrome.toolbarAllowed,
+            initialResolved: !!_libraryInitialResolutionComplete
+        });
+        return _lastDashboardRelease;
+    }
+
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
         const id = normalizeSection(sectionId);
         const authed = isAuthedUser();
@@ -704,10 +785,10 @@ window.rcInteraction = (function () {
         const librarySample = document.getElementById('library-public-sample');
         const publicSampleCopy = document.getElementById('library-public-sample-copy');
         const publicSampleSubcopy = document.getElementById('library-public-sample-subcopy');
-        syncLibraryToolbarVisibility();
         if (librarySample) librarySample.classList.add('hidden-section');
         if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your own library.';
         if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Start free, keep your place, and come back anytime.';
+        applyDashboardLibraryChrome(readDashboardLibraryState(), 'sync-auth-presentation:' + id);
         renderLibrarySubtitle(authed);
 
         const profileGuestCard = document.getElementById('profile-guest-card');
@@ -744,6 +825,10 @@ window.rcInteraction = (function () {
         if (targetId === 'landing-page' && !options.preserveIntroLibrary) _publicIntroLibraryVisible = false;
         const readingModeEl = document.getElementById('reading-mode');
         const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
+        let dashboardRelease = null;
+        if (targetId === 'dashboard') {
+            dashboardRelease = prepareDashboardRelease(options.releaseReason || ('show-section:' + targetId));
+        }
 
         ALL_SECTIONS.forEach((s) => {
             const el = document.getElementById(s);
@@ -763,7 +848,9 @@ window.rcInteraction = (function () {
             shellTrailPush('dashboard-reveal', {
                 historyMode: options.historyMode || 'push',
                 authed: !!isAuthedUser(),
-                hasLocalLibraryOwner: typeof localBooksGetAll === 'function'
+                hasLocalLibraryOwner: typeof localBooksGetAll === 'function',
+                libraryStateAtRelease: dashboardRelease ? dashboardRelease.libraryStateAtRelease : readDashboardLibraryState(),
+                toolbarAllowedAtRelease: dashboardRelease ? dashboardRelease.toolbarAllowed : null
             });
         }
 
@@ -799,7 +886,7 @@ window.rcInteraction = (function () {
         clearPaidIntentForPublicAbandon(targetId);
         syncShellAuthPresentation(targetId);
         let _sectionRefreshPromise = null;
-        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary('show-section-dashboard');
+        if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary(options.releaseReason || 'show-section-dashboard');
         if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
@@ -1301,8 +1388,7 @@ window.rcInteraction = (function () {
                 return;
             }
             if (current === 'landing-page' || current === 'login-page') {
-                showSection('dashboard', { historyMode: 'replace' });
-                try { refreshLibrary('auth-change-dashboard-redirect'); } catch(_) {}
+                showSection('dashboard', { historyMode: 'replace', releaseReason: 'auth-change-dashboard-redirect' });
                 return;
             }
             syncShellAuthPresentation(current);
@@ -1961,14 +2047,10 @@ window.rcInteraction = (function () {
 
     // ── Library table — populated by __jublyLibraryRefresh hook called from library.js ──
     function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-    const LIBRARY_EMPTY_REVEAL_MIN_MS = 1000;
     let libraryRefreshRetryTimer = null;
     let _loggedFirstLocalLibraryRead = false;
     let _libraryInitialResolutionComplete = false;
     let _libraryRefreshSequence = 0;
-    let _libraryEmptyGraceStartedAt = 0;
-    let _libraryEmptyRevealTimer = null;
-
 
     function scheduleLibraryPendingBanner() {
         if (_libraryPendingBannerTimer || _libraryInitialResolutionComplete) return;
@@ -1991,69 +2073,21 @@ window.rcInteraction = (function () {
         try { window.rcInteraction && window.rcInteraction.clear('library:hydrate'); } catch (_) {}
     }
 
-    function cancelLibraryEmptyReveal() {
-        if (_libraryEmptyRevealTimer) {
-            window.clearTimeout(_libraryEmptyRevealTimer);
-            _libraryEmptyRevealTimer = null;
-        }
-        const dashboardEl = document.getElementById('dashboard');
-        if (dashboardEl) dashboardEl.removeAttribute('data-library-empty-reveal');
-    }
-
-    function syncLibraryToolbarVisibility(state) {
-        const toolbar = document.getElementById('library-toolbar');
-        if (!toolbar) return;
-        const dashboardEl = document.getElementById('dashboard');
-        const libraryState = state || (dashboardEl && dashboardEl.getAttribute('data-library-state')) || 'pending';
-        // Presentation only: importer/manage chrome is not a fallback surface.
-        // Empty importing is owned by #library-empty after the empty grace; rows use
-        // toolbar chrome only after populated truth exists.
-        const showToolbar = !!isAuthedUser() && libraryState === 'populated';
-        toolbar.classList.toggle('hidden-section', !showToolbar);
-        toolbar.setAttribute('aria-hidden', showToolbar ? 'false' : 'true');
-    }
-
     function setLibrarySurfaceState(state) {
-        if (state !== 'empty') cancelLibraryEmptyReveal();
-        if (state === 'pending' && !_libraryEmptyGraceStartedAt) _libraryEmptyGraceStartedAt = Date.now();
-        if (state === 'sample') _libraryEmptyGraceStartedAt = 0;
         const pendingEl = document.getElementById('library-pending');
         const popEl = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
         const sampleEl = document.getElementById('library-public-sample');
-        if (pendingEl) pendingEl.classList.toggle('hidden-section', state !== 'pending');
-        if (popEl) popEl.classList.toggle('hidden-section', state !== 'populated');
-        if (emptyEl) emptyEl.classList.toggle('hidden-section', state !== 'empty');
-        if (sampleEl) sampleEl.classList.toggle('hidden-section', state !== 'sample');
+        const normalized = state === 'populated' || state === 'empty' || state === 'error' || state === 'sample'
+            ? state
+            : 'pending';
+        if (pendingEl) pendingEl.classList.toggle('hidden-section', normalized !== 'pending' && normalized !== 'error');
+        if (popEl) popEl.classList.toggle('hidden-section', normalized !== 'populated');
+        if (emptyEl) emptyEl.classList.toggle('hidden-section', normalized !== 'empty');
+        if (sampleEl) sampleEl.classList.toggle('hidden-section', normalized !== 'sample');
         const dashboardEl = document.getElementById('dashboard');
-        if (dashboardEl) dashboardEl.setAttribute('data-library-state', state);
-        syncLibraryToolbarVisibility(state);
-    }
-
-    function revealLibraryEmptyAfterGrace(reason, refreshSeq) {
-        cancelLibraryEmptyReveal();
-        const startedAt = Number(_libraryEmptyGraceStartedAt || 0);
-        const elapsed = startedAt ? Math.max(0, Date.now() - startedAt) : LIBRARY_EMPTY_REVEAL_MIN_MS;
-        const remaining = Math.max(0, LIBRARY_EMPTY_REVEAL_MIN_MS - elapsed);
-        const dashboardEl = document.getElementById('dashboard');
-        if (dashboardEl) dashboardEl.setAttribute('data-library-empty-reveal', remaining > 0 ? 'waiting' : 'ready');
-        shellTrailPush('dashboard-library-empty-reveal-scheduled', { reason, remainingMs: remaining });
-        if (remaining <= 0) {
-            setLibrarySurfaceState('empty');
-            return;
-        }
-        setLibrarySurfaceState('pending');
-        const pendingDashboard = document.getElementById('dashboard');
-        if (pendingDashboard) pendingDashboard.setAttribute('data-library-empty-reveal', 'waiting');
-        _libraryEmptyRevealTimer = window.setTimeout(() => {
-            _libraryEmptyRevealTimer = null;
-            if (!isAuthedUser()) return;
-            if (refreshSeq !== _libraryRefreshSequence) return;
-            const liveDashboard = document.getElementById('dashboard');
-            if (liveDashboard) liveDashboard.setAttribute('data-library-empty-reveal', 'ready');
-            setLibrarySurfaceState('empty');
-            shellTrailPush('dashboard-library-empty-revealed', { reason, waitedMs: remaining });
-        }, remaining);
+        if (dashboardEl) dashboardEl.setAttribute('data-library-state', normalized);
+        applyDashboardLibraryChrome(normalized, 'library-surface-state:' + normalized);
     }
 
     async function refreshLibrary(reason = 'unknown') {
@@ -2074,9 +2108,7 @@ window.rcInteraction = (function () {
 
         if (!authed) {
             _libraryInitialResolutionComplete = false;
-            _libraryEmptyGraceStartedAt = 0;
             clearLibraryPendingBanner();
-            cancelLibraryEmptyReveal();
             if (libraryRefreshRetryTimer) {
                 clearTimeout(libraryRefreshRetryTimer);
                 libraryRefreshRetryTimer = null;
@@ -2092,7 +2124,6 @@ window.rcInteraction = (function () {
         // After that first truthful read, later refreshes keep the current visible
         // surface instead of flashing back through pending.
         if (!_libraryInitialResolutionComplete) {
-            _libraryEmptyGraceStartedAt = Date.now();
             setLibrarySurfaceState('pending');
             scheduleLibraryPendingBanner();
         }
@@ -2127,7 +2158,7 @@ window.rcInteraction = (function () {
         clearLibraryPendingBanner();
         const has = books.length > 0;
         if (!has) {
-            revealLibraryEmptyAfterGrace(reason, refreshSeq);
+            setLibrarySurfaceState('empty');
             try { renderSubscriptionSurface([]); } catch (_) {}
             return;
         }
@@ -2719,9 +2750,6 @@ window.rcInteraction = (function () {
             ownerReady: typeof localBooksGetAll === 'function',
             state: state || (_libraryInitialResolutionComplete ? 'ready-unknown' : 'pending'),
             initialResolutionComplete: !!_libraryInitialResolutionComplete,
-            emptyGraceActive: !!(_libraryEmptyRevealTimer || (dashboard && dashboard.getAttribute('data-library-empty-reveal') === 'waiting')),
-            emptyReveal: dashboard ? (dashboard.getAttribute('data-library-empty-reveal') || null) : null,
-            toolbarVisible: !!isElementVisible(document.getElementById('library-toolbar')),
             count: rows ? rows.children.length : 0
         };
     }
@@ -2767,6 +2795,7 @@ window.rcInteraction = (function () {
             },
             publicRuntime: readPublicRuntimeBoundaryReport(),
             signedInInteraction: getSignedInInteractionReport(),
+            dashboardRelease: _lastDashboardRelease,
             library: getLibrarySurfaceReport(),
             modal,
             pricing: getPricingSurfaceReport(modal, readingVisible),
