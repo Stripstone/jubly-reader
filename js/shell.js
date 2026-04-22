@@ -387,6 +387,7 @@ window.rcInteraction = (function () {
         clearBootPendingMessage();
         try { document.body.classList.remove('boot-pending'); } catch (_) {}
         try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
+        try { markDashboardPendingVisibleIfNeeded('boot-release'); } catch (_) {}
         try { applySignedInAccountControlReadiness('boot-release'); } catch (_) {}
         const scrim = document.getElementById('boot-scrim');
         if (!scrim) return;
@@ -799,6 +800,39 @@ window.rcInteraction = (function () {
             hiddenSectionOwner: 'releaseDashboardSectionVisibility'
         });
         return release;
+    }
+
+    function waitForDashboardLibrarySettlementOrThreshold(targetId, thresholdMs, reason = 'dashboard-library-reveal') {
+        if (targetId !== 'dashboard') {
+            return Promise.resolve({ targetId, settled: true, state: null, elapsedMs: 0, reason });
+        }
+        const started = performance.now();
+        return new Promise((resolve) => {
+            const done = (settled, state) => {
+                const elapsedMs = Math.round(performance.now() - started);
+                const report = { targetId, settled, state, elapsedMs, thresholdMs, reason, at: new Date().toISOString() };
+                _lastDashboardLibraryRevealTransaction = Object.assign({}, _lastDashboardLibraryRevealTransaction || {}, report);
+                shellTrailPush('dashboard-library-reveal-transaction', report);
+                resolve(report);
+            };
+            const check = () => {
+                const state = readDashboardLibraryState();
+                const authed = !!isAuthedUser();
+                const settled = authed
+                    ? (!!_libraryInitialResolutionComplete && isSettledDashboardLibraryState(state))
+                    : (state === 'sample' || state === 'pending');
+                if (settled) {
+                    done(true, state);
+                    return;
+                }
+                if (performance.now() - started >= thresholdMs) {
+                    done(false, state || 'pending');
+                    return;
+                }
+                window.setTimeout(check, 25);
+            };
+            check();
+        });
     }
 
     function releaseStandardSectionVisibility(requestedSurface, targetId, options = {}) {
@@ -1492,21 +1526,23 @@ window.rcInteraction = (function () {
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
-        // Start the library refresh immediately behind the boot hold, then always
-        // wait the full 1000ms before revealing. At reveal time the library is
-        // either settled (show books or empty state directly) or still pending
-        // (show the neutral pending surface). No early release — the hold is a
-        // minimum, not a cap.
-        showSection(settledSection, { historyMode: 'replace' });
+        // Start dashboard/library settlement behind the boot hold. If signed-in
+        // library truth resolves quickly, reveal the settled dashboard directly.
+        // If it is still unresolved at the threshold, reveal neutral pending; if
+        // final truth lands immediately after that, setLibrarySurfaceState() keeps
+        // pending visible for a short readable minimum instead of flashing it.
+        const sectionPromise = Promise.resolve(showSection(settledSection, { historyMode: 'replace' }))
+            .catch((err) => shellTrailPush('boot-section-settlement-error', { message: String(err && err.message || err) }));
         const bootHoldMs = 1000;
         try {
             await Promise.all([
-                new Promise(resolve => setTimeout(resolve, bootHoldMs)),
-                appearancePainted
+                appearancePainted,
+                waitForDashboardLibrarySettlementOrThreshold(settledSection, bootHoldMs, 'boot')
             ]);
             await waitForBootRevealFrame();
         } catch (_) {}
         releaseBootPending();
+        try { await sectionPromise; } catch (_) {}
     });
     // ── Profile tabs ─────────────────────────────────────────────
     function switchTab(tabId) {
@@ -2116,6 +2152,11 @@ window.rcInteraction = (function () {
     let _loggedFirstLocalLibraryRead = false;
     let _libraryInitialResolutionComplete = false;
     let _libraryRefreshSequence = 0;
+    const DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS = 350;
+    let _dashboardLibraryPendingVisibleAt = 0;
+    let _dashboardLibraryDeferredFinalTimer = null;
+    let _dashboardLibraryDeferredFinalState = null;
+    let _lastDashboardLibraryRevealTransaction = null;
 
     function scheduleLibraryPendingBanner() {
         if (_libraryPendingBannerTimer || _libraryInitialResolutionComplete) return;
@@ -2138,9 +2179,43 @@ window.rcInteraction = (function () {
         try { window.rcInteraction && window.rcInteraction.clear('library:hydrate'); } catch (_) {}
     }
 
-    function setLibrarySurfaceState(state, reason = 'library-surface') {
-        const normalized = (state === 'populated' || state === 'empty' || state === 'error' || state === 'sample')
-            ? state : 'pending';
+    function isDashboardVisibleToUser() {
+        const dashboard = document.getElementById('dashboard');
+        if (!dashboard || dashboard.classList.contains('hidden-section')) return false;
+        try {
+            if (document.body.classList.contains('boot-pending') || document.body.classList.contains('auth-hydrating')) return false;
+        } catch (_) {}
+        return true;
+    }
+
+    function clearDeferredDashboardLibraryFinalState() {
+        if (_dashboardLibraryDeferredFinalTimer) {
+            window.clearTimeout(_dashboardLibraryDeferredFinalTimer);
+            _dashboardLibraryDeferredFinalTimer = null;
+        }
+        _dashboardLibraryDeferredFinalState = null;
+    }
+
+    function markDashboardPendingVisibleIfNeeded(reason = 'dashboard-pending-visible') {
+        const state = readDashboardLibraryState();
+        if (state !== 'pending' || !isDashboardVisibleToUser()) return false;
+        if (!_dashboardLibraryPendingVisibleAt) {
+            _dashboardLibraryPendingVisibleAt = performance.now();
+            _lastDashboardLibraryRevealTransaction = Object.assign({}, _lastDashboardLibraryRevealTransaction || {}, {
+                pendingVisibleAtMs: Math.round(_dashboardLibraryPendingVisibleAt),
+                pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS,
+                pendingVisibleReason: reason,
+                at: new Date().toISOString()
+            });
+            shellTrailPush('dashboard-library-pending-visible', {
+                reason,
+                pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS
+            });
+        }
+        return true;
+    }
+
+    function applyLibrarySurfaceStateNow(normalized, reason = 'library-surface') {
         const pendingEl = document.getElementById('library-pending');
         const popEl = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
@@ -2153,6 +2228,56 @@ window.rcInteraction = (function () {
         const dashboardEl = document.getElementById('dashboard');
         if (dashboardEl) dashboardEl.setAttribute('data-library-state', normalized);
         applyDashboardLibraryChrome(normalized, reason);
+
+        if (normalized === 'pending') {
+            markDashboardPendingVisibleIfNeeded(reason);
+        } else if (isSettledDashboardLibraryState(normalized) || normalized === 'sample') {
+            _dashboardLibraryPendingVisibleAt = 0;
+            clearDeferredDashboardLibraryFinalState();
+        }
+    }
+
+    function maybeDeferDashboardLibraryFinalState(normalized, reason = 'library-surface') {
+        if (!isSettledDashboardLibraryState(normalized)) return false;
+        if (!isDashboardVisibleToUser()) return false;
+        if (!_dashboardLibraryPendingVisibleAt) return false;
+        const elapsed = performance.now() - _dashboardLibraryPendingVisibleAt;
+        const remaining = DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS - elapsed;
+        if (remaining <= 0) return false;
+        _dashboardLibraryDeferredFinalState = { state: normalized, reason };
+        if (_dashboardLibraryDeferredFinalTimer) window.clearTimeout(_dashboardLibraryDeferredFinalTimer);
+        _dashboardLibraryDeferredFinalTimer = window.setTimeout(() => {
+            const deferred = _dashboardLibraryDeferredFinalState;
+            clearDeferredDashboardLibraryFinalState();
+            if (!deferred) return;
+            shellTrailPush('dashboard-library-deferred-final-commit', {
+                state: deferred.state,
+                reason: deferred.reason,
+                pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS
+            });
+            applyLibrarySurfaceStateNow(deferred.state, deferred.reason + ':deferred-final');
+        }, Math.max(0, remaining));
+        _lastDashboardLibraryRevealTransaction = Object.assign({}, _lastDashboardLibraryRevealTransaction || {}, {
+            deferredFinalState: normalized,
+            deferredReason: reason,
+            deferredRemainingMs: Math.round(remaining),
+            pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS,
+            at: new Date().toISOString()
+        });
+        shellTrailPush('dashboard-library-final-deferred', {
+            state: normalized,
+            reason,
+            elapsedMs: Math.round(elapsed),
+            remainingMs: Math.round(remaining)
+        });
+        return true;
+    }
+
+    function setLibrarySurfaceState(state, reason = 'library-surface') {
+        const normalized = (state === 'populated' || state === 'empty' || state === 'error' || state === 'sample')
+            ? state : 'pending';
+        if (maybeDeferDashboardLibraryFinalState(normalized, reason)) return;
+        applyLibrarySurfaceStateNow(normalized, reason);
     }
 
     async function refreshLibrary(reason = 'unknown') {
@@ -2818,7 +2943,11 @@ window.rcInteraction = (function () {
             initialResolutionComplete: !!_libraryInitialResolutionComplete,
             count: rows ? rows.children.length : 0,
             source: ownerReport.source,
-            dashboardRelease: _lastDashboardRelease
+            dashboardRelease: _lastDashboardRelease,
+            revealTransaction: _lastDashboardLibraryRevealTransaction,
+            pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS,
+            pendingVisible: !!_dashboardLibraryPendingVisibleAt,
+            deferredFinalState: _dashboardLibraryDeferredFinalState ? _dashboardLibraryDeferredFinalState.state : null
         };
     }
 
