@@ -69,6 +69,11 @@
         const _cur = window.__rcReadingTarget || {};
         if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _cur.sourceType || '', bookId: _cur.bookId || '', chapterIndex: _cur.chapterIndex != null ? _cur.chapterIndex : -1, pageIndex: idx });
       } catch (_) {}
+      // Store index for post-reveal re-anchor (Patch B). The CSS restore-pending
+      // guard (Patch A) locks document scroll while this runs, making the
+      // scrollIntoView() above a no-op. startReadingFromPreview() re-applies it
+      // after reading-restore-pending is removed and scroll is unlocked.
+      window.__rcLastRestoredPageIndex = idx;
       window.__rcPendingRestorePageIndex = -1;
       return true;
     } catch (_) {
@@ -3144,6 +3149,18 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   // which runs simultaneously with the hold fade-out above.
   try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
   try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
+  // Patch B: Re-anchor scroll to the restored page now that reading-restore-pending
+  // is removed and the html overflow:hidden lock (Patch A) has lifted. The
+  // scrollIntoView() call inside applyPendingReadingRestore() was a no-op while
+  // the lock was active, so this is the authoritative scroll for restore sessions.
+  try {
+    const _ri = Number(window.__rcLastRestoredPageIndex ?? -1);
+    if (Number.isFinite(_ri) && _ri >= 0) {
+      const _rEl = document.querySelectorAll('.page')[_ri];
+      if (_rEl) _rEl.scrollIntoView({ behavior: 'auto', block: 'start' });
+      window.__rcLastRestoredPageIndex = -1;
+    }
+  } catch (_) {}
   try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}
   return true;
 };

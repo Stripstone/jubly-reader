@@ -1600,7 +1600,15 @@ body.auth-hydrating #profile-page {
    Keeps #pages hidden while startReadingFromPreview() is resolving, preventing
    stale or partially-rendered cards from flashing under the intro hold.
    The visible pending surface is now owned by #reading-intro-hold above.
+
+   html overflow:hidden locks document scroll for the entire restore phase so
+   wheel/touch events cannot move the document while cards are being appended
+   and applyPendingReadingRestore() is running. Scroll is restored the moment
+   reading-restore-pending is removed. The post-reveal re-anchor in
+   startReadingFromPreview() (Patch B) compensates for scrollIntoView() being
+   a no-op while overflow:hidden is active.
    ============================================================================= */
+html:has(#reading-mode.reading-restore-pending) { overflow: hidden; }
 #pages {
   transition: opacity 0.14s ease;
 }
