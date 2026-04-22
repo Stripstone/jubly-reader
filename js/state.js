@@ -848,8 +848,7 @@ const RC_PROFILE_PREFS_KEY = 'rc_profile_prefs';
 
 let appTheme = 'default';
 let appThemeSettings = {};
-let appearanceFirstPaintReport = readAppearanceFirstPaintReport();
-let appAppearance = appearanceFirstPaintReport.modeAtFirstPaint || 'light';
+let appAppearance = 'light';
 let appearanceAppliedOnce = false;
 let appearancePaintSignalSeq = 0;
 let diagnosticsPrefs = { enabled: false, mode: 'off' };
@@ -1337,11 +1336,6 @@ function loadTheme() {
 function applyAppearance() {
   const modeClass = appAppearance === 'dark' ? 'app-dark' : 'app-light';
   const paintSeq = ++appearancePaintSignalSeq;
-  const firstRuntimeApply = !appearanceAppliedOnce;
-  const modeBeforeRuntime = normalizeAppearanceMode((document.documentElement && document.documentElement.getAttribute('data-app-appearance')) || (document.documentElement && document.documentElement.classList && document.documentElement.classList.contains('app-dark') ? 'dark' : 'light'));
-  appearanceFirstPaintReport.modeAfterRuntime = appAppearance;
-  if (firstRuntimeApply) appearanceFirstPaintReport.changedAfterPaint = !!(appearanceFirstPaintReport.appearancePrePaintApplied && appearanceFirstPaintReport.modeAtFirstPaint && modeBeforeRuntime && modeBeforeRuntime !== appAppearance);
-  syncAppearanceFirstPaintGlobalReport();
   try {
     document.documentElement.classList.remove('app-light', 'app-dark');
     document.documentElement.classList.add(modeClass);
@@ -1377,21 +1371,6 @@ function applyAppearance() {
 
 function normalizeAppearanceMode(value) {
   return String(value || 'light') === 'dark' ? 'dark' : 'light';
-}
-
-function readAppearanceFirstPaintReport() {
-  const root = (typeof document !== 'undefined') ? document.documentElement : null;
-  const boot = (typeof window !== 'undefined' && window.__rcAppearanceFirstPaint && typeof window.__rcAppearanceFirstPaint === 'object') ? window.__rcAppearanceFirstPaint : {};
-  const modeAtFirstPaint = normalizeAppearanceMode(boot.modeAtFirstPaint || (root && root.getAttribute('data-app-appearance')) || (root && root.classList && root.classList.contains('app-dark') ? 'dark' : 'light'));
-  return { appearancePrePaintApplied: !!(boot.applied || (root && root.getAttribute('data-appearance-prepaint-applied') === 'true')), modeAtFirstPaint, modeAfterRuntime: null, changedAfterPaint: !!boot.changedAfterPaint, shellFirstAppearanceWriter: boot.firstWriter === 'shell.js', firstWriter: boot.firstWriter || (root && root.getAttribute('data-appearance-first-writer')) || null, source: boot.source || null, reassertedAfterShell: !!boot.reassertedAfterShell };
-}
-
-function syncAppearanceFirstPaintGlobalReport() {
-  try { window.__rcAppearanceFirstPaint = Object.assign({}, window.__rcAppearanceFirstPaint || {}, appearanceFirstPaintReport, { applied: !!appearanceFirstPaintReport.appearancePrePaintApplied, shellFirstAppearanceWriter: false }); } catch (_) {}
-}
-
-function getAppearanceFirstPaintReport() {
-  return Object.assign({}, appearanceFirstPaintReport, { modeAfterRuntime: appearanceFirstPaintReport.modeAfterRuntime || appAppearance, shellFirstAppearanceWriter: false });
 }
 
 function writeAppearanceModeToLocal(mode) {
@@ -1431,9 +1410,7 @@ function setAppearance(mode) {
 }
 
 function loadAppearance(opts = {}) {
-  if (opts.fromLocal === true) appAppearance = readAppearanceModeFromLocal();
-  else if (appearanceFirstPaintReport.appearancePrePaintApplied && appearanceFirstPaintReport.modeAtFirstPaint) appAppearance = normalizeAppearanceMode(appearanceFirstPaintReport.modeAtFirstPaint);
-  else appAppearance = 'light';
+  appAppearance = opts.fromLocal === true ? readAppearanceModeFromLocal() : 'light';
   return applyAppearance();
 }
 
@@ -1532,12 +1509,9 @@ window.rcAppearance = {
   apply: applyAppearance,
   hasApplied: () => appearanceAppliedOnce,
   syncButtons: syncAppearanceButtons,
-  getFirstPaintReport: getAppearanceFirstPaintReport,
   // Transitional alias for current shell button handlers.
   save: setAppearance
 };
-
-window.getAppearanceFirstPaintReport = getAppearanceFirstPaintReport;
 
 window.rcDiagnosticsPrefs = {
   get: getDiagnosticsPreference,
