@@ -402,35 +402,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             overflow-y: auto;
             overscroll-behavior: contain;
             -webkit-overflow-scrolling: touch;
-            scrollbar-gutter: stable;
-            scrollbar-width: var(--reading-scrollbar-firefox-width, thin);
-            scrollbar-color: var(--reading-scrollbar-thumb, rgba(100, 116, 139, 0.55)) var(--reading-scrollbar-track, transparent);
-        }
-
-        /* Reading scrollbar affordance.
-           Owner: layout/CSS only. Purpose: make the app-owned reading scroller visible.
-           Future customization should patch these variables rather than replacing the
-           reading scroll-owner rules above. */
-        body.reading-active #reading-mode .reading-content::-webkit-scrollbar {
-            width: var(--reading-scrollbar-size, 10px);
-            height: var(--reading-scrollbar-size, 10px);
-        }
-
-        body.reading-active #reading-mode .reading-content::-webkit-scrollbar-track {
-            background: var(--reading-scrollbar-track, transparent);
-        }
-
-        body.reading-active #reading-mode .reading-content::-webkit-scrollbar-thumb {
-            min-height: var(--reading-scrollbar-thumb-min-size, 44px);
-            border-radius: var(--reading-scrollbar-radius, 999px);
-            border: var(--reading-scrollbar-thumb-border-width, 2px) solid var(--reading-scrollbar-track, transparent);
-            background: var(--reading-scrollbar-thumb, rgba(100, 116, 139, 0.55));
-            background-clip: padding-box;
-        }
-
-        body.reading-active #reading-mode .reading-content::-webkit-scrollbar-thumb:hover {
-            background: var(--reading-scrollbar-thumb-hover, rgba(71, 85, 105, 0.72));
-            background-clip: padding-box;
         }
 
         @supports not (height: 100dvh) {
