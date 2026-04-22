@@ -1186,8 +1186,18 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
   display: block;
 }
 
-#dashboard[data-library-state="pending"] #library-toolbar {
-  opacity: 1;
+/* Empty/import affordances are not a pending fallback. During signed-in
+   library hydration, only the neutral pending surface may show. The toolbar
+   returns when populated library truth exists; the empty/import path is owned
+   by #library-empty after its empty-grace timer. */
+#dashboard[data-library-state="pending"] #library-toolbar,
+#dashboard[data-library-state="sample"] #library-toolbar,
+#dashboard[data-library-state="empty"] #library-toolbar {
+  display: none !important;
+}
+
+#dashboard[data-library-state="populated"] #library-toolbar {
+  display: flex;
 }
 
 .library-pending-card {
