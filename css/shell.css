@@ -363,6 +363,20 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             }
             #landing-footer span { white-space: nowrap; }
         }
+        /* Reading view overscroll background guard.
+           Locks scroll ownership to #reading-mode when reading is active, preventing
+           any pre-existing viewport scrollbar (e.g. from the dashboard) from carrying
+           into the reading view. The browser canvas exposed during overscroll is also
+           painted to match the active reading background. */
+        html:has(body.reading-active) { overflow: hidden; }
+        body.reading-active           { overflow: hidden; }
+        body.reading-active #reading-mode {
+            background: var(--theme-accent-soft);
+            height: 100dvh;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+
         /* ── Focus Mode reading UI ── */
         #reading-mode { background: var(--theme-accent-soft); min-height: 100vh; padding: 0; }
         /* Reading bar layout — see consolidated system at end of file */
