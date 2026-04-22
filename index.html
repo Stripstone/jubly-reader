@@ -4,7 +4,25 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>jubly | Focus-First Reading</title>
+    <script>
+    (function(){
+      try{
+        var r=document.documentElement;if(!r)return;
+        function n(v){return v==='dark'?'dark':'light'}
+        function read(){
+          try{var p=JSON.parse(localStorage.getItem('rc_appearance_prefs')||'{}')||{};var v=p.appearance_mode||p.mode||p.appearance;if(v==='dark'||v==='light')return{mode:v,source:'localStorage'}}catch(_){}
+          try{var m=String(document.cookie||'').match(/(?:^|; )rc_appearance_mode=([^;]+)/);var c=m&&m[1]?decodeURIComponent(m[1]):'';if(c==='dark'||c==='light')return{mode:c,source:'cookie'}}catch(_){}
+          return{mode:'light',source:'default'};
+        }
+        function apply(v){var m=n(v);r.classList.remove('app-light','app-dark');r.classList.add(m==='dark'?'app-dark':'app-light');r.setAttribute('data-app-appearance',m);r.setAttribute('data-appearance-ready','true');r.setAttribute('data-appearance-prepaint-applied','true');r.setAttribute('data-appearance-first-writer','index.html');r.style.backgroundColor=m==='dark'?'#0f172a':'#ffffff';r.style.color=m==='dark'?'#e2e8f0':'#1e293b';r.style.colorScheme=m;return m}
+        var x=read(),mode=apply(x.mode);
+        window.__rcAppearanceFirstPaint={applied:true,modeAtFirstPaint:mode,source:x.source,firstWriter:'index.html',shellFirstAppearanceWriter:false,changedAfterPaint:false,reassertedAfterShell:false,at:(window.performance&&performance.now)?performance.now():Date.now()};
+        window.__rcReapplyAppearanceFirstPaint=function(){apply(mode);window.__rcAppearanceFirstPaint.reassertedAfterShell=true;window.__rcAppearanceFirstPaint.shellFirstAppearanceWriter=false};
+      }catch(_){}
+    })();
+    </script>
     <script src="js/shell.js"></script>
+    <script>try{if(window.__rcReapplyAppearanceFirstPaint)window.__rcReapplyAppearanceFirstPaint();delete window.__rcReapplyAppearanceFirstPaint}catch(_){}</script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Lora:wght@400;500&family=Crimson+Pro:wght@400;600;700&display=swap" rel="stylesheet">
     <!-- JSZip: required for EPUB import (app's import.js) -->
