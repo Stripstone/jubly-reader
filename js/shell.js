@@ -2996,6 +2996,10 @@ window.rcInteraction = (function () {
             if (!el) return null;
             try { return Math.round(el.scrollTop || 0); } catch (_) { return null; }
         }
+        function cssVariable(el, name) {
+            if (!el) return null;
+            try { return window.getComputedStyle(el).getPropertyValue(name).trim() || null; } catch (_) { return null; }
+        }
         function fixedAndVisible(el) {
             const position = styleValue(el, 'position');
             let visible = false;
@@ -3035,6 +3039,12 @@ window.rcInteraction = (function () {
             readingContentMaxScroll: maxScroll(readingContent),
             readingContentOverflow: styleValue(readingContent, 'overflowY'),
             readingContentHeight: rectHeight(readingContent),
+            readingContentScrollbarGutter: styleValue(readingContent, 'scrollbarGutter'),
+            readingContentScrollbarWidth: styleValue(readingContent, 'scrollbarWidth'),
+            readingContentScrollbarColor: styleValue(readingContent, 'scrollbarColor'),
+            readingScrollbarSizeVar: cssVariable(readingContent, '--reading-scrollbar-size'),
+            readingScrollbarThumbVar: cssVariable(readingContent, '--reading-scrollbar-thumb'),
+            readingScrollbarTrackVar: cssVariable(readingContent, '--reading-scrollbar-track'),
             settingsOpen: !!(typeof window.isReadingSettingsModalOpen === 'function' && window.isReadingSettingsModalOpen()),
             settingsModalScrollTop: scrollTop(settingsModal),
             settingsModalMaxScroll: maxScroll(settingsModal),
