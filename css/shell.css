@@ -1186,8 +1186,13 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
   display: block;
 }
 
-#dashboard[data-library-state="pending"] #library-toolbar {
-  opacity: 1;
+/* Import/manage chrome is not a loading fallback. During signed-in pending,
+   public sample, and empty state, the truthful surface is the current library
+   body: pending, public sample, or #library-empty after its grace timer. */
+#dashboard[data-library-state="pending"] #library-toolbar,
+#dashboard[data-library-state="sample"] #library-toolbar,
+#dashboard[data-library-state="empty"] #library-toolbar {
+  display: none !important;
 }
 
 .library-pending-card {
