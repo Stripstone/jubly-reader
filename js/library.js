@@ -61,7 +61,13 @@
       const pageEls = document.querySelectorAll('.page');
       const target = pageEls[idx];
       if (!target) return false;
-      target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      // When startReadingFromPreview is in flight, defer scroll to Patch B — it fires
+      // after the overflow:hidden lock lifts and is the single authoritative restore
+      // scroll for that path. Scrolling here too produced a double-scroll on Android
+      // (Chrome mobile ignores overflow:hidden for programmatic scrollIntoView).
+      if (!window.__rcReadingEntryRestoreSettling) {
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
       lastFocusedPageIndex = idx;
       try { currentPageIndex = idx; } catch (_) {}
       // Advance reading target to the restored page; preserve source context set by render().
@@ -69,10 +75,7 @@
         const _cur = window.__rcReadingTarget || {};
         if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _cur.sourceType || '', bookId: _cur.bookId || '', chapterIndex: _cur.chapterIndex != null ? _cur.chapterIndex : -1, pageIndex: idx });
       } catch (_) {}
-      // Store index for post-reveal re-anchor (Patch B). The CSS restore-pending
-      // guard (Patch A) locks document scroll while this runs, making the
-      // scrollIntoView() above a no-op. startReadingFromPreview() re-applies it
-      // after reading-restore-pending is removed and scroll is unlocked.
+      // Store index for Patch B (startReadingFromPreview path) or for diagnostics.
       window.__rcLastRestoredPageIndex = idx;
       window.__rcPendingRestorePageIndex = -1;
       return true;
@@ -2083,6 +2086,14 @@
     container.innerHTML = "";
 
     const _isReadingMode = appMode === 'reading';
+    // Chapter/content switch: reset scroll so the first page card anchors correctly
+    // below the fixed top bar. DOM shrinkage from resetSession clamps scrollY to ~104
+    // (not 0) so this explicit reset is needed. Skipped when a page-restore is pending
+    // — applyPendingReadingRestore (direct paths) or Patch B (startReadingFromPreview)
+    // will position to the saved page instead.
+    if (_isReadingMode && !(Number(window.__rcPendingRestorePageIndex ?? -1) >= 0)) {
+      try { window.scrollTo(0, 0); } catch (_) {}
+    }
 
     pages.forEach((text, i) => {
       timers[i] ??= 0;
@@ -3149,10 +3160,10 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   // which runs simultaneously with the hold fade-out above.
   try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
   try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
-  // Patch B: Re-anchor scroll to the restored page now that reading-restore-pending
-  // is removed and the html overflow:hidden lock (Patch A) has lifted. The
-  // scrollIntoView() call inside applyPendingReadingRestore() was a no-op while
-  // the lock was active, so this is the authoritative scroll for restore sessions.
+  // Patch B: Single authoritative scroll for the startReadingFromPreview restore path.
+  // applyPendingReadingRestore() recorded the target index but deferred the scroll
+  // (it now skips scrollIntoView when __rcReadingEntryRestoreSettling is set).
+  // Fires here after reading-restore-pending is removed and overflow:hidden has lifted.
   try {
     const _ri = Number(window.__rcLastRestoredPageIndex ?? -1);
     if (Number.isFinite(_ri) && _ri >= 0) {
