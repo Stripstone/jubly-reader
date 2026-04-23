@@ -17,8 +17,7 @@ function parseExplicitPageMarker(block) {
   const match = raw.match(/^(?:##\s*)?page\s+(\d+)\s*$/i);
   if (!match) return null;
   const pageNumber = Number(match[1]);
-  // Upper bound guards against OCR/conversion artifacts (e.g. Page 15642).
-  return Number.isFinite(pageNumber) && pageNumber > 0 && pageNumber <= 9999 ? pageNumber : null;
+  return Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : null;
 }
 
 function stripMarkerBlocks(blocks) {
@@ -201,29 +200,20 @@ export function chunkBlocksToPages(blocks) {
     const allStops = collectStops(t).filter(s => s.cut >= minChars);
     if (!allStops.length) return -1;
 
-    // Backward preference: prefer a stop at or before target over one past it.
-    // Only fall forward if no scored stop exists at or before target in the
-    // viable range. Prevents first-page content from drifting forward past target.
-    function pickBestStop(candidates) {
-      const back = candidates.filter(s => s.cut <= target);
-      const fwd  = candidates.filter(s => s.cut > target);
-      back.sort((a, b) => b.score - a.score || b.cut - a.cut); // best score, then latest (closest to target)
-      fwd.sort((a, b)  => b.score - a.score || a.cut - b.cut); // best score, then earliest (closest to target)
-      return back.length ? back[0].cut : (fwd.length ? fwd[0].cut : -1);
-    }
-
     const windowLo = Math.round(target * 0.7);
     const windowHi = Math.round(target * 1.3);
     const tightStops = allStops.filter(s => s.cut >= windowLo && s.cut <= windowHi);
     const tightScored = tightStops.map(s => scoreStop(t, s, allStops)).filter(Boolean);
     if (tightScored.length) {
-      const cut = pickBestStop(tightScored);
-      if (cut >= 0) return cut;
+      tightScored.sort((a, b) => b.score - a.score || a.cut - b.cut);
+      return tightScored[0].cut;
     }
 
     const scored = allStops.map(s => scoreStop(t, s, allStops)).filter(Boolean);
     if (!scored.length) return -1;
-    return pickBestStop(scored);
+
+    scored.sort((a, b) => b.score - a.score || a.cut - b.cut);
+    return scored[0].cut;
   }
 
   function nearestBlockBoundaryCut(text, tgt, min) {
@@ -281,10 +271,7 @@ export function chunkBlocksToPages(blocks) {
     if (!merged.length) { merged.push(page); continue; }
     const prev = merged[merged.length - 1];
     const combined = prev + '\n\n' + page;
-    // Tightened from 0.7 to 0.4: only absorb genuinely tiny tail pages.
-    // At 0.7 a page that barely overflowed target could be pulled back into the
-    // previous page, making it too long. 0.4 catches only true orphan slivers.
-    const absorbThreshold = Math.round(target * 0.4);
+    const absorbThreshold = Math.round(target * 0.7);
     if (page.length < absorbThreshold && combined.length <= hardMax && !isListLine(page)) {
       merged[merged.length - 1] = combined.trim();
     } else {
@@ -327,33 +314,6 @@ function buildSectionPages(sectionBlocks, { breakByPageNumber = true, fallbackSt
 
   return pages;
 }
-function buildFlatMarkdownFromPages(flatPages, { breakByPageNumber = true } = {}) {
-  const out = [];
-  const normalizedPages = [];
-
-  for (const page of (flatPages || [])) {
-    const assigned = Number(page?.sourcePageNumber);
-    const pageText = String(page?.text || '').trim();
-    if (!Number.isFinite(assigned) || assigned <= 0 || !pageText) continue;
-    out.push(`## Page ${assigned}`);
-    out.push('');
-    out.push(pageText);
-    out.push('');
-    normalizedPages.push({
-      sectionTitle: typeof page?.sectionTitle === 'string' ? page.sectionTitle : '',
-      sourcePageNumber: assigned,
-      text: pageText,
-    });
-  }
-
-  return {
-    markdown: out.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
-    pages: normalizedPages,
-    pageCount: normalizedPages.length,
-    breakByPageNumber: !!breakByPageNumber,
-  };
-}
-
 
 export function buildMarkdownBookFromSections(sections, { breakByPageNumber = true } = {}) {
   const out = [];
@@ -385,10 +345,11 @@ export function buildMarkdownBookFromSections(sections, { breakByPageNumber = tr
     out.push('');
   });
 
-  const built = buildFlatMarkdownFromPages(flatPages, { breakByPageNumber });
   return {
-    ...built,
     markdown: out.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
+    pages: flatPages,
+    pageCount: flatPages.length,
+    breakByPageNumber: !!breakByPageNumber,
   };
 }
 
@@ -397,8 +358,7 @@ export function splitRawTextToPages(raw, { breakByPageNumber = true } = {}) {
   if (!input) return { pages: [], pageCount: 0, markdown: '', breakByPageNumber: !!breakByPageNumber };
 
   const hardChunks = input.split(/\n\s*---\s*\n/g);
-  const flatPages = [];
-  let fallbackPageNumber = 1;
+  const sections = [];
 
   for (let i = 0; i < hardChunks.length; i++) {
     const chunk = String(hardChunks[i] || '').trim();
@@ -407,27 +367,12 @@ export function splitRawTextToPages(raw, { breakByPageNumber = true } = {}) {
       .split(/\n\s*\n+/g)
       .map((part) => String(part || '').trim())
       .filter(Boolean);
-    if (!blocks.length) continue;
-
-    const pages = buildSectionPages(blocks, { breakByPageNumber, fallbackStart: fallbackPageNumber });
-    pages.forEach((page) => {
-      const assigned = Number(page?.sourcePageNumber);
-      const pageText = String(page?.text || '').trim();
-      if (!Number.isFinite(assigned) || assigned <= 0 || !pageText) return;
-      flatPages.push({ sourcePageNumber: assigned, text: pageText });
-      fallbackPageNumber = Math.max(fallbackPageNumber, assigned + 1);
-    });
+    sections.push({ title: `Section ${sections.length + 1}`, blocks });
   }
 
-  if (!flatPages.length) {
-    const pages = buildSectionPages([input], { breakByPageNumber, fallbackStart: fallbackPageNumber });
-    pages.forEach((page) => {
-      const assigned = Number(page?.sourcePageNumber);
-      const pageText = String(page?.text || '').trim();
-      if (!Number.isFinite(assigned) || assigned <= 0 || !pageText) return;
-      flatPages.push({ sourcePageNumber: assigned, text: pageText });
-    });
+  if (!sections.length) {
+    sections.push({ title: 'Section 1', blocks: [input] });
   }
 
-  return buildFlatMarkdownFromPages(flatPages, { breakByPageNumber });
+  return buildMarkdownBookFromSections(sections, { breakByPageNumber });
 }
