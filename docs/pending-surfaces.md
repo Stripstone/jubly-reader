@@ -122,7 +122,6 @@ Allowed first visible dashboard/library states are `pending`, `populated`, `empt
 
 | Surface | What it does | Status |
 |---|---|---|
-| Reading mode → chapter selector | Runtime chapter rebuild / page-card replacement | ✅ Reuse the existing reading-entry hold and restore-pending guard so chapter switches do not reveal stale cards or partially rebuilt pages. The dark reading hold is the honest pending surface until the selected chapter’s first page has rendered and painted. |
 | Reading mode → **Play** / `Read page` cloud start | Cloud TTS `POST /api/ai?action=tts` | ✅ No routine pending banner for normal start; preserve normal countdown/flow. Surface real playback errors with `Try again`. Transient cloud/server transport failures must stop cleanly and leave Play immediately retryable. |
 | Reading mode → **Skip forward / back** buttons | Runtime route decision and cloud seek/restart | ◐ Immediate by default. During an already-started cloud seek/restart under poor connection, a visible `Loading audio…` / poor-connection pending banner may appear; rapid skip intents received during that pending restart are coalesced so the latest same-page target wins when audio is ready. |
 
@@ -150,9 +149,9 @@ Pending UI should not be added to every control.
 | Usage | 1 | 0 |
 | Importer | 5 | 0 |
 | Library | 5 | 0 |
-| Reading / TTS | 2 wired, 1 conditional/local pending | 0 |
+| Reading / TTS | 1 wired, 1 conditional/local pending | 0 |
 | Settings / persistence | 1 wired, 1 intentionally immediate | 0 |
-| **Total surfaces covered** | **28** | **0 in this bounded pass** |
+| **Total surfaces covered** | **27** | **0 in this bounded pass** |
 
 ## Notes locked by this pass
 

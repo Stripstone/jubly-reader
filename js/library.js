@@ -223,65 +223,6 @@
     });
   }
 
-
-  function activateReadingPendingSurface({ restoreKind = 'opening' } = {}) {
-    const holdEl = document.getElementById('reading-intro-hold');
-    const holdMsgEl = document.getElementById('reading-intro-message');
-    const readingModeEl = document.getElementById('reading-mode');
-    try {
-      if (holdEl) {
-        holdEl.classList.remove('intro-hold-fading', 'intro-hold-message-visible');
-        holdEl.classList.add('intro-hold-active');
-      }
-    } catch (_) {}
-    try {
-      if (readingModeEl) {
-        readingModeEl.classList.add('reading-restore-pending');
-        readingModeEl.setAttribute('data-restore-kind', String(restoreKind || 'opening'));
-      }
-    } catch (_) {}
-    return { holdEl, holdMsgEl, readingModeEl, msgTimer: null };
-  }
-
-  function scheduleReadingPendingMessage(pendingUi, msgText) {
-    if (!pendingUi) return pendingUi;
-    try {
-      if (pendingUi.holdMsgEl) pendingUi.holdMsgEl.textContent = String(msgText || 'Preparing reading view…');
-      if (pendingUi.holdEl) pendingUi.msgTimer = setTimeout(() => pendingUi.holdEl.classList.add('intro-hold-message-visible'), 1000);
-    } catch (_) {}
-    return pendingUi;
-  }
-
-  async function releaseReadingPendingSurface(pendingUi) {
-    const ctx = pendingUi || {};
-    const holdEl = ctx.holdEl || document.getElementById('reading-intro-hold');
-    const readingModeEl = ctx.readingModeEl || document.getElementById('reading-mode');
-    if (ctx.msgTimer) {
-      try { clearTimeout(ctx.msgTimer); } catch (_) {}
-      ctx.msgTimer = null;
-    }
-    try { await waitForNextPaint(2); } catch (_) {}
-    try {
-      if (holdEl) {
-        holdEl.classList.remove('intro-hold-message-visible');
-        holdEl.classList.add('intro-hold-fading');
-        const releaseHold = () => holdEl.classList.remove('intro-hold-active', 'intro-hold-fading');
-        holdEl.addEventListener('transitionend', releaseHold, { once: true });
-        setTimeout(releaseHold, 400);
-      }
-    } catch (_) {}
-    try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
-    try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
-    try {
-      const restoredIndex = Number(window.__rcLastRestoredPageIndex ?? -1);
-      if (Number.isFinite(restoredIndex) && restoredIndex >= 0) {
-        const restoredEl = document.querySelectorAll('.page')[restoredIndex];
-        if (restoredEl) restoredEl.scrollIntoView({ behavior: 'auto', block: 'start' });
-        window.__rcLastRestoredPageIndex = -1;
-      }
-    } catch (_) {}
-  }
-
   async function localDeletedBookDelete(id) {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
@@ -1813,7 +1754,7 @@
       await loadBook(id, { restore });
     });
 
-    chapterSelect.addEventListener("change", async () => {
+    chapterSelect.addEventListener("change", () => {
       const idx = parseInt(chapterSelect.value || "", 10);
       if (!Number.isFinite(idx)) return;
 
@@ -1825,12 +1766,6 @@
       const chapterPages = getSequentialChapterPages(selectedIdx);
       populatePagesSelect(chapterPages);
 
-      // Reuse the existing reading-entry pending surface here so chapter switches
-      // do not briefly reveal stale cards or partially rebuilt pages.
-      try { window.__rcReadingEntryRestoreSettling = true; } catch (_) {}
-      const pendingUi = activateReadingPendingSurface({ restoreKind: 'opening' });
-      scheduleReadingPendingMessage(pendingUi, 'Preparing reading view…');
-
       // Chapter entry should always begin at page 1 of that chapter.
       // Route through the existing restore-owned render path by pinning a
       // pending restore to index 0 before addPages() resets and rebuilds.
@@ -1838,15 +1773,11 @@
 
       // Immediately replace rendered page cards with the new chapter's content.
       // Routing through applySelectionToBulkInput → addPages() → render() is the
-      // single authoritative card-replacement path. Await it here so the pending
-      // surface remains visible until the rebuilt chapter cards have painted.
+      // single authoritative card-replacement path. Calling it synchronously here
+      // closes the race window between chapter assignment and card DOM update —
+      // no Load button click required, no timing assumption.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      try {
-        await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
-      } finally {
-        try { window.__rcReadingEntryRestoreSettling = false; } catch (_) {}
-        await releaseReadingPendingSurface(pendingUi);
-      }
+      applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
     });
 
     // Keep end >= start
@@ -3118,9 +3049,17 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   // Activated synchronously before any await so the reading surface is covered
   // from the very first frame. Texture and Wallpaper prepare behind it and
   // never become the visible first phase. Released after cards are confirmed
-  // ready. Message appears on the hold after 1000 ms if loading is still in
-  // progress.
-  const pendingUi = activateReadingPendingSurface({ restoreKind: 'opening' });
+  // ready (after __rcLoadBook + waitForNextPaint). Message appears on the hold
+  // after 1000 ms if loading is still in progress.
+  const holdEl = document.getElementById('reading-intro-hold');
+  const holdMsgEl = document.getElementById('reading-intro-message');
+  let _holdMsgTimer = null;
+  try {
+    if (holdEl) {
+      holdEl.classList.remove('intro-hold-fading', 'intro-hold-message-visible');
+      holdEl.classList.add('intro-hold-active');
+    }
+  } catch (_) {}
   // ───────────────────────────────────────────────────────────────────────────
 
   // MUST be synchronous — before any await — so reading mode never shows stale
@@ -3130,9 +3069,13 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   try { lastFocusedPageIndex = -1; } catch (_) {}
   try { window.__rcReadingEntryRestoreSettling = true; } catch (_) {}
   const pagesEl = document.getElementById('pages');
-  const readingModeEl = pendingUi.readingModeEl || document.getElementById('reading-mode');
+  const readingModeEl = document.getElementById('reading-mode');
   try {
     if (pagesEl) pagesEl.innerHTML = '';
+    if (readingModeEl) {
+      readingModeEl.classList.add('reading-restore-pending');
+      readingModeEl.setAttribute('data-restore-kind', 'opening');
+    }
   } catch (_) {}
 
   // Fire-and-forget: the current reading target is safe in memory and will be
@@ -3175,7 +3118,11 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   // Start the 1000 ms message timer now that we know if this is a fresh open or
   // a return. If cards are ready before 1000 ms the timer is cleared and the
   // message never appears. If not, the message fades in on the existing hold.
-  scheduleReadingPendingMessage(pendingUi, hasRestore ? 'Returning to your place…' : 'Preparing reading view…');
+  try {
+    const msgText = hasRestore ? 'Returning to your place\u2026' : 'Preparing reading view\u2026';
+    if (holdMsgEl) holdMsgEl.textContent = msgText;
+    if (holdEl) _holdMsgTimer = setTimeout(() => holdEl.classList.add('intro-hold-message-visible'), 1000);
+  } catch (_) {}
 
   // Await the runtime-owned book load path. This resolves only after render()
   // and applyPendingReadingRestore() have both completed, so #pages is already
@@ -3183,11 +3130,42 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   if (typeof window.__rcLoadBook === 'function') {
     try { await window.__rcLoadBook(normalizedId, { restore }); } catch (_) {}
   }
+  try { await waitForNextPaint(2); } catch (_) {}
   try { window.__rcReadingEntryRestoreSettling = false; } catch (_) {}
 
-  // Cards are rendered and painted. Release the existing intro hold and page
-  // guard together so the reading surface cross-fades in a single motion.
-  await releaseReadingPendingSurface(pendingUi);
+  // Cards are rendered and painted. Clear the message timer (fast load — message
+  // never needed), then release the hold and the page guard simultaneously so
+  // the reading surface and the hold cross-fade in a single motion.
+  if (_holdMsgTimer) { clearTimeout(_holdMsgTimer); _holdMsgTimer = null; }
+
+  // Fade out the hold. JS removes the active classes once the transition ends
+  // (with a 400 ms hard fallback in case transitionend does not fire).
+  try {
+    if (holdEl) {
+      holdEl.classList.remove('intro-hold-message-visible');
+      holdEl.classList.add('intro-hold-fading');
+      const releaseHold = () => holdEl.classList.remove('intro-hold-active', 'intro-hold-fading');
+      holdEl.addEventListener('transitionend', releaseHold, { once: true });
+      setTimeout(releaseHold, 400);
+    }
+  } catch (_) {}
+
+  // Remove restore-pending — triggers the #pages opacity fade-in (0.14 s),
+  // which runs simultaneously with the hold fade-out above.
+  try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
+  try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
+  // Patch B: Re-anchor scroll to the restored page now that reading-restore-pending
+  // is removed and the html overflow:hidden lock (Patch A) has lifted. The
+  // scrollIntoView() call inside applyPendingReadingRestore() was a no-op while
+  // the lock was active, so this is the authoritative scroll for restore sessions.
+  try {
+    const _ri = Number(window.__rcLastRestoredPageIndex ?? -1);
+    if (Number.isFinite(_ri) && _ri >= 0) {
+      const _rEl = document.querySelectorAll('.page')[_ri];
+      if (_rEl) _rEl.scrollIntoView({ behavior: 'auto', block: 'start' });
+      window.__rcLastRestoredPageIndex = -1;
+    }
+  } catch (_) {}
   try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}
   return true;
 };
