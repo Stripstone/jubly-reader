@@ -386,7 +386,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         body.reading-active #reading-mode { background: var(--theme-accent-soft); }
 
         /* ── Focus Mode reading UI ── */
-        #reading-mode { background: var(--theme-accent-soft); padding: 0; }
+        #reading-mode { background: var(--theme-accent-soft); min-height: 100vh; padding: 0; }
         /* Reading bar layout — see consolidated system at end of file */
         /* Reading content wrapper — unconstrained on desktop, centred column on tablet/mobile */
         .reading-content { position: relative; padding: 80px 0 96px; }
