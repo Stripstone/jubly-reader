@@ -15,52 +15,11 @@
 //   closeModal(), setTheme(), handleExplorerSwatch(),
 //   setTier(), updateTierPill(), handlePausePlay(),
 //   handleAutoplayToggle(), updateProgressBar(),
-//   showSessionComplete(), startReading()
+//   showSessionComplete(), renderDashboard(), startReading()
 //
+// SCAFFOLD (remove on real auth wiring):
+//   login() — simulates auth; replace with Supabase auth flow
 // ============================================================
-
-    // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 1/6 — Shell Surface Contract & Release Decision
-    // Logical boundary declaration only — code not physically separated yet.
-    // Primary content: showSection(), releaseDashboardSectionVisibility(),
-    //   releaseStandardSectionVisibility(), surface state machine, boot release
-    //   transaction, interaction banner. Theme/appearance shell and reading
-    //   chrome (TTS bridge, bottom-bar controls) continue later in this file
-    //   as part of the presentation layer for this same logical module.
-    // =========================================================================
-
-    // ── Boot timing probe — dev-only, removable after Bucket E proof ────────────
-    // Proves whether shell's rc:runtime-policy-changed listener is always attached
-    // before state.js fires its initial policy event. Required before touching the
-    // 500ms boot-order bridge (Bucket E, RUNTIME_PROTECTION_LEDGER.md §15).
-    //
-    // To enable:  localStorage.setItem('rcBootProbe', '1')  then hard-refresh.
-    // To disable: localStorage.removeItem('rcBootProbe')     then hard-refresh.
-    // Output: '[rcBootProbe] Boot timing report' in the browser console.
-    // Also written to window.__rcBootProbeResult for copy/paste.
-    //
-    // Remove this block after Bucket E retirement conditions are met.
-    const _bootProbe = (function () {
-        const enabled = (function () {
-            try { return typeof localStorage !== 'undefined' && localStorage.getItem('rcBootProbe') === '1'; } catch (_) { return false; }
-        })();
-        if (!enabled) return { mark: function () {}, report: function () {} };
-        const _marks = [];
-        function mark(tag, extra) {
-            try { _marks.push(Object.assign({ tag, tMs: Math.round(performance.now()) }, extra || {})); } catch (_) {}
-        }
-        function report() {
-            try {
-                const out = { probe: 'rcBootProbe v1', scenario: 'cold-boot', marks: _marks };
-                console.group('[rcBootProbe] Boot timing report — copy the JSON below for Bucket E evidence:');
-                console.log(JSON.stringify(out, null, 2));
-                console.groupEnd();
-                window.__rcBootProbeResult = out;
-            } catch (_) {}
-        }
-        return { mark, report };
-    })();
-    // ─────────────────────────────────────────────────────────────────────────────
 
     // ── Section routing ──────────────────────────────────────────
     const ALL_SECTIONS     = ['landing-page', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
@@ -415,15 +374,6 @@ window.rcInteraction = (function () {
         blockedBy: null,
         at: null
     };
-    // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 3/6 — Account-Control Readiness
-    // Logical boundary declaration only — code not physically separated yet.
-    // Primary content: signed-in control state record, readiness reader,
-    //   readiness poll. Auth presentation layer (sign-in/sign-up/sign-out
-    //   shell, profile tabs, subscription surface rendering) continues after
-    //   the Modal Opener Provenance block below.
-    // =========================================================================
-
     let _accountControlsTransientBlock = null;
     let _lastSignedInAccountReadiness = {
         signedInInteractionReady: false,
@@ -675,15 +625,6 @@ window.rcInteraction = (function () {
         });
         return _lastSignedInAccountReadiness;
     }
-
-    // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 2/6 — Dashboard/Library Visible Settlement
-    // Logical boundary declaration only — code not physically separated yet.
-    // Primary content here: dashboard pending/ready release decision, owner
-    //   report reads, settlement thresholds, releaseDashboardSectionVisibility().
-    // Library table rendering (the visible settlement output) continues further
-    //   in this file — see the matching MODULE BOUNDARY 2/6 continuation marker.
-    // =========================================================================
 
     // ── Dashboard release seam ────────────────────────────────────────────────
     // Shell owns the first-visible dashboard state decision before the section
@@ -987,15 +928,6 @@ window.rcInteraction = (function () {
         return _sectionRefreshPromise || Promise.resolve();
     }
 
-    // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 6/6 — Public Route Coordination
-    // Logical boundary declaration only — code not physically separated yet.
-    // Primary content: focus mode, public sample entry/exit, reading session
-    //   entry, preview modal, session-complete surface. Shell frames user
-    //   intent into runtime reading transitions — reading truth stays with
-    //   the runtime owner.
-    // =========================================================================
-
     // ── Focus mode fade ──────────────────────────────────────────
     let focusModeTimer   = null;
     let focusModeHandler = null;
@@ -1018,16 +950,6 @@ window.rcInteraction = (function () {
 
 
 
-    // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 4/6 — Modal Opener Provenance
-    // Logical boundary declaration only — code not physically separated yet.
-    // Primary content: openModal(), closeModal(), ownership guards,
-    //   promptOwnershipAction(). Opener truth for pricing-modal is currently
-    //   inferred, not authoritative — see getActiveModalReport() HELD comment
-    //   (Bucket F). Do not treat this section as provenance-complete until
-    //   Bucket F retirement conditions are met.
-    // =========================================================================
-
     // ── Modals ───────────────────────────────────────────────────
     function openModal(id)  {
         const el = document.getElementById(id);
@@ -1041,12 +963,16 @@ window.rcInteraction = (function () {
     }
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
+    function login() {
+        showSigninPane();
+    }
+
     function continueWithFree() {
         if (window.rcBilling && typeof window.rcBilling.continueWithFree === 'function') {
             window.rcBilling.continueWithFree();
             return;
         }
-        showSigninPane();
+        login();
     }
 
     function showSigninPane() {
@@ -1119,11 +1045,12 @@ window.rcInteraction = (function () {
         if (window.rcBilling && typeof window.rcBilling.showPricingForGatedAction === 'function') {
             window.rcBilling.showPricingForGatedAction(message);
         } else {
-            // Fallback: billing module unavailable. Set the gated message directly
-            // before opening. This is the billing-unavailable degradation path only —
-            // when billing is present, showPricingForGatedAction owns message delivery.
-            const msgEl = document.getElementById('pricing-message');
-            if (msgEl) msgEl.textContent = message;
+            const pricingMessage = document.getElementById('pricing-message');
+            if (pricingMessage) {
+                pricingMessage.textContent = message;
+                pricingMessage.classList.remove('hidden-section');
+                pricingMessage.style.color = '#4338ca';
+            }
             openModal('pricing-modal');
         }
         return true;
@@ -2058,44 +1985,21 @@ window.rcInteraction = (function () {
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        // HELD — boot-order bridge. Do not remove without boot timing proof.
-        //
-        // Why this exists: shell.js attaches its rc:runtime-policy-changed listener
-        // during DOMContentLoaded, but state.js is injected later by app.js and emits
-        // rc:runtime-policy-changed when it applies the initial fallback policy. Because
-        // of that load order, shell can miss the first policy event entirely.
-        //
-        // Retirement condition: either prove via dev-only boot timing probes (cold
-        // signed-out, cold signed-in, refresh signed-in) that rc:runtime-policy-changed
-        // always fires after this listener is attached, or replace with a one-time
-        // immediate read from current owner state after listener attachment. Do not
-        // remove this timeout on the assumption it is "just a delay."
         setTimeout(() => {
-            _bootProbe.mark('boot-timeout-fired', {
-                rcPolicyPresent:     !!window.rcPolicy,
-                rcThemePresent:      !!window.rcTheme,
-                rcAppearancePresent: !!window.rcAppearance,
-                rcEntitlementsPresent: !!window.rcEntitlements
-            });
             updateTierPill();
             updateExplorerSwatchState();
             try { if (window.rcTheme) window.rcTheme.syncShellState(); } catch (_) {}
             try { if (window.rcAppearance) window.rcAppearance.syncButtons(); } catch (_) {}
             try { refreshExplorerPanel(); } catch (_) {}
-            // Delayed report: fires after timeout so all marks are present.
-            setTimeout(() => { _bootProbe.report(); }, 150);
         }, 500);
-        // Reading entry is fully runtime-owned via startReadingFromPreview → __rcLoadBook.
+        patchRefreshHook();
+        // Reading entry is now fully runtime-owned via startReadingFromPreview → __rcLoadBook.
+        // The previous poll/auto-click bridge (bookSel change → waitForPages → loadBtn.click)
+        // has been retired: loadBook() in library.js calls render() directly, and render()
+        // calls __jublyAfterRender itself. No shell polling or synthetic click is needed.
     });
 
-    // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 2/6 (continued) — Dashboard/Library Visible Settlement
-    // Library table rendering: the visible output of the settlement decision
-    // made in the primary 2/6 block above. Refresh is driven by the
-    // rc:local-library-changed event and show-section-dashboard transitions.
-    // =========================================================================
-
-    // ── Library table — refreshed via rc:local-library-changed and show-section-dashboard ──
+    // ── Library table — populated by __jublyLibraryRefresh hook called from library.js ──
     function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     let libraryRefreshRetryTimer = null;
     let _loggedFirstLocalLibraryRead = false;
@@ -2295,6 +2199,30 @@ window.rcInteraction = (function () {
         try { renderSubscriptionSurface(books); } catch (_) {}
 
     }
+    // Hook called by library.js after populateBookSelectWithLocal()
+    window.__jublyLibraryRefresh = refreshLibrary;
+
+    function patchRefreshHook() {
+        let tries = 0;
+        const timer = setInterval(() => {
+            tries += 1;
+            if (typeof window.__rcRefreshBookSelect === 'function') {
+                clearInterval(timer);
+                const prev = window.__rcRefreshBookSelect;
+                if (prev.__jublyWrapped) return;
+                const wrapped = async function() {
+                    const out = await prev.apply(this, arguments);
+                    try { await refreshLibrary('book-select-refresh-hook'); } catch(_) {}
+                    return out;
+                };
+                wrapped.__jublyWrapped = true;
+                window.__rcRefreshBookSelect = wrapped;
+            } else if (tries >= 100) {
+                clearInterval(timer);
+            }
+        }, 100);
+    }
+
     // Scroll affordance — called by library.js via __jublyAfterRender after render()
     window.__jublyAfterRender = function() {
         document.querySelectorAll('#pages .page').forEach(function(pageEl) {
@@ -2503,13 +2431,13 @@ window.rcInteraction = (function () {
         prog.textContent = total > 0 ? `Page ${currentLabel} / ${totalLabel}` : '—';
     }
 
+    // ── App event bridge ─────────────────────────────────────────
+    // Called by app's goToNext() / nextCard equivalent at session end
+    // The app will call showSessionComplete() directly once wired;
+    // this is a fallback shim for the transition period.
+    window.jublySessionComplete = showSessionComplete;
+
     document.addEventListener('DOMContentLoaded', () => {
-        _bootProbe.mark('dcl-handler-entry', {
-            rcPolicyPresent:     !!window.rcPolicy,
-            rcThemePresent:      !!window.rcTheme,
-            rcAppearancePresent: !!window.rcAppearance,
-            rcEntitlementsPresent: !!window.rcEntitlements
-        });
         const goalEditBtn = document.getElementById('profile-goal-edit-btn');
         const goalEditForm = document.getElementById('profile-goal-edit-form');
         const goalCancelBtn = document.getElementById('profile-goal-cancel-btn');
@@ -2637,21 +2565,7 @@ window.rcInteraction = (function () {
                 refreshExplorerPanel();
             });
         }
-        _bootProbe.mark('policy-listener-attached', {
-            rcPolicyPresent:     !!window.rcPolicy,
-            rcThemePresent:      !!window.rcTheme,
-            rcAppearancePresent: !!window.rcAppearance,
-            rcEntitlementsPresent: !!window.rcEntitlements
-        });
-        document.addEventListener('rc:runtime-policy-changed', (e) => {
-            _bootProbe.mark('policy-event-received', {
-                rcPolicyPresent:     !!window.rcPolicy,
-                rcThemePresent:      !!window.rcTheme,
-                rcAppearancePresent: !!window.rcAppearance,
-                rcEntitlementsPresent: !!window.rcEntitlements,
-                resolved:            !!(e && e.detail && e.detail.resolved),
-                reason:              (e && e.detail && e.detail.reason) || null
-            });
+        document.addEventListener('rc:runtime-policy-changed', () => {
             updateTierPill();
             syncTierButtonState();
             updateExplorerSwatchState();
@@ -2742,17 +2656,6 @@ window.rcInteraction = (function () {
         }, 350);
     });
 
-    // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 5/6 — Shell Report & Diagnostics
-    // Logical boundary declaration only — code not physically separated yet.
-    // Primary content: snapshotShellControl(), getVisiblePublicBoundaryFields(),
-    //   isElementVisible(), getActiveModalReport(), getSignedInInteractionReport(),
-    //   and any exported shell report surface (window.rcShell).
-    // These are dev/reporting tools only. They must not become product owners
-    //   or behavior justification. See workflow rule: diagnostics report owner
-    //   truth only and are removable unless accepted as durable diagnostics.
-    // =========================================================================
-
     function snapshotShellControl(selector) {
         const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
         if (!el) return null;
@@ -2828,17 +2731,6 @@ window.rcInteraction = (function () {
         return {
             open: !!open,
             id: open ? (open.id || '') : null,
-            // HELD — opener is inferred, not truthful provenance.
-            // billing.js entry points (openPricingForSignup, openPricingForAccount,
-            // showPricingForGatedAction) do not persist a shared opener context that
-            // shell can read back. Reporting here is inference from billing side effects
-            // and is not a valid provenance substitute.
-            //
-            // Retirement condition: billing.js must be extended (in a Central-authorized
-            // Station 2 follow-up slice scoping js/billing.js) to write a single readable
-            // pricing-open context — opener, allowed surface, message/source, timestamp —
-            // from the three legitimate entry points only. Shell reads that context here
-            // instead of inferring. Acceptance requires runtime test with probes.
             opener: open && open.id === 'pricing-modal' ? 'pricing' : (open ? 'unknown' : 'none'),
             allowedSurface: open ? getCurrentVisibleSection() : null
         };
@@ -2978,3 +2870,9 @@ window.rcInteraction = (function () {
             }
         };
     };
+    // Engine scripts load dynamically after window.load; refresh shell library once boot settles.
+    // refreshLibrary() removed from this timer — it was a timing workaround that
+    // raced against auth and could show the unauthenticated sample state after
+    // auth had resolved. DOMContentLoaded now awaits refreshLibrary() before
+    // removing auth-hydrating, so this stale call is no longer needed.
+    window.addEventListener('load', () => setTimeout(() => { patchRefreshHook(); }, 350));
