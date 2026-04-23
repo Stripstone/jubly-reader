@@ -1444,13 +1444,23 @@
       return count;
     }
 
-    function parseSourcePageNumber(title, fallbackIndex = 0) {
+    function hasExplicitChaptersInMarkdown(text) {
+      return countExplicitH1(text) > 1;
+    }
+
+    function parseSourcePageNumberDetail(title, fallbackIndex = 0) {
       const match = String(title || "").match(/(?:\bpage\s+|\bp\.\s*)(\d+)\b/i);
       if (match) {
         const num = Number(match[1]);
-        if (Number.isFinite(num) && num > 0) return num;
+        if (Number.isFinite(num) && num > 0) {
+          return { number: num, explicit: true };
+        }
       }
-      return Number(fallbackIndex) + 1;
+      return { number: Number(fallbackIndex) + 1, explicit: false };
+    }
+
+    function parseSourcePageNumber(title, fallbackIndex = 0) {
+      return parseSourcePageNumberDetail(title, fallbackIndex).number;
     }
 
     function parsePagesWithTitles(raw) {
@@ -1467,7 +1477,15 @@
           .filter(l => l && !/^\s{0,3}#{1,6}\s+/.test(l) && !/^\s*[—-]{2,}\s*$/.test(l));
 
         const body = cleaned.join(" ").trim();
-        if (body) pages.push({ title: cur.title, text: body, sourcePageNumber: parseSourcePageNumber(cur.title, pages.length) });
+        if (body) {
+          const sourcePage = parseSourcePageNumberDetail(cur.title, pages.length);
+          pages.push({
+            title: cur.title,
+            text: body,
+            sourcePageNumber: sourcePage.number,
+            sourcePageNumberExplicit: sourcePage.explicit,
+          });
+        }
       }
 
       for (const line of lines) {
@@ -1493,7 +1511,7 @@
               .map(l => l.trim())
               .filter(l => l && !/^\s{0,3}#{1,6}\s+/.test(l) && !/^\s*[—-]{2,}\s*$/.test(l));
             const body = cleaned.join(" ").trim();
-            if (body) out.push({ title: `Page ${out.length + 1}`, text: body, sourcePageNumber: out.length + 1 });
+            if (body) out.push({ title: `Page ${out.length + 1}`, text: body, sourcePageNumber: out.length + 1, sourcePageNumberExplicit: false });
           });
           return out.length ? out : pages;
         }
@@ -1516,7 +1534,8 @@
       pages = blocks.map((b, i) => ({
         title: `Page ${i + 1}`,
         text: b.replace(/\s+/g, " ").trim(),
-        sourcePageNumber: i + 1
+        sourcePageNumber: i + 1,
+        sourcePageNumberExplicit: false,
       }));
     }
   }
@@ -1526,16 +1545,30 @@
 
     function getSequentialChapterPages(chapterIndex) {
       const idx = Number(chapterIndex);
-      const pagesForChapter = parsePagesWithTitles((Number.isFinite(idx) && idx >= 0 && chapterList[idx]) ? chapterList[idx].raw : getCurrentChapterRaw());
-      if (!Number.isFinite(idx) || idx <= 0) return pagesForChapter;
-      let offset = 0;
-      for (let i = 0; i < idx; i++) {
-        offset += parsePagesWithTitles(chapterList[i]?.raw || '').length;
+      const targetIdx = (Number.isFinite(idx) && idx >= 0 && chapterList[idx]) ? idx : null;
+      if (targetIdx == null) return parsePagesWithTitles(getCurrentChapterRaw());
+
+      let nextFallbackPageNumber = 1;
+      let resolvedPages = [];
+      for (let i = 0; i <= targetIdx; i++) {
+        const parsedPages = parsePagesWithTitles(chapterList[i]?.raw || '');
+        const chapterHasExplicitSourceNumbers = parsedPages.some((page) => !!page?.sourcePageNumberExplicit);
+        resolvedPages = chapterHasExplicitSourceNumbers
+          ? parsedPages.map((page) => ({ ...page }))
+          : parsedPages.map((page, localIdx) => ({
+              ...page,
+              sourcePageNumber: nextFallbackPageNumber + localIdx,
+              sourcePageNumberExplicit: false,
+            }));
+
+        const lastResolvedPageNumber = resolvedPages.length
+          ? Number(resolvedPages[resolvedPages.length - 1]?.sourcePageNumber)
+          : (nextFallbackPageNumber - 1);
+        nextFallbackPageNumber = Number.isFinite(lastResolvedPageNumber) && lastResolvedPageNumber > 0
+          ? (lastResolvedPageNumber + 1)
+          : nextFallbackPageNumber;
       }
-      return pagesForChapter.map((page, localIdx) => ({
-        ...page,
-        sourcePageNumber: offset + localIdx + 1,
-      }));
+      return resolvedPages;
     }
 
     function setSelectOptions(selectEl, options, placeholder) {
@@ -1676,7 +1709,7 @@
           const rec = await localBookGet(stripLocalPrefix(id));
           if (!rec || typeof rec.markdown !== 'string') throw new Error('local book missing');
           currentBookRaw = rec.markdown;
-          hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
+          hasExplicitChapters = hasExplicitChaptersInMarkdown(currentBookRaw);
           if (hasExplicitChapters) chapterList = parseChaptersFromMarkdown(currentBookRaw);
           // Await so loadBook only resolves after render() + applyPendingReadingRestore().
           await refreshChapterAndPagesUI(options);
@@ -1703,7 +1736,7 @@
         if (!res.ok) throw new Error(`book fetch failed (${res.status}) at ${entry.path}`);
         currentBookRaw = await res.text();
 
-        hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
+        hasExplicitChapters = hasExplicitChaptersInMarkdown(currentBookRaw);
         if (hasExplicitChapters) {
           chapterList = parseChaptersFromMarkdown(currentBookRaw);
         }
@@ -1714,7 +1747,7 @@
         try {
           if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[id] === "string") {
             currentBookRaw = window.EMBED_BOOKS[id];
-            hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
+            hasExplicitChapters = hasExplicitChaptersInMarkdown(currentBookRaw);
             if (hasExplicitChapters) {
               chapterList = parseChaptersFromMarkdown(currentBookRaw);
             }
