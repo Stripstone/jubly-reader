@@ -527,21 +527,8 @@
     if (!root) return [];
 
     const blocks = [];
-    let lastMarker = null;
-    const nodes = root.querySelectorAll('[id],[name],h1,h2,h3,h4,h5,h6,p,li');
-    nodes.forEach((el) => {
-      try {
-        const rawMarker = el.getAttribute('id') || el.getAttribute('name') || '';
-        const markerMatch = String(rawMarker).match(/^page[_-]?(\d+)$/i);
-        if (markerMatch) {
-          const marker = `## Page ${Number(markerMatch[1])}`;
-          if (marker !== lastMarker) {
-            blocks.push(marker);
-            lastMarker = marker;
-          }
-        }
-      } catch (_) {}
-      if (!/^(H[1-6]|P|LI)$/i.test(el.tagName || '')) return;
+    const candidates = root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li');
+    candidates.forEach((el) => {
       const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
       if (!txt) return;
       if (txt.length < 2) return;
