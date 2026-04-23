@@ -382,11 +382,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             background: var(--theme-accent-soft);
             overscroll-behavior: none;
             scrollbar-color: #94a3b8 transparent;
-            min-height: 0;
         }
-        /* Clear the global html,body min-height:100% floor during reading so short
-           chapters cannot produce a blank tail below the last page card. */
-        html:has(body.reading-active) { min-height: 0; }
         body.reading-active #reading-mode { background: var(--theme-accent-soft); }
 
         /* ── Focus Mode reading UI ── */
