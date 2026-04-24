@@ -7,9 +7,8 @@ export function getBearer(req) {
   return match ? match[1].trim() : '';
 }
 
-export function getDevEmails() {
-  const raw = String(optionalEnv('DEV_CREDA', '') || '').trim().toLowerCase();
-  return raw ? raw.split(',').map(e => e.trim()).filter(Boolean) : [];
+export function getDevEmail() {
+  return String(optionalEnv('DEV_CREDA', '') || '').trim().toLowerCase();
 }
 
 export async function getAuthorizedDevUser(req) {
@@ -17,9 +16,9 @@ export async function getAuthorizedDevUser(req) {
   if (!token) return { ok: false, reason: 'missing_auth', user: null, token: '' };
   const user = await getUserFromAccessToken(token).catch(() => null);
   if (!user?.id) return { ok: false, reason: 'invalid_auth', user: null, token };
-  const devEmails = getDevEmails();
+  const devEmail = getDevEmail();
   const email = String(user.email || '').trim().toLowerCase();
-  if (!devEmails.length) return { ok: false, reason: 'dev_email_unconfigured', user, token };
-  if (!devEmails.includes(email)) return { ok: false, reason: 'not_dev_account', user, token };
-  return { ok: true, reason: 'ok', user, token, devEmails };
+  if (!devEmail) return { ok: false, reason: 'dev_email_unconfigured', user, token };
+  if (email !== devEmail) return { ok: false, reason: 'not_dev_account', user, token };
+  return { ok: true, reason: 'ok', user, token, devEmail };
 }

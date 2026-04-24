@@ -1980,12 +1980,9 @@ window.rcInteraction = (function () {
             else pageBtn.removeAttribute('title');
         });
         // Surface blocked/no-voice/error state visibly rather than leaving dead controls.
-        // Use !support.playable as the primary gate so "no browser voice" always surfaces,
-        // even when eligibility.canPlay is ambiguous.
         const blockedMsgEl = document.getElementById('shell-tts-blocked-msg');
         if (blockedMsgEl) {
-            const blocked = (!support.playable || !canPlay) && !status.active && !countdown.active;
-            const blockedReason = blocked
+            const blockedReason = !canPlay && !status.active && !countdown.active
                 ? String(support.reason || eligibility.reasons?.canPlay || '')
                 : '';
             if (blockedReason) {
