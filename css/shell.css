@@ -210,7 +210,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         .import-file-input { display:none; }
         .import-hint { margin-top:12px; font-size:0.8rem; color:#64748b; }
         .import-status { margin-top:12px; font-size:0.82rem; font-weight:600; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:10px 12px; }
-        .import-status a { color:#4f46e5; text-decoration:underline; cursor:pointer; }
         .import-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
         .import-picker { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(280px,0.9fr); gap:16px; }
         @media (max-width: 900px) { .import-picker { grid-template-columns:1fr; } }
@@ -1355,27 +1354,24 @@ body.auth-hydrating #profile-page {
 .import-source-tabs {
   display: inline-flex;
   gap: 8px;
+  padding: 6px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
   margin-bottom: 14px;
 }
 .import-source-tab {
-  border: 2px solid #e2e8f0;
-  background: #f8fafc;
+  border: 0;
+  background: transparent;
   color: #64748b;
   font-weight: 800;
   font-size: 0.82rem;
-  padding: 8px 16px;
+  padding: 9px 14px;
   border-radius: 12px;
-  cursor: pointer;
-  transition: border-color .15s, background .15s, color .15s;
-}
-.import-source-tab:not(.active):hover {
-  border-color: #cbd5e1;
-  background: #f1f5f9;
-  color: #334155;
+  transition: background .2s ease, color .2s ease;
 }
 .import-source-tab.active {
-  border-color: var(--jubly-purple);
-  background: rgba(124,58,237,0.08);
+  background: rgba(124,58,237,0.12);
   color: var(--jubly-purple);
 }
 .import-text-label {
@@ -1660,32 +1656,6 @@ html:has(#reading-mode.reading-restore-pending) { overflow: hidden; }
   pointer-events: auto;
 }
 
-/* Playback surface indicator — discrete floating badge above bottom bar.
-   Shell-owned, driven by syncShellPlaybackControls(). Never uses rcInteraction. */
-#shell-playback-indicator {
-  position: fixed;
-  bottom: 60px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: 80vw;
-  z-index: 200;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #92400e;
-  padding: 3px 10px;
-  border-radius: 6px;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  pointer-events: none;
-  display: none;
-}
-
-/* During reading, lift rcInteraction banner above the playback bar */
-body.reading-active #rc-interaction-banner {
-  bottom: 52px;
-}
-
 /* Pending — slate, muted, no urgency */
 #rc-interaction-banner[data-sev="pending"] {
   background: #f1f5f9;
@@ -1755,36 +1725,6 @@ body.reading-active #rc-interaction-banner {
 }
 .rc-banner__close:hover { opacity: 0.85; }
 
-
-/* Pricing modal — mobile-first sizing */
-#pricing-modal > div {
-  overflow-y: auto;
-  max-height: 92dvh;
-}
-@media (max-width: 640px) {
-  #pricing-modal {
-    padding: 0.75rem;
-    align-items: flex-end;
-  }
-  #pricing-modal > div {
-    padding: 1.5rem 1.25rem 1.75rem !important;
-    border-radius: 1.25rem !important;
-    max-height: 96dvh;
-  }
-  #pricing-modal > div > .text-center {
-    margin-bottom: 1rem;
-  }
-  #pricing-modal > div > .text-center h2 {
-    font-size: 1.4rem;
-  }
-  #pricing-modal > div > button:first-of-type {
-    top: 0.75rem;
-    right: 0.75rem;
-  }
-  .pricing-card {
-    padding: 1rem !important;
-  }
-}
 
 /* Group A: pricing modal should first appear only after settled labels are ready. */
 #pricing-modal.pricing-modal-settling .pricing-card {
