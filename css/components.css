@@ -323,7 +323,6 @@ body {
       font-size: 13px;
       box-shadow: var(--shadow-sm);
     }
-    .import-status a { color:#4f46e5; text-decoration:underline; cursor:pointer; }
 
     .import-picker {
       display: grid;
