@@ -179,7 +179,6 @@ What must be true:
 ### Page navigation
 What must be true:
 - Next advances to the next page
-- when a loaded source has another chapter, reading mode shows a **Next Chapter** control after the final card; it advances to the next chapter and is omitted on the final chapter
 - displayed page numbers preserve source or actual document numbering when that metadata exists
 - a document does not restart visible page labels at chapter 1 when source numbering should continue across the book
 - page numbering behavior is fixed runtime truth, not a user-configurable preference
