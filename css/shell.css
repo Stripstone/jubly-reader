@@ -694,46 +694,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
   justify-content: flex-end;
 }
 
-.shell-playback-indicator {
-  position: fixed;
-  left: 50%;
-  bottom: 60px;
-  transform: translateX(-50%);
-  z-index: 31;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: max-content;
-  min-height: 24px;
-  max-width: min(360px, calc(100vw - 32px));
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fde68a;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
-  font-size: 0.72rem;
-  font-weight: 800;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none;
-}
-
-.shell-playback-indicator[hidden] {
-  display: none;
-}
-
-@media (max-width: 640px) {
-  .shell-playback-indicator {
-    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
-    max-width: calc(100vw - 24px);
-    font-size: 0.66rem;
-    padding: 5px 8px;
-  }
-}
-
 /* Top fixed controls */
 .reading-top-settings-btn,
 .reading-top-exit {

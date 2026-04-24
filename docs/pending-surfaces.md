@@ -122,9 +122,8 @@ Allowed first visible dashboard/library states are `pending`, `populated`, `empt
 
 | Surface | What it does | Status |
 |---|---|---|
-| Reading mode → **Play** / `Read page` cloud start | Cloud TTS `POST /api/ai?action=tts` | ✅ No routine pending banner for normal start; preserve normal countdown/flow. Surface real playback errors with `Try again` when runtime exposes a settled start-failure signal. Transient cloud/server transport failures must stop cleanly and leave Play immediately retryable. |
-| Reading view → `#shell-playback-indicator` | Shell-presented floating playback/support notice from runtime getter truth through `syncShellPlaybackControls()` | ◐ Hidden when playback is healthy. Floats centered above the bottom playback bar; shows browser voice unavailable/support copy, voice-volume-off copy, and delayed cloud-restart copy after the no-flash threshold. Playback-start failure remains held until runtime exposes a retry-exhausted/start-error signal outside `tts.js`. |
-| Reading mode → **Skip forward / back** buttons | Runtime route decision and cloud seek/restart | ◐ Immediate by default. During an already-started cloud seek/restart under poor connection, `#shell-playback-indicator` may show `Loading audio…` / poor-connection copy after the no-flash threshold; rapid skip intents received during that pending restart are coalesced so the latest same-page target wins when audio is ready. |
+| Reading mode → **Play** / `Read page` cloud start | Cloud TTS `POST /api/ai?action=tts` | ✅ No routine pending banner for normal start; preserve normal countdown/flow. Surface real playback errors with `Try again`. Transient cloud/server transport failures must stop cleanly and leave Play immediately retryable. |
+| Reading mode → **Skip forward / back** buttons | Runtime route decision and cloud seek/restart | ◐ Immediate by default. During an already-started cloud seek/restart under poor connection, a visible `Loading audio…` / poor-connection pending banner may appear; rapid skip intents received during that pending restart are coalesced so the latest same-page target wins when audio is ready. |
 
 ---
 
@@ -150,15 +149,14 @@ Pending UI should not be added to every control.
 | Usage | 1 | 0 |
 | Importer | 5 | 0 |
 | Library | 5 | 0 |
-| Reading / TTS | 1 wired, 2 conditional/local pending | 0 |
+| Reading / TTS | 1 wired, 1 conditional/local pending | 0 |
 | Settings / persistence | 1 wired, 1 intentionally immediate | 0 |
-| **Total surfaces covered** | **28** | **0 in this bounded pass** |
+| **Total surfaces covered** | **27** | **0 in this bounded pass** |
 
 ## Notes locked by this pass
 
 - Button-owned waits prefer inline busy states before any global banner.
 - App-level or cross-surface truth settles may use the bottom interaction banner.
 - Skip controls remain immediate in routine operation; the only TTS skip pending surface is the poor-connection cloud seek/restart seam, where audio is already in a restart transition and the user needs honest loading visibility.
-- Playback-start failure migration is not complete until runtime exposes a settled retry-exhausted/start-error signal that shell can read without touching `tts.js`.
 - Settings stay optimistic/local first; the shared save-failure seam is enough for this pass.
 - Recoverable error banners now standardize to `Try again`, `Refresh`, `Open login`, or `Dismiss`.
