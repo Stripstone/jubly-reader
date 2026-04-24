@@ -853,8 +853,19 @@ function writeAnchorsToCache(pageHash, payload) {
       if (TTS_STATE.audio && typeof TTS_STATE.audio.volume === 'number') {
         try { TTS_STATE.audio.volume = v; } catch (_) {}
       }
+      updateSoundMutedBadge(v);
     }
   }
+
+  function updateSoundMutedBadge(vol) {
+    const badge = document.getElementById('shell-sound-muted-badge');
+    if (!badge) return;
+    badge.style.display = (Number(vol) === 0) ? 'inline-block' : 'none';
+  }
+
+  // Reflect saved volume state into the badge on initial load.
+  // Deferred so the badge element is guaranteed to be in the DOM.
+  setTimeout(() => updateSoundMutedBadge(TTS_STATE.volume ?? 1), 0);
   
   // Set initial input values from constants
   document.getElementById("goalTimeInput").value = DEFAULT_TIME_GOAL;
