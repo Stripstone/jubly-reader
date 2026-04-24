@@ -1051,6 +1051,15 @@ window.rcInteraction = (function () {
     }
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
+    function installPricingModalClickAway() {
+        const pricingModal = document.getElementById('pricing-modal');
+        if (!pricingModal || pricingModal.__jublyPricingClickAwayBound) return;
+        pricingModal.__jublyPricingClickAwayBound = true;
+        pricingModal.addEventListener('click', (event) => {
+            if (event.target === pricingModal) closeModal('pricing-modal');
+        });
+    }
+
     function continueWithFree() {
         if (window.rcBilling && typeof window.rcBilling.continueWithFree === 'function') {
             window.rcBilling.continueWithFree();
@@ -1520,6 +1529,7 @@ window.rcInteraction = (function () {
 
     document.addEventListener('DOMContentLoaded', async () => {
         installOwnershipGuards();
+        installPricingModalClickAway();
         try {
             document.body.classList.add('auth-hydrating');
             document.body.classList.add('boot-pending');

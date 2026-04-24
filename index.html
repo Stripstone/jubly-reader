@@ -941,14 +941,15 @@
 
 <!-- PRICING MODAL -->
 <div id="pricing-modal" class="hidden-section fixed inset-0 bg-slate-900/70 modal-overlay flex items-center justify-center z-[100] p-6">
-    <div class="bg-white w-full max-w-2xl rounded-3xl p-8 relative shadow-2xl">
-        <button onclick="closeModal('pricing-modal')" class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition">✕</button>
-        <div class="text-center mb-8">
+    <div class="bg-white w-full max-w-2xl rounded-3xl relative shadow-2xl pricing-modal-card">
+        <div class="pricing-modal-header text-center">
+            <button onclick="closeModal('pricing-modal')" class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition">✕</button>
             <h2 class="text-3xl font-extrabold text-slate-900">Simple Pricing</h2>
             <p id="pricing-subcopy" class="text-slate-400 mt-1 text-sm">Start free, keep your place, and come back anytime.</p>
-        <div id="pricing-message" class="hidden-section mt-3 text-sm font-semibold"></div>
+            <div id="pricing-message" class="hidden-section mt-3 text-sm font-semibold"></div>
         </div>
-        <div class="flex gap-4 flex-col md:flex-row">
+        <div class="pricing-modal-body">
+            <div class="flex gap-4 flex-col md:flex-row">
             <div class="pricing-card">
                 <p class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Basic</p>
                 <p class="text-4xl font-extrabold text-slate-900 mb-0.5">Free</p>
@@ -985,6 +986,7 @@
                 </ul>
                 <button id="pricing-premium-btn" type="button" onclick="startCheckout('premium')" class="w-full border-2 border-indigo-200 text-indigo-600 rounded-xl py-2.5 font-bold text-sm hover:bg-indigo-50 transition">Upgrade to Premium</button>
             </div>
+        </div>
         </div>
     </div>
 </div>

@@ -1775,17 +1775,32 @@ body.reading-active #rc-interaction-banner {
 .rc-banner__close:hover { opacity: 0.85; }
 
 
-/* Pricing modal — mobile sizing only. Opener/plan truth remains JS-owned. */
-#pricing-modal > div {
-  overflow-y: auto;
+/* Pricing modal — size/scroll containment only. Opener/plan truth remains JS-owned. */
+#pricing-modal > .pricing-modal-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   max-height: 92dvh;
 }
- (max-width: 640px) {
+
+.pricing-modal-header {
+  flex: 0 0 auto;
+  padding: 2rem 2rem 2rem;
+}
+
+.pricing-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 2rem 2rem;
+}
+
+@media (max-width: 640px) {
   #pricing-modal {
     padding: 0.75rem;
     align-items: center;
   }
-  #pricing-modal > div {
+  #pricing-modal > .pricing-modal-card {
     width: min(100%, 390px);
     max-height: min(78dvh, 620px);
   }
