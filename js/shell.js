@@ -1979,18 +1979,23 @@ window.rcInteraction = (function () {
             if (disabled) pageBtn.title = support.reason || 'Playback unavailable';
             else pageBtn.removeAttribute('title');
         });
-        // Surface blocked/no-voice/error state visibly rather than leaving dead controls.
-        const blockedMsgEl = document.getElementById('shell-tts-blocked-msg');
-        if (blockedMsgEl) {
-            const blockedReason = !canPlay && !status.active && !countdown.active
-                ? String(support.reason || eligibility.reasons?.canPlay || '')
-                : '';
+        // Drive the discrete floating playback indicator (#shell-playback-indicator).
+        // Priority: browser-voice blocked > sound muted. Hidden when neither applies.
+        const indicator = document.getElementById('shell-playback-indicator');
+        if (indicator) {
+            const blocked = (!support.playable || !canPlay) && !status.active && !countdown.active;
+            const blockedReason = blocked ? String(support.reason || eligibility.reasons?.canPlay || '') : '';
+            const volSlider = document.getElementById('vol_voice');
+            const soundMuted = !blocked && !!status.active && Number(volSlider?.value ?? 1) === 0;
             if (blockedReason) {
-                blockedMsgEl.textContent = blockedReason;
-                blockedMsgEl.style.display = '';
+                indicator.textContent = blockedReason;
+                indicator.style.display = '';
+            } else if (soundMuted) {
+                indicator.textContent = 'Voice volume is off';
+                indicator.style.display = '';
             } else {
-                blockedMsgEl.textContent = '';
-                blockedMsgEl.style.display = 'none';
+                indicator.textContent = '';
+                indicator.style.display = 'none';
             }
         }
         // PATCH(speed-sync): Keep #shell-speed in sync with TTS_STATE.rate.

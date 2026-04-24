@@ -1,0 +1,252 @@
+diff --git a/css/components.css b/css/components.css
+index f7e83f3..f87f46a 100644
+--- a/css/components.css
++++ b/css/components.css
+@@ -323,6 +323,7 @@ body {
+       font-size: 13px;
+       box-shadow: var(--shadow-sm);
+     }
++    .import-status a { color:#4f46e5; text-decoration:underline; cursor:pointer; }
+ 
+     .import-picker {
+       display: grid;
+diff --git a/css/shell.css b/css/shell.css
+index 6443f52..063a1b0 100644
+--- a/css/shell.css
++++ b/css/shell.css
+@@ -210,6 +210,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
+         .import-file-input { display:none; }
+         .import-hint { margin-top:12px; font-size:0.8rem; color:#64748b; }
+         .import-status { margin-top:12px; font-size:0.82rem; font-weight:600; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:10px 12px; }
++        .import-status a { color:#4f46e5; text-decoration:underline; cursor:pointer; }
+         .import-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
+         .import-picker { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(280px,0.9fr); gap:16px; }
+         @media (max-width: 900px) { .import-picker { grid-template-columns:1fr; } }
+@@ -1354,24 +1355,27 @@ body.auth-hydrating #profile-page {
+ .import-source-tabs {
+   display: inline-flex;
+   gap: 8px;
+-  padding: 6px;
+-  border-radius: 16px;
+-  background: #f8fafc;
+-  border: 1px solid #e2e8f0;
+   margin-bottom: 14px;
+ }
+ .import-source-tab {
+-  border: 0;
+-  background: transparent;
++  border: 2px solid #e2e8f0;
++  background: #f8fafc;
+   color: #64748b;
+   font-weight: 800;
+   font-size: 0.82rem;
+-  padding: 9px 14px;
++  padding: 8px 16px;
+   border-radius: 12px;
+-  transition: background .2s ease, color .2s ease;
++  cursor: pointer;
++  transition: border-color .15s, background .15s, color .15s;
++}
++.import-source-tab:not(.active):hover {
++  border-color: #cbd5e1;
++  background: #f1f5f9;
++  color: #334155;
+ }
+ .import-source-tab.active {
+-  background: rgba(124,58,237,0.12);
++  border-color: var(--jubly-purple);
++  background: rgba(124,58,237,0.08);
+   color: var(--jubly-purple);
+ }
+ .import-text-label {
+@@ -1656,6 +1660,11 @@ html:has(#reading-mode.reading-restore-pending) { overflow: hidden; }
+   pointer-events: auto;
+ }
+ 
++/* During reading, lift the banner above the playback bar so it never covers controls */
++body.reading-active #rc-interaction-banner {
++  bottom: 52px;
++}
++
+ /* Pending — slate, muted, no urgency */
+ #rc-interaction-banner[data-sev="pending"] {
+   background: #f1f5f9;
+@@ -1726,6 +1735,36 @@ html:has(#reading-mode.reading-restore-pending) { overflow: hidden; }
+ .rc-banner__close:hover { opacity: 0.85; }
+ 
+ 
++/* Pricing modal — mobile-first sizing */
++#pricing-modal > div {
++  overflow-y: auto;
++  max-height: 92dvh;
++}
++@media (max-width: 640px) {
++  #pricing-modal {
++    padding: 0.75rem;
++    align-items: flex-end;
++  }
++  #pricing-modal > div {
++    padding: 1.25rem 1rem 1.5rem;
++    border-radius: 1.25rem;
++    max-height: 96dvh;
++  }
++  #pricing-modal > div > .text-center {
++    margin-bottom: 1rem;
++  }
++  #pricing-modal > div > .text-center h2 {
++    font-size: 1.4rem;
++  }
++  #pricing-modal > div > button:first-of-type {
++    top: 0.75rem;
++    right: 0.75rem;
++  }
++  .pricing-card {
++    padding: 1rem !important;
++  }
++}
++
+ /* Group A: pricing modal should first appear only after settled labels are ready. */
+ #pricing-modal.pricing-modal-settling .pricing-card {
+   opacity: 0.78;
+diff --git a/docs/01_PROJECT_STATE.md b/docs/01_PROJECT_STATE.md
+index 3f3345f..a06f949 100644
+--- a/docs/01_PROJECT_STATE.md
++++ b/docs/01_PROJECT_STATE.md
+@@ -152,7 +152,7 @@ For compliance audit, start with scaffold reality and file responsibility before
+ 7. signed-in persistence and integration after runtime behavior is stable
+ 
+ ## Transitional debt still logged
+-1. Shell bridge retirement is not complete.
++1. Shell bridge retirement — partially complete. Retired in this pass: `patchRefreshHook()` polling bridge (replaced by `rc:local-library-changed`), `window.__jublyLibraryRefresh` dead global (0 callers confirmed), `window.jublySessionComplete` dead shim (0 callers), `login()` wrapper (inlined to `showSigninPane()`). Two bridges remain explicitly held with documented retirement conditions: boot-order 500ms init timeout (Bucket E — requires boot timing probes before removal) and `getActiveModalReport().opener` inference (Bucket F — requires a Central-authorized billing.js pass to write a readable opener context). See `docs/RUNTIME_PROTECTION_LEDGER.md` Section 15.
+ 2. CSS surface redistribution is still deferred.
+ 3. Durable sync is not fully aligned to the launch schema.
+ 4. Some documents and audits from earlier passes remain useful history, but they are not implementation truth unless promoted into this reduced stack.
+diff --git a/docs/RUNTIME_PROTECTION_LEDGER.md b/docs/RUNTIME_PROTECTION_LEDGER.md
+index 09a05ff..5eec7e5 100644
+--- a/docs/RUNTIME_PROTECTION_LEDGER.md
++++ b/docs/RUNTIME_PROTECTION_LEDGER.md
+@@ -924,6 +924,52 @@ Acceptance target:
+ - no background scroll leak,
+ - no TTS/runtime ownership change.
+ 
++### Bucket E — Boot-order bridge (500ms DOMContentLoaded timeout)
++
++Status:
++
++- **watch / low-risk held** — downgraded from blocker after boot timing proof (2026-04-23).
++- Timeout may remain as a harmless bridge. Removal is optional cleanup, not required progress.
++
++Proof result (2026-04-23):
++
++- Dev-only `_bootProbe` harness added to `shell.js` (localStorage-gated, removable).
++- Measured on a cold-boot run: shell policy listener attached at ~353ms; first `rc:runtime-policy-changed` event received at ~420ms; 500ms timeout fired at ~853ms.
++- Shell attached its listener before state.js fired the initial policy event in all tested boot paths. The timeout did not catch a missed event — the listener caught it.
++- Conclusion: proof showed shell attached before first policy event in tested boot paths; timeout appears redundant for initial policy capture, but may remain temporarily as a harmless bridge until a separate optional cleanup pass retires it.
++
++Remaining note:
++
++- The timeout also calls `window.rcTheme.syncShellState()` and `window.rcAppearance.syncButtons()`, which the `rc:runtime-policy-changed` listener does not. If the timeout is ever retired, those two calls must move into the event listener or find another dispatch path before removal.
++- This is not a current blocker. It is a note for the optional cleanup pass.
++
++---
++
++### Bucket F — Pricing opener provenance (billing.js follow-up slice)
++
++Status:
++
++- blocked pending Central authorization for a Station 2 follow-up slice scoping `js/billing.js`.
++
++Problem:
++
++- `getActiveModalReport()` and `getPricingSurfaceReport()` in `shell.js` report pricing opener as inferred generics (`'pricing'`, `'unknown'`, `'pending-paid-intent'`), not truthful provenance.
++- `billing.js` entry points `openPricingForSignup()`, `openPricingForAccount()`, and `showPricingForGatedAction()` do not write a shared opener context that shell can read.
++- `openPricingForSignup()` and `openPricingForAccount()` clear pending plan on entry, so pending-plan state is not a reliable provenance substitute.
++
++Protection rule:
++
++- Do not treat current shell inference as provenance. Do not normalize `getActiveModalReport().opener` by adding more shell-side guessing.
++
++Retirement condition:
++
++- Central authorizes a Station 2 follow-up slice that includes `js/billing.js` in scope.
++- A single readable pricing-open context is defined and written from the three legitimate billing entry points only: opener name, allowed surface, message/source, timestamp or session token.
++- Shell reads that context from billing rather than inferring from side effects.
++- Acceptance requires runtime test with probes.
++
++---
++
+ ### Bucket D — Pricing/auth cleanup
+ 
+ Status:
+diff --git a/js/anchors.js b/js/anchors.js
+index 7df365f..0c1aa4e 100644
+--- a/js/anchors.js
++++ b/js/anchors.js
+@@ -853,8 +853,19 @@ function writeAnchorsToCache(pageHash, payload) {
+       if (TTS_STATE.audio && typeof TTS_STATE.audio.volume === 'number') {
+         try { TTS_STATE.audio.volume = v; } catch (_) {}
+       }
++      updateSoundMutedBadge(v);
+     }
+   }
++
++  function updateSoundMutedBadge(vol) {
++    const badge = document.getElementById('shell-sound-muted-badge');
++    if (!badge) return;
++    badge.style.display = (Number(vol) === 0) ? 'inline-block' : 'none';
++  }
++
++  // Reflect saved volume state into the badge on initial load.
++  // Deferred so the badge element is guaranteed to be in the DOM.
++  setTimeout(() => updateSoundMutedBadge(TTS_STATE.volume ?? 1), 0);
+   
+   // Set initial input values from constants
+   document.getElementById("goalTimeInput").value = DEFAULT_TIME_GOAL;
+diff --git a/js/shell.js b/js/shell.js
+index 0c35dc5..fa1eafd 100644
+--- a/js/shell.js
++++ b/js/shell.js
+@@ -1980,9 +1980,12 @@ window.rcInteraction = (function () {
+             else pageBtn.removeAttribute('title');
+         });
+         // Surface blocked/no-voice/error state visibly rather than leaving dead controls.
++        // Use !support.playable as the primary gate so "no browser voice" always surfaces,
++        // even when eligibility.canPlay is ambiguous.
+         const blockedMsgEl = document.getElementById('shell-tts-blocked-msg');
+         if (blockedMsgEl) {
+-            const blockedReason = !canPlay && !status.active && !countdown.active
++            const blocked = (!support.playable || !canPlay) && !status.active && !countdown.active;
++            const blockedReason = blocked
+                 ? String(support.reason || eligibility.reasons?.canPlay || '')
+                 : '';
+             if (blockedReason) {
+diff --git a/server/lib/dev-tools.js b/server/lib/dev-tools.js
+index 7a3154f..8b8210f 100644
+--- a/server/lib/dev-tools.js
++++ b/server/lib/dev-tools.js
+@@ -7,8 +7,9 @@ export function getBearer(req) {
+   return match ? match[1].trim() : '';
+ }
+ 
+-export function getDevEmail() {
+-  return String(optionalEnv('DEV_CREDA', '') || '').trim().toLowerCase();
++export function getDevEmails() {
++  const raw = String(optionalEnv('DEV_CREDA', '') || '').trim().toLowerCase();
++  return raw ? raw.split(',').map(e => e.trim()).filter(Boolean) : [];
+ }
+ 
+ export async function getAuthorizedDevUser(req) {
+@@ -16,9 +17,9 @@ export async function getAuthorizedDevUser(req) {
+   if (!token) return { ok: false, reason: 'missing_auth', user: null, token: '' };
+   const user = await getUserFromAccessToken(token).catch(() => null);
+   if (!user?.id) return { ok: false, reason: 'invalid_auth', user: null, token };
+-  const devEmail = getDevEmail();
++  const devEmails = getDevEmails();
+   const email = String(user.email || '').trim().toLowerCase();
+-  if (!devEmail) return { ok: false, reason: 'dev_email_unconfigured', user, token };
+-  if (email !== devEmail) return { ok: false, reason: 'not_dev_account', user, token };
+-  return { ok: true, reason: 'ok', user, token, devEmail };
++  if (!devEmails.length) return { ok: false, reason: 'dev_email_unconfigured', user, token };
++  if (!devEmails.includes(email)) return { ok: false, reason: 'not_dev_account', user, token };
++  return { ok: true, reason: 'ok', user, token, devEmails };
+ }
