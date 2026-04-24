@@ -517,6 +517,15 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         #reading-mode .anchors-counter { padding:4px 10px; border-radius:8px; background:var(--rm-btn-bg); color:var(--rm-text-2); }
         #reading-mode .anchors-nav   { display:flex; justify-content:flex-end; margin:4px 0 14px; }
         #reading-mode .anchors-nav .next-btn { min-height:36px; }
+        #reading-mode .reading-next-chapter-wrap {
+            display:flex; justify-content:flex-end; margin: 10px 0 0;
+        }
+        #reading-mode .reading-next-chapter-btn {
+            min-height: 38px; padding: 8px 16px;
+        }
+        #reading-mode .reading-next-chapter-btn:disabled {
+            opacity: 0.6; cursor: wait; transform: none;
+        }
 
         /* Comprehension elements */
         #reading-mode .sand-wrapper { position:relative; margin-top:8px; }

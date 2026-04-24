@@ -1741,30 +1741,51 @@
       await loadBook(id, { restore });
     });
 
-    chapterSelect.addEventListener("change", () => {
-      const idx = parseInt(chapterSelect.value || "", 10);
-      if (!Number.isFinite(idx)) return;
+    async function loadChapterByIndex(idx, options = {}) {
+      const selectedIdx = Number(idx);
+      if (!Number.isFinite(selectedIdx) || selectedIdx < 0) return false;
+      if (!Array.isArray(chapterList) || selectedIdx >= chapterList.length) return false;
 
-      // Snapshot the selected index into a local const before any async boundary
-      // so a rapid second change cannot corrupt this handler's chapter resolution.
-      const selectedIdx = idx;
+      // Chapter entry should always begin at page 1 of that chapter. Keep this
+      // as the single chapter-change path so the top selector and the in-reader
+      // Next Chapter button cannot diverge.
       currentChapterIndex = selectedIdx;
+      try { if (chapterSelect) chapterSelect.value = String(selectedIdx); } catch (_) {}
 
       const chapterPages = getSequentialChapterPages(selectedIdx);
       populatePagesSelect(chapterPages);
-
-      // Chapter entry should always begin at page 1 of that chapter.
-      // Route through the existing restore-owned render path by pinning a
-      // pending restore to index 0 before addPages() resets and rebuilds.
       try { window.__rcPendingRestorePageIndex = 0; } catch (_) {}
 
-      // Immediately replace rendered page cards with the new chapter's content.
-      // Routing through applySelectionToBulkInput → addPages() → render() is the
-      // single authoritative card-replacement path. Calling it synchronously here
-      // closes the race window between chapter assignment and card DOM update —
-      // no Load button click required, no timing assumption.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
+      if (!chapterText) return false;
+      await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
+
+      try {
+        const _ctx = getReadingTargetContext();
+        const sourceType = _ctx.sourceType || 'book';
+        const bookId = _ctx.bookId || '';
+        if (typeof setReadingTarget === 'function') {
+          setReadingTarget({ sourceType, bookId, chapterIndex: selectedIdx, pageIndex: 0 });
+        }
+        if (bookId && window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
+          window.rcSync.scheduleProgressSync(bookId, selectedIdx, 0, { reason: options.reason || 'chapter-change' });
+        }
+      } catch (_) {}
+      try { currentPageIndex = 0; } catch (_) {}
+      try { lastFocusedPageIndex = 0; } catch (_) {}
+      try { await waitForNextPaint(1); } catch (_) {}
+      try {
+        const firstPage = document.querySelector('#reading-mode .page[data-page-index="0"]');
+        if (firstPage) firstPage.scrollIntoView({ behavior: options.behavior || 'smooth', block: 'start' });
+      } catch (_) {}
+      try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
+      return true;
+    }
+
+    chapterSelect.addEventListener("change", () => {
+      const idx = parseInt(chapterSelect.value || "", 10);
+      if (!Number.isFinite(idx)) return;
+      loadChapterByIndex(idx, { reason: 'chapter-select', behavior: 'auto' });
     });
 
     // Keep end >= start
@@ -2367,6 +2388,25 @@
       bindHintButton(page, i);
 
     });
+
+    if (_isReadingMode && Array.isArray(chapterList) && Number.isFinite(currentChapterIndex) && currentChapterIndex >= 0 && currentChapterIndex < chapterList.length - 1) {
+      const nextChapterIndex = currentChapterIndex + 1;
+      const nextChapter = chapterList[nextChapterIndex] || {};
+      const nextWrap = document.createElement('div');
+      nextWrap.className = 'reading-next-chapter-wrap';
+      const nextBtn = document.createElement('button');
+      nextBtn.type = 'button';
+      nextBtn.className = 'top-btn reading-next-chapter-btn';
+      nextBtn.textContent = 'Next Chapter';
+      nextBtn.setAttribute('aria-label', `Next chapter${nextChapter.title ? `: ${nextChapter.title}` : ''}`);
+      nextBtn.addEventListener('click', async () => {
+        nextBtn.disabled = true;
+        nextBtn.setAttribute('aria-disabled', 'true');
+        await loadChapterByIndex(nextChapterIndex, { reason: 'next-chapter-button', behavior: 'smooth' });
+      });
+      nextWrap.appendChild(nextBtn);
+      container.appendChild(nextWrap);
+    }
     
     // Check states after rendering
     checkCompassUnlock();
