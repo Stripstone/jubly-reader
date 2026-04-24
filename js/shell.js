@@ -63,12 +63,15 @@
     // ─────────────────────────────────────────────────────────────────────────────
 
     // ── Section routing ──────────────────────────────────────────
-    const ALL_SECTIONS     = ['landing-page', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
+    const ALL_SECTIONS     = ['landing-page', 'public-onboarding', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
     const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
     const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
+    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'mara', theme: 'default', speed: 1 });
+    let _publicOnboardingChoices = Object.assign({}, PUBLIC_ONBOARDING_DEFAULTS);
+    let _publicOnboardingTimer = null;
     let _shellAuthBootstrapped = false;
 
 
@@ -492,13 +495,13 @@ window.rcInteraction = (function () {
 
     function isPublicAbandonSurface(sectionId) {
         if (isAuthedUser()) return false;
-        return sectionId === 'landing-page' || (sectionId === 'dashboard' && isIntroLibraryVisible());
+        return sectionId === 'landing-page' || sectionId === 'public-onboarding' || (sectionId === 'dashboard' && isIntroLibraryVisible());
     }
 
     function isPublicRuntimeSurface(sectionId) {
         const section = normalizeSection(sectionId);
         if (isAuthedUser()) return false;
-        return section === 'landing-page' || section === 'reading-mode' || (section === 'dashboard' && isIntroLibraryVisible());
+        return section === 'landing-page' || section === 'public-onboarding' || section === 'reading-mode' || (section === 'dashboard' && isIntroLibraryVisible());
     }
 
     function readPublicRuntimeBoundaryReport() {
@@ -550,7 +553,7 @@ window.rcInteraction = (function () {
 
     function resolveSectionForAuth(id) {
         const normalized = normalizeSection(id);
-        if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'login-page')) return 'dashboard';
+        if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'public-onboarding' || normalized === 'login-page')) return 'dashboard';
         if (!isAuthedUser() && normalized === 'profile-page') return 'landing-page';
         if (!isAuthedUser() && normalized === 'dashboard' && !isIntroLibraryVisible()) return 'landing-page';
         return normalized;
@@ -960,7 +963,7 @@ window.rcInteraction = (function () {
         if (footer) footer.classList.toggle('hidden-section', targetId !== 'landing-page');
 
         const mainNav = document.querySelector('nav');
-        if (mainNav) mainNav.style.display = targetId === 'reading-mode' ? 'none' : '';
+        if (mainNav) mainNav.style.display = targetId === 'reading-mode' || targetId === 'public-onboarding' ? 'none' : '';
         if (wasReading && targetId !== 'reading-mode') {
             try {
                 if (typeof exitReadingSession === 'function') exitReadingSession();
@@ -1112,6 +1115,145 @@ window.rcInteraction = (function () {
         _signupStep = 1;
         toggleAuthMode(true);
         showSection('login-page');
+    }
+
+    function clearPublicOnboardingTimer() {
+        if (_publicOnboardingTimer) window.clearTimeout(_publicOnboardingTimer);
+        _publicOnboardingTimer = null;
+    }
+
+    function getPublicOnboardingPanes() {
+        const card = document.getElementById('public-onboarding-card');
+        return card ? Array.from(card.querySelectorAll('[data-onboarding-pane]')) : [];
+    }
+
+    function updatePublicOnboardingProgress(step) {
+        document.querySelectorAll('[data-onboarding-progress]').forEach((dot) => {
+            dot.classList.toggle('active', dot.getAttribute('data-onboarding-progress') === String(step));
+        });
+    }
+
+    function setPublicOnboardingPane(name) {
+        clearPublicOnboardingTimer();
+        getPublicOnboardingPanes().forEach((pane) => {
+            const active = pane.getAttribute('data-onboarding-pane') === name;
+            pane.classList.toggle('active', active);
+            if (active && pane.getAttribute('data-onboarding-step')) updatePublicOnboardingProgress(pane.getAttribute('data-onboarding-step'));
+        });
+        try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch (_) { window.scrollTo(0, 0); }
+    }
+
+    function goToPublicOnboardingStep(step) {
+        setPublicOnboardingPane('step-' + step);
+    }
+
+    function showPublicOnboardingTransition(id, destination, delay) {
+        setPublicOnboardingPane('interstitial-' + id);
+        _publicOnboardingTimer = window.setTimeout(() => {
+            _publicOnboardingTimer = null;
+            try { destination(); } catch (_) {}
+        }, delay);
+    }
+
+    function applyPublicOnboardingTheme(theme) {
+        const safeTheme = ['default', 'green', 'purple'].includes(String(theme || 'default')) ? String(theme || 'default') : 'default';
+        document.body.classList.remove('theme-green', 'theme-purple');
+        if (safeTheme !== 'default') document.body.classList.add('theme-' + safeTheme);
+        return safeTheme;
+    }
+
+    function syncPublicOnboardingSpeed(rate) {
+        const value = Math.max(0.5, Math.min(2, Number(rate || 1) || 1));
+        _publicOnboardingChoices.speed = value;
+        const slider = document.getElementById('public-onboarding-speed');
+        const label = document.getElementById('public-onboarding-speed-value');
+        if (slider) {
+            slider.value = String(value);
+            const min = Number(slider.min || 0.5);
+            const max = Number(slider.max || 2);
+            const pct = ((value - min) / (max - min) * 100).toFixed(1) + '%';
+            slider.style.setProperty('--fill', pct);
+        }
+        if (label) label.textContent = (Number.isInteger(value) ? value.toFixed(1) : String(value)) + '×';
+        const shellSpeed = document.getElementById('shell-speed');
+        if (shellSpeed) shellSpeed.value = String(value);
+        shellSetSpeed(value);
+        return value;
+    }
+
+    function resetPublicOnboardingQuiz() {
+        clearPublicOnboardingTimer();
+        _publicOnboardingChoices = Object.assign({}, PUBLIC_ONBOARDING_DEFAULTS);
+        window.__jublyPublicOnboarding = Object.assign({ source: 'public-onboarding', durable: false }, _publicOnboardingChoices);
+        applyPublicOnboardingTheme('default');
+        document.querySelectorAll('#public-onboarding [role="radiogroup"]').forEach((group) => {
+            const choices = Array.from(group.querySelectorAll('[role="radio"]'));
+            choices.forEach((choice, index) => {
+                const selected = index === 0;
+                choice.classList.toggle('selected', selected);
+                choice.setAttribute('aria-checked', String(selected));
+            });
+        });
+        syncPublicOnboardingSpeed(PUBLIC_ONBOARDING_DEFAULTS.speed);
+        goToPublicOnboardingStep(1);
+    }
+
+    function selectPublicOnboardingChoice(button) {
+        const group = button && button.closest ? button.closest('[data-onboarding-group]') : null;
+        if (!group) return;
+        const key = group.getAttribute('data-onboarding-group');
+        const value = button.getAttribute('data-onboarding-value') || '';
+        Array.from(group.querySelectorAll('[role="radio"]')).forEach((choice) => {
+            const selected = choice === button;
+            choice.classList.toggle('selected', selected);
+            choice.setAttribute('aria-checked', String(selected));
+        });
+        if (key === 'goal' || key === 'voice' || key === 'theme') _publicOnboardingChoices[key] = value;
+        if (key === 'theme') applyPublicOnboardingTheme(value);
+        window.__jublyPublicOnboarding = Object.assign({ source: 'public-onboarding', durable: false }, _publicOnboardingChoices);
+    }
+
+    function initPublicOnboardingSurface() {
+        const surface = document.getElementById('public-onboarding');
+        if (!surface || surface.__jublyOnboardingBound) return;
+        surface.__jublyOnboardingBound = true;
+        surface.addEventListener('click', (event) => {
+            const radio = event.target.closest('[role="radio"]');
+            if (radio && surface.contains(radio)) {
+                selectPublicOnboardingChoice(radio);
+                return;
+            }
+            const nextButton = event.target.closest('[data-onboarding-next]');
+            if (!nextButton || !surface.contains(nextButton)) return;
+            const next = nextButton.getAttribute('data-onboarding-next');
+            if (next === '1') showPublicOnboardingTransition('1', () => goToPublicOnboardingStep(2), 2500);
+            else if (next === '2') goToPublicOnboardingStep(3);
+            else if (next === '3') showPublicOnboardingTransition('3', () => completePublicOnboardingAndStartReading(), 2600);
+        });
+        const speed = document.getElementById('public-onboarding-speed');
+        if (speed) speed.addEventListener('input', () => syncPublicOnboardingSpeed(speed.value));
+        resetPublicOnboardingQuiz();
+    }
+
+    function startPublicOnboardingQuiz() {
+        if (isAuthedUser()) return startPublicSampleReading();
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        _publicIntroLibraryVisible = false;
+        resetPublicOnboardingQuiz();
+        return showSection('public-onboarding', { releaseReason: 'public-onboarding:start' });
+    }
+
+    async function completePublicOnboardingAndStartReading() {
+        clearPublicOnboardingTimer();
+        window.__jublyPublicOnboarding = Object.assign({
+            source: 'public-onboarding',
+            durable: false,
+            completedAt: new Date().toISOString()
+        }, _publicOnboardingChoices);
+        applyPublicOnboardingTheme(_publicOnboardingChoices.theme);
+        syncPublicOnboardingSpeed(_publicOnboardingChoices.speed);
+        await startPublicSampleReading();
     }
 
     async function startPublicSampleReading() {
@@ -1530,6 +1672,7 @@ window.rcInteraction = (function () {
     document.addEventListener('DOMContentLoaded', async () => {
         installOwnershipGuards();
         installPricingModalClickAway();
+        initPublicOnboardingSurface();
         try {
             document.body.classList.add('auth-hydrating');
             document.body.classList.add('boot-pending');

@@ -447,7 +447,7 @@
             Turn dense reading into manageable pages, listen with high-quality AI voices, and pick up exactly where you left off.
         </p>
         <div class="max-w-xs mx-auto md:mx-0 flex flex-col gap-3">
-            <button onclick="startPublicSampleReading()" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Try it now</button>
+            <button onclick="startPublicOnboardingQuiz()" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Try it now</button>
             <button onclick="showSigninPane()" class="btn-ghost w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Log In</button>
         </div>
     </div>
@@ -461,6 +461,168 @@
         <span>Focus-First Design</span>
     </div>
 </div>
+
+<!-- PUBLIC ONBOARDING QUIZ -->
+<section id="public-onboarding" class="hidden-section public-onboarding" aria-labelledby="public-onboarding-title">
+    <div class="public-onboarding-shell">
+        <aside class="public-onboarding-intro" aria-label="Preview setup introduction">
+            <span class="public-onboarding-kicker">Preview setup</span>
+            <h2 id="public-onboarding-title">Make the first sample feel like yours.</h2>
+            <p>Choose a few quick preferences, then Jubly will open the real sample reading view.</p>
+            <div class="public-onboarding-progress" aria-hidden="true">
+                <span class="public-onboarding-dot active" data-onboarding-progress="1"></span>
+                <span class="public-onboarding-dot" data-onboarding-progress="2"></span>
+                <span class="public-onboarding-dot" data-onboarding-progress="3"></span>
+            </div>
+        </aside>
+
+        <article class="public-onboarding-card" id="public-onboarding-card" aria-label="Jubly preview setup">
+            <section class="public-onboarding-pane active" data-onboarding-pane="step-1" data-onboarding-step="1" aria-label="Step 1">
+                <div class="public-onboarding-topline">
+                    <span class="public-onboarding-mark" aria-hidden="true">J</span>
+                    <span class="public-onboarding-pill">Setup · 1 of 3</span>
+                </div>
+                <h2 class="public-onboarding-title">What should Jubly<br>help you with?</h2>
+                <p class="public-onboarding-copy">Pick what fits today. You can change it anytime.</p>
+
+                <div class="public-onboarding-options" role="radiogroup" aria-label="Reading goal" data-onboarding-group="goal">
+                    <button class="public-onboarding-option selected" type="button" role="radio" aria-checked="true" data-onboarding-value="finish">
+                        <span class="public-onboarding-option-icon" aria-hidden="true">📚</span>
+                        <span><span class="public-onboarding-option-title">Finish books faster</span><span class="public-onboarding-option-sub">I start more than I finish</span></span>
+                        <span class="public-onboarding-check" aria-hidden="true"></span>
+                    </button>
+                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="focus">
+                        <span class="public-onboarding-option-icon" aria-hidden="true">🎯</span>
+                        <span><span class="public-onboarding-option-title">Stay focused</span><span class="public-onboarding-option-sub">My mind wanders mid-page</span></span>
+                        <span class="public-onboarding-check" aria-hidden="true"></span>
+                    </button>
+                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="dense">
+                        <span class="public-onboarding-option-icon" aria-hidden="true">🧠</span>
+                        <span><span class="public-onboarding-option-title">Make dense reading easier</span><span class="public-onboarding-option-sub">Textbooks, papers, long-form</span></span>
+                        <span class="public-onboarding-check" aria-hidden="true"></span>
+                    </button>
+                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="listen">
+                        <span class="public-onboarding-option-icon" aria-hidden="true">🎧</span>
+                        <span><span class="public-onboarding-option-title">Listen while I move</span><span class="public-onboarding-option-sub">Commute, walk, chores</span></span>
+                        <span class="public-onboarding-check" aria-hidden="true"></span>
+                    </button>
+                </div>
+
+                <div class="public-onboarding-actions">
+                    <button class="public-onboarding-primary" type="button" data-onboarding-next="1">Continue</button>
+                </div>
+            </section>
+
+            <section class="public-onboarding-pane" data-onboarding-pane="interstitial-1" aria-live="polite">
+                <div class="public-onboarding-interstitial">
+                    <svg class="public-onboarding-glow" viewBox="0 0 68 68" aria-hidden="true">
+                        <defs>
+                            <radialGradient id="publicOnboardingGlowA" cx="50%" cy="45%" r="70%">
+                                <stop offset="0" stop-color="#ede9fe"></stop>
+                                <stop offset="0.58" stop-color="#a78bfa"></stop>
+                                <stop offset="1" stop-color="#6344F5"></stop>
+                            </radialGradient>
+                        </defs>
+                        <circle cx="34" cy="34" r="32" fill="url(#publicOnboardingGlowA)"></circle>
+                    </svg>
+                    <h2><em>That’s exactly what Jubly is built for.</em></h2>
+                    <p>Good. We’ll shape the sample around that.</p>
+                </div>
+            </section>
+
+            <section class="public-onboarding-pane" data-onboarding-pane="step-2" data-onboarding-step="2" aria-label="Step 2">
+                <div class="public-onboarding-topline">
+                    <span class="public-onboarding-mark" aria-hidden="true">J</span>
+                    <span class="public-onboarding-pill">Setup · 2 of 3</span>
+                </div>
+                <h2 class="public-onboarding-title">Pick a voice<br>to read along.</h2>
+                <p class="public-onboarding-copy">Choose the voice that feels easiest to stay with.</p>
+
+                <div class="public-onboarding-options" role="radiogroup" aria-label="Voice style" data-onboarding-group="voice">
+                    <button class="public-onboarding-option selected" type="button" role="radio" aria-checked="true" data-onboarding-value="mara">
+                        <span class="public-onboarding-option-icon" aria-hidden="true">▮▮</span>
+                        <span><span class="public-onboarding-option-title">Mara</span><span class="public-onboarding-option-sub">Warm &amp; unhurried</span></span>
+                        <span class="public-onboarding-check" aria-hidden="true"></span>
+                    </button>
+                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="ansel">
+                        <span class="public-onboarding-option-icon" aria-hidden="true">▶</span>
+                        <span><span class="public-onboarding-option-title">Ansel</span><span class="public-onboarding-option-sub">Clear &amp; steady</span></span>
+                        <span class="public-onboarding-check" aria-hidden="true"></span>
+                    </button>
+                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="iris">
+                        <span class="public-onboarding-option-icon" aria-hidden="true">▶</span>
+                        <span><span class="public-onboarding-option-title">Iris</span><span class="public-onboarding-option-sub">Soft &amp; intimate</span></span>
+                        <span class="public-onboarding-check" aria-hidden="true"></span>
+                    </button>
+                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="brook">
+                        <span class="public-onboarding-option-icon" aria-hidden="true">▶</span>
+                        <span><span class="public-onboarding-option-title">Brook</span><span class="public-onboarding-option-sub">Bright &amp; brisk</span></span>
+                        <span class="public-onboarding-check" aria-hidden="true"></span>
+                    </button>
+                </div>
+
+                <div class="public-onboarding-actions">
+                    <button class="public-onboarding-primary" type="button" data-onboarding-next="2">Continue</button>
+                </div>
+            </section>
+
+            <section class="public-onboarding-pane" data-onboarding-pane="step-3" data-onboarding-step="3" aria-label="Step 3">
+                <div class="public-onboarding-topline">
+                    <span class="public-onboarding-mark" aria-hidden="true">J</span>
+                    <span class="public-onboarding-pill">Setup · 3 of 3</span>
+                </div>
+                <h2 class="public-onboarding-title">How should Jubly<br>feel to read?</h2>
+                <p class="public-onboarding-copy">You can switch this anytime.</p>
+
+                <div class="public-onboarding-chips" role="radiogroup" aria-label="Reading theme" data-onboarding-group="theme">
+                    <button class="public-onboarding-chip selected" type="button" role="radio" aria-checked="true" data-onboarding-value="default">
+                        <span class="public-onboarding-theme-card public-onboarding-theme-default">Aa</span>
+                        <span>Default</span>
+                    </button>
+                    <button class="public-onboarding-chip" type="button" role="radio" aria-checked="false" data-onboarding-value="green">
+                        <span class="public-onboarding-theme-card public-onboarding-theme-green">Aa</span>
+                        <span>Light Green</span>
+                    </button>
+                    <button class="public-onboarding-chip" type="button" role="radio" aria-checked="false" data-onboarding-value="purple">
+                        <span class="public-onboarding-theme-card public-onboarding-theme-purple">Aa</span>
+                        <span>Light Purple</span>
+                    </button>
+                </div>
+
+                <div class="public-onboarding-pace" aria-label="Reading speed">
+                    <div class="public-onboarding-pace-head">
+                        <span>Reading speed</span>
+                        <span class="public-onboarding-pace-value" id="public-onboarding-speed-value">1.0×</span>
+                    </div>
+                    <input class="public-onboarding-slider" id="public-onboarding-speed" type="range" min="0.5" max="2" step="0.25" value="1" aria-label="Reading speed">
+                    <div class="public-onboarding-pace-labels"><span>0.5×</span><span>2.0×</span></div>
+                </div>
+
+                <div class="public-onboarding-actions">
+                    <button class="public-onboarding-primary" type="button" data-onboarding-next="3">Start reading</button>
+                    <p class="public-onboarding-note">Your choices shape this sample on this device for now.</p>
+                </div>
+            </section>
+
+            <section class="public-onboarding-pane" data-onboarding-pane="interstitial-3" aria-live="polite">
+                <div class="public-onboarding-interstitial">
+                    <svg class="public-onboarding-glow" viewBox="0 0 68 68" aria-hidden="true">
+                        <defs>
+                            <radialGradient id="publicOnboardingGlowB" cx="50%" cy="45%" r="70%">
+                                <stop offset="0" stop-color="#ede9fe"></stop>
+                                <stop offset="0.58" stop-color="#a78bfa"></stop>
+                                <stop offset="1" stop-color="#6344F5"></stop>
+                            </radialGradient>
+                        </defs>
+                        <circle cx="34" cy="34" r="32" fill="url(#publicOnboardingGlowB)"></circle>
+                    </svg>
+                    <h2>Tuning your reading experience<span class="public-onboarding-dots"><span>.</span><span>.</span><span>.</span></span></h2>
+                    <p>Jubly is opening the real sample reading view.</p>
+                </div>
+            </section>
+        </article>
+    </div>
+</section>
 
 <!-- LOGIN PAGE -->
 <div id="login-page" class="hidden-section min-h-[88vh] flex items-center justify-center px-6 py-16">
