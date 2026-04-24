@@ -126,6 +126,12 @@ window.rcInteraction = (function () {
   let _active = null;  // { key, sevName, severity, message, actions, timer }
   let _el = null;
 
+  const PLAYBACK_SURFACE_KEYS = new Set(['tts:cloud-restart']);
+
+  function _isPlaybackSurfaceKey(key) {
+    return PLAYBACK_SURFACE_KEYS.has(String(key || ''));
+  }
+
   function _defaultOpenLogin() {
     try {
       if (typeof showSigninPane === 'function') {
@@ -222,6 +228,9 @@ window.rcInteraction = (function () {
   // ── Core show logic ───────────────────────────────────────────────────────
 
   function _show(key, sevName, message, actions) {
+    // Playback notices have a dedicated reading-view surface driven by
+    // syncShellPlaybackControls(). Keep them out of the global shell banner.
+    if (_isPlaybackSurfaceKey(key)) return;
     const sev = SEV[sevName] ?? 0;
 
     // A different key at higher severity keeps its banner — do not override
@@ -272,6 +281,7 @@ window.rcInteraction = (function () {
   }
 
   function clear(key) {
+    if (_isPlaybackSurfaceKey(key)) return;
     if (!_active) return;
     if (!key || _active.key === key) {
       if (_active.timer) clearTimeout(_active.timer);
@@ -1931,6 +1941,57 @@ window.rcInteraction = (function () {
 
     // ── Bottom bar controls ──────────────────────────────────────
 
+    const SHELL_PLAYBACK_CLOUD_RESTART_VISIBLE_AFTER_MS = 400;
+
+    function getShellVoiceVolumeLevel() {
+        try {
+            const voice = document.getElementById('vol_voice');
+            if (voice && voice.value !== '') return Number(voice.value);
+        } catch (_) {}
+        try {
+            const stored = JSON.parse(localStorage.getItem('rc_volumes') || '{}');
+            if (typeof stored.voice === 'number') return Number(stored.voice);
+        } catch (_) {}
+        return null;
+    }
+
+    function computeShellPlaybackIndicatorMessage(status, countdown, support, eligibility) {
+        const supportReason = String(support && support.reason || eligibility?.reasons?.canPlay || '').trim();
+        const browserVoiceUnavailable = support && support.playable === false && support.browserVoiceAvailable === false;
+        if (browserVoiceUnavailable || (!support?.playable && supportReason)) {
+            return supportReason || 'No browser English voice is available on this device.';
+        }
+
+        const voiceVolume = getShellVoiceVolumeLevel();
+        if (status?.active && Number.isFinite(voiceVolume) && voiceVolume <= 0) {
+            return 'Voice volume is off';
+        }
+
+        const pending = status?.cloudRestartPending || null;
+        const cloudRestartActive = !!(status?.cloudRestartInFlight || pending?.active);
+        const elapsedMs = Number(pending?.elapsedMs || 0);
+        if (cloudRestartActive && elapsedMs >= SHELL_PLAYBACK_CLOUD_RESTART_VISIBLE_AFTER_MS) {
+            return String(pending?.message || 'Loading audio…');
+        }
+
+        // Playback-start failure is intentionally not inferred here. The current
+        // runtime getter does not expose a retry-exhausted/start-error field.
+        return '';
+    }
+
+    function setShellPlaybackIndicatorMessage(message) {
+        const indicator = document.getElementById('shell-playback-indicator');
+        if (!indicator) return;
+        const text = String(message || '').trim();
+        if (text) {
+            indicator.textContent = text;
+            indicator.hidden = false;
+        } else {
+            indicator.textContent = '';
+            indicator.hidden = true;
+        }
+    }
+
     // Pause/Play — calls app's tts.js functions if available.
     // Guards against first-use case where TTS was never started (TTS_STATE.activeKey is null).
     function syncShellPlaybackControls() {
@@ -1948,12 +2009,15 @@ window.rcInteraction = (function () {
         try { if (typeof getTtsSupportStatus === 'function') support = getTtsSupportStatus() || support; } catch (_) {}
         try { if (typeof getPlaybackControlEligibility === 'function') eligibility = getPlaybackControlEligibility() || eligibility; } catch (_) {}
         const canPlay = !!eligibility.canPlay;
+        const indicatorMessage = computeShellPlaybackIndicatorMessage(status, countdown, support, eligibility);
         if (btn) {
             const label = eligibility.canResume ? 'Resume' : (eligibility.canPause ? 'Pause' : 'Play');
             btn.classList.toggle('active', !!status.active && !status.paused);
-            btn.title = status.active ? (status.paused ? 'Resume narration' : 'Pause narration') : (countdown.active ? 'Resume current page from countdown' : 'Play current page');
-            btn.disabled = !canPlay;
-            btn.setAttribute('aria-disabled', String(!canPlay));
+            btn.title = indicatorMessage || (status.active ? (status.paused ? 'Resume narration' : 'Pause narration') : (countdown.active ? 'Resume current page from countdown' : 'Play current page'));
+            // Keep Play reachable even when runtime reports a blocked state; the
+            // indicator explains why while shell still forwards intent only.
+            btn.disabled = false;
+            btn.setAttribute('aria-disabled', 'false');
             if (labelEl) labelEl.textContent = label;
             if (iconEl) {
                 iconEl.innerHTML = label === 'Pause'
@@ -1979,20 +2043,8 @@ window.rcInteraction = (function () {
             if (disabled) pageBtn.title = support.reason || 'Playback unavailable';
             else pageBtn.removeAttribute('title');
         });
-        // Surface blocked/no-voice/error state visibly rather than leaving dead controls.
-        const blockedMsgEl = document.getElementById('shell-tts-blocked-msg');
-        if (blockedMsgEl) {
-            const blockedReason = !canPlay && !status.active && !countdown.active
-                ? String(support.reason || eligibility.reasons?.canPlay || '')
-                : '';
-            if (blockedReason) {
-                blockedMsgEl.textContent = blockedReason;
-                blockedMsgEl.style.display = '';
-            } else {
-                blockedMsgEl.textContent = '';
-                blockedMsgEl.style.display = 'none';
-            }
-        }
+        // Surface playback/support status without taking ownership of runtime truth.
+        setShellPlaybackIndicatorMessage(indicatorMessage);
         // PATCH(speed-sync): Keep #shell-speed in sync with TTS_STATE.rate.
         // Previously, if setPlaybackRate() was called from any path other than
         // the shell select itself (e.g. programmatic change, restored preference),
