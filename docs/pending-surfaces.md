@@ -124,6 +124,7 @@ Allowed first visible dashboard/library states are `pending`, `populated`, `empt
 |---|---|---|
 | Reading mode → **Play** / `Read page` cloud start | Cloud TTS `POST /api/ai?action=tts` | ✅ No routine pending banner for normal start; preserve normal countdown/flow. Surface real playback errors with `Try again`. Transient cloud/server transport failures must stop cleanly and leave Play immediately retryable. |
 | Reading mode → **Skip forward / back** buttons | Runtime route decision and cloud seek/restart | ◐ Immediate by default. During an already-started cloud seek/restart under poor connection, a visible `Loading audio…` / poor-connection pending banner may appear; rapid skip intents received during that pending restart are coalesced so the latest same-page target wins when audio is ready. |
+| Reading mode → **Playback indicator** (floating, shell-owned) | `#shell-playback-indicator` driven by `syncShellPlaybackControls()` in `shell.js` | ✅ Discrete floating badge above playback bar. Priority: (1) browser voice unavailable reason from `getTtsSupportStatus()`/`getPlaybackControlEligibility()`; (2) voice volume slider at 0 while active. Hidden when neither applies. Play button stays enabled when blocked — indicator surfaces the reason. Never uses `rcInteraction` (reserved for non-playback surfaces). |
 
 ---
 
@@ -149,7 +150,7 @@ Pending UI should not be added to every control.
 | Usage | 1 | 0 |
 | Importer | 5 | 0 |
 | Library | 5 | 0 |
-| Reading / TTS | 1 wired, 1 conditional/local pending | 0 |
+| Reading / TTS | 2 wired, 1 conditional/local pending | 0 |
 | Settings / persistence | 1 wired, 1 intentionally immediate | 0 |
 | **Total surfaces covered** | **27** | **0 in this bounded pass** |
 

@@ -1952,8 +1952,8 @@ window.rcInteraction = (function () {
             const label = eligibility.canResume ? 'Resume' : (eligibility.canPause ? 'Pause' : 'Play');
             btn.classList.toggle('active', !!status.active && !status.paused);
             btn.title = status.active ? (status.paused ? 'Resume narration' : 'Pause narration') : (countdown.active ? 'Resume current page from countdown' : 'Play current page');
-            btn.disabled = !canPlay;
-            btn.setAttribute('aria-disabled', String(!canPlay));
+            btn.disabled = false;
+            btn.removeAttribute('aria-disabled');
             if (labelEl) labelEl.textContent = label;
             if (iconEl) {
                 iconEl.innerHTML = label === 'Pause'
@@ -1979,18 +1979,24 @@ window.rcInteraction = (function () {
             if (disabled) pageBtn.title = support.reason || 'Playback unavailable';
             else pageBtn.removeAttribute('title');
         });
-        // Surface blocked/no-voice/error state visibly rather than leaving dead controls.
-        const blockedMsgEl = document.getElementById('shell-tts-blocked-msg');
-        if (blockedMsgEl) {
-            const blockedReason = !canPlay && !status.active && !countdown.active
-                ? String(support.reason || eligibility.reasons?.canPlay || '')
-                : '';
+        // Drive #shell-playback-indicator — shell-owned floating badge above playback bar.
+        // Priority: (1) voice blocked, (2) sound muted while active. Hidden otherwise.
+        // Shell reads runtime truth via exposed APIs; never owns TTS state.
+        const indicator = document.getElementById('shell-playback-indicator');
+        if (indicator) {
+            const blocked = (!support.playable || !canPlay) && !status.active && !countdown.active;
+            const blockedReason = blocked ? String(support.reason || eligibility.reasons?.canPlay || '') : '';
+            const volSlider = document.getElementById('vol_voice');
+            const soundMuted = !blocked && !!status.active && Number(volSlider?.value ?? 1) === 0;
             if (blockedReason) {
-                blockedMsgEl.textContent = blockedReason;
-                blockedMsgEl.style.display = '';
+                indicator.textContent = blockedReason;
+                indicator.style.display = '';
+            } else if (soundMuted) {
+                indicator.textContent = 'Voice volume is off';
+                indicator.style.display = '';
             } else {
-                blockedMsgEl.textContent = '';
-                blockedMsgEl.style.display = 'none';
+                indicator.textContent = '';
+                indicator.style.display = 'none';
             }
         }
         // PATCH(speed-sync): Keep #shell-speed in sync with TTS_STATE.rate.
