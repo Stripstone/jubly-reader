@@ -526,11 +526,12 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
            reading surface. Use the opaque white-card equivalent so it matches
            the in-card page navigation buttons by color. */
         #reading-mode .next-chapter-surface .top-btn {
-            background: color-mix(in srgb, var(--rm-accent) 7%, #0f172a);
-            color: var(--rm-accent);
+          background: color-mix(in srgb, var(--rm-accent) 22%, #fff);
+          color: var(--rm-accent);
         }
+
         #reading-mode .next-chapter-surface .top-btn:hover {
-            background: color-mix(in srgb, var(--rm-accent) 14%, #0f172a);
+          background: color-mix(in srgb, var(--rm-accent) 30%, #fff);
         }
         #reading-mode .top-btn.tts-active { background:var(--rm-btn-hover); box-shadow:0 0 0 2px var(--rm-accent); }
         #reading-mode .hint-btn:disabled { opacity:0.35; cursor:not-allowed; transform:none; }
