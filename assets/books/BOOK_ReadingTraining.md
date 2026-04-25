@@ -29,14 +29,14 @@ You can read with your eyes, listen with your ears, or shift between both whenev
 
 Use the playback controls to move through the reading without losing your place.
 
-Pause when you need to, and resume without losing the flow.
+Change the speed, pause when you need to, and resume without losing the flow.
 
 ---
 
 ## Page 3
 Open Settings when you want to adjust your experience.
 
-Change the speed, try a new voice, and make Jubly feel more natural for the way you like to read.
+Try a new voice, and make Jubly feel more natural for the way you like to read.
 
 ---
 
