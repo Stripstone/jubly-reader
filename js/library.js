@@ -527,8 +527,30 @@
     if (!root) return [];
 
     const blocks = [];
-    const candidates = root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li');
-    candidates.forEach((el) => {
+    let lastMarker = null;
+
+    function normalizePageMarker(raw) {
+      const markerMatch = String(raw || '').match(/^page[_-]?(\d+)$/i);
+      if (!markerMatch) return null;
+
+      const pageNumber = Number(markerMatch[1]);
+      // Reject implausibly large page IDs from OCR/conversion artifacts.
+      if (!Number.isFinite(pageNumber) || pageNumber <= 0 || pageNumber > 9999) return null;
+
+      return `## Page ${pageNumber}`;
+    }
+
+    const nodes = root.querySelectorAll('[id],[name],h1,h2,h3,h4,h5,h6,p,li');
+    nodes.forEach((el) => {
+      try {
+        const marker = normalizePageMarker(el.getAttribute('id')) || normalizePageMarker(el.getAttribute('name'));
+        if (marker && marker !== lastMarker) {
+          blocks.push(marker);
+          lastMarker = marker;
+        }
+      } catch (_) {}
+
+      if (!/^(H[1-6]|P|LI)$/i.test(el.tagName || '')) return;
       const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
       if (!txt) return;
       if (txt.length < 2) return;
@@ -1571,6 +1593,49 @@
       return currentBookRaw;
     }
 
+    function updateNextChapterSurface() {
+      const surface = document.getElementById('next-chapter-surface');
+      const button = document.getElementById('next-chapter-btn');
+      if (!surface || !button) return;
+
+      const chapterIndex = Number(currentChapterIndex);
+      const hasNextChapter = appMode === 'reading'
+        && hasExplicitChapters
+        && Array.isArray(chapterList)
+        && chapterList.length > 1
+        && Number.isFinite(chapterIndex)
+        && chapterIndex >= 0
+        && chapterIndex < chapterList.length - 1;
+
+      surface.classList.toggle('hidden-section', !hasNextChapter);
+      if (!hasNextChapter) {
+        button.removeAttribute('aria-label');
+        return;
+      }
+
+      const nextTitle = String(chapterList[chapterIndex + 1]?.title || `Chapter ${chapterIndex + 2}`).trim();
+      button.textContent = 'Next Chapter';
+      button.setAttribute('aria-label', `Next chapter: ${nextTitle}`);
+    }
+
+    function installNextChapterBridge() {
+      const button = document.getElementById('next-chapter-btn');
+      if (!button || button.__jublyNextChapterBound) return;
+      button.__jublyNextChapterBound = true;
+      button.addEventListener('click', () => {
+        const chapterIndex = Number(currentChapterIndex);
+        if (!hasExplicitChapters || !Array.isArray(chapterList) || !Number.isFinite(chapterIndex)) return;
+        const nextChapterIndex = chapterIndex + 1;
+        if (nextChapterIndex >= chapterList.length) return;
+        if (!chapterSelect) return;
+
+        // Forward user intent through the existing chapter-select runtime path.
+        // Do not duplicate chapter/page/render truth in this button bridge.
+        chapterSelect.value = String(nextChapterIndex);
+        chapterSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+
     // Async so that loadBook can await full render + restore before resolving.
     // This closes the race where reading-restore-pending was removed before
     // render() and applyPendingReadingRestore() had actually run.
@@ -1728,6 +1793,7 @@
     }
 
     // Events
+    installNextChapterBridge();
     sourceSel.addEventListener("change", setSourceUI);
     setSourceUI();
 
@@ -2374,6 +2440,7 @@
 
     
     applyModeVisibility();
+    try { updateNextChapterSurface(); } catch (_) {}
     if (typeof applyTierAccess === 'function') applyTierAccess();
     try { applyPendingReadingRestore(); } catch (_) {}
     try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
@@ -2414,6 +2481,7 @@
     const verdictSection = document.getElementById('verdictSection');
     if (submitBtn) submitBtn.style.display = isReading ? 'none' : '';
     if (verdictSection) verdictSection.style.display = isReading ? 'none' : '';
+    try { updateNextChapterSurface(); } catch (_) {}
   }
 
   function startTimer(i, sand, timerDiv, wrapper, textarea) {

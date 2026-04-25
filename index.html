@@ -1033,6 +1033,11 @@
         <!-- #pages — app's render() (library.js) writes .page card elements here -->
         <div id="pages"></div>
 
+        <!-- Chapter handoff — runtime/library owns chapter truth; this forwards intent only. -->
+        <div id="next-chapter-surface" class="next-chapter-surface hidden-section">
+            <button id="next-chapter-btn" type="button" class="top-btn next-chapter-btn">Next Chapter</button>
+        </div>
+
         <!-- END-OF-SESSION SIGNAL (shown by showSessionComplete() when last page done) -->
         <div id="session-complete" class="hidden-section mt-12 mb-4">
             <div class="glass-card p-8 text-center" style="border-color: var(--theme-accent); border-width: 2px;">
