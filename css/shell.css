@@ -1825,7 +1825,7 @@ body.reading-active #rc-interaction-banner {
   --border: #e2e8f0;
   --border-purple: rgba(99, 68, 245, 0.2);
   --surface: #ffffff;
-  --surface-warm: #F4F6FB;
+  --surface-warm: #E6E6FA;
   --shadow: 0 24px 64px rgba(15, 23, 42, 0.12);
   --font-serif: Georgia, "Times New Roman", serif;
   min-height: 100svh;
