@@ -76,7 +76,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             /* Brand constants */
             --jubly-purple:      #6344F5;
             --jubly-purple-deep: #4b32bc;
-            --jubly-light:       #F8F7FF;
+            --jubly-light:       #EDE9FF;
             --jubly-border:      #E2E8F0;
             --text-dark:         #1E293B;
             /* Decorative illustration colors — landing hero only */
@@ -1825,7 +1825,7 @@ body.reading-active #rc-interaction-banner {
   --border: #e2e8f0;
   --border-purple: rgba(99, 68, 245, 0.2);
   --surface: #ffffff;
-  --surface-warm: #F9F8FF;
+  --surface-warm: #FBFBFF;
   --shadow: 0 24px 64px rgba(15, 23, 42, 0.12);
   --font-serif: Georgia, "Times New Roman", serif;
   min-height: 100svh;
