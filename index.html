@@ -1033,11 +1033,6 @@
         <!-- #pages — app's render() (library.js) writes .page card elements here -->
         <div id="pages"></div>
 
-        <!-- Chapter handoff — runtime/library owns chapter truth; this forwards intent only. -->
-        <div id="next-chapter-surface" class="next-chapter-surface hidden-section">
-            <button id="next-chapter-btn" type="button" class="top-btn next-chapter-btn">Next Chapter</button>
-        </div>
-
         <!-- END-OF-SESSION SIGNAL (shown by showSessionComplete() when last page done) -->
         <div id="session-complete" class="hidden-section mt-12 mb-4">
             <div class="glass-card p-8 text-center" style="border-color: var(--theme-accent); border-width: 2px;">
@@ -1216,10 +1211,11 @@
 
 <!-- ── App scripts ──────────────────────────────────────────────
      Load order matches original index.html exactly.
-     config.js loads before app.js.
+     config.js and embedded_books.js load before app.js.
      audio.js and embers.js are separate from the app.js sequential loader.
 ──────────────────────────────────────────────────────────────── -->
 <script src="js/config.js"></script>
+<script src="assets/books/embedded_books.js" onerror="console.warn('[jubly] Embedded books not found — library will load from IndexedDB only')"></script>
 <script src="js/audio.js"></script>
 <script src="js/embers.js"></script>
 <script src="js/music.js"></script>

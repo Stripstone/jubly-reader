@@ -376,7 +376,7 @@
       if (!res.ok) throw new Error('fetch failed');
       raw = await res.text();
     } catch (_) {
-      return null;
+      try { if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[bookId] === 'string') raw = window.EMBED_BOOKS[bookId]; } catch (_) {}
     }
     if (!raw) return null;
     const record = { title: entry.title || titleFromBookId(bookId) || 'Untitled', markdown: raw, totalPages: countPagesFromMarkdown(raw) };
@@ -1571,49 +1571,6 @@
       return currentBookRaw;
     }
 
-    function updateNextChapterSurface() {
-      const surface = document.getElementById('next-chapter-surface');
-      const button = document.getElementById('next-chapter-btn');
-      if (!surface || !button) return;
-
-      const chapterIndex = Number(currentChapterIndex);
-      const hasNextChapter = appMode === 'reading'
-        && hasExplicitChapters
-        && Array.isArray(chapterList)
-        && chapterList.length > 1
-        && Number.isFinite(chapterIndex)
-        && chapterIndex >= 0
-        && chapterIndex < chapterList.length - 1;
-
-      surface.classList.toggle('hidden-section', !hasNextChapter);
-      if (!hasNextChapter) {
-        button.removeAttribute('aria-label');
-        return;
-      }
-
-      const nextTitle = String(chapterList[chapterIndex + 1]?.title || `Chapter ${chapterIndex + 2}`).trim();
-      button.textContent = 'Next Chapter';
-      button.setAttribute('aria-label', `Next chapter: ${nextTitle}`);
-    }
-
-    function installNextChapterBridge() {
-      const button = document.getElementById('next-chapter-btn');
-      if (!button || button.__jublyNextChapterBound) return;
-      button.__jublyNextChapterBound = true;
-      button.addEventListener('click', () => {
-        const chapterIndex = Number(currentChapterIndex);
-        if (!hasExplicitChapters || !Array.isArray(chapterList) || !Number.isFinite(chapterIndex)) return;
-        const nextChapterIndex = chapterIndex + 1;
-        if (nextChapterIndex >= chapterList.length) return;
-        if (!chapterSelect) return;
-
-        // Forward user intent through the existing chapter-select runtime path.
-        // Do not duplicate chapter/page/render truth in this button bridge.
-        chapterSelect.value = String(nextChapterIndex);
-        chapterSelect.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-    }
-
     // Async so that loadBook can await full render + restore before resolving.
     // This closes the race where reading-restore-pending was removed before
     // render() and applyPendingReadingRestore() had actually run.
@@ -1674,6 +1631,19 @@
           lastErr = e;
         }
       }
+      // Fallback for local file:// usage (fetch is often blocked). If an embedded manifest exists, use it.
+      try {
+        if (window.EMBED_MANIFEST && Array.isArray(window.EMBED_MANIFEST)) {
+          const data = window.EMBED_MANIFEST;
+          manifest = (Array.isArray(data) ? data : []).map((b) => {
+            const id = b.id || b.name || "";
+            const p = b.path || (id ? `assets/books/${id}.md` : "");
+            const title = b.title || titleFromBookId(id) || id || "Untitled";
+            return { id, title, path: p };
+          }).filter(b => b.id && b.path);
+          return;
+        }
+      } catch (_) {}
       throw lastErr || new Error("manifest fetch failed");
     }
 
@@ -1727,6 +1697,19 @@
 
         await refreshChapterAndPagesUI(options);
       } catch (e) {
+        // Fallback for local file:// usage: try embedded books
+        try {
+          if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[id] === "string") {
+            currentBookRaw = window.EMBED_BOOKS[id];
+            hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
+            if (hasExplicitChapters) {
+              chapterList = parseChaptersFromMarkdown(currentBookRaw);
+            }
+            await refreshChapterAndPagesUI(options);
+            return;
+          }
+        } catch (_) {}
+
         setSelectOptions(chapterSelect, [], "Failed to load book");
         setSelectOptions(pageStart, [], "Failed to load book");
         setSelectOptions(pageEnd, [], "Failed to load book");
@@ -1745,7 +1728,6 @@
     }
 
     // Events
-    installNextChapterBridge();
     sourceSel.addEventListener("change", setSourceUI);
     setSourceUI();
 
@@ -2392,7 +2374,6 @@
 
     
     applyModeVisibility();
-    try { updateNextChapterSurface(); } catch (_) {}
     if (typeof applyTierAccess === 'function') applyTierAccess();
     try { applyPendingReadingRestore(); } catch (_) {}
     try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
@@ -2433,7 +2414,6 @@
     const verdictSection = document.getElementById('verdictSection');
     if (submitBtn) submitBtn.style.display = isReading ? 'none' : '';
     if (verdictSection) verdictSection.style.display = isReading ? 'none' : '';
-    try { updateNextChapterSurface(); } catch (_) {}
   }
 
   function startTimer(i, sand, timerDiv, wrapper, textarea) {

@@ -57,6 +57,7 @@ Loaded before the scaffold:
 - `js/audio.js`
 - `js/embers.js`
 - `js/music.js`
+- `assets/books/embedded_books.js`
 
 Current role:
 - configuration/bootstrap inputs
