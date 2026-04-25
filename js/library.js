@@ -376,7 +376,7 @@
       if (!res.ok) throw new Error('fetch failed');
       raw = await res.text();
     } catch (_) {
-      try { if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[bookId] === 'string') raw = window.EMBED_BOOKS[bookId]; } catch (_) {}
+      return null;
     }
     if (!raw) return null;
     const record = { title: entry.title || titleFromBookId(bookId) || 'Untitled', markdown: raw, totalPages: countPagesFromMarkdown(raw) };
@@ -1571,6 +1571,75 @@
       return currentBookRaw;
     }
 
+    function getActiveChapterIndexForNextSurface() {
+      const fromRuntime = Number(currentChapterIndex);
+      if (Number.isFinite(fromRuntime)) return fromRuntime;
+      const fromSelect = Number(chapterSelect && chapterSelect.value !== '' ? chapterSelect.value : NaN);
+      return Number.isFinite(fromSelect) ? fromSelect : -1;
+    }
+
+    function setNextChapterSurfaceVisible(visible) {
+      const surface = document.getElementById('next-chapter-surface');
+      if (!surface) return;
+      surface.classList.toggle('hidden-section', !visible);
+      // Use inline display as a defensive presentation reflection only. The
+      // runtime/chapter truth still comes from currentChapterIndex/chapterList.
+      surface.style.display = visible ? 'flex' : 'none';
+      surface.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    }
+
+    function updateNextChapterSurface() {
+      const surface = document.getElementById('next-chapter-surface');
+      const button = document.getElementById('next-chapter-btn');
+      if (!surface || !button) return;
+
+      const readingModeEl = document.getElementById('reading-mode');
+      const readingSurfaceVisible = !!(
+        readingModeEl
+        && !readingModeEl.classList.contains('hidden-section')
+        && document.body.classList.contains('reading-active')
+      );
+      const renderedCardCount = document.querySelectorAll('#pages .page').length;
+      const chapterIndex = getActiveChapterIndexForNextSurface();
+      const hasNextChapter = readingSurfaceVisible
+        && renderedCardCount > 0
+        && hasExplicitChapters
+        && Array.isArray(chapterList)
+        && chapterList.length > 1
+        && Number.isFinite(chapterIndex)
+        && chapterIndex >= 0
+        && chapterIndex < chapterList.length - 1;
+
+      setNextChapterSurfaceVisible(hasNextChapter);
+      if (!hasNextChapter) {
+        button.removeAttribute('aria-label');
+        return;
+      }
+
+      const nextTitle = String(chapterList[chapterIndex + 1]?.title || `Chapter ${chapterIndex + 2}`).trim();
+      button.textContent = 'Next Chapter';
+      button.setAttribute('aria-label', `Next chapter: ${nextTitle}`);
+    }
+
+    function installNextChapterBridge() {
+      const button = document.getElementById('next-chapter-btn');
+      if (!button || button.__jublyNextChapterBound) return;
+      button.__jublyNextChapterBound = true;
+      button.addEventListener('click', () => {
+        const chapterIndex = getActiveChapterIndexForNextSurface();
+        if (!hasExplicitChapters || !Array.isArray(chapterList) || !Number.isFinite(chapterIndex)) return;
+        const nextChapterIndex = chapterIndex + 1;
+        if (nextChapterIndex >= chapterList.length) return;
+        if (!chapterSelect) return;
+
+        try { if (typeof ttsAutoplayCancelCountdown === 'function') ttsAutoplayCancelCountdown(); } catch (_) {}
+        // Forward user intent through the existing chapter-select runtime path.
+        // Do not duplicate chapter/page/render truth in this button bridge.
+        chapterSelect.value = String(nextChapterIndex);
+        chapterSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+
     // Async so that loadBook can await full render + restore before resolving.
     // This closes the race where reading-restore-pending was removed before
     // render() and applyPendingReadingRestore() had actually run.
@@ -1631,19 +1700,6 @@
           lastErr = e;
         }
       }
-      // Fallback for local file:// usage (fetch is often blocked). If an embedded manifest exists, use it.
-      try {
-        if (window.EMBED_MANIFEST && Array.isArray(window.EMBED_MANIFEST)) {
-          const data = window.EMBED_MANIFEST;
-          manifest = (Array.isArray(data) ? data : []).map((b) => {
-            const id = b.id || b.name || "";
-            const p = b.path || (id ? `assets/books/${id}.md` : "");
-            const title = b.title || titleFromBookId(id) || id || "Untitled";
-            return { id, title, path: p };
-          }).filter(b => b.id && b.path);
-          return;
-        }
-      } catch (_) {}
       throw lastErr || new Error("manifest fetch failed");
     }
 
@@ -1697,19 +1753,6 @@
 
         await refreshChapterAndPagesUI(options);
       } catch (e) {
-        // Fallback for local file:// usage: try embedded books
-        try {
-          if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[id] === "string") {
-            currentBookRaw = window.EMBED_BOOKS[id];
-            hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
-            if (hasExplicitChapters) {
-              chapterList = parseChaptersFromMarkdown(currentBookRaw);
-            }
-            await refreshChapterAndPagesUI(options);
-            return;
-          }
-        } catch (_) {}
-
         setSelectOptions(chapterSelect, [], "Failed to load book");
         setSelectOptions(pageStart, [], "Failed to load book");
         setSelectOptions(pageEnd, [], "Failed to load book");
@@ -1728,6 +1771,8 @@
     }
 
     // Events
+    installNextChapterBridge();
+    window.__rcUpdateNextChapterSurface = updateNextChapterSurface;
     sourceSel.addEventListener("change", setSourceUI);
     setSourceUI();
 
@@ -2374,6 +2419,7 @@
 
     
     applyModeVisibility();
+    try { updateNextChapterSurface(); } catch (_) {}
     if (typeof applyTierAccess === 'function') applyTierAccess();
     try { applyPendingReadingRestore(); } catch (_) {}
     try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
@@ -2414,6 +2460,7 @@
     const verdictSection = document.getElementById('verdictSection');
     if (submitBtn) submitBtn.style.display = isReading ? 'none' : '';
     if (verdictSection) verdictSection.style.display = isReading ? 'none' : '';
+    try { updateNextChapterSurface(); } catch (_) {}
   }
 
   function startTimer(i, sand, timerDiv, wrapper, textarea) {
@@ -3141,6 +3188,9 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   // which runs simultaneously with the hold fade-out above.
   try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
   try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
+  // Re-evaluate the chapter-level handoff after reading is actually released;
+  // render() may have run while the surface was still hidden/restore-pending.
+  try { if (typeof window.__rcUpdateNextChapterSurface === 'function') window.__rcUpdateNextChapterSurface(); } catch (_) {}
   // Patch B: Re-anchor scroll to the restored page now that reading-restore-pending
   // is removed and the html overflow:hidden lock (Patch A) has lifted. The
   // scrollIntoView() call inside applyPendingReadingRestore() was a no-op while
@@ -3164,6 +3214,7 @@ window.exitReadingSession = function exitReadingSession() {
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}
   try { if (typeof ttsAutoplayCancelCountdown === 'function') { ttsAutoplayCancelCountdown(); result.countdownCleared = true; } } catch (_) {}
   try { const signal = document.getElementById('session-complete'); if (signal) signal.classList.add('hidden-section'); } catch (_) {}
+  try { const nextSurface = document.getElementById('next-chapter-surface'); if (nextSurface) { nextSurface.classList.add('hidden-section'); nextSurface.style.display = 'none'; nextSurface.setAttribute('aria-hidden', 'true'); } } catch (_) {}
   try { document.querySelectorAll('.page-active').forEach((el) => el.classList.remove('page-active')); } catch (_) {}
   try { const active = document.activeElement; if (active && typeof active.blur === 'function') active.blur(); } catch (_) {}
   try { if (window.music) { window.music.pause(); result.musicStopped = true; } } catch (_) {}
