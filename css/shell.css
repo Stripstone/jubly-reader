@@ -1989,7 +1989,7 @@ body.reading-active #rc-interaction-banner {
   padding: 13px 14px;
   border: 1.5px solid var(--border-purple);
   border-radius: 18px;
-  background: var(--surface-warm);
+  background: var(--surface);
   color: var(--text-dark);
   text-align: left;
   cursor: pointer;

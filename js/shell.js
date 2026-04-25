@@ -946,6 +946,10 @@ window.rcInteraction = (function () {
         const publicBoundary = ensurePublicRuntimeBeforeRelease(targetId, 'show-section:' + targetId);
         if (!publicBoundary.allowed) return Promise.resolve(publicBoundary.report || null);
         if (targetId === 'landing-page' && !options.preserveIntroLibrary) _publicIntroLibraryVisible = false;
+        // Route entry must not resume a stale onboarding pane. Browser history
+        // can re-enter ?view=public-onboarding after the final transition has
+        // been active; reset before release so Step 1 is the visible owner.
+        if (targetId === 'public-onboarding') resetPublicOnboardingQuiz();
         const readingModeEl = document.getElementById('reading-mode');
         const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
 
@@ -1240,7 +1244,6 @@ window.rcInteraction = (function () {
         closeModal('pricing-modal');
         closeModal('ownership-modal');
         _publicIntroLibraryVisible = false;
-        resetPublicOnboardingQuiz();
         return showSection('public-onboarding', { releaseReason: 'public-onboarding:start' });
     }
 
