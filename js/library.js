@@ -1585,7 +1585,6 @@
         currentChapterIndex = null;
         const bookPages = parsePagesWithTitles(currentBookRaw);
         populatePagesSelect(bookPages);
-        publishChapterNavigationState();
         try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, bookPages.length - 1)); } catch (_) {}
         // Await render completion so the restore scroll finishes before the caller
         // removes reading-restore-pending and reveals pages to the user.
@@ -1603,7 +1602,6 @@
 
       const chapterPages = getSequentialChapterPages(nextChapterIndex);
       populatePagesSelect(chapterPages);
-      publishChapterNavigationState();
       try { window.__rcPendingRestorePageIndex = Math.min(restorePageIndex, Math.max(0, chapterPages.length - 1)); } catch (_) {}
       // Await render completion before resolving.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
@@ -1729,43 +1727,6 @@
       return addPages({ preservePendingRestore, pageMeta });
     }
 
-    function getChapterNavigationState() {
-      const chapterCount = Array.isArray(chapterList) ? chapterList.length : 0;
-      const chapterIndex = Number.isFinite(currentChapterIndex) ? currentChapterIndex : -1;
-      const hasNextChapter = hasExplicitChapters && chapterIndex >= 0 && chapterIndex < chapterCount - 1;
-      return {
-        hasExplicitChapters: !!hasExplicitChapters,
-        currentChapterIndex: chapterIndex,
-        chapterCount,
-        hasNextChapter,
-        nextChapterIndex: hasNextChapter ? chapterIndex + 1 : -1,
-      };
-    }
-
-    function publishChapterNavigationState() {
-      try { window.__rcChapterNavigationState = getChapterNavigationState(); } catch (_) {}
-    }
-
-    function selectChapterIndex(index) {
-      const idx = parseInt(String(index ?? ""), 10);
-      if (!Number.isFinite(idx) || !chapterList[idx]) return null;
-
-      // Explicit chapter movement always starts on the first page/card of the
-      // selected chapter. This is the same owner path used by manual chapter
-      // selection; the Next Chapter affordance only forwards intent here.
-      const selectedIdx = idx;
-      currentChapterIndex = selectedIdx;
-      if (chapterSelect) chapterSelect.value = String(selectedIdx);
-
-      const chapterPages = getSequentialChapterPages(selectedIdx);
-      populatePagesSelect(chapterPages);
-      try { window.__rcPendingRestorePageIndex = 0; } catch (_) {}
-      publishChapterNavigationState();
-
-      const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      return applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
-    }
-
     // Events
     sourceSel.addEventListener("change", setSourceUI);
     setSourceUI();
@@ -1781,7 +1742,29 @@
     });
 
     chapterSelect.addEventListener("change", () => {
-      selectChapterIndex(chapterSelect.value);
+      const idx = parseInt(chapterSelect.value || "", 10);
+      if (!Number.isFinite(idx)) return;
+
+      // Snapshot the selected index into a local const before any async boundary
+      // so a rapid second change cannot corrupt this handler's chapter resolution.
+      const selectedIdx = idx;
+      currentChapterIndex = selectedIdx;
+
+      const chapterPages = getSequentialChapterPages(selectedIdx);
+      populatePagesSelect(chapterPages);
+
+      // Chapter entry should always begin at page 1 of that chapter.
+      // Route through the existing restore-owned render path by pinning a
+      // pending restore to index 0 before addPages() resets and rebuilds.
+      try { window.__rcPendingRestorePageIndex = 0; } catch (_) {}
+
+      // Immediately replace rendered page cards with the new chapter's content.
+      // Routing through applySelectionToBulkInput → addPages() → render() is the
+      // single authoritative card-replacement path. Calling it synchronously here
+      // closes the race window between chapter assignment and card DOM update —
+      // no Load button click required, no timing assumption.
+      const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
+      applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
     });
 
     // Keep end >= start
@@ -1905,9 +1888,6 @@
     // Expose context helper so out-of-closure callers (startFocusedPageTts,
     // focusReadingPage, _installScrollPageTracker) can reach it.
     window.getReadingTargetContext = getReadingTargetContext;
-    window.__rcGetChapterNavigationState = getChapterNavigationState;
-    window.__rcSelectChapterIndex = selectChapterIndex;
-    publishChapterNavigationState();
     // Expose the authoritative book load path for the runtime reading-entry API.
     window.__rcLoadBook = loadBook;
   }
@@ -2096,24 +2076,12 @@
 
     const _isReadingMode = appMode === 'reading';
 
-    const chapterNavigationState = (() => {
-      try {
-        if (typeof window.__rcGetChapterNavigationState === 'function') return window.__rcGetChapterNavigationState();
-        return window.__rcChapterNavigationState || {};
-      } catch (_) {
-        return {};
-      }
-    })();
-
     pages.forEach((text, i) => {
       timers[i] ??= 0;
 
       const page = document.createElement("div");
       page.className = "page";
       page.dataset.pageIndex = String(i);
-
-      const showNextChapter = !!(_isReadingMode && i === pages.length - 1 && chapterNavigationState && chapterNavigationState.hasNextChapter);
-      const nextChapterIndex = showNextChapter ? Number(chapterNavigationState.nextChapterIndex) : -1;
 
       // Evaluation/consolidation block is intentionally omitted from the DOM
       // in reading mode. applyModeVisibility() handles display toggling when
@@ -2138,12 +2106,6 @@
         <div class="anchors-nav">
           <button class="top-btn next-btn" onclick="goToNext(${i})">▶ Next</button>
         </div>
-
-        ${showNextChapter ? `
-        <div class="anchors-nav chapter-next-nav">
-          <button type="button" class="top-btn next-btn" data-next-chapter="${nextChapterIndex}">▶ Next Chapter</button>
-        </div>
-        ` : ''}
 
         ${_isReadingMode ? '' : `
         <div class="page-header">Consolidation</div>
@@ -2223,19 +2185,6 @@
             (typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${i}`,
             [text]
           );
-        });
-      }
-
-      const nextChapterBtn = page.querySelector('[data-next-chapter]');
-      if (nextChapterBtn) {
-        nextChapterBtn.addEventListener('click', (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const targetChapterIndex = parseInt(nextChapterBtn.getAttribute('data-next-chapter') || '', 10);
-          if (!Number.isFinite(targetChapterIndex)) return;
-          try {
-            if (typeof window.__rcSelectChapterIndex === 'function') window.__rcSelectChapterIndex(targetChapterIndex);
-          } catch (_) {}
         });
       }
 
