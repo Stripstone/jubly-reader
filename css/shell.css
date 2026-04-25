@@ -422,8 +422,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         }
         #reading-mode .next-chapter-btn { 
           min-height: 36px;
-          background: var(--rm-btn-bg);
-          color: var(--rm-accent);
         }
         @media (max-width: 1024px) {
             /* Tablet: constrained, centred */
@@ -523,6 +521,17 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         }
         #reading-mode .top-btn:hover { background:var(--rm-btn-hover); transform:translateY(-1px); box-shadow:none; }
         #reading-mode .top-btn:active { transform:translateY(0); }
+        /* Chapter Next sits outside the white page card, so the translucent
+           top-btn background would visually blend darker over the purple
+           reading surface. Use the opaque white-card equivalent so it matches
+           the in-card page navigation buttons by color. */
+        #reading-mode .next-chapter-surface .top-btn {
+            background: color-mix(in srgb, var(--rm-accent) 7%, #fff);
+            color: var(--rm-accent);
+        }
+        #reading-mode .next-chapter-surface .top-btn:hover {
+            background: color-mix(in srgb, var(--rm-accent) 14%, #fff);
+        }
         #reading-mode .top-btn.tts-active { background:var(--rm-btn-hover); box-shadow:0 0 0 2px var(--rm-accent); }
         #reading-mode .hint-btn:disabled { opacity:0.35; cursor:not-allowed; transform:none; }
         #reading-mode .page-actions { display:flex; justify-content:flex-end; gap:8px; margin:6px 0 4px; }
