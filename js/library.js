@@ -1571,21 +1571,67 @@
       return currentBookRaw;
     }
 
+    let nextChapterTransitionInFlight = false;
+
+    function parseChapterIndexValue(raw) {
+      if (raw === null || raw === undefined) return null;
+      const text = String(raw).trim();
+      if (!text) return null;
+      if (!/^-?\d+$/.test(text)) return null;
+      const index = Number.parseInt(text, 10);
+      return Number.isInteger(index) ? index : null;
+    }
+
+    function isValidChapterIndex(index) {
+      return Number.isInteger(index)
+        && index >= 0
+        && Array.isArray(chapterList)
+        && index < chapterList.length;
+    }
+
     function getActiveChapterIndexForNextSurface() {
-      const fromRuntime = Number(currentChapterIndex);
-      if (Number.isFinite(fromRuntime)) return fromRuntime;
-      const fromSelect = Number(chapterSelect && chapterSelect.value !== '' ? chapterSelect.value : NaN);
-      return Number.isFinite(fromSelect) ? fromSelect : -1;
+      if (Number.isInteger(currentChapterIndex) && isValidChapterIndex(currentChapterIndex)) return currentChapterIndex;
+      const selectedIndex = parseChapterIndexValue(chapterSelect ? chapterSelect.value : null);
+      return isValidChapterIndex(selectedIndex) ? selectedIndex : -1;
     }
 
     function setNextChapterSurfaceVisible(visible) {
       const surface = document.getElementById('next-chapter-surface');
       if (!surface) return;
       surface.classList.toggle('hidden-section', !visible);
-      // Use inline display as a defensive presentation reflection only. The
-      // runtime/chapter truth still comes from currentChapterIndex/chapterList.
+      // Presentation reflection only; chapter/card truth remains in runtime state.
       surface.style.display = visible ? 'flex' : 'none';
       surface.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    }
+
+    async function selectChapterIndex(index, options = {}) {
+      const selectedIdx = Number.isInteger(index) ? index : parseChapterIndexValue(index);
+      if (!isValidChapterIndex(selectedIdx)) return false;
+
+      currentChapterIndex = selectedIdx;
+      if (chapterSelect && chapterSelect.value !== String(selectedIdx)) chapterSelect.value = String(selectedIdx);
+
+      const chapterPages = getSequentialChapterPages(selectedIdx);
+      populatePagesSelect(chapterPages);
+
+      // Chapter entry should always begin at page 1 of that chapter. Route
+      // through the existing restore-owned render path before rebuilding cards.
+      try { window.__rcPendingRestorePageIndex = 0; } catch (_) {}
+
+      // This is the single authoritative chapter card replacement path. Both
+      // the dropdown and Next Chapter button use it; no synthetic change event,
+      // alternate render path, or duplicate chapter truth is introduced.
+      const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
+      if (chapterText) {
+        await applySelectionToBulkInput(chapterText, {
+          append: false,
+          preservePendingRestore: true,
+          pageMeta: chapterPages
+        });
+      }
+
+      try { updateNextChapterSurface(); } catch (_) {}
+      return true;
     }
 
     function updateNextChapterSurface() {
@@ -1594,30 +1640,28 @@
       if (!surface || !button) return;
 
       const readingModeEl = document.getElementById('reading-mode');
-      const readingSurfaceVisible = !!(
-        readingModeEl
-        && !readingModeEl.classList.contains('hidden-section')
-        && document.body.classList.contains('reading-active')
-      );
-      const renderedCardCount = document.querySelectorAll('#pages .page').length;
+      const hasRenderedChapterPages = Array.isArray(pages) && pages.length > 0;
       const chapterIndex = getActiveChapterIndexForNextSurface();
-      const hasNextChapter = readingSurfaceVisible
-        && renderedCardCount > 0
+      const hasNextChapter = !!readingModeEl
+        && hasRenderedChapterPages
         && hasExplicitChapters
         && Array.isArray(chapterList)
         && chapterList.length > 1
-        && Number.isFinite(chapterIndex)
-        && chapterIndex >= 0
+        && isValidChapterIndex(chapterIndex)
         && chapterIndex < chapterList.length - 1;
 
       setNextChapterSurfaceVisible(hasNextChapter);
       if (!hasNextChapter) {
+        button.disabled = false;
+        button.removeAttribute('aria-disabled');
         button.removeAttribute('aria-label');
         return;
       }
 
       const nextTitle = String(chapterList[chapterIndex + 1]?.title || `Chapter ${chapterIndex + 2}`).trim();
       button.textContent = 'Next Chapter';
+      button.disabled = !!nextChapterTransitionInFlight;
+      button.setAttribute('aria-disabled', nextChapterTransitionInFlight ? 'true' : 'false');
       button.setAttribute('aria-label', `Next chapter: ${nextTitle}`);
     }
 
@@ -1625,18 +1669,22 @@
       const button = document.getElementById('next-chapter-btn');
       if (!button || button.__jublyNextChapterBound) return;
       button.__jublyNextChapterBound = true;
-      button.addEventListener('click', () => {
+      button.addEventListener('click', async () => {
+        if (nextChapterTransitionInFlight) return;
         const chapterIndex = getActiveChapterIndexForNextSurface();
-        if (!hasExplicitChapters || !Array.isArray(chapterList) || !Number.isFinite(chapterIndex)) return;
+        if (!hasExplicitChapters || !Array.isArray(chapterList) || !isValidChapterIndex(chapterIndex)) return;
         const nextChapterIndex = chapterIndex + 1;
-        if (nextChapterIndex >= chapterList.length) return;
-        if (!chapterSelect) return;
+        if (!isValidChapterIndex(nextChapterIndex) || nextChapterIndex <= chapterIndex) return;
 
+        nextChapterTransitionInFlight = true;
+        updateNextChapterSurface();
         try { if (typeof ttsAutoplayCancelCountdown === 'function') ttsAutoplayCancelCountdown(); } catch (_) {}
-        // Forward user intent through the existing chapter-select runtime path.
-        // Do not duplicate chapter/page/render truth in this button bridge.
-        chapterSelect.value = String(nextChapterIndex);
-        chapterSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        try {
+          await selectChapterIndex(nextChapterIndex, { reason: 'next-chapter-button' });
+        } finally {
+          nextChapterTransitionInFlight = false;
+          updateNextChapterSurface();
+        }
       });
     }
 
@@ -1772,7 +1820,6 @@
 
     // Events
     installNextChapterBridge();
-    window.__rcUpdateNextChapterSurface = updateNextChapterSurface;
     sourceSel.addEventListener("change", setSourceUI);
     setSourceUI();
 
@@ -1787,29 +1834,9 @@
     });
 
     chapterSelect.addEventListener("change", () => {
-      const idx = parseInt(chapterSelect.value || "", 10);
-      if (!Number.isFinite(idx)) return;
-
-      // Snapshot the selected index into a local const before any async boundary
-      // so a rapid second change cannot corrupt this handler's chapter resolution.
-      const selectedIdx = idx;
-      currentChapterIndex = selectedIdx;
-
-      const chapterPages = getSequentialChapterPages(selectedIdx);
-      populatePagesSelect(chapterPages);
-
-      // Chapter entry should always begin at page 1 of that chapter.
-      // Route through the existing restore-owned render path by pinning a
-      // pending restore to index 0 before addPages() resets and rebuilds.
-      try { window.__rcPendingRestorePageIndex = 0; } catch (_) {}
-
-      // Immediately replace rendered page cards with the new chapter's content.
-      // Routing through applySelectionToBulkInput → addPages() → render() is the
-      // single authoritative card-replacement path. Calling it synchronously here
-      // closes the race window between chapter assignment and card DOM update —
-      // no Load button click required, no timing assumption.
-      const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
+      const selectedIdx = parseChapterIndexValue(chapterSelect.value);
+      if (!isValidChapterIndex(selectedIdx)) return;
+      selectChapterIndex(selectedIdx, { reason: 'chapter-select' }).catch(() => {});
     });
 
     // Keep end >= start
@@ -3188,9 +3215,6 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   // which runs simultaneously with the hold fade-out above.
   try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
   try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
-  // Re-evaluate the chapter-level handoff after reading is actually released;
-  // render() may have run while the surface was still hidden/restore-pending.
-  try { if (typeof window.__rcUpdateNextChapterSurface === 'function') window.__rcUpdateNextChapterSurface(); } catch (_) {}
   // Patch B: Re-anchor scroll to the restored page now that reading-restore-pending
   // is removed and the html overflow:hidden lock (Patch A) has lifted. The
   // scrollIntoView() call inside applyPendingReadingRestore() was a no-op while

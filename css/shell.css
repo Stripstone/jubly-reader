@@ -415,7 +415,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         }
         #reading-mode .next-chapter-surface {
             max-width: 900px;
-            margin: -4px auto 34px;
+            margin: 14px auto 34px;
             padding: 0 2rem;
             display: flex;
             justify-content: flex-end;
