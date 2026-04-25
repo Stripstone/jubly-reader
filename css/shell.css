@@ -420,7 +420,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             display: flex;
             justify-content: flex-end;
         }
-        #reading-mode .next-chapter-btn { min-height: 38px; }
+        #reading-mode .next-chapter-btn { min-height: 36px; }
         @media (max-width: 1024px) {
             /* Tablet: constrained, centred */
             #reading-mode #pages,

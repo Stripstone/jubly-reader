@@ -1604,6 +1604,14 @@
       surface.setAttribute('aria-hidden', visible ? 'false' : 'true');
     }
 
+    function settleNextChapterSurface() {
+      try { updateNextChapterSurface(); } catch (_) {}
+      // Reading entry/re-entry can reveal the surface immediately after the
+      // runtime-owned load/render path settles. Recheck on the next paint so the
+      // user navigation surface is not dependent on a later dropdown change.
+      try { requestAnimationFrame(() => { try { updateNextChapterSurface(); } catch (_) {} }); } catch (_) {}
+    }
+
     async function selectChapterIndex(index, options = {}) {
       const selectedIdx = Number.isInteger(index) ? index : parseChapterIndexValue(index);
       if (!isValidChapterIndex(selectedIdx)) return false;
@@ -1630,7 +1638,7 @@
         });
       }
 
-      try { updateNextChapterSurface(); } catch (_) {}
+      settleNextChapterSurface();
       return true;
     }
 
@@ -1652,14 +1660,15 @@
 
       setNextChapterSurfaceVisible(hasNextChapter);
       if (!hasNextChapter) {
-        button.disabled = false;
-        button.removeAttribute('aria-disabled');
+        button.textContent = '▶ Next Chapter';
+        button.disabled = true;
+        button.setAttribute('aria-disabled', 'true');
         button.removeAttribute('aria-label');
         return;
       }
 
       const nextTitle = String(chapterList[chapterIndex + 1]?.title || `Chapter ${chapterIndex + 2}`).trim();
-      button.textContent = 'Next Chapter';
+      button.textContent = '▶ Next Chapter';
       button.disabled = !!nextChapterTransitionInFlight;
       button.setAttribute('aria-disabled', nextChapterTransitionInFlight ? 'true' : 'false');
       button.setAttribute('aria-label', `Next chapter: ${nextTitle}`);
@@ -1683,7 +1692,7 @@
           await selectChapterIndex(nextChapterIndex, { reason: 'next-chapter-button' });
         } finally {
           nextChapterTransitionInFlight = false;
-          updateNextChapterSurface();
+          settleNextChapterSurface();
         }
       });
     }
@@ -1707,6 +1716,7 @@
         // removes reading-restore-pending and reveals pages to the user.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
         if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true, pageMeta: bookPages });
+        settleNextChapterSurface();
         return;
       }
 
@@ -1723,6 +1733,7 @@
       // Await render completion before resolving.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
       if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
+      settleNextChapterSurface();
     }
 
     async function loadManifest() {
@@ -3238,7 +3249,7 @@ window.exitReadingSession = function exitReadingSession() {
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}
   try { if (typeof ttsAutoplayCancelCountdown === 'function') { ttsAutoplayCancelCountdown(); result.countdownCleared = true; } } catch (_) {}
   try { const signal = document.getElementById('session-complete'); if (signal) signal.classList.add('hidden-section'); } catch (_) {}
-  try { const nextSurface = document.getElementById('next-chapter-surface'); if (nextSurface) { nextSurface.classList.add('hidden-section'); nextSurface.style.display = 'none'; nextSurface.setAttribute('aria-hidden', 'true'); } } catch (_) {}
+  try { const nextSurface = document.getElementById('next-chapter-surface'); const nextButton = document.getElementById('next-chapter-btn'); if (nextSurface) { nextSurface.classList.add('hidden-section'); nextSurface.style.display = 'none'; nextSurface.setAttribute('aria-hidden', 'true'); } if (nextButton) { nextButton.disabled = true; nextButton.setAttribute('aria-disabled', 'true'); } } catch (_) {}
   try { document.querySelectorAll('.page-active').forEach((el) => el.classList.remove('page-active')); } catch (_) {}
   try { const active = document.activeElement; if (active && typeof active.blur === 'function') active.blur(); } catch (_) {}
   try { if (window.music) { window.music.pause(); result.musicStopped = true; } } catch (_) {}
