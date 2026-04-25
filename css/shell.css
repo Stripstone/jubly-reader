@@ -413,13 +413,23 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             /* Desktop (≥1025px): full natural width, unconstrained */
             max-width: 900px; margin: 0 auto; padding: 0 2rem;
         }
+        #reading-mode .next-chapter-surface {
+            max-width: 900px;
+            margin: -4px auto 34px;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: flex-end;
+        }
+        #reading-mode .next-chapter-btn { min-height: 38px; }
         @media (max-width: 1024px) {
             /* Tablet: constrained, centred */
-            #reading-mode #pages { max-width: 720px; padding: 0 1.5rem; }
+            #reading-mode #pages,
+            #reading-mode .next-chapter-surface { max-width: 720px; padding: 0 1.5rem; }
         }
         @media (max-width: 768px) {
             /* Mobile: tight padding */
-            #reading-mode #pages { max-width: 100%; padding: 0 1rem; }
+            #reading-mode #pages,
+            #reading-mode .next-chapter-surface { max-width: 100%; padding: 0 1rem; }
         }
         #session-complete { max-width: 900px; margin: 0 auto; padding: 0 2rem; }
         .page-text { line-height: 1.75; font-size: 1rem; }
