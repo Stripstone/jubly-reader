@@ -22,7 +22,7 @@
 
 import crypto from "node:crypto";
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
-import { S3Client, HeadObjectCommand, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, HeadObjectCommand, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { json, withCors, readJsonBody } from "./http.js";
 import { getAllowedBrowserOrigins } from "./origins.js";
@@ -115,6 +115,25 @@ function bookmarkAudioOffsetMs(audioOffsetTicks) {
   return Math.max(0, Number((Number(audioOffsetTicks || 0) + 5000) / 10000) || 0);
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function hasCompleteAzureBookmarkOffsets(sentencePlan, bookmarkOffsets) {
+  return !sentencePlan.length || sentencePlan.every((entry) => bookmarkOffsets.has(entry.bookmark));
+}
+
+async function waitForAzureBookmarkOffsets(sentencePlan, bookmarkOffsets) {
+  if (hasCompleteAzureBookmarkOffsets(sentencePlan, bookmarkOffsets)) return;
+
+  // Azure bookmarkReached callbacks can land just after speakSsmlAsync resolves.
+  // Yield briefly before deciding the artifact has incomplete timing data.
+  const deadline = Date.now() + 250;
+  while (!hasCompleteAzureBookmarkOffsets(sentencePlan, bookmarkOffsets) && Date.now() < deadline) {
+    await delay(25);
+  }
+}
+
 function buildAzureSentencePlan(text) {
   const source = String(text || "");
   return splitIntoSentenceRanges(source).map((range, index) => ({
@@ -134,6 +153,49 @@ function buildAzureSsml(text, voiceName, sentencePlan) {
     ? sentencePlan.map((entry) => `<bookmark mark="${entry.bookmark}"/>${escapeXml(entry.value)}`).join("")
     : escapeXml(source);
   return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voiceName}"><prosody rate="0.95">${body}</prosody></voice></speak>`;
+}
+
+function isIncompleteAzureBookmarkError(err) {
+  return String(err?.message || err || "").includes("Azure synthesis returned incomplete bookmark offsets");
+}
+
+function isValidAzureSentenceMarks(text, sentenceMarks) {
+  if (!Array.isArray(sentenceMarks)) return false;
+
+  const sentencePlan = buildAzureSentencePlan(text);
+  if (sentenceMarks.length !== sentencePlan.length) return false;
+
+  let previousTime = -1;
+  return sentencePlan.every((entry, index) => {
+    const mark = sentenceMarks[index];
+    const time = Number(mark?.time);
+    const start = Number(mark?.start);
+    const end = Number(mark?.end);
+    const valid = Number.isFinite(time)
+      && time >= 0
+      && time >= previousTime
+      && start === entry.startByte
+      && end === entry.endByte
+      && String(mark?.value || "") === entry.value;
+    if (valid) previousTime = time;
+    return valid;
+  });
+}
+
+async function deleteS3ObjectQuietly(s3, bucket, key) {
+  try {
+    await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  } catch (_) {}
+}
+
+async function readJsonS3Object(s3, bucket, key, fallback = null) {
+  try {
+    const got = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    const buf = got?.Body ? await streamToBuffer(got.Body) : Buffer.from(JSON.stringify(fallback));
+    return JSON.parse(buf.toString("utf8"));
+  } catch (_) {
+    return fallback;
+  }
 }
 
 function resolveAzureVoiceId(voiceVariant, explicitVoiceId) {
@@ -262,16 +324,19 @@ async function azureSynthesizeArtifact(text, voiceName) {
     }
 
     const audioBuf = Buffer.from(result.audioData || []);
+    await waitForAzureBookmarkOffsets(sentencePlan, bookmarkOffsets);
+
+    if (!hasCompleteAzureBookmarkOffsets(sentencePlan, bookmarkOffsets)) {
+      // Do not cache partial Azure bookmark data as precise S3 sidecar truth.
+      throw new Error("Azure synthesis returned incomplete bookmark offsets");
+    }
+
     const sentenceMarks = sentencePlan.map((entry) => ({
-      time: bookmarkOffsets.has(entry.bookmark) ? bookmarkOffsets.get(entry.bookmark) : 0,
+      time: bookmarkOffsets.get(entry.bookmark),
       start: entry.startByte,
       end: entry.endByte,
       value: entry.value,
     }));
-
-    if (sentencePlan.length && !sentencePlan.every((entry) => bookmarkOffsets.has(entry.bookmark))) {
-      throw new Error("Azure synthesis returned incomplete bookmark offsets");
-    }
 
     return { audioBuf, sentenceMarks };
   } finally {
@@ -294,14 +359,8 @@ async function synthesizeCloudAudio({ awsRegion, text, policy }) {
 
 async function resolveSentenceMarks({ awsRegion, bucket, cacheHit, nocache, marksKey, policy, s3, text }) {
   if (policy.provider === "azure") {
-    try {
-      const got = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: marksKey }));
-      const buf = got?.Body ? await streamToBuffer(got.Body) : Buffer.from("[]");
-      const parsed = JSON.parse(buf.toString("utf8"));
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (_) {
-      return null;
-    }
+    const parsed = await readJsonS3Object(s3, bucket, marksKey, null);
+    return isValidAzureSentenceMarks(text, parsed) ? parsed : null;
   }
 
   if (policy.provider !== "polly") return null;
@@ -411,6 +470,13 @@ export default async function handler(req, res) {
         marksCacheHit = false;
       }
     }
+    if (policy.provider === "azure" && marksCacheHit) {
+      const cachedAzureMarks = await readJsonS3Object(s3, bucket, marksKey, null);
+      if (!isValidAzureSentenceMarks(text, cachedAzureMarks)) {
+        await deleteS3ObjectQuietly(s3, bucket, marksKey);
+        marksCacheHit = false;
+      }
+    }
     const marksCacheHitInitial = marksCacheHit;
 
     let audioCacheStatus = nocache ? "bypass" : (audioCacheHitInitial ? "hit" : "miss");
@@ -421,7 +487,17 @@ export default async function handler(req, res) {
 
     if (policy.provider === "azure") {
       if (!audioCacheHitInitial || !marksCacheHitInitial) {
-        const artifact = await azureSynthesizeArtifact(text, policy.voiceId);
+        let artifact;
+        try {
+          artifact = await azureSynthesizeArtifact(text, policy.voiceId);
+        } catch (err) {
+          if (isIncompleteAzureBookmarkError(err)) {
+            await deleteS3ObjectQuietly(s3, bucket, marksKey);
+            marksCacheHit = false;
+            marksCacheStatus = "miss";
+          }
+          throw err;
+        }
         await s3.send(new PutObjectCommand({
           Bucket: bucket,
           Key: objectKey,
@@ -483,7 +559,7 @@ export default async function handler(req, res) {
     );
 
     const preciseSeekCapable = policy.provider === "azure"
-      ? !!marksCacheHit
+      ? !!marksCacheHit && (!wantSentenceMarks || Array.isArray(sentenceMarks))
       : (!!marksCacheHitInitial || (Array.isArray(sentenceMarks) && sentenceMarks.length > 0));
     const capability = buildCapabilityPayload({
       artifactVersion,
