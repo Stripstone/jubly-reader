@@ -234,26 +234,6 @@ window.rcAuth = (function () {
     });
   }
 
-  async function requestPasswordReset(email, authOptions) {
-    if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
-    const normalizedEmail = String(email || '').trim();
-    const emailError = _emailValidationMessage(normalizedEmail);
-    if (emailError) return { error: { message: emailError } };
-    if (!_client.auth || typeof _client.auth.resetPasswordForEmail !== 'function') {
-      return { error: { message: 'Password reset is not available in this environment.' } };
-    }
-
-    const options = {};
-    const requestedRedirect = authOptions && typeof authOptions === 'object'
-      ? String(authOptions.redirectTo || authOptions.emailRedirectTo || '').trim()
-      : '';
-    const fallbackRedirect = String((_config && (_config.resetPasswordRedirectUrl || (_config.appBaseUrl ? `${String(_config.appBaseUrl).replace(/\/$/, '')}/?view=reset-password` : ''))) || '').trim();
-    const redirect = requestedRedirect || fallbackRedirect;
-    if (redirect) options.redirectTo = redirect;
-
-    return _client.auth.resetPasswordForEmail(normalizedEmail, options);
-  }
-
   async function signOut() {
     if (!_client) return { ok: true };
     let signOutError = null;
@@ -308,7 +288,6 @@ window.rcAuth = (function () {
     signUp,
     signIn,
     resendSignupVerification,
-    requestPasswordReset,
     signOut,
     looksLikeEmail,
     inspectEmail,

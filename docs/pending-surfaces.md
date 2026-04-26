@@ -44,8 +44,6 @@ Maintenance rule:
 |---|---|---|
 | Login page → **Sign In** button | Supabase signIn | ✅ Inline button state: `Please wait…` during await. Stale signup/verification copy is cleared on login re-entry; if Supabase returns email-not-confirmed, the app shows fresh verification-required copy and attempts a signup-confirmation resend. |
 | Login page → **Create Account** button | Supabase signUp | ✅ Inline button state: `Please wait…` during await |
-| Login page → **Forgot password?** button | Supabase `resetPasswordForEmail` | ✅ Inline button state: `Sending…` during await. Success copy stays generic: `If an account exists for that email, we sent a password reset link.` |
-| Reset password page → **Save Password** button | Supabase `updateUser({ password })` | ✅ Inline button state: `Saving…` during await. Recovery link returns to `/?view=reset-password`; successful update signs out locally and sends the user back to Log In with `Password updated. Please sign in.` |
 | Sidebar → **Logout** button | Supabase signOut | ✅ Banner: `Signing out…` → recoverable error with standardized actions `Try again` / `Refresh` |
 | App cold load (no button) | Session restore on boot | ✅ Delayed boot-scrim copy: `Checking your account…` if auth settle takes long |
 
@@ -146,7 +144,7 @@ Pending UI should not be added to every control.
 
 | Group | Wired / intentional | Remaining follow-up |
 |---|---|---|
-| Auth | 6 | 0 |
+| Auth | 4 | 0 |
 | Account / Profile | 4 | 0 |
 | Billing & Subscription | 6 | 0 |
 | Usage | 1 | 0 |
@@ -154,7 +152,7 @@ Pending UI should not be added to every control.
 | Library | 5 | 0 |
 | Reading / TTS | 1 wired, 2 conditional/local pending | 0 |
 | Settings / persistence | 1 wired, 1 intentionally immediate | 0 |
-| **Total surfaces covered** | **30** | **0 in this bounded pass** |
+| **Total surfaces covered** | **28** | **0 in this bounded pass** |
 
 ## Notes locked by this pass
 
