@@ -842,7 +842,6 @@ window.rcInteraction = (function () {
     }
 
     function releaseStandardSectionVisibility(requestedSurface, targetId, options = {}) {
-        prepareAuthSurfaceForRelease(targetId, options);
         ALL_SECTIONS.forEach((sectionId) => {
             const el = document.getElementById(sectionId);
             if (el) el.classList.add('hidden-section');
@@ -1404,45 +1403,6 @@ window.rcInteraction = (function () {
         if (ok)  ok.classList.add('hidden-section');
     }
 
-    function prepareAuthSurfaceForRelease(targetId, options = {}) {
-        if (targetId !== 'login-page') return;
-        if (options && options.preserveAuthMessage) return;
-        // Route/re-entry into login must not preserve week-old signup or
-        // confirmation-copy as current auth truth. Supabase sign-in remains the
-        // authority for whether the email is actually confirmed.
-        _authClearMessages();
-    }
-
-    function _isEmailNotConfirmedMessage(message) {
-        return /email\s+not\s+confirmed|confirm(?:ed)?\s+email|email.*confirm/i.test(String(message || ''));
-    }
-
-    async function _handleUnconfirmedSignIn(email) {
-        const normalizedEmail = String(email || '').trim();
-        const fallback = 'Please verify your email before signing in.';
-        const resend = window.rcAuth && typeof window.rcAuth.resendSignupVerification === 'function'
-            ? window.rcAuth.resendSignupVerification
-            : null;
-        if (!normalizedEmail || !resend) {
-            _authShowError(fallback);
-            return;
-        }
-
-        try {
-            const result = await resend(normalizedEmail, {
-                emailRedirectTo: buildAuthRedirectForPendingPlan(),
-            });
-            const resendError = result && result.error ? result.error : null;
-            if (resendError) {
-                _authShowError(`${fallback} I couldn't send a fresh verification email right now. Try signing in again in a moment.`);
-                return;
-            }
-            _authShowSuccess(`${fallback} We sent a fresh verification email.`);
-        } catch (_) {
-            _authShowError(fallback);
-        }
-    }
-
     function _readAuthPendingPlan() {
         try {
             return window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function'
@@ -1619,11 +1579,7 @@ window.rcInteraction = (function () {
                 const { error } = await window.rcAuth.signIn(email, password);
                 if (error) {
                     const message = String(error.message || 'Sign-in failed. Check your email and password.');
-                    if (_isEmailNotConfirmedMessage(message)) {
-                        await _handleUnconfirmedSignIn(email);
-                    } else {
-                        _authShowError(message);
-                    }
+                    _authShowError(/email\s+not\s+confirmed/i.test(message) ? 'Check your email to verify your account before signing in.' : message);
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     if (pendingPlan === 'pro' || pendingPlan === 'premium') {

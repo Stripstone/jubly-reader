@@ -213,27 +213,6 @@ window.rcAuth = (function () {
     return _client.auth.signInWithPassword({ email: normalizedEmail, password });
   }
 
-  async function resendSignupVerification(email, authOptions) {
-    if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
-    const normalizedEmail = String(email || '').trim();
-    const emailError = _emailValidationMessage(normalizedEmail);
-    if (emailError) return { error: { message: emailError } };
-    if (!_client.auth || typeof _client.auth.resend !== 'function') {
-      return { error: { message: 'Verification resend is not available in this environment.' } };
-    }
-
-    const options = {};
-    const requestedRedirect = authOptions && typeof authOptions === 'object' ? String(authOptions.emailRedirectTo || '').trim() : '';
-    const redirect = requestedRedirect || String(_config && _config.authRedirectUrl || '').trim();
-    if (redirect) options.emailRedirectTo = redirect;
-
-    return _client.auth.resend({
-      type: 'signup',
-      email: normalizedEmail,
-      options,
-    });
-  }
-
   async function signOut() {
     if (!_client) return { ok: true };
     let signOutError = null;
@@ -287,7 +266,6 @@ window.rcAuth = (function () {
     getConfig,
     signUp,
     signIn,
-    resendSignupVerification,
     signOut,
     looksLikeEmail,
     inspectEmail,
