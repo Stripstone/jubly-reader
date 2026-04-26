@@ -134,6 +134,49 @@ async function waitForAzureBookmarkOffsets(sentencePlan, bookmarkOffsets) {
   }
 }
 
+function previewDiagnosticText(value, maxLength = 160) {
+  const compact = String(value || "").replace(/\s+/g, " ").trim();
+  return compact.length > maxLength ? `${compact.slice(0, maxLength)}…` : compact;
+}
+
+function buildAzureIncompleteBookmarkDiagnostic({ sentencePlan, bookmarkOffsets, text, voiceName, meta }) {
+  const plan = Array.isArray(sentencePlan) ? sentencePlan : [];
+  const offsets = bookmarkOffsets instanceof Map ? bookmarkOffsets : new Map();
+  const missing = plan.filter((entry) => !offsets.has(entry.bookmark));
+  const firstMissing = missing[0] || null;
+
+  return {
+    diagnosticVersion: "azure-bookmark-diagnostics-v1",
+    requestMode: meta?.requestMode || null,
+    voiceId: voiceName || null,
+    artifactHash: meta?.artifactHash || null,
+    textLength: String(text || "").length,
+    sentencePlanLength: plan.length,
+    bookmarkOffsetCount: offsets.size,
+    missingBookmarkCount: missing.length,
+    missingBookmarks: missing.slice(0, 12).map((entry) => entry.bookmark),
+    firstMissing: firstMissing ? {
+      index: firstMissing.index,
+      bookmark: firstMissing.bookmark,
+      startByte: firstMissing.startByte,
+      endByte: firstMissing.endByte,
+      excerpt: previewDiagnosticText(firstMissing.value),
+    } : null,
+  };
+}
+
+function logAzureIncompleteBookmarkDiagnostic({ sentencePlan, bookmarkOffsets, text, voiceName, meta }) {
+  try {
+    console.warn("[ai-tts] incomplete Azure bookmarks", JSON.stringify(buildAzureIncompleteBookmarkDiagnostic({
+      sentencePlan,
+      bookmarkOffsets,
+      text,
+      voiceName,
+      meta,
+    })));
+  } catch (_) {}
+}
+
 function buildAzureSentencePlan(text) {
   const source = String(text || "");
   return splitIntoSentenceRanges(source).map((range, index) => ({
@@ -290,7 +333,7 @@ function resolveCloudPolicy(body, debug) {
 // Azure Speech SDK synthesis with bookmark-driven sentence marks.
 // Audio and marks are cached as paired S3 artifacts so cache-hit sessions keep
 // precise sentence timing instead of falling back to client-estimated marks.
-async function azureSynthesizeArtifact(text, voiceName) {
+async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
   const key = requiredEnv("AZURE_SPEECH_KEY");
   const region = requiredEnv("AZURE_SPEECH_REGION");
   if (!key || !region) throw new Error("AZURE_SPEECH_KEY or AZURE_SPEECH_REGION not set");
@@ -327,6 +370,7 @@ async function azureSynthesizeArtifact(text, voiceName) {
     await waitForAzureBookmarkOffsets(sentencePlan, bookmarkOffsets);
 
     if (!hasCompleteAzureBookmarkOffsets(sentencePlan, bookmarkOffsets)) {
+      logAzureIncompleteBookmarkDiagnostic({ sentencePlan, bookmarkOffsets, text, voiceName: voice, meta });
       // Do not cache partial Azure bookmark data as precise S3 sidecar truth.
       throw new Error("Azure synthesis returned incomplete bookmark offsets");
     }
@@ -489,7 +533,10 @@ export default async function handler(req, res) {
       if (!audioCacheHitInitial || !marksCacheHitInitial) {
         let artifact;
         try {
-          artifact = await azureSynthesizeArtifact(text, policy.voiceId);
+          artifact = await azureSynthesizeArtifact(text, policy.voiceId, {
+            requestMode,
+            artifactHash: hash,
+          });
         } catch (err) {
           if (isIncompleteAzureBookmarkError(err)) {
             await deleteS3ObjectQuietly(s3, bucket, marksKey);
