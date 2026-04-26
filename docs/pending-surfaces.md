@@ -42,7 +42,7 @@ Maintenance rule:
 
 | Surface | What it does | Status |
 |---|---|---|
-| Login page → **Sign In** button | Supabase signIn | ✅ Inline button state: `Please wait…` during await |
+| Login page → **Sign In** button | Supabase signIn | ✅ Inline button state: `Please wait…` during await. Stale signup/verification copy is cleared on login re-entry; if Supabase returns email-not-confirmed, the app shows fresh verification-required copy and attempts a signup-confirmation resend. |
 | Login page → **Create Account** button | Supabase signUp | ✅ Inline button state: `Please wait…` during await |
 | Sidebar → **Logout** button | Supabase signOut | ✅ Banner: `Signing out…` → recoverable error with standardized actions `Try again` / `Refresh` |
 | App cold load (no button) | Session restore on boot | ✅ Delayed boot-scrim copy: `Checking your account…` if auth settle takes long |
