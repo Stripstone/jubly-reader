@@ -770,11 +770,7 @@ window.rcSync = (function () {
     });
     const data = await resp.json().catch(() => null);
     if (!resp.ok || !data || data.ok === false) {
-      const error = new Error(String((data && (data.error || data.reason)) || `Durable sync ${resp.status}`));
-      error.status = resp.status;
-      error.reason = data && (data.reason || data.error) ? String(data.reason || data.error) : '';
-      error.data = data || null;
-      throw error;
+      throw new Error(String((data && (data.error || data.reason)) || `Durable sync ${resp.status}`));
     }
     return { seq, data };
   }
@@ -1296,28 +1292,18 @@ window.rcSync = (function () {
       publicRuntime: _getPublicRuntimeBoundaryReport(),
     }),
     deleteLibraryItem: async (bookId, options = {}) => {
-      if (!_ready()) return { ok: false, row: null, reason: 'auth_required' };
+      if (!_ready()) return null;
       const payload = { book_id: _normalizeBookId(bookId), purge: !!options.purge };
-      try {
-        const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'delete_library_item', payload } });
-        if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
-        return { ok: true, row: data && data.row ? data.row : null, reason: data && data.row ? 'settled' : 'not_found' };
-      } catch (error) {
-        const reason = String(error?.reason || error?.data?.reason || error?.message || 'server_error').trim().toLowerCase();
-        return { ok: false, row: null, reason: reason || 'server_error', error };
-      }
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'delete_library_item', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      return data && data.row ? data.row : null;
     },
     restoreLibraryItem: async (bookId) => {
-      if (!_ready()) return { ok: false, row: null, reason: 'auth_required' };
+      if (!_ready()) return null;
       const payload = { book_id: _normalizeBookId(bookId) };
-      try {
-        const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'restore_library_item', payload } });
-        if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
-        return { ok: true, row: data && data.row ? data.row : null, reason: data && data.row ? 'settled' : 'not_found' };
-      } catch (error) {
-        const reason = String(error?.reason || error?.data?.reason || error?.message || 'server_error').trim().toLowerCase();
-        return { ok: false, row: null, reason: reason || 'server_error', error };
-      }
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'restore_library_item', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      return data && data.row ? data.row : null;
     },
   };
 })();

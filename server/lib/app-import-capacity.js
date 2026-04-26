@@ -54,30 +54,16 @@ export async function countActiveLibraryItemsForUser(userId) {
   const id = String(userId || '').trim();
   if (!id) throw new Error('user_id is required for active library count');
 
-  // Capacity counts logical durable identities, not raw rows. Historical
-  // duplicate rows with the same non-empty fingerprint must not consume
-  // multiple slots; rows without a fingerprint fall back to storage_ref.
+  // Capacity counts only durable active rows. Deleted rows do not count.
   const data = await supabaseRest(
-    `/rest/v1/user_library_items?user_id=eq.${encodeURIComponent(id)}&status=eq.active&select=id,content_fingerprint,storage_ref&limit=10000`,
+    `/rest/v1/user_library_items?user_id=eq.${encodeURIComponent(id)}&status=eq.active&select=id&limit=10000`,
     {
       method: 'GET',
       asService: true,
       headers: { Prefer: 'count=exact' },
     }
   );
-  const identities = new Set();
-  for (const row of Array.isArray(data) ? data : []) {
-    const fingerprint = String(row?.content_fingerprint || '').trim();
-    const storageRef = String(row?.storage_ref || '').trim();
-    if (fingerprint) {
-      identities.add(`fp:${fingerprint}`);
-    } else if (storageRef) {
-      identities.add(`ref:${storageRef}`);
-    } else if (row?.id) {
-      identities.add(`id:${String(row.id)}`);
-    }
-  }
-  return identities.size;
+  return Array.isArray(data) ? data.length : 0;
 }
 
 export async function resolveImportCapacity(req, { stage = 'intake', user = null } = {}) {
