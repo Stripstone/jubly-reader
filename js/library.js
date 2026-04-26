@@ -164,29 +164,65 @@
     });
   }
 
+  function normalizeRemoteLibrarySettlement(result, action) {
+    if (result && typeof result === 'object' && Object.prototype.hasOwnProperty.call(result, 'ok')) {
+      return {
+        ok: result.ok !== false,
+        row: result.row || null,
+        reason: String(result.reason || (result.row ? 'settled' : 'not_found') || '').trim().toLowerCase(),
+        action,
+        error: result.error || null,
+      };
+    }
+    if (result && typeof result === 'object') {
+      return { ok: true, row: result, reason: 'settled', action, error: null };
+    }
+    return { ok: true, row: null, reason: 'not_found', action, error: null };
+  }
+
   async function syncRemoteLibraryItemState(bookId, options = {}) {
+    const normalized = String(bookId || '').trim();
+    const action = options.restore ? 'restore' : (options.purge ? 'purge' : 'delete');
+    if (!(window.rcSync && normalized)) return { ok: false, row: null, reason: 'auth_required', action, error: null };
     try {
-      if (!(window.rcSync && typeof bookId === 'string' && bookId.trim())) return null;
       if (options.restore) {
-        if (typeof window.rcSync.restoreLibraryItem === 'function') return await window.rcSync.restoreLibraryItem(bookId);
-        return null;
+        if (typeof window.rcSync.restoreLibraryItem === 'function') {
+          return normalizeRemoteLibrarySettlement(await window.rcSync.restoreLibraryItem(normalized), action);
+        }
+        return { ok: false, row: null, reason: 'server_error', action, error: null };
       }
-      if (typeof window.rcSync.deleteLibraryItem === 'function') return await window.rcSync.deleteLibraryItem(bookId, options);
-    } catch (_) {}
-    return null;
+      if (typeof window.rcSync.deleteLibraryItem === 'function') {
+        return normalizeRemoteLibrarySettlement(await window.rcSync.deleteLibraryItem(normalized, options), action);
+      }
+    } catch (error) {
+      return { ok: false, row: null, reason: String(error?.reason || error?.message || 'server_error').trim().toLowerCase(), action, error };
+    }
+    return { ok: false, row: null, reason: 'server_error', action, error: null };
+  }
+
+  function makeLibrarySettlementError(settlement, fallbackMessage) {
+    const reason = String(settlement?.reason || '').trim().toLowerCase();
+    let message = fallbackMessage || 'Library change could not be confirmed.';
+    if (reason === 'library_full') message = 'Restore failed. Your library is full.';
+    else if (reason === 'auth_required' || reason === 'missing auth token.') message = 'Sign in again to update your library.';
+    else if (reason === 'not_found') message = 'Restore failed. This book was not found on the server.';
+    const error = new Error(message);
+    error.reason = reason || 'server_error';
+    error.settlement = settlement || null;
+    return error;
   }
 
   function queueRemoteLibraryItemState(bookId, options = {}) {
     const normalized = String(bookId || '').trim();
     if (!normalized) return Promise.resolve(null);
     const task = (async () => {
-      const row = await syncRemoteLibraryItemState(normalized, options);
+      const settlement = await syncRemoteLibraryItemState(normalized, options);
       try {
         if (window.rcSync && typeof window.rcSync.rehydrateDurableData === 'function') {
           await window.rcSync.rehydrateDurableData();
         }
       } catch (_) {}
-      return row;
+      return settlement;
     })();
     task.catch((error) => {
       try { console.warn('Remote library sync failed:', error); } catch (_) {}
@@ -235,6 +271,10 @@
   }
 
   async function moveLocalBookToDeleted(id) {
+    const remoteId = `local:${String(id || '').trim()}`;
+    const settlement = await syncRemoteLibraryItemState(remoteId, { purge: false });
+    if (!settlement.ok) throw makeLibrarySettlementError(settlement, 'Delete failed. Your library could not be updated.');
+
     const db = await openLocalDb();
     await new Promise((resolve, reject) => {
       const tx = db.transaction([LOCAL_STORE_BOOKS, LOCAL_STORE_DELETED], 'readwrite');
@@ -252,11 +292,14 @@
       tx.onerror = () => reject(tx.error || new Error('move failed'));
       tx.onabort = () => reject(tx.error || new Error('move aborted'));
     });
-    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: false });
-    return true;
+    return settlement;
   }
 
   async function restoreDeletedLocalBook(id) {
+    const remoteId = `local:${String(id || '').trim()}`;
+    const settlement = await syncRemoteLibraryItemState(remoteId, { restore: true });
+    if (!settlement.ok || !settlement.row) throw makeLibrarySettlementError(settlement, 'Restore failed. Your library could not be updated.');
+
     const db = await openLocalDb();
     await new Promise((resolve, reject) => {
       const tx = db.transaction([LOCAL_STORE_BOOKS, LOCAL_STORE_DELETED], 'readwrite');
@@ -276,21 +319,23 @@
       tx.onerror = () => reject(tx.error || new Error('restore failed'));
       tx.onabort = () => reject(tx.error || new Error('restore aborted'));
     });
-    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { restore: true });
-    return true;
+    return settlement;
   }
 
   async function permanentlyDeleteLocalBook(id) {
+    const remoteId = `local:${String(id || '').trim()}`;
+    const settlement = await syncRemoteLibraryItemState(remoteId, { purge: true });
+    if (!settlement.ok) throw makeLibrarySettlementError(settlement, 'Delete failed. Your library could not be updated.');
     await localDeletedBookDelete(id);
-    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: true });
-    return true;
+    return settlement;
   }
 
   async function permanentlyDeleteAllLocalBooks(ids = []) {
     const uniqueIds = Array.from(new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean)));
     for (const id of uniqueIds) {
+      const settlement = await syncRemoteLibraryItemState(`local:${id}`, { purge: true });
+      if (!settlement.ok) throw makeLibrarySettlementError(settlement, 'Delete all failed. Your library could not be updated.');
       await localDeletedBookDelete(id);
-      queueRemoteLibraryItemState(`local:${id}`, { purge: true });
     }
     return true;
   }
@@ -2703,8 +2748,8 @@
               emitDeletedChanged();
               await renderDeletedCount();
               render();
-            } catch (_) {
-              alert('Delete failed.');
+            } catch (error) {
+              alert(String(error?.message || 'Delete failed.'));
             }
           });
           actions.appendChild(del);
@@ -2750,9 +2795,9 @@ This removes them from Deleted Files and frees the device storage.`);
           emitDeletedChanged();
           await renderDeletedCount();
           renderDeleted();
-        } catch (_) {
+        } catch (error) {
           setButtonBusy(deleteAll, false);
-          alert('Delete all failed.');
+          alert(String(error?.message || 'Delete all failed.'));
         }
       });
       topActions.appendChild(deleteAll);
@@ -2790,9 +2835,9 @@ This removes them from Deleted Files and frees the device storage.`);
               emitDeletedChanged();
               await renderDeletedCount();
               renderDeleted();
-            } catch (_) {
+            } catch (error) {
               setButtonBusy(restore, false);
-              alert('Restore failed.');
+              alert(String(error?.message || 'Restore failed.'));
             }
           });
           const purge = document.createElement('button');
@@ -2807,8 +2852,8 @@ This removes them from Deleted Files and frees the device storage.`);
               emitDeletedChanged();
               await renderDeletedCount();
               renderDeleted();
-            } catch (_) {
-              alert('Delete failed.');
+            } catch (error) {
+              alert(String(error?.message || 'Delete failed.'));
             }
           });
           actions.appendChild(restore);

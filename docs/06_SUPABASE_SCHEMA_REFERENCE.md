@@ -144,9 +144,10 @@ Authoritative user-owned library registry.
 - `purge_after`
 
 ### Key rules
-- one row represents one owned library item, not one content fingerprint
-- `id` is the canonical owned-book identity
-- uploading the same file again creates a new owned item unless the product explicitly offers replace or reconnect
+- `id` remains the canonical owned-book identity and restore/progress foreign key
+- importer durable settlement treats `user_id + non-empty content_fingerprint` as the reconnect/idempotency key for active imported content
+- when `content_fingerprint` is missing, durable library idempotency falls back to `user_id + storage_ref`
+- duplicate active rows for the same idempotency key count as one capacity identity; targeted delete/restore settles the fingerprint group without adding new status values
 
 ## 4. user_progress
 

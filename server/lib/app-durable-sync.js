@@ -208,18 +208,71 @@ async function getLibraryItemsRows(userId, { includeDeleted = true, limit = 500 
   return Array.isArray(data) ? data : [];
 }
 
-async function findLibraryItemByStorageRef(userId, storageRef, { includeDeleted = true } = {}) {
+function normalizeContentFingerprint(value) {
+  return toText(value, null);
+}
+
+function getPatchContentFingerprint(patch = {}) {
+  return normalizeContentFingerprint(patch?.content_fingerprint || patch?.contentFingerprint);
+}
+
+function isActiveLibraryItem(row) {
+  return String(row?.status || '').trim().toLowerCase() === 'active';
+}
+
+function compareCanonicalLibraryRows(a, b) {
+  const aUpdated = Date.parse(a?.updated_at || '') || 0;
+  const bUpdated = Date.parse(b?.updated_at || '') || 0;
+  if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+  const aCreated = Date.parse(a?.created_at || '') || 0;
+  const bCreated = Date.parse(b?.created_at || '') || 0;
+  if (aCreated !== bCreated) return bCreated - aCreated;
+  return String(a?.id || '').localeCompare(String(b?.id || ''));
+}
+
+function chooseCanonicalLibraryRow(rows = [], { preferActive = true } = {}) {
+  const list = (Array.isArray(rows) ? rows : []).filter(Boolean);
+  if (!list.length) return null;
+  if (preferActive) {
+    const activeRows = list.filter(isActiveLibraryItem).sort(compareCanonicalLibraryRows);
+    if (activeRows.length) return activeRows[0];
+  }
+  return list.slice().sort(compareCanonicalLibraryRows)[0] || null;
+}
+
+async function findLibraryItemsByStorageRef(userId, storageRef, { includeDeleted = true, limit = 50 } = {}) {
   const ref = normalizeBookId(storageRef);
-  if (!ref) return null;
+  if (!ref) return [];
   const filters = [`user_id=eq.${encodeURIComponent(userId)}`, `storage_ref=eq.${encodeURIComponent(ref)}`];
   if (!includeDeleted) filters.push('status=eq.active');
-  const data = await supabaseRest(`/rest/v1/user_library_items?${filters.join('&')}&select=*&order=updated_at.desc&limit=20`, {
+  const data = await supabaseRest(`/rest/v1/user_library_items?${filters.join('&')}&select=*&order=created_at.asc&limit=${Math.max(1, toInt(limit, 50))}`, {
     method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
   }).catch(() => null);
-  const rows = Array.isArray(data) ? data : [];
-  const active = rows.find((row) => String(row?.status || '') === 'active');
-  return active || rows[0] || null;
+  return Array.isArray(data) ? data : [];
 }
+
+async function findLibraryItemsByContentFingerprint(userId, contentFingerprint, { includeDeleted = true, limit = 100 } = {}) {
+  const fingerprint = normalizeContentFingerprint(contentFingerprint);
+  if (!fingerprint) return [];
+  const filters = [`user_id=eq.${encodeURIComponent(userId)}`, `content_fingerprint=eq.${encodeURIComponent(fingerprint)}`];
+  if (!includeDeleted) filters.push('status=eq.active');
+  const data = await supabaseRest(`/rest/v1/user_library_items?${filters.join('&')}&select=*&order=created_at.asc&limit=${Math.max(1, toInt(limit, 100))}`, {
+    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
+  }).catch(() => null);
+  return Array.isArray(data) ? data : [];
+}
+
+async function findLibraryIdentityRows(userId, { contentFingerprint = null, storageRef = null, includeDeleted = true } = {}) {
+  const fingerprint = normalizeContentFingerprint(contentFingerprint);
+  if (fingerprint) return findLibraryItemsByContentFingerprint(userId, fingerprint, { includeDeleted });
+  return findLibraryItemsByStorageRef(userId, storageRef, { includeDeleted });
+}
+
+async function findLibraryItemByStorageRef(userId, storageRef, { includeDeleted = true } = {}) {
+  const rows = await findLibraryItemsByStorageRef(userId, storageRef, { includeDeleted, limit: 20 });
+  return chooseCanonicalLibraryRow(rows);
+}
+
 
 async function findLibraryItemById(userId, libraryItemId) {
   const id = String(libraryItemId || '').trim();
@@ -256,20 +309,29 @@ async function assertActiveLibrarySlotAvailable(req, userId, { stage = 'final-wr
 async function ensureLibraryItem(userId, patch = {}, options = {}) {
   const storageRef = normalizeBookId(patch?.storage_ref || patch?.storageRef || patch?.book_id || patch?.bookId);
   if (!storageRef) throw new Error('storage_ref is required');
-  const existing = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: true }).catch(() => null);
+
+  const patchFingerprint = getPatchContentFingerprint(patch);
+  const identityRows = await findLibraryIdentityRows(userId, {
+    contentFingerprint: patchFingerprint,
+    storageRef,
+    includeDeleted: true,
+  }).catch(() => []);
+  const existing = chooseCanonicalLibraryRow(identityRows, { preferActive: true });
   const existingStatus = String(existing?.status || '').trim().toLowerCase();
   const wouldConsumeActiveSlot = !existing?.id || existingStatus !== 'active';
   if (wouldConsumeActiveSlot) {
     await assertActiveLibrarySlotAvailable(options?.req, userId, { stage: options?.stage || 'final-write' });
   }
+
   const status = 'active';
   const titleFallback = inferSourceKindFromStorageRef(storageRef, patch) === 'embedded_book' ? (storageRef || 'Book') : (patch?.source_name || storageRef || 'Book');
+  const contentFingerprint = patchFingerprint || toText(existing?.content_fingerprint, null);
   const payload = {
     user_id: userId,
     title: toText(patch?.title, toText(existing?.title, titleFallback)),
     source_kind: inferSourceKindFromStorageRef(storageRef, patch),
     source_name: toText(patch?.source_name || patch?.sourceName, toText(existing?.source_name, null)),
-    content_fingerprint: toText(patch?.content_fingerprint || patch?.contentFingerprint, toText(existing?.content_fingerprint, null)),
+    content_fingerprint: contentFingerprint,
     storage_kind: inferStorageKindFromStorageRef(storageRef, patch),
     storage_ref: storageRef,
     import_kind: inferImportKind(storageRef, patch),
@@ -540,36 +602,98 @@ async function addSession(userId, patch = {}, options = {}) {
   };
 }
 
-async function setLibraryItemStatus(userId, storageRef, nextStatus, options = {}) {
-  const item = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: true }).catch(() => null);
-  if (!item) return null;
-  if (nextStatus === 'active' && String(item.status || '').trim().toLowerCase() !== 'active') {
-    await assertActiveLibrarySlotAvailable(options?.req, userId, { stage: options?.stage || 'final-write' });
-  }
+async function patchLibraryItemStatus(row, nextStatus, options = {}) {
+  if (!row?.id) return null;
   const now = new Date();
-  if (nextStatus === 'deleted') {
-    await deleteProgressForLibraryItem(item.id).catch(() => null);
-  }
   if (nextStatus === 'purge') {
     await Promise.all([
-      deleteProgressForLibraryItem(item.id).catch(() => null),
-      deleteBookMetricsForLibraryItem(item.id).catch(() => null),
+      deleteProgressForLibraryItem(row.id).catch(() => null),
+      deleteBookMetricsForLibraryItem(row.id).catch(() => null),
     ]);
-    await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(item.id)}&user_id=eq.${encodeURIComponent(userId)}`, {
+    await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(row.id)}&user_id=eq.${encodeURIComponent(row.user_id)}`, {
       method: 'DELETE', asService: true,
     }).catch(() => null);
-    return { id: item.id, storage_ref: item.storage_ref, status: 'purged' };
+    return { id: row.id, storage_ref: row.storage_ref, content_fingerprint: row.content_fingerprint || null, status: 'purged' };
   }
+
   const payload = {
     status: nextStatus === 'active' ? 'active' : 'deleted',
     deleted_at: nextStatus === 'active' ? null : now.toISOString(),
     purge_after: nextStatus === 'active' ? null : new Date(now.getTime() + Math.max(1, toInt(options.purgeAfterDays, 30)) * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: now.toISOString(),
   };
-  const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(item.id)}&select=*`, {
+  if (payload.status === 'deleted') {
+    await deleteProgressForLibraryItem(row.id).catch(() => null);
+  }
+  const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(row.id)}&select=*`, {
     method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
   }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : { ...item, ...payload };
+  return Array.isArray(data) && data[0] ? data[0] : { ...row, ...payload };
+}
+
+function buildLibraryStatusResult({ status, storageRef, contentFingerprint = null, matched = 0, updated = 0, rows = [] } = {}) {
+  const primary = Array.isArray(rows) && rows[0] ? rows[0] : null;
+  return {
+    id: primary?.id || null,
+    storage_ref: primary?.storage_ref || storageRef || null,
+    content_fingerprint: contentFingerprint || primary?.content_fingerprint || null,
+    status,
+    matched,
+    updated,
+    rows,
+  };
+}
+
+async function setLibraryItemStatus(userId, storageRef, nextStatus, options = {}) {
+  const ref = normalizeBookId(storageRef);
+  if (!ref) return null;
+
+  const targetRows = await findLibraryItemsByStorageRef(userId, ref, { includeDeleted: true, limit: 20 }).catch(() => []);
+  const targetItem = chooseCanonicalLibraryRow(targetRows, { preferActive: true });
+  if (!targetItem) return null;
+
+  if (nextStatus === 'purge') {
+    return patchLibraryItemStatus(targetItem, 'purge', options);
+  }
+
+  const targetFingerprint = normalizeContentFingerprint(
+    options?.content_fingerprint || options?.contentFingerprint || targetItem?.content_fingerprint
+  );
+  const identityRows = targetFingerprint
+    ? await findLibraryItemsByContentFingerprint(userId, targetFingerprint, { includeDeleted: true, limit: 100 }).catch(() => [])
+    : targetRows;
+
+  if (nextStatus === 'deleted') {
+    const activeRows = (identityRows || []).filter(isActiveLibraryItem);
+    const updatedRows = [];
+    for (const row of activeRows) {
+      const updated = await patchLibraryItemStatus(row, 'deleted', options);
+      if (updated) updatedRows.push(updated);
+    }
+    return buildLibraryStatusResult({
+      status: 'deleted',
+      storageRef: ref,
+      contentFingerprint: targetFingerprint,
+      matched: activeRows.length,
+      updated: updatedRows.length,
+      rows: updatedRows,
+    });
+  }
+
+  if (nextStatus === 'active') {
+    const activeRow = chooseCanonicalLibraryRow((identityRows || []).filter(isActiveLibraryItem), { preferActive: false });
+    if (activeRow?.id) {
+      return activeRow;
+    }
+
+    const canonical = chooseCanonicalLibraryRow(identityRows, { preferActive: false });
+    if (!canonical?.id) return null;
+
+    await assertActiveLibrarySlotAvailable(options?.req, userId, { stage: options?.stage || 'final-write' });
+    return patchLibraryItemStatus(canonical, 'active', options);
+  }
+
+  return null;
 }
 
 function summarizeUsage(usageRow, usageDailyLimit) {

@@ -101,10 +101,10 @@ Maintenance rule:
 | Surface | What it does | Status |
 |---|---|---|
 | Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ✅ Dashboard/library release is a settlement transaction: refresh/login begins behind the boot/settlement boundary; quick `populated`/`empty`/`error` truth may release directly; otherwise release neutral pending, keep it readable for a minimum duration, then replace with final truth. Empty/import guidance appears only after owner-empty truth plus empty grace. Local read failure stays in error/pending rather than pretending empty. Delayed banner appears only if hydration noticeably stalls |
-| Library modal → **Delete** book button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
-| Deleted files modal → **Restore** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Restoring…` on the clicked row |
-| Deleted files modal → **Delete** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
-| Deleted files modal → **Delete All** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` while batch delete runs |
+| Library modal → **Delete** book button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row. The server delete settlement is attempted before local cache movement. If the server returns `row:null`, the client may clean up local cache only; if the server errors, local state is not changed and the failure is surfaced honestly. |
+| Deleted files modal → **Restore** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Restoring…` on the clicked row. Restore is server-first: `library_full`, `row:null`, auth, or server errors do not restore locally, preventing local counts from exceeding the server-settled library limit after denial. |
+| Deleted files modal → **Delete** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row. Permanent delete settles the server result first; `row:null` permits local deleted-cache cleanup only. |
+| Deleted files modal → **Delete All** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` while batch delete runs. Each item is settled with the server before its local deleted-cache row is removed. |
 
 ### Dashboard/library release transaction
 
