@@ -146,7 +146,8 @@ Authoritative user-owned library registry.
 ### Key rules
 - one row represents one owned library item, not one content fingerprint
 - `id` is the canonical owned-book identity
-- uploading the same file again creates a new owned item unless the product explicitly offers replace or reconnect
+- active importer settlement is idempotent by `user_id + non-empty content_fingerprint`, with `user_id + storage_ref` as fallback, to prevent duplicate active capacity identities
+- that idempotency grouping does not make `content_fingerprint` the owned-book identity; `user_library_items.id` remains the durable row identity
 
 ## 4. user_progress
 
