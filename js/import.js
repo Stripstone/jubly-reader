@@ -206,17 +206,13 @@ async function requestServerPageBreak(payload) {
     let _inputMode = 'file';
 
     // Action locks — prevent duplicate concurrent operations.
-    // _capacityVerified: false until background server check resolves after modal open.
-    //   Action buttons are disabled during this window to prevent capacity bypass.
-    // _scanInProgress / _importInProgress: prevent re-entrant scans or imports from
-    //   rapid button clicks. Set synchronously before the first await in each operation.
-    let _capacityVerified = false;
+    // Capacity is not checked on modal open. The shared server gate below runs
+    // only when the user attempts intake, scanning/population, or final save.
     let _scanInProgress = false;
     let _importInProgress = false;
 
     function _setActionButtonsLocked(locked) {
-      // Apply/release the capacity verification lock on action surfaces.
-      // Each button's final enabled state also respects its own readiness condition.
+      // Used only for active operations; never as a modal-open capacity verdict.
       if (scanBtn) scanBtn.disabled = locked || !_file;
       if (doImportBtn) doImportBtn.disabled = locked || !(_tocItems.some(x => x.selected));
       if (textImportBtn) textImportBtn.disabled = locked || !(textBodyInput && String(textBodyInput.value || '').trim());
@@ -242,10 +238,6 @@ async function requestServerPageBreak(payload) {
     }
 
     function syncIdleStatus(snapshot = null) {
-      if (!_capacityVerified) {
-        setStatus('Checking import availability…');
-        return;
-      }
       if (_inputMode === 'file' && _file) {
         setStatus(getSelectedFileStatus(_file));
         return;
@@ -271,9 +263,8 @@ async function requestServerPageBreak(payload) {
       _activeId = null;
       _spineHrefs = [];
       _bookTitle = '';
-      // Reset action locks on every close. Next open will re-verify capacity.
+      // Reset operation locks on close. Capacity is checked at action time.
       if (!keepModalOpen) {
-        _capacityVerified = false;
         _scanInProgress = false;
         _importInProgress = false;
       }
@@ -310,36 +301,16 @@ async function requestServerPageBreak(payload) {
     };
 
     // One authoritative entry path when a file is already in hand (e.g. page-level
-    // drag/drop). Opens the modal immediately so there is no perceptible lag after
-    // drop, then verifies capacity in the background and unlocks actions afterward.
+    // drag/drop). Shell forwards the file here; import.js owns the shared gate.
     window.openImporterWithFile = async function openImporterWithFile(file) {
       if (!file || !modal) return false;
       try { document.body.classList.add('import-drop-pending'); } catch (_) {}
-      const localSnapshot = await getImportCapacitySnapshot();
-      syncImportEntryState(localSnapshot);
-      _capacityVerified = false;
       resetImporterState({ keepModalOpen: true });
-      syncIdleStatus(localSnapshot);
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
-      _setActionButtonsLocked(true);
-      onFileSelected(file);
+      try { syncIdleStatus(await getImportCapacitySnapshot()); } catch (_) { syncIdleStatus(); }
       try { document.body.classList.remove('import-drop-pending'); } catch (_) {}
-      guardImportCapacity().then(guard => {
-        if (modal.style.display === 'none') return;
-        if (!guard.ok) {
-          syncIdleStatus(guard.snapshot);
-          resetImporterState({ keepModalOpen: false });
-        } else {
-          _capacityVerified = true;
-          syncIdleStatus(guard.snapshot);
-          _setActionButtonsLocked(false);
-        }
-      }).catch(() => {
-        _capacityVerified = true;
-        syncIdleStatus(localSnapshot);
-        _setActionButtonsLocked(false);
-      });
+      await attemptFileIntake(file, 'forwarded-drop');
       return true;
     };
 
@@ -392,8 +363,7 @@ async function requestServerPageBreak(payload) {
       const hasText = !!(textBodyInput && String(textBodyInput.value || '').trim());
       textImportBtn.disabled = !hasText;
       if (_inputMode === 'text') {
-        if (!_capacityVerified) setStatus('Checking import availability…');
-        else setStatus(hasText ? 'Text will be split into pages using the normal importer page-breaking behavior.' : 'Paste text to import it as a book.');
+        setStatus(hasText ? 'Text will be split into pages using the normal importer page-breaking behavior.' : 'Paste text to import it as a book.');
       }
     }
 
@@ -414,7 +384,7 @@ async function requestServerPageBreak(payload) {
     }
 
     async function savePastedTextImport() {
-      if (_importInProgress || !_capacityVerified) return;
+      if (_importInProgress) return;
       const raw = String(textBodyInput && textBodyInput.value || '').trim();
       if (!raw) return;
       _importInProgress = true;
@@ -424,9 +394,8 @@ async function requestServerPageBreak(payload) {
       }
 
       try {
-        const guard = await guardImportCapacity();
-        syncImportEntryState(guard.snapshot);
-        if (!guard.ok) return;
+        const intakeGate = await checkImportCapacityGate({ phase: 'intake', source: 'text' });
+        if (!intakeGate.ok) return;
 
         showStage('progress');
         doneBtn.style.display = 'none';
@@ -463,6 +432,8 @@ async function requestServerPageBreak(payload) {
         };
 
         setProgress(75, 'Saving to device', `${pages.length} pages created`);
+        const finalGate = await checkImportCapacityGate({ phase: 'populate', source: 'text-final-save' });
+        if (!finalGate.ok) return;
         if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
         else if (typeof localBookPut === 'function') await localBookPut(record);
         setProgress(100, 'Import complete', `${pages.length} pages created`);
@@ -488,40 +459,16 @@ async function requestServerPageBreak(payload) {
     }
 
     async function showModal() {
-      // Open the modal immediately using the local capacity snapshot — no perceptible lag.
-      // Action buttons are locked until the server confirms capacity, preventing the window
-      // where a user could start an import before a server-side denial arrives.
+      // Open normally. Local count is display/cache only; the server gate runs
+      // only when the user attempts intake, scan/populate, or final save.
       const localSnapshot = await getImportCapacitySnapshot();
       syncImportEntryState(localSnapshot);
       resetImporterState({ keepModalOpen: true });
-      _capacityVerified = false;
       syncIdleStatus(localSnapshot);
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
       syncInputMode();
       syncTextImportState();
-      // Lock all action buttons until server check resolves.
-      _setActionButtonsLocked(true);
-
-      guardImportCapacity().then(guard => {
-        if (modal.style.display === 'none') return;
-        if (!guard.ok) {
-          syncIdleStatus(guard.snapshot);
-          // Server denied — close modal (guardImportCapacity already set status and
-          // may have opened the pricing modal).
-          resetImporterState({ keepModalOpen: false });
-        } else {
-          // Server confirmed capacity — unlock actions.
-          _capacityVerified = true;
-          syncIdleStatus(guard.snapshot);
-          _setActionButtonsLocked(false);
-        }
-      }).catch(() => {
-        // Server unreachable — trust local verdict and unlock.
-        _capacityVerified = true;
-        syncIdleStatus(localSnapshot);
-        _setActionButtonsLocked(false);
-      });
     }
 
     function hideModal() {
@@ -556,10 +503,7 @@ async function requestServerPageBreak(payload) {
       const limit = (window.rcPolicy && typeof window.rcPolicy.getImportSlotLimit === 'function')
         ? window.rcPolicy.getImportSlotLimit()
         : null;
-      const hasCapacity = (window.rcPolicy && typeof window.rcPolicy.hasImportCapacity === 'function')
-        ? window.rcPolicy.hasImportCapacity(count)
-        : true;
-      return { count, limit, hasCapacity };
+      return { count, limit };
     }
 
     function getAuthHeaders() {
@@ -571,40 +515,131 @@ async function requestServerPageBreak(payload) {
       } catch (_) { return {}; }
     }
 
-    async function guardImportCapacity() {
-      const snapshot = await getImportCapacitySnapshot();
-      // Pass 3: back the capacity verdict with a server-owned policy check.
-      // The server resolves its own tier (production ignores client claims).
-      // count is still client-provided (interim until Pass 4 durable tracking).
-      let hasCapacity = snapshot.hasCapacity;
+    function normalizeImportCapacityReason(data, resp) {
+      const raw = String(
+        data?.reason ||
+        data?.verdict ||
+        data?.status ||
+        data?.result ||
+        ''
+      ).trim().toLowerCase();
+      if (raw === 'allowed' || data?.allowed === true) return 'allowed';
+      if (raw === 'library_full') return 'library_full';
+      if (raw === 'auth_required') return 'auth_required';
+      if (raw === 'server_error') return 'server_error';
+      if (resp && (resp.status === 401 || resp.status === 403)) return 'auth_required';
+      return 'server_error';
+    }
+
+    async function requestImportCapacityVerdict() {
+      let snapshot = null;
+      try { snapshot = await getImportCapacitySnapshot(); } catch (_) { snapshot = null; }
+      try { if (snapshot) syncImportEntryState(snapshot); } catch (_) {}
       try {
         const resp = await fetch(
           (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=import-capacity') : '/api/app?kind=import-capacity'),
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-            body: JSON.stringify({ count: snapshot.count }),
+            body: JSON.stringify({}),
             cache: 'no-store',
           }
         );
-        if (resp.ok) {
-          const data = await resp.json();
-          hasCapacity = !!data.hasCapacity;
-          // Sync server-resolved limit back so display stays accurate.
-          if (typeof data.limit !== 'undefined') snapshot.limit = data.limit;
-        }
+        const data = await resp.json().catch(() => null);
+        const reason = normalizeImportCapacityReason(data || {}, resp);
+        if (!resp.ok && reason === 'allowed') return { ok: false, reason: 'server_error', snapshot, data };
+        return { ok: reason === 'allowed', reason, snapshot, data };
       } catch (_) {
-        // Server unreachable: fall back to client snapshot verdict.
-        // BRIDGE: client verdict is the fallback until server is reachable.
-        // Real owner: /api/app?kind=import-capacity.
+        return { ok: false, reason: 'server_error', snapshot, data: null };
       }
-      if (hasCapacity) return { ok: true, snapshot };
-      const msg = snapshot.limit == null
-        ? 'Import is currently unavailable.'
-        : `This tier is full (${snapshot.count}/${snapshot.limit} saved books). Delete a book or upgrade to add another.`;
-      setStatus(msg);
-      try { if (typeof openModal === 'function') openModal('pricing-modal'); } catch (_) {}
-      return { ok: false, snapshot, message: msg };
+    }
+
+    function discardQueuedImportAfterCapacityDenial() {
+      _file = null;
+      _zip = null;
+      _needsConversion = false;
+      _inputFormat = '';
+      _tocItems = [];
+      _activeId = null;
+      _spineHrefs = [];
+      _bookTitle = '';
+      if (fileInput) fileInput.value = '';
+      if (dropzone) dropzone.classList.remove('is-dragover');
+      if (tocList) tocList.innerHTML = '';
+      if (filterInput) filterInput.value = '';
+      if (selectionMeta) selectionMeta.textContent = 'No sections selected';
+      if (previewTitle) previewTitle.textContent = '';
+      if (previewBody) previewBody.innerHTML = '';
+      if (progMeta) progMeta.textContent = '';
+      if (progDetail) progDetail.textContent = '';
+      if (progFill) progFill.style.width = '0%';
+      if (doneBtn) doneBtn.style.display = 'none';
+      if (scanBtn) scanBtn.disabled = true;
+      if (doImportBtn) doImportBtn.disabled = true;
+      showStage('upload');
+    }
+
+    function showImportFullInlineHelper() {
+      if (!uploadStatus) return;
+      uploadStatus.style.display = 'block';
+      uploadStatus.innerHTML = '';
+      const prefix = document.createElement('span');
+      prefix.textContent = 'Your library is full. ';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'See plans';
+      btn.className = 'link-button import-see-plans-btn';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try { if (typeof openModal === 'function') openModal('pricing-modal'); } catch (_) {}
+      });
+      const suffix = document.createElement('span');
+      suffix.textContent = ' for more options.';
+      uploadStatus.append(prefix, btn, suffix);
+    }
+
+    function showImportCapacityNotification(message) {
+      if (window.rcInteraction && typeof window.rcInteraction.error === 'function') {
+        window.rcInteraction.error('import:capacity', message);
+        return;
+      }
+      setStatus(message);
+    }
+
+    function handleImportCapacityDenial(reason, phase) {
+      const isLibraryFull = reason === 'library_full';
+      const phaseKey = String(phase || 'intake');
+      const isIntake = phaseKey === 'intake';
+      discardQueuedImportAfterCapacityDenial();
+      if (isLibraryFull && isIntake) {
+        showImportFullInlineHelper();
+        return;
+      }
+      if (isLibraryFull) {
+        showImportCapacityNotification('Book import failed. Your library is full.');
+        return;
+      }
+      setStatus(reason === 'auth_required' ? 'Sign in to import books.' : 'Book import failed. Try again shortly.');
+    }
+
+    async function checkImportCapacityGate(opts = {}) {
+      const phase = opts.phase || 'intake';
+      const verdict = await requestImportCapacityVerdict();
+      if (verdict.ok) return verdict;
+      handleImportCapacityDenial(verdict.reason, phase);
+      return verdict;
+    }
+
+    async function attemptFileIntake(file, source) {
+      if (!file) {
+        await onFileSelected(null);
+        return false;
+      }
+      const gate = await checkImportCapacityGate({ phase: 'intake', source: source || 'file' });
+      if (!gate.ok) return false;
+      await onFileSelected(file);
+      return true;
     }
 
     function describeCapacity(snapshot) {
@@ -624,11 +659,9 @@ async function requestServerPageBreak(payload) {
 
     function syncImportEntryState(snapshot) {
       if (!openBtn) return;
-      const blocked = !!snapshot && snapshot.hasCapacity === false;
-      openBtn.dataset.slotBlocked = blocked ? 'true' : 'false';
-      openBtn.title = blocked
-        ? `Import limit reached (${snapshot.count}/${snapshot.limit}). Delete a book or upgrade to add another.`
-        : 'Import a book to this device';
+      // Local count is display/cache only and must not block importer open.
+      openBtn.dataset.slotBlocked = 'false';
+      openBtn.title = snapshot ? describeCapacity(snapshot) : 'Import a book to this device';
     }
 
     function setProgress(pct, meta, detail) {
@@ -791,7 +824,7 @@ async function requestServerPageBreak(payload) {
     }
 
     async function scanContents() {
-      if (!_file || _scanInProgress || !_capacityVerified) return;
+      if (!_file || _scanInProgress) return;
       // Lock immediately — before any await — so rapid clicks cannot trigger
       // concurrent scans regardless of which code path runs next.
       _scanInProgress = true;
@@ -801,6 +834,9 @@ async function requestServerPageBreak(payload) {
       }
 
       try {
+
+      const scanGate = await checkImportCapacityGate({ phase: 'scan', source: 'scan' });
+      if (!scanGate.ok) return;
 
       // Branch to the FreeConvert conversion path for all non-EPUB formats.
       if (_needsConversion) { await scanContentsViaConversion(); return; }
@@ -882,9 +918,12 @@ async function requestServerPageBreak(payload) {
 
       } finally {
         // Release the in-progress lock whether the scan succeeded, failed, or was
-        // short-circuited by an early return. Button state is managed by the inner
-        // finally above; this only resets the concurrency guard.
+        // short-circuited by an early return before the inner scan finally runs.
         _scanInProgress = false;
+        if (scanBtn) {
+          _setButtonBusy(scanBtn, false, 'Scanning…', 'Scan Contents');
+          scanBtn.disabled = !_file;
+        }
       }
     }
 
@@ -1017,13 +1056,7 @@ async function requestServerPageBreak(payload) {
     }
 
     async function doImportSelected() {
-      if (!_file || !_zip || _importInProgress || !_capacityVerified) return;
-      const selectedFile = _file;
-      const selectedZip = _zip;
-      const selectedTocItems = Array.isArray(_tocItems) ? _tocItems.slice() : [];
-      const selectedSpineHrefs = Array.isArray(_spineHrefs) ? _spineHrefs.slice() : [];
-      const selectedIds = new Set(selectedTocItems.filter(x => x.selected).map(x => x.id));
-      if (selectedIds.size === 0) return;
+      if (!_file || !_zip || _importInProgress) return;
       // Lock immediately — before any await — so rapid clicks cannot trigger concurrent imports.
       _importInProgress = true;
       if (doImportBtn) {
@@ -1032,15 +1065,15 @@ async function requestServerPageBreak(payload) {
       }
 
       try {
-        // Re-verify capacity at write time as a server-side safety check.
-        // (Capacity was already verified when the modal opened, but this catches
-        // edge cases like another device importing during the same session.)
-        const guard = await guardImportCapacity();
-        syncImportEntryState(guard.snapshot);
-        if (!guard.ok) {
-          showStage('upload');
-          return;
-        }
+        const populateGate = await checkImportCapacityGate({ phase: 'populate', source: 'import-selected' });
+        if (!populateGate.ok) return;
+
+        const selectedFile = _file;
+        const selectedZip = _zip;
+        const selectedTocItems = Array.isArray(_tocItems) ? _tocItems.slice() : [];
+        const selectedSpineHrefs = Array.isArray(_spineHrefs) ? _spineHrefs.slice() : [];
+        const selectedIds = new Set(selectedTocItems.filter(x => x.selected).map(x => x.id));
+        if (selectedIds.size === 0) return;
 
         showStage('progress');
         doneBtn.style.display = 'none';
@@ -1097,7 +1130,10 @@ async function requestServerPageBreak(payload) {
           pageCount: createdPages,
           markdown: md
         };
-        await localBookPut(record);
+        const finalGate = await checkImportCapacityGate({ phase: 'populate', source: 'file-final-save' });
+        if (!finalGate.ok) return;
+        if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
+        else if (typeof localBookPut === 'function') await localBookPut(record);
 
         setProgress(100, 'Import complete', `${createdPages} pages created`);
         try {
@@ -1163,9 +1199,9 @@ async function requestServerPageBreak(payload) {
     dropzone?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') fileInput?.click();
     });
-    fileInput?.addEventListener('change', (e) => {
+    fileInput?.addEventListener('change', async (e) => {
       const f = e.target.files && e.target.files[0];
-      onFileSelected(f);
+      await attemptFileIntake(f, 'browse');
     });
 
     // Drag/drop
@@ -1173,9 +1209,9 @@ async function requestServerPageBreak(payload) {
     ['dragenter','dragover','dragleave','drop'].forEach((ev) => {
       dropzone?.addEventListener(ev, prevent);
     });
-    dropzone?.addEventListener('drop', (e) => {
+    dropzone?.addEventListener('drop', async (e) => {
       const f = e.dataTransfer?.files && e.dataTransfer.files[0];
-      if (f) onFileSelected(f);
+      if (f) await attemptFileIntake(f, 'drop');
     });
 
     modeFileBtn?.addEventListener('click', () => { _inputMode = 'file'; syncInputMode(); });

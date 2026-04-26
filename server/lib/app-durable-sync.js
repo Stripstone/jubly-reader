@@ -1,5 +1,6 @@
 import { json, withCors, readJsonBody } from './http.js';
 import { getAllowedBrowserOrigins } from './origins.js';
+import { resolveImportCapacity } from './app-import-capacity.js';
 import { getResolvedRuntimePolicyForRequest } from './runtime-policy.js';
 import { getUserFromAccessToken, getUsageRow, supabaseRest, upsertUsageRow } from './supabase.js';
 
@@ -229,10 +230,38 @@ async function findLibraryItemById(userId, libraryItemId) {
   return Array.isArray(data) && data[0] ? data[0] : null;
 }
 
-async function ensureLibraryItem(userId, patch = {}) {
+
+function buildImportCapacityError(result) {
+  const body = result?.body || {
+    ok: false,
+    allowed: false,
+    reason: 'server_error',
+    count: null,
+    limit: null,
+    source: 'server-durable',
+    stage: 'final-write',
+  };
+  const error = new Error(String(body.reason || 'import_capacity_blocked'));
+  error.importCapacityStatus = result?.status || (body.reason === 'library_full' ? 200 : 500);
+  error.importCapacityBody = body;
+  return error;
+}
+
+async function assertActiveLibrarySlotAvailable(req, userId, { stage = 'final-write' } = {}) {
+  const result = await resolveImportCapacity(req, { stage, user: { id: userId } });
+  if (!result?.body?.allowed) throw buildImportCapacityError(result);
+  return result.body;
+}
+
+async function ensureLibraryItem(userId, patch = {}, options = {}) {
   const storageRef = normalizeBookId(patch?.storage_ref || patch?.storageRef || patch?.book_id || patch?.bookId);
   if (!storageRef) throw new Error('storage_ref is required');
   const existing = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: true }).catch(() => null);
+  const existingStatus = String(existing?.status || '').trim().toLowerCase();
+  const wouldConsumeActiveSlot = !existing?.id || existingStatus !== 'active';
+  if (wouldConsumeActiveSlot) {
+    await assertActiveLibrarySlotAvailable(options?.req, userId, { stage: options?.stage || 'final-write' });
+  }
   const status = 'active';
   const titleFallback = inferSourceKindFromStorageRef(storageRef, patch) === 'embedded_book' ? (storageRef || 'Book') : (patch?.source_name || storageRef || 'Book');
   const payload = {
@@ -390,8 +419,8 @@ function serializeDailyStatRow(row) {
   };
 }
 
-async function upsertProgress(userId, patch = {}) {
-  const libraryItem = await ensureLibraryItem(userId, patch);
+async function upsertProgress(userId, patch = {}, options = {}) {
+  const libraryItem = await ensureLibraryItem(userId, patch, options);
   const existing = await getProgressRowByLibraryItemId(libraryItem.id).catch(() => null);
   const payload = {
     library_item_id: libraryItem.id,
@@ -494,8 +523,8 @@ async function upsertDailyStatsForSession(userId, patch = {}) {
   return Array.isArray(data) && data[0] ? data[0] : payload;
 }
 
-async function addSession(userId, patch = {}) {
-  const libraryItem = await ensureLibraryItem(userId, patch);
+async function addSession(userId, patch = {}, options = {}) {
+  const libraryItem = await ensureLibraryItem(userId, patch, options);
   await Promise.all([
     upsertBookMetricsForSession(userId, libraryItem, patch),
     upsertDailyStatsForSession(userId, patch),
@@ -514,6 +543,9 @@ async function addSession(userId, patch = {}) {
 async function setLibraryItemStatus(userId, storageRef, nextStatus, options = {}) {
   const item = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: true }).catch(() => null);
   if (!item) return null;
+  if (nextStatus === 'active' && String(item.status || '').trim().toLowerCase() !== 'active') {
+    await assertActiveLibrarySlotAvailable(options?.req, userId, { stage: options?.stage || 'final-write' });
+  }
   const now = new Date();
   if (nextStatus === 'deleted') {
     await deleteProgressForLibraryItem(item.id).catch(() => null);
@@ -688,10 +720,10 @@ export default async function handler(req, res) {
           row = await upsertSettings(auth.user.id, body?.payload || {});
           break;
         case 'write_progress':
-          row = await upsertProgress(auth.user.id, body?.payload || {});
+          row = await upsertProgress(auth.user.id, body?.payload || {}, { req, stage: 'final-write' });
           break;
         case 'record_session':
-          row = await addSession(auth.user.id, body?.payload || {});
+          row = await addSession(auth.user.id, body?.payload || {}, { req, stage: 'final-write' });
           break;
         case 'delete_library_item': {
           const storageRef = body?.payload?.storage_ref || body?.payload?.storageRef || body?.payload?.book_id || body?.payload?.bookId;
@@ -701,7 +733,7 @@ export default async function handler(req, res) {
         }
         case 'restore_library_item': {
           const storageRef = body?.payload?.storage_ref || body?.payload?.storageRef || body?.payload?.book_id || body?.payload?.bookId;
-          row = await setLibraryItemStatus(auth.user.id, storageRef, 'active', body?.payload || {});
+          row = await setLibraryItemStatus(auth.user.id, storageRef, 'active', { ...(body?.payload || {}), req, stage: 'final-write' });
           break;
         }
         case 'reset_usage_window': {
@@ -725,6 +757,9 @@ export default async function handler(req, res) {
       const snapshot = await buildSnapshot(req, auth.user).catch(() => null);
       return json(res, 200, { ok: true, row, snapshot });
     } catch (error) {
+      if (error?.importCapacityBody) {
+        return json(res, error.importCapacityStatus || 200, error.importCapacityBody);
+      }
       return json(res, 400, { ok: false, error: String(error?.message || error || 'Sync failed.') });
     }
   }

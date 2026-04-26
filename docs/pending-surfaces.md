@@ -90,7 +90,7 @@ Maintenance rule:
 | Importer → **Import** button (post-scan) | `POST /api/content?action=page-break` then IndexedDB write | ✅ Inline progress stage now includes explicit page-builder step before save |
 | Importer → **Import** button (non-EPUB file) | Upload → FreeConvert → poll → fetch EPUB → parse | ✅ Existing inline multi-step copy retained (`Preparing upload…`, `Uploading…`, `Converting…`, `Reading book…`) |
 | Importer → **Import Text** button | Markdown chapter parse + IndexedDB write | ✅ Inline button state: `Importing…` + progress stage appears before page-break await |
-| Importer opens (no button) | `GET /api/app?kind=import-capacity` | ✅ Inline copy while actions are locked: `Checking import availability…` |
+| Importer capacity gate (file/drop/text/scan/import/final save) | `POST /api/app?kind=import-capacity` | ◐ Server-backed action gate. The importer opens normally; local `Saved on this device` count is display/cache only and never capacity authority. Intake/scan/populate/final-save checks use `source: server-durable` with reasons `allowed`, `library_full`, `auth_required`, or `server_error`. `library_full` at intake keeps the importer open and shows `Your library is full. See plans for more options.`; scan/populate/final-save denial drops the queued import and surfaces `Book import failed. Your library is full.` |
 
 ---
 
