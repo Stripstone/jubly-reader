@@ -553,6 +553,7 @@ window.rcInteraction = (function () {
 
     function resolveSectionForAuth(id) {
         const normalized = normalizeSection(id);
+        if (normalized === 'login-page' && isPasswordRecoveryActive()) return 'login-page';
         if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'public-onboarding' || normalized === 'login-page')) return 'dashboard';
         if (!isAuthedUser() && normalized === 'profile-page') return 'landing-page';
         if (!isAuthedUser() && normalized === 'dashboard' && !isIntroLibraryVisible()) return 'landing-page';
@@ -582,7 +583,9 @@ window.rcInteraction = (function () {
     function readSectionFromLocation() {
         try {
             const params = new URLSearchParams(window.location.search || '');
-            return normalizeSection(params.get('view') || 'landing-page');
+            const requestedView = String(params.get('view') || 'landing-page').trim();
+            if (requestedView === 'reset-password') return 'login-page';
+            return normalizeSection(requestedView);
         } catch (_) {
             return 'landing-page';
         }
@@ -1081,6 +1084,7 @@ window.rcInteraction = (function () {
         closeModal('ownership-modal');
         _authMode = 'signin';
         _signupStep = 1;
+        _passwordRecoveryActive = false;
         toggleAuthMode(true);
         showSection('login-page');
     }
@@ -1110,6 +1114,10 @@ window.rcInteraction = (function () {
             } catch (_) {}
             return;
         }
+        if (_authMode === 'forgot' || _authMode === 'reset') {
+            showSigninPane();
+            return;
+        }
         returnToPublicEntry();
     }
 
@@ -1118,6 +1126,7 @@ window.rcInteraction = (function () {
         closeModal('pricing-modal');
         _authMode = 'signup';
         _signupStep = 1;
+        _passwordRecoveryActive = false;
         toggleAuthMode(true);
         showSection('login-page');
     }
@@ -1317,9 +1326,37 @@ window.rcInteraction = (function () {
     // Shell is a thin presenter. It calls rcAuth, reflects state, and routes.
     // It does not own auth state or Supabase operations.
 
-    let _authMode = 'signin'; // 'signin' | 'signup'
+    let _authMode = 'signin'; // 'signin' | 'signup' | 'forgot' | 'reset'
     let _signupStep = 1; // 1=email, 2=username+password
     let _validatedSignupEmail = '';
+    let _passwordRecoveryActive = false;
+
+    function isPasswordRecoveryRoute() {
+        try {
+            const search = new URLSearchParams(window.location.search || '');
+            if (String(search.get('view') || '').trim() === 'reset-password') return true;
+            if (String(search.get('type') || '').trim().toLowerCase() === 'recovery') return true;
+        } catch (_) {}
+        try {
+            const hash = String(window.location.hash || '').replace(/^#/, '');
+            if (!hash) return false;
+            const hashParams = new URLSearchParams(hash);
+            return String(hashParams.get('type') || '').trim().toLowerCase() === 'recovery';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function isPasswordRecoveryActive() {
+        return _passwordRecoveryActive || isPasswordRecoveryRoute();
+    }
+
+    function _authSubmitText() {
+        if (_authMode === 'signup') return _signupStep === 1 ? 'Next' : 'Create Account';
+        if (_authMode === 'forgot') return 'Send Reset Link';
+        if (_authMode === 'reset') return 'Save Password';
+        return 'Sign In';
+    }
 
     function applyAuthModeUi() {
         const heading       = document.getElementById('auth-form-heading');
@@ -1331,6 +1368,7 @@ window.rcInteraction = (function () {
         const usernameWrap  = document.getElementById('auth-username-wrap');
         const passwordWrap  = document.getElementById('auth-password-wrap');
         const confirmWrap   = document.getElementById('auth-confirm-wrap');
+        const forgotWrap    = document.getElementById('auth-forgot-wrap');
         const errEl         = document.getElementById('auth-error');
         const okEl          = document.getElementById('auth-success');
         const pwInput       = document.getElementById('loginPassword');
@@ -1342,21 +1380,45 @@ window.rcInteraction = (function () {
             if (heading) heading.textContent = 'Create account';
             if (toggleBtn) toggleBtn.textContent = 'Sign in instead';
             if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
+            if (forgotWrap) forgotWrap.classList.add('hidden-section');
             if (_signupStep === 1) {
                 if (emailWrap) emailWrap.classList.remove('hidden-section');
                 if (subheading) subheading.textContent = 'Enter your email to begin.';
                 if (usernameWrap) usernameWrap.classList.add('hidden-section');
                 if (passwordWrap) passwordWrap.classList.add('hidden-section');
                 if (confirmWrap) confirmWrap.classList.add('hidden-section');
-                if (submitBtn) submitBtn.textContent = 'Next';
+                if (submitBtn) submitBtn.textContent = _authSubmitText();
             } else {
                 if (emailWrap) emailWrap.classList.add('hidden-section');
                 if (subheading) subheading.textContent = 'Choose a username and password.';
                 if (usernameWrap) usernameWrap.classList.remove('hidden-section');
                 if (passwordWrap) passwordWrap.classList.remove('hidden-section');
                 if (confirmWrap) confirmWrap.classList.remove('hidden-section');
-                if (submitBtn) submitBtn.textContent = 'Create Account';
+                if (submitBtn) submitBtn.textContent = _authSubmitText();
             }
+            if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
+        } else if (_authMode === 'forgot') {
+            if (heading) heading.textContent = 'Reset password';
+            if (subheading) subheading.textContent = 'Enter your email and we’ll send a reset link.';
+            if (toggleBtn) toggleBtn.textContent = 'Sign in';
+            if (toggleLabel) toggleLabel.textContent = 'Remembered it?';
+            if (emailWrap) emailWrap.classList.remove('hidden-section');
+            if (usernameWrap) usernameWrap.classList.add('hidden-section');
+            if (passwordWrap) passwordWrap.classList.add('hidden-section');
+            if (confirmWrap) confirmWrap.classList.add('hidden-section');
+            if (forgotWrap) forgotWrap.classList.add('hidden-section');
+            if (submitBtn) submitBtn.textContent = _authSubmitText();
+        } else if (_authMode === 'reset') {
+            if (heading) heading.textContent = 'Choose a new password';
+            if (subheading) subheading.textContent = 'Enter a new password for your Jubly account.';
+            if (toggleBtn) toggleBtn.textContent = 'Sign in';
+            if (toggleLabel) toggleLabel.textContent = 'Ready?';
+            if (emailWrap) emailWrap.classList.add('hidden-section');
+            if (usernameWrap) usernameWrap.classList.add('hidden-section');
+            if (passwordWrap) passwordWrap.classList.remove('hidden-section');
+            if (confirmWrap) confirmWrap.classList.remove('hidden-section');
+            if (forgotWrap) forgotWrap.classList.add('hidden-section');
+            if (submitBtn) submitBtn.textContent = _authSubmitText();
             if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
         } else {
             if (heading) heading.textContent = 'Welcome back';
@@ -1367,16 +1429,33 @@ window.rcInteraction = (function () {
             if (usernameWrap) usernameWrap.classList.add('hidden-section');
             if (passwordWrap) passwordWrap.classList.remove('hidden-section');
             if (confirmWrap) confirmWrap.classList.add('hidden-section');
-            if (submitBtn) submitBtn.textContent = 'Sign In';
+            if (forgotWrap) forgotWrap.classList.remove('hidden-section');
+            if (submitBtn) submitBtn.textContent = _authSubmitText();
             if (pwInput) pwInput.setAttribute('autocomplete', 'current-password');
         }
     }
 
     function toggleAuthMode(forceApply = false) {
-        if (!forceApply) _authMode = _authMode === 'signin' ? 'signup' : 'signin';
+        if (!forceApply) _authMode = _authMode === 'signup' ? 'signin' : 'signup';
         _signupStep = 1;
         _validatedSignupEmail = '';
+        if (_authMode !== 'reset') _passwordRecoveryActive = false;
         applyAuthModeUi();
+    }
+
+    function showForgotPasswordPane() {
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        _authMode = 'forgot';
+        _signupStep = 1;
+        _validatedSignupEmail = '';
+        _passwordRecoveryActive = false;
+        applyAuthModeUi();
+        showSection('login-page', { preserveAuthMessage: true });
+        try {
+            const emailField = document.getElementById('loginEmail');
+            if (emailField) emailField.focus();
+        } catch (_) {}
     }
 
     function _authShowError(msg) {
@@ -1406,6 +1485,16 @@ window.rcInteraction = (function () {
 
     function prepareAuthSurfaceForRelease(targetId, options = {}) {
         if (targetId !== 'login-page') return;
+        if (isPasswordRecoveryRoute()) {
+            _passwordRecoveryActive = true;
+            _authMode = 'reset';
+            _signupStep = 1;
+            _validatedSignupEmail = '';
+            applyAuthModeUi();
+            if (options && options.preserveAuthMessage) return;
+            _authClearMessages();
+            return;
+        }
         if (options && options.preserveAuthMessage) return;
         // Route/re-entry into login must not preserve week-old signup or
         // confirmation-copy as current auth truth. Supabase sign-in remains the
@@ -1513,6 +1602,17 @@ window.rcInteraction = (function () {
         }
     }
 
+    function buildPasswordResetRedirect() {
+        try {
+            const cfg = window.rcAuth && typeof window.rcAuth.getConfig === 'function' ? window.rcAuth.getConfig() : null;
+            const configured = String((cfg && cfg.resetPasswordRedirectUrl) || '').trim();
+            if (configured) return configured;
+            const base = String((cfg && cfg.appBaseUrl) || '').trim().replace(/\/$/, '');
+            if (base) return `${base}/?view=reset-password`;
+        } catch (_) {}
+        return '';
+    }
+
     async function authFormSubmit() {
         const email    = ((document.getElementById('loginEmail') || {}).value || '').trim();
         const username = ((document.getElementById('signupUsername') || {}).value || '').trim();
@@ -1521,6 +1621,90 @@ window.rcInteraction = (function () {
         const btn      = document.getElementById('auth-submit-btn');
 
         _authClearMessages();
+
+        if (_authMode === 'forgot') {
+            if (!email) {
+                _authShowError('Email is required.');
+                return;
+            }
+            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
+                _authShowError('Enter a valid email address.');
+                return;
+            }
+            if (!(window.rcAuth && typeof window.rcAuth.requestPasswordReset === 'function')) {
+                _authShowError('Password reset is not available in this environment.');
+                return;
+            }
+            if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+            try {
+                const result = await window.rcAuth.requestPasswordReset(email, {
+                    redirectTo: buildPasswordResetRedirect(),
+                });
+                const error = result && result.error ? result.error : null;
+                if (error) {
+                    _authShowError(String(error.message || 'Password reset failed. Please try again.'));
+                    return;
+                }
+                // Keep copy generic so reset does not disclose whether an email
+                // belongs to an account. Supabase remains the mail/session owner.
+                _authShowSuccess('If an account exists for that email, we sent a password reset link.');
+            } catch (_) {
+                _authShowError('Password reset failed. Please try again.');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = _authSubmitText();
+                }
+            }
+            return;
+        }
+
+        if (_authMode === 'reset') {
+            if (!password || !confirm) {
+                _authShowError('Enter and confirm your new password.');
+                return;
+            }
+            if (password.length < 8) {
+                _authShowError('Password must be at least 8 characters.');
+                return;
+            }
+            if (password !== confirm) {
+                _authShowError('Passwords do not match.');
+                return;
+            }
+            if (!(window.rcAuth && typeof window.rcAuth.changePassword === 'function')) {
+                _authShowError('Password reset is not available in this environment.');
+                return;
+            }
+            if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+            try {
+                const result = await window.rcAuth.changePassword(password);
+                const error = result && result.error ? result.error : null;
+                if (error) {
+                    _authShowError(String(error.message || 'Password update failed. Please try again.'));
+                    return;
+                }
+
+                _passwordRecoveryActive = false;
+                try {
+                    if (window.rcAuth && typeof window.rcAuth.signOut === 'function') await window.rcAuth.signOut();
+                } catch (_) {}
+                _authMode = 'signin';
+                _signupStep = 1;
+                _validatedSignupEmail = '';
+                applyAuthModeUi();
+                try { syncHistoryForSection('login-page', 'replace'); } catch (_) {}
+                _authShowSuccess('Password updated. Please sign in.');
+            } catch (_) {
+                _authShowError('Password update failed. Please try again.');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = _authSubmitText();
+                }
+            }
+            return;
+        }
 
         if (_authMode === 'signup' && _signupStep === 1) {
             if (!email) {
@@ -1539,7 +1723,7 @@ window.rcInteraction = (function () {
             } finally {
                 if (btn) {
                     btn.disabled = false;
-                    btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
+                    btn.textContent = _authSubmitText();
                 }
             }
             _signupStep = 2;
@@ -1636,7 +1820,7 @@ window.rcInteraction = (function () {
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
+                btn.textContent = _authSubmitText();
             }
         }
     }
@@ -1683,12 +1867,34 @@ window.rcInteraction = (function () {
         // index.html owns first paint, state.js owns runtime adoption, and shell
         // appearance controls remain user-intent bridges through rcAppearance.set().
 
+        if (source === 'PASSWORD_RECOVERY') {
+            _passwordRecoveryActive = true;
+            _authMode = 'reset';
+            _signupStep = 1;
+            _validatedSignupEmail = '';
+            applyAuthModeUi();
+            if (_shellAuthBootstrapped && current !== 'login-page') {
+                showSection('login-page', {
+                    historyMode: 'replace',
+                    preserveAuthMessage: true,
+                    releaseReason: 'auth-password-recovery',
+                });
+            } else {
+                syncShellAuthPresentation('login-page');
+            }
+            return;
+        }
+
         if (!_shellAuthBootstrapped) {
             syncShellAuthPresentation(resolveSectionForAuth(current));
             return;
         }
 
         if (signedIn) {
+            if (current === 'login-page' && isPasswordRecoveryActive()) {
+                syncShellAuthPresentation(current);
+                return;
+            }
             const pendingPaid = !!(window.rcBilling && typeof window.rcBilling.hasPendingPaidIntent === 'function' && window.rcBilling.hasPendingPaidIntent());
             if (pendingPaid && (current === 'landing-page' || current === 'login-page')) {
                 syncShellAuthPresentation(current === 'landing-page' ? 'login-page' : current);

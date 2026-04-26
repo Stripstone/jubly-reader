@@ -18,10 +18,13 @@ Add these exact redirect URLs using the same resolved origin:
 - `https://your-app.example.com/?view=login-page&auth=verified`
 - `https://your-app.example.com/?view=login-page&auth=verified&next=checkout&tier=pro`
 - `https://your-app.example.com/?view=login-page&auth=verified&next=checkout&tier=premium`
+- `https://your-app.example.com/?view=reset-password`
 
 Replace `https://your-app.example.com` with the actual value of `APP_BASE_URL` for the deployed environment.
 
-## Email template
+## Email templates
 In Supabase Auth → Email Templates → Confirm signup, paste the contents of `SUPABASE_CONFIRM_SIGNUP_TEMPLATE.html`.
 
-The template intentionally uses `{{ .ConfirmationURL }}` so verification stays provider-backed while continuation returns to the app-owned verified login flow. The app preserves the active continuation intent and clears stale paid-intent markers when the user leaves the auth/checkout path.
+In Supabase Auth → Email Templates → Reset password, paste the contents of `SUPABASE_RESET_PASSWORD_TEMPLATE.html`.
+
+Both templates intentionally use `{{ .ConfirmationURL }}` so Supabase owns the provider-backed email action while Jubly owns the app surface the user returns to. Signup returns to the verified login flow; password reset returns to `/?view=reset-password`, where the app asks for a new password and then sends the user back to Log In.

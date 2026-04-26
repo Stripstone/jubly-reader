@@ -60,3 +60,4 @@ Supabase Auth dashboard values (operator-set, not code-owned):
   - https://your-app.example.com/?view=login-page&auth=verified
   - https://your-app.example.com/?view=login-page&auth=verified&next=checkout&tier=pro
   - https://your-app.example.com/?view=login-page&auth=verified&next=checkout&tier=premium
+  - https://your-app.example.com/?view=reset-password
