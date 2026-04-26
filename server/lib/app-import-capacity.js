@@ -50,42 +50,20 @@ function buildCapacityBody({ ok, allowed, reason, count, limit, stage }) {
   };
 }
 
-function normalizeIdentityText(value) {
-  const out = String(value == null ? '' : value).trim();
-  return out || null;
-}
-
-function activeIdentityKey(row) {
-  const userId = normalizeIdentityText(row?.user_id);
-  const fingerprint = normalizeIdentityText(row?.content_fingerprint);
-  if (userId && fingerprint) return `fingerprint:${userId}:${fingerprint}`;
-  const storageRef = normalizeIdentityText(row?.storage_ref);
-  if (userId && storageRef) return `storage:${userId}:${storageRef}`;
-  const id = normalizeIdentityText(row?.id);
-  return id ? `row:${id}` : null;
-}
-
 export async function countActiveLibraryItemsForUser(userId) {
   const id = String(userId || '').trim();
   if (!id) throw new Error('user_id is required for active library count');
 
-  // Capacity counts durable active identities, not raw rows. Historical duplicate
-  // active rows for the same content/storage identity must not consume multiple slots.
+  // Capacity counts only durable active rows. Deleted rows do not count.
   const data = await supabaseRest(
-    `/rest/v1/user_library_items?user_id=eq.${encodeURIComponent(id)}&status=eq.active&select=id,user_id,content_fingerprint,storage_ref&limit=10000`,
+    `/rest/v1/user_library_items?user_id=eq.${encodeURIComponent(id)}&status=eq.active&select=id&limit=10000`,
     {
       method: 'GET',
       asService: true,
       headers: { Prefer: 'count=exact' },
     }
   );
-  const rows = Array.isArray(data) ? data : [];
-  const identities = new Set();
-  rows.forEach((row) => {
-    const key = activeIdentityKey(row);
-    if (key) identities.add(key);
-  });
-  return identities.size;
+  return Array.isArray(data) ? data.length : 0;
 }
 
 export async function resolveImportCapacity(req, { stage = 'intake', user = null } = {}) {

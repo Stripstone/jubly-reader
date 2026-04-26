@@ -153,17 +153,6 @@
     });
   }
 
-
-  async function localDeletedBookGet(id) {
-    const db = await openLocalDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(LOCAL_STORE_DELETED, 'readonly');
-      const store = tx.objectStore(LOCAL_STORE_DELETED);
-      const req = store.get(id);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => reject(req.error || new Error('deleted get failed'));
-    });
-  }
   async function localDeletedBookPut(record) {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
@@ -177,18 +166,14 @@
 
   async function syncRemoteLibraryItemState(bookId, options = {}) {
     try {
-      if (!(window.rcSync && typeof bookId === 'string' && bookId.trim())) {
-        return { ok: true, localOnly: true, reason: 'local_only' };
-      }
+      if (!(window.rcSync && typeof bookId === 'string' && bookId.trim())) return null;
       if (options.restore) {
-        if (typeof window.rcSync.restoreLibraryItem === 'function') return await window.rcSync.restoreLibraryItem(bookId, options);
-        return { ok: true, localOnly: true, reason: 'local_only' };
+        if (typeof window.rcSync.restoreLibraryItem === 'function') return await window.rcSync.restoreLibraryItem(bookId);
+        return null;
       }
       if (typeof window.rcSync.deleteLibraryItem === 'function') return await window.rcSync.deleteLibraryItem(bookId, options);
-    } catch (error) {
-      return { ok: false, reason: String(error?.message || error || 'server_error'), error: String(error?.message || error || 'server_error') };
-    }
-    return { ok: true, localOnly: true, reason: 'local_only' };
+    } catch (_) {}
+    return null;
   }
 
   function queueRemoteLibraryItemState(bookId, options = {}) {
@@ -207,21 +192,6 @@
       try { console.warn('Remote library sync failed:', error); } catch (_) {}
     });
     return task;
-  }
-
-  function librarySettlementAllowsLocalMove(result, { allowNotFound = false } = {}) {
-    if (!result) return true;
-    if (result.ok || result.localOnly) return true;
-    const reason = String(result.reason || '').trim().toLowerCase();
-    return !!(allowNotFound && ['not_found', 'row_missing', 'missing_row'].includes(reason));
-  }
-
-  function librarySettlementFailureMessage(result, fallback = 'Server update failed.') {
-    const reason = String(result?.reason || result?.error || '').trim();
-    if (reason === 'library_full') return 'Your library is full. Delete another book or choose a plan before restoring this one.';
-    if (reason === 'missing_auth' || reason === 'auth_required' || reason === 'invalid_auth') return 'Please sign in again before changing this library item.';
-    if (reason === 'not_found') return 'This book could not be matched on the server.';
-    return fallback;
   }
 
   function setButtonBusy(btn, busy, busyLabel) {
@@ -265,71 +235,63 @@
   }
 
   async function moveLocalBookToDeleted(id) {
-    const record = await localBookGet(id);
-    if (!record) throw new Error('book not found');
-    const settlement = await syncRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: false, record });
-    if (!librarySettlementAllowsLocalMove(settlement, { allowNotFound: true })) {
-      throw new Error(librarySettlementFailureMessage(settlement, 'Delete failed before the server marked this book deleted.'));
-    }
     const db = await openLocalDb();
     await new Promise((resolve, reject) => {
       const tx = db.transaction([LOCAL_STORE_BOOKS, LOCAL_STORE_DELETED], 'readwrite');
       const books = tx.objectStore(LOCAL_STORE_BOOKS);
       const deleted = tx.objectStore(LOCAL_STORE_DELETED);
-      deleted.put({ ...record, deletedAt: Date.now() });
-      books.delete(id);
+      const req = books.get(id);
+      req.onsuccess = () => {
+        const record = req.result;
+        if (!record) { reject(new Error('book not found')); return; }
+        deleted.put({ ...record, deletedAt: Date.now() });
+        books.delete(id);
+      };
+      req.onerror = () => reject(req.error || new Error('move failed'));
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => reject(tx.error || new Error('move failed'));
       tx.onabort = () => reject(tx.error || new Error('move aborted'));
     });
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: false });
     return true;
   }
 
   async function restoreDeletedLocalBook(id) {
-    const record = await localDeletedBookGet(id);
-    if (!record) throw new Error('deleted book not found');
-    const settlement = await syncRemoteLibraryItemState(`local:${String(id || '').trim()}`, { restore: true, record });
-    if (!librarySettlementAllowsLocalMove(settlement)) {
-      throw new Error(librarySettlementFailureMessage(settlement, 'Restore failed before the server reactivated this book.'));
-    }
     const db = await openLocalDb();
     await new Promise((resolve, reject) => {
       const tx = db.transaction([LOCAL_STORE_BOOKS, LOCAL_STORE_DELETED], 'readwrite');
       const books = tx.objectStore(LOCAL_STORE_BOOKS);
       const deleted = tx.objectStore(LOCAL_STORE_DELETED);
-      const restored = { ...record };
-      delete restored.deletedAt;
-      books.put(restored);
-      deleted.delete(id);
+      const req = deleted.get(id);
+      req.onsuccess = () => {
+        const record = req.result;
+        if (!record) { reject(new Error('deleted book not found')); return; }
+        const restored = { ...record };
+        delete restored.deletedAt;
+        books.put(restored);
+        deleted.delete(id);
+      };
+      req.onerror = () => reject(req.error || new Error('restore failed'));
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => reject(tx.error || new Error('restore failed'));
       tx.onabort = () => reject(tx.error || new Error('restore aborted'));
     });
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { restore: true });
     return true;
   }
 
   async function permanentlyDeleteLocalBook(id) {
-    const record = await localDeletedBookGet(id);
-    if (!record) throw new Error('deleted book not found');
-    const settlement = await syncRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: true, record });
-    if (!librarySettlementAllowsLocalMove(settlement, { allowNotFound: true })) {
-      throw new Error(librarySettlementFailureMessage(settlement, 'Permanent delete failed before the server purged this book.'));
-    }
     await localDeletedBookDelete(id);
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: true });
     return true;
   }
 
   async function permanentlyDeleteAllLocalBooks(ids = []) {
     const uniqueIds = Array.from(new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean)));
-    const failures = [];
     for (const id of uniqueIds) {
-      try {
-        await permanentlyDeleteLocalBook(id);
-      } catch (error) {
-        failures.push({ id, error });
-      }
+      await localDeletedBookDelete(id);
+      queueRemoteLibraryItemState(`local:${id}`, { purge: true });
     }
-    if (failures.length) throw new Error(`Delete all partially failed for ${failures.length} item${failures.length === 1 ? '' : 's'}.`);
     return true;
   }
 
@@ -2734,7 +2696,6 @@
           del.addEventListener('click', async () => {
             const ok = confirm(`Move “${b.title || 'this book'}” to Deleted Files?\n\nIt will leave your Library now, stay on this device, and can be restored later from Profile.`);
             if (!ok) return;
-            setButtonBusy(del, true, 'Deleting…');
             try {
               await moveLocalBookToDeleted(b.id);
               await refreshBookSelect();
@@ -2742,9 +2703,8 @@
               emitDeletedChanged();
               await renderDeletedCount();
               render();
-            } catch (error) {
-              setButtonBusy(del, false);
-              alert(String(error?.message || 'Delete failed.'));
+            } catch (_) {
+              alert('Delete failed.');
             }
           });
           actions.appendChild(del);
@@ -2790,9 +2750,9 @@ This removes them from Deleted Files and frees the device storage.`);
           emitDeletedChanged();
           await renderDeletedCount();
           renderDeleted();
-        } catch (error) {
+        } catch (_) {
           setButtonBusy(deleteAll, false);
-          alert(String(error?.message || 'Delete all failed.'));
+          alert('Delete all failed.');
         }
       });
       topActions.appendChild(deleteAll);
@@ -2830,9 +2790,9 @@ This removes them from Deleted Files and frees the device storage.`);
               emitDeletedChanged();
               await renderDeletedCount();
               renderDeleted();
-            } catch (error) {
+            } catch (_) {
               setButtonBusy(restore, false);
-              alert(String(error?.message || 'Restore failed.'));
+              alert('Restore failed.');
             }
           });
           const purge = document.createElement('button');
@@ -2842,15 +2802,13 @@ This removes them from Deleted Files and frees the device storage.`);
           purge.addEventListener('click', async () => {
             const ok = confirm(`Permanently delete “${b.title || 'this book'}”?\n\nThis removes it from Deleted Files and frees the device storage.`);
             if (!ok) return;
-            setButtonBusy(purge, true, 'Deleting…');
             try {
               await permanentlyDeleteLocalBook(b.id);
               emitDeletedChanged();
               await renderDeletedCount();
               renderDeleted();
-            } catch (error) {
-              setButtonBusy(purge, false);
-              alert(String(error?.message || 'Delete failed.'));
+            } catch (_) {
+              alert('Delete failed.');
             }
           });
           actions.appendChild(restore);

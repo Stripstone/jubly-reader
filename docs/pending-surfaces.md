@@ -101,10 +101,10 @@ Maintenance rule:
 | Surface | What it does | Status |
 |---|---|---|
 | Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ✅ Dashboard/library release is a settlement transaction: refresh/login begins behind the boot/settlement boundary; quick `populated`/`empty`/`error` truth may release directly; otherwise release neutral pending, keep it readable for a minimum duration, then replace with final truth. Empty/import guidance appears only after owner-empty truth plus empty grace. Local read failure stays in error/pending rather than pretending empty. Delayed banner appears only if hydration noticeably stalls |
-| Library modal → **Delete** book button | Server-backed soft delete through `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row. Server-backed rows must settle `active → deleted` before local count/storage moves; local-only rows may still move locally. |
-| Deleted files modal → **Restore** button | Server-backed restore through `syncRemoteLibraryItemState` | ✅ Inline button state: `Restoring…` on the clicked row. Restore reactivates server durable truth only after the capacity gate allows it; `library_full`, auth, server error, and unmatched server rows block local restore. |
-| Deleted files modal → **Delete** button | Server-backed purge through `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row. Deleted durable rows are permanently purged; missing server rows are treated as local-only cleanup, while auth/server errors keep the local Trash row. |
-| Deleted files modal → **Delete All** button | Mixed batch purge through `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` while batch delete runs. Each row follows the single Delete rule; partial server failures keep failed local Trash rows and report a partial failure. |
+| Library modal → **Delete** book button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
+| Deleted files modal → **Restore** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Restoring…` on the clicked row |
+| Deleted files modal → **Delete** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
+| Deleted files modal → **Delete All** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` while batch delete runs |
 
 ### Dashboard/library release transaction
 
