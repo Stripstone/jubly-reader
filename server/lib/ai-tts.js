@@ -190,14 +190,32 @@ function buildAzureSentencePlan(text) {
   })).filter((entry) => entry.endJs > entry.startJs);
 }
 
+const AZURE_LEADING_DECORATIVE_MARKER_RUN_RE = /^(\s*[\*#_~`|\\\/@\^=+<>\[\]\{\}•·○●◦▪▫■□]+\s+)/u;
+const AZURE_ALPHANUMERIC_RE = /[\p{L}\p{N}]/u;
+
+function splitAzureLeadingDecorativeMarker(value) {
+  const source = String(value || "");
+  const match = source.match(AZURE_LEADING_DECORATIVE_MARKER_RUN_RE);
+  if (!match) return { prefix: "", body: source };
+
+  const prefix = match[1];
+  const body = source.slice(prefix.length);
+  if (!AZURE_ALPHANUMERIC_RE.test(body)) return { prefix: "", body: source };
+  return { prefix, body };
+}
+
+function buildAzureSsmlSentence(entry) {
+  const { prefix, body } = splitAzureLeadingDecorativeMarker(entry?.value);
+  return `${escapeXml(prefix)}<bookmark mark="${entry.bookmark}"/>${escapeXml(body)}`;
+}
+
 function buildAzureSsml(text, voiceName, sentencePlan) {
   const source = String(text || "");
   const body = Array.isArray(sentencePlan) && sentencePlan.length
-    ? sentencePlan.map((entry) => `<bookmark mark="${entry.bookmark}"/>${escapeXml(entry.value)}`).join("")
+    ? sentencePlan.map((entry) => buildAzureSsmlSentence(entry)).join("")
     : escapeXml(source);
   return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voiceName}"><prosody rate="0.95">${body}</prosody></voice></speak>`;
 }
-
 function isIncompleteAzureBookmarkError(err) {
   return String(err?.message || err || "").includes("Azure synthesis returned incomplete bookmark offsets");
 }
