@@ -23,7 +23,7 @@ Use Next when you’re ready to move on.
 ## Page 2
 Now let’s try the main thing.
 
-Press Play to hear this page read aloud.
+Press 'Read page' to hear this page read aloud.
 
 You can read with your eyes, listen with your ears, or shift between both whenever your focus changes.
 
