@@ -584,7 +584,7 @@ window.rcInteraction = (function () {
         try {
             const params = new URLSearchParams(window.location.search || '');
             const requestedView = String(params.get('view') || 'landing-page').trim();
-            if (requestedView === 'reset-password' || requestedView === 'auth-callback') return 'login-page';
+            if (requestedView === 'reset-password') return 'login-page';
             return normalizeSection(requestedView);
         } catch (_) {
             return 'landing-page';
@@ -1351,15 +1351,6 @@ window.rcInteraction = (function () {
         return _passwordRecoveryActive || isPasswordRecoveryRoute();
     }
 
-    function isAuthCallbackRoute() {
-        try {
-            const search = new URLSearchParams(window.location.search || '');
-            return String(search.get('view') || '').trim() === 'auth-callback';
-        } catch (_) {
-            return false;
-        }
-    }
-
     function _authSubmitText() {
         if (_authMode === 'signup') return _signupStep === 1 ? 'Next' : 'Create Account';
         if (_authMode === 'forgot') return 'Send Reset Link';
@@ -1505,14 +1496,6 @@ window.rcInteraction = (function () {
             return;
         }
         if (options && options.preserveAuthMessage) return;
-        if (isAuthCallbackRoute()) {
-            _authClearMessages();
-            const pendingPlan = _readAuthPendingPlan();
-            _authShowSuccess(pendingPlan === 'pro' || pendingPlan === 'premium'
-                ? `Email verified. Sign in to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
-                : 'Email verified. Please sign in to continue.');
-            return;
-        }
         // Route/re-entry into login must not preserve week-old signup or
         // confirmation-copy as current auth truth. Supabase sign-in remains the
         // authority for whether the email is actually confirmed.
@@ -1594,25 +1577,40 @@ window.rcInteraction = (function () {
         return true;
     }
 
-    function buildAuthCallbackRedirect() {
+    function buildAuthRedirectForPendingPlan() {
+        let redirect = '';
         try {
             const cfg = window.rcAuth && typeof window.rcAuth.getConfig === 'function' ? window.rcAuth.getConfig() : null;
-            const configured = String((cfg && (cfg.authCallbackUrl || cfg.authRedirectUrl)) || '').trim();
-            if (configured) return configured;
-            const base = String((cfg && cfg.appBaseUrl) || '').trim().replace(/\/$/, '');
-            if (base) return `${base}/?view=auth-callback`;
+            redirect = String((cfg && cfg.authRedirectUrl) || '').trim();
         } catch (_) {}
-        return '';
-    }
-
-    function buildAuthRedirectForPendingPlan() {
-        // Staging-first callback refactor: checkout intent stays in app-owned
-        // pending-plan storage; Supabase only returns to the canonical callback.
-        return buildAuthCallbackRedirect();
+        if (!redirect) return '';
+        try {
+            const url = new URL(redirect, window.location.href);
+            url.searchParams.set('view', 'login-page');
+            url.searchParams.set('auth', 'verified');
+            const pendingPlan = _readAuthPendingPlan();
+            if (pendingPlan === 'pro' || pendingPlan === 'premium') {
+                url.searchParams.set('next', 'checkout');
+                url.searchParams.set('tier', pendingPlan);
+            } else {
+                url.searchParams.delete('next');
+                url.searchParams.delete('tier');
+            }
+            return url.toString();
+        } catch (_) {
+            return redirect;
+        }
     }
 
     function buildPasswordResetRedirect() {
-        return buildAuthCallbackRedirect();
+        try {
+            const cfg = window.rcAuth && typeof window.rcAuth.getConfig === 'function' ? window.rcAuth.getConfig() : null;
+            const configured = String((cfg && cfg.resetPasswordRedirectUrl) || '').trim();
+            if (configured) return configured;
+            const base = String((cfg && cfg.appBaseUrl) || '').trim().replace(/\/$/, '');
+            if (base) return `${base}/?view=reset-password`;
+        } catch (_) {}
+        return '';
     }
 
     async function authFormSubmit() {
@@ -2321,7 +2319,13 @@ window.rcInteraction = (function () {
         if (!Number.isFinite(idx) || idx < 0) return false;
         const pageEl = document.querySelector(`.page[data-page-index="${idx}"]`) || document.querySelectorAll('.page')[idx];
         if (!pageEl) return false;
-        try { pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) { return false; }
+        try {
+            if (typeof window.__rcScrollReadingPageIntoView === 'function') {
+                window.__rcScrollReadingPageIntoView(pageEl, { behavior: 'smooth', reason: 'shell-playback-page' });
+            } else {
+                pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        } catch (_) { return false; }
         return true;
     }
 

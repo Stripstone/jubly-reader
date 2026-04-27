@@ -103,18 +103,7 @@ window.rcAuth = (function () {
 
     try {
       const params = new URLSearchParams(window.location.search || '');
-      const view = String(params.get('view') || '').trim().toLowerCase();
-      const authState = String(params.get('auth') || '').trim().toLowerCase();
-      let type = String(params.get('type') || '').trim().toLowerCase();
-      if (!type) {
-        try {
-          const hashParams = new URLSearchParams(String(window.location.hash || '').replace(/^#/, ''));
-          type = String(hashParams.get('type') || '').trim().toLowerCase();
-        } catch (_) {}
-      }
-      const isRecoveryReturn = view === 'reset-password' || type === 'recovery';
-      const isAuthReturn = view === 'auth-callback' || authState === 'verified';
-      if (isAuthReturn && !isRecoveryReturn && _session) {
+      if (String(params.get('auth') || '').trim().toLowerCase() === 'verified' && _session) {
         // Supabase may create a browser session during email confirmation.
         // Jubly's verified continuation contract returns to Login first so paid
         // intent is preserved but the user explicitly signs in before checkout.
@@ -258,7 +247,7 @@ window.rcAuth = (function () {
     const requestedRedirect = authOptions && typeof authOptions === 'object'
       ? String(authOptions.redirectTo || authOptions.emailRedirectTo || '').trim()
       : '';
-    const fallbackRedirect = String((_config && (_config.authCallbackUrl || _config.resetPasswordRedirectUrl || (_config.appBaseUrl ? `${String(_config.appBaseUrl).replace(/\/$/, '')}/?view=auth-callback` : ''))) || '').trim();
+    const fallbackRedirect = String((_config && (_config.resetPasswordRedirectUrl || (_config.appBaseUrl ? `${String(_config.appBaseUrl).replace(/\/$/, '')}/?view=reset-password` : ''))) || '').trim();
     const redirect = requestedRedirect || fallbackRedirect;
     if (redirect) options.redirectTo = redirect;
 

@@ -98,21 +98,20 @@ window.rcBilling = (function () {
     try {
       const url = new URL(window.location.href);
       const normalized = normalizePlan(plan);
-      // The canonical auth callback no longer carries checkout intent in its
-      // redirect URL. Keep legacy query cleanup/read support, but do not write
-      // new billing intent query parameters from current UI actions.
-      if (!(normalized === 'pro' || normalized === 'premium')) {
+      if (normalized === 'pro' || normalized === 'premium') {
+        url.searchParams.set('tier', normalized);
+        url.searchParams.set('next', 'checkout');
+      } else {
         url.searchParams.delete('tier');
         if (String(url.searchParams.get('next') || '').trim().toLowerCase() === 'checkout') url.searchParams.delete('next');
-        window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
       }
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
     } catch (_) {}
   }
 
   function rememberPendingPlan(plan) {
     const normalized = normalizePlan(plan);
     try { sessionStorage.setItem('rc_pending_plan', String(normalized || '')); } catch (_) {}
-    try { localStorage.setItem('rc_pending_plan', String(normalized || '')); } catch (_) {}
     syncPlanIdQuery(normalized);
   }
 
@@ -122,16 +121,11 @@ window.rcBilling = (function () {
       const fromUrl = normalizePlan(url.searchParams.get('tier') || '');
       if (fromUrl) return fromUrl;
     } catch (_) {}
-    try {
-      const fromSession = normalizePlan(sessionStorage.getItem('rc_pending_plan') || '');
-      if (fromSession) return fromSession;
-    } catch (_) {}
-    try { return normalizePlan(localStorage.getItem('rc_pending_plan') || ''); } catch (_) { return ''; }
+    try { return normalizePlan(sessionStorage.getItem('rc_pending_plan') || ''); } catch (_) { return ''; }
   }
 
   function clearPendingPlan() {
     try { sessionStorage.removeItem('rc_pending_plan'); } catch (_) {}
-    try { localStorage.removeItem('rc_pending_plan'); } catch (_) {}
     syncPlanIdQuery('');
   }
 
