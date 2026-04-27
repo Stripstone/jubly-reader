@@ -102,7 +102,7 @@ Maintenance rule:
 |---|---|---|
 | Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ✅ Dashboard/library release is a settlement transaction: refresh/login begins behind the boot/settlement boundary; quick `populated`/`empty`/`error` truth may release directly; otherwise release neutral pending, keep it readable for a minimum duration, then replace with final truth. Empty/import guidance appears only after owner-empty truth plus empty grace. Local read failure stays in error/pending rather than pretending empty. Delayed banner appears only if hydration noticeably stalls |
 | Library modal → **Delete** book button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
-| Deleted files modal → **Restore** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Restoring…` on the clicked row |
+| Deleted files modal → **Restore** button | `POST /api/app?kind=import-capacity` then `syncRemoteLibraryItemState` | ◐ Inline button state: `Restoring…` on the clicked row. Restore uses the same action-time library-slot gate as importer Scan Contents/import; if capacity is full, the item stays in Deleted Files and the modal shows `Restoring failed. Your library is full.` |
 | Deleted files modal → **Delete** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
 | Deleted files modal → **Delete All** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` while batch delete runs |
 
