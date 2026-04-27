@@ -132,6 +132,15 @@ Premium remains intentional and visible even if packaging evolves later.
 6. Paid continuation preserves `next=checkout` plus `tier=pro|premium` through verification and login
 7. User logs in only after verification is complete
 
+### Password reset flow
+1. User opens Log In and chooses `Forgot password?`
+2. User enters email
+3. App calls Supabase password reset with redirect to `/?view=reset-password`
+4. Reset email uses the Supabase-owned `{{ .ConfirmationURL }}`
+5. Recovery link returns to Jubly's reset password surface
+6. User enters and confirms a new password
+7. App calls Supabase `updateUser` through the auth owner, signs out locally, and sends the user back to Log In
+
 ### Visitor tries an account-owned action
 1. Visitor taps import or owned-library action
 2. Public shell opens a subtle auth prompt
@@ -415,4 +424,4 @@ Replace with real flows:
 - `APP_BASE_URL` is the canonical public app origin for verified auth continuation and billing continuation redirects.
 - Supabase Site URL should equal the bare resolved `APP_BASE_URL` origin.
 - Supabase dashboard values must use the real resolved URL, not the literal text `APP_BASE_URL`.
-- Supabase Redirect URLs should include the exact verified login continuation paths for plain login, verified login, and verified paid continuation.
+- Supabase Redirect URLs should include the exact verified login continuation paths for plain login, verified login, verified paid continuation, and password reset.

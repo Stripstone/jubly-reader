@@ -54,6 +54,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   let appTier = 'basic';
   let runtimePolicy = null;
   let runtimePolicyResolved = false;
+  let publicRuntimeReset = { at: null, reason: 'boot-default' };
 
   // ---- Token Tracking ----
   // Session token counter. Counts consumption per category for diagnostic purposes.
@@ -230,18 +231,73 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     return !!getRuntimePolicy()?.features?.cloudVoices;
   }
 
+  function hasRuntimeAuthContext() {
+    try {
+      const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+      const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function'
+        ? String(window.rcAuth.getAccessToken() || '').trim()
+        : '';
+      return signedIn && !!token;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function isNonPublicRuntimePolicy(policy) {
+    const normalized = normalizeRuntimePolicy(policy, policy && policy.tier ? policy.tier : 'basic');
+    return normalized.tier !== 'basic' ||
+      !!normalized.features?.cloudVoices ||
+      !!normalized.features?.themes?.explorer;
+  }
+
   function applyResolvedRuntimePolicy(policyLike, tierHint, options = {}) {
     runtimePolicy = normalizeRuntimePolicy(policyLike, tierHint);
     runtimePolicyResolved = !!options.resolved;
     appTier = runtimePolicy.tier;
     try { tokenReset(); } catch (_) {}
-    try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
     try {
-      const detail = { policy: runtimePolicy, resolved: runtimePolicyResolved };
+      if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') {
+        window.rcTheme.enforceAccess({
+          persist: options.publicReset !== true,
+          reason: String(options.reason || '')
+        });
+      }
+    } catch (_) {}
+    try {
+      const detail = {
+        policy: runtimePolicy,
+        resolved: runtimePolicyResolved,
+        reason: String(options.reason || ''),
+        publicReset: !!options.publicReset
+      };
       document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
       window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
     } catch (_) {}
     return runtimePolicy;
+  }
+
+  function resetRuntimePolicyToPublic(reason = 'public-reset') {
+    const resetReason = String(reason || 'public-reset');
+    publicRuntimeReset = { at: new Date().toISOString(), reason: resetReason };
+    _trailPush('runtime-policy-public-reset', { reason: resetReason });
+    return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', {
+      resolved: false,
+      publicReset: true,
+      reason: resetReason,
+    });
+  }
+
+  function getRuntimePolicyReport() {
+    const policy = getRuntimePolicy();
+    return {
+      tier: normalizeAppTier(policy?.tier || 'basic'),
+      resolved: isRuntimePolicyResolved(),
+      resolutionMode: String(policy?.resolutionMode || ''),
+      cloudAllowed: !!policy?.features?.cloudVoices,
+      explorerAllowed: !!policy?.features?.themes?.explorer,
+      customMusicAllowed: !!policy?.features?.themes?.customMusic,
+      publicReset: Object.assign({}, publicRuntimeReset || { at: null, reason: null }),
+    };
   }
 
   async function refreshRuntimePolicy(requestedTier) {
@@ -264,13 +320,23 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
         ? { ...payload.policy, resolutionMode: payload?.meta?.resolutionMode }
         : payload;
       const resolvedTierHint = payload?.meta?.effectiveTier || tier;
-      return applyResolvedRuntimePolicy(policyWithMeta, resolvedTierHint, { resolved: true });
+      const normalizedPolicy = normalizeRuntimePolicy(policyWithMeta, resolvedTierHint);
+      if (!hasRuntimeAuthContext() && isNonPublicRuntimePolicy(normalizedPolicy)) {
+        _trailPush('policy-response-blocked-public', {
+          requestedTier: tier,
+          responseTier: normalizedPolicy.tier,
+          reason: 'auth-context-gone'
+        });
+        return resetRuntimePolicyToPublic('runtime-policy-response-auth-absent');
+      }
+      return applyResolvedRuntimePolicy(normalizedPolicy, normalizedPolicy.tier, { resolved: true });
     } catch (err) {
       // Server unreachable. If we already hold a confirmed non-basic policy (from a
       // prior successful fetch or durable-sync cache projection), preserve it — a
       // transient network failure must not strip access the user legitimately holds.
       // Only fall back to safe-basic when there is no confirmed policy in place.
       _trailPush('policy-fetch-failed', { tier: runtimePolicy && runtimePolicy.tier, reason: String(err?.message || err || 'unknown') });
+      if (!hasRuntimeAuthContext()) return resetRuntimePolicyToPublic('runtime-policy-fetch-failed-auth-absent');
       if (runtimePolicy && runtimePolicy.tier && runtimePolicy.tier !== 'basic') return runtimePolicy;
       return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', { resolved: false });
     }
@@ -782,7 +848,7 @@ const RC_PROFILE_PREFS_KEY = 'rc_profile_prefs';
 
 let appTheme = 'default';
 let appThemeSettings = {};
-let appAppearance = 'light';
+let appAppearance = getBootAppliedAppearanceMode();
 let appearanceAppliedOnce = false;
 let appearancePaintSignalSeq = 0;
 let diagnosticsPrefs = { enabled: false, mode: 'off' };
@@ -1242,6 +1308,66 @@ function syncThemeShellState() {
   syncAppearanceButtons();
 }
 
+function getMutableAppearanceFirstPaintReport() {
+  try {
+    if (!window.__rcAppearanceFirstPaint || typeof window.__rcAppearanceFirstPaint !== 'object') {
+      window.__rcAppearanceFirstPaint = {
+        appearancePrePaintApplied: false,
+        modeAtFirstPaint: 'light',
+        modeAfterRuntime: null,
+        changedAfterPaint: false,
+        shellFirstAppearanceWriter: false,
+        firstWriter: 'state.js-fallback',
+        source: 'runtime-fallback'
+      };
+    }
+    return window.__rcAppearanceFirstPaint;
+  } catch (_) {
+    return {
+      appearancePrePaintApplied: false,
+      modeAtFirstPaint: 'light',
+      modeAfterRuntime: null,
+      changedAfterPaint: false,
+      shellFirstAppearanceWriter: false,
+      firstWriter: 'state.js-fallback',
+      source: 'runtime-fallback'
+    };
+  }
+}
+
+function getAppearanceFirstPaintReport() {
+  const report = getMutableAppearanceFirstPaintReport();
+  return Object.assign({}, report, {
+    modeAfterRuntime: appAppearance,
+    changedAfterPaint: normalizeAppearanceMode(report.modeAtFirstPaint) !== normalizeAppearanceMode(appAppearance),
+    shellFirstAppearanceWriter: false
+  });
+}
+
+function getBootAppliedAppearanceMode() {
+  try {
+    const report = window.__rcAppearanceFirstPaint;
+    const reported = report && typeof report === 'object' ? report.modeAtFirstPaint : null;
+    if (reported === 'dark' || reported === 'light') return normalizeAppearanceMode(reported);
+  } catch (_) {}
+  try {
+    const rootMode = document.documentElement && document.documentElement.getAttribute('data-app-appearance');
+    if (rootMode === 'dark' || rootMode === 'light') return normalizeAppearanceMode(rootMode);
+  } catch (_) {}
+  return 'light';
+}
+
+function updateAppearanceFirstPaintReport() {
+  const report = getMutableAppearanceFirstPaintReport();
+  try {
+    report.modeAfterRuntime = appAppearance;
+    report.changedAfterPaint = normalizeAppearanceMode(report.modeAtFirstPaint) !== normalizeAppearanceMode(appAppearance);
+    report.shellFirstAppearanceWriter = false;
+    report.runtimeAdoptedAtMs = (window.performance && typeof window.performance.now === 'function') ? window.performance.now() : null;
+  } catch (_) {}
+  return getAppearanceFirstPaintReport();
+}
+
 function loadTheme() {
   const stored = loadThemePrefs() || {};
   const storedDiagPrefs = loadDiagnosticsPrefs() || {};
@@ -1276,6 +1402,7 @@ function applyAppearance() {
     document.documentElement.setAttribute('data-app-appearance', appAppearance);
     document.documentElement.setAttribute('data-appearance-ready', 'true');
     document.documentElement.setAttribute('data-appearance-painted', 'false');
+    document.documentElement.style.colorScheme = appAppearance;
   } catch (_) {}
   document.body.classList.remove('app-light', 'app-dark');
   document.body.classList.add(modeClass);
@@ -1285,6 +1412,7 @@ function applyAppearance() {
     document.body.setAttribute('data-appearance-painted', 'false');
   } catch (_) {}
   appearanceAppliedOnce = true;
+  updateAppearanceFirstPaintReport();
   syncAppearanceButtons();
   try { document.dispatchEvent(new CustomEvent('rc:appearance-applied', { detail: { appearance: appAppearance } })); } catch (_) {}
   const dispatchPainted = () => {
@@ -1344,7 +1472,13 @@ function setAppearance(mode) {
 }
 
 function loadAppearance(opts = {}) {
-  appAppearance = opts.fromLocal === true ? readAppearanceModeFromLocal() : 'light';
+  if (opts.fromLocal === true) {
+    appAppearance = readAppearanceModeFromLocal();
+  } else if (opts.fromBoot === false) {
+    appAppearance = 'light';
+  } else {
+    appAppearance = getBootAppliedAppearanceMode();
+  }
   return applyAppearance();
 }
 
@@ -1363,11 +1497,28 @@ function setDiagnosticsPreference(partial) {
   return getDiagnosticsPreference();
 }
 
-function enforceThemeAccess() {
+function enforceThemeAccess(options = {}) {
   const canUse = canUseTheme(appTheme);
-  _trailPush('enforce-theme-access', { appTheme, canUse, policyTier: runtimePolicy && runtimePolicy.tier, policyResolved: isRuntimePolicyResolved() });
+  const persist = options && options.persist === false ? false : true;
+  _trailPush('enforce-theme-access', {
+    appTheme,
+    canUse,
+    persist,
+    reason: String(options && options.reason || ''),
+    policyTier: runtimePolicy && runtimePolicy.tier,
+    policyResolved: isRuntimePolicyResolved()
+  });
   if (canUse) return true;
-  setThemeRuntime('default');
+  if (persist) {
+    setThemeRuntime('default');
+    return false;
+  }
+  // Public reset must remove gated Explorer/theme visuals without persisting
+  // default over the user's signed-in theme preference.
+  appTheme = 'default';
+  applyThemeClass(appTheme);
+  applyThemeSettings();
+  syncThemeShellState();
   return false;
 }
 
@@ -1426,9 +1577,12 @@ window.rcAppearance = {
   apply: applyAppearance,
   hasApplied: () => appearanceAppliedOnce,
   syncButtons: syncAppearanceButtons,
+  getFirstPaintReport: getAppearanceFirstPaintReport,
   // Transitional alias for current shell button handlers.
   save: setAppearance
 };
+
+window.getAppearanceFirstPaintReport = getAppearanceFirstPaintReport;
 
 window.rcDiagnosticsPrefs = {
   get: getDiagnosticsPreference,
@@ -1462,7 +1616,9 @@ window.rcPolicy = {
   canUseMode,
   canUseAiEvaluate,
   canUseAnchors,
-  canUseCloudVoices
+  canUseCloudVoices,
+  resetToPublic: resetRuntimePolicyToPublic,
+  getReport: getRuntimePolicyReport
 };
 
 // PASS3: Interim server-owned usage capacity API.
@@ -1600,6 +1756,6 @@ window.rcEntitlements = {
 };
 
 applyResolvedRuntimePolicy(getFallbackRuntimePolicy(appTier), appTier, { resolved: false });
-loadAppearance({ fromLocal: false });
+loadAppearance({ fromBoot: true });
 loadTheme();
 

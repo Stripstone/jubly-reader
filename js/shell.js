@@ -2,40 +2,10 @@
 // jubly — Shell + App bridge
 // ============================================================
 //
-// PRE-RUNTIME APPEARANCE BOOTSTRAP (temporary shell bridge):
-//   Applies a public-safe appearance class to <html> before CSS paints, then
-//   lets runtime restore persisted local appearance only after signed-in auth
-//   truth is available.
-//   Retirement condition: remove when runtime provides an equally-early
-//   appearance bootstrap seam without using index.html inline script ownership.
-(function applyPublicSafeAppearanceBoot() {
-    try {
-        // Public/signed-out surfaces must not inherit a prior account's local
-        // dark appearance before auth truth exists. Runtime restores persisted
-        // appearance after a signed-in account is confirmed.
-        var mode = 'light';
-        try {
-            var params = new URLSearchParams(window.location.search || '');
-            var view = String(params.get('view') || '').trim();
-            if (view === 'dashboard' || view === 'profile-page') {
-                var raw = localStorage.getItem('rc_appearance_prefs');
-                if (raw) {
-                    var parsed = JSON.parse(raw) || {};
-                    var stored = parsed.appearance_mode || parsed.mode || parsed.appearance;
-                    if (stored === 'dark' || stored === 'light') mode = stored;
-                }
-            }
-        } catch (_) {}
-        var root = document.documentElement;
-        if (!root) return;
-        root.classList.remove('app-light', 'app-dark');
-        root.classList.add(mode === 'dark' ? 'app-dark' : 'app-light');
-        root.setAttribute('data-app-appearance', mode);
-        root.style.backgroundColor = mode === 'dark' ? '#0f172a' : '#ffffff';
-        root.style.color = mode === 'dark' ? '#e2e8f0' : '#1e293b';
-        root.style.colorScheme = mode;
-    } catch (_) {}
-})();
+// PRE-RUNTIME APPEARANCE BOOTSTRAP RETIRED:
+//   index.html is now the only first-paint appearance writer. Runtime/state.js
+//   adopts that boot-applied mode. Shell must not apply an appearance fallback
+//   or reset appearance during boot/auth transitions.
 
 // ============================================================
 // PERMANENT (shell navigation and app wiring):
@@ -45,25 +15,80 @@
 //   closeModal(), setTheme(), handleExplorerSwatch(),
 //   setTier(), updateTierPill(), handlePausePlay(),
 //   handleAutoplayToggle(), updateProgressBar(),
-//   showSessionComplete(), renderDashboard(), startReading()
+//   showSessionComplete(), startReading()
 //
-// SCAFFOLD (remove on real auth wiring):
-//   login() — simulates auth; replace with Supabase auth flow
 // ============================================================
 
+    // =========================================================================
+    // SLICE 7 MODULE BOUNDARY 1/6 — Shell Surface Contract & Release Decision
+    // Logical boundary declaration only — code not physically separated yet.
+    // Primary content: showSection(), releaseDashboardSectionVisibility(),
+    //   releaseStandardSectionVisibility(), surface state machine, boot release
+    //   transaction, interaction banner. Theme/appearance shell and reading
+    //   chrome (TTS bridge, bottom-bar controls) continue later in this file
+    //   as part of the presentation layer for this same logical module.
+    // =========================================================================
+
+    // ── Boot timing probe — dev-only, removable after Bucket E proof ────────────
+    // Proves whether shell's rc:runtime-policy-changed listener is always attached
+    // before state.js fires its initial policy event. Required before touching the
+    // 500ms boot-order bridge (Bucket E, RUNTIME_PROTECTION_LEDGER.md §15).
+    //
+    // To enable:  localStorage.setItem('rcBootProbe', '1')  then hard-refresh.
+    // To disable: localStorage.removeItem('rcBootProbe')     then hard-refresh.
+    // Output: '[rcBootProbe] Boot timing report' in the browser console.
+    // Also written to window.__rcBootProbeResult for copy/paste.
+    //
+    // Remove this block after Bucket E retirement conditions are met.
+    const _bootProbe = (function () {
+        const enabled = (function () {
+            try { return typeof localStorage !== 'undefined' && localStorage.getItem('rcBootProbe') === '1'; } catch (_) { return false; }
+        })();
+        if (!enabled) return { mark: function () {}, report: function () {} };
+        const _marks = [];
+        function mark(tag, extra) {
+            try { _marks.push(Object.assign({ tag, tMs: Math.round(performance.now()) }, extra || {})); } catch (_) {}
+        }
+        function report() {
+            try {
+                const out = { probe: 'rcBootProbe v1', scenario: 'cold-boot', marks: _marks };
+                console.group('[rcBootProbe] Boot timing report — copy the JSON below for Bucket E evidence:');
+                console.log(JSON.stringify(out, null, 2));
+                console.groupEnd();
+                window.__rcBootProbeResult = out;
+            } catch (_) {}
+        }
+        return { mark, report };
+    })();
+    // ─────────────────────────────────────────────────────────────────────────────
+
     // ── Section routing ──────────────────────────────────────────
-    const ALL_SECTIONS     = ['landing-page', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
+    const ALL_SECTIONS     = ['landing-page', 'public-onboarding', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
     const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
     const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
+    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'mara', theme: 'default', speed: 1 });
+    let _publicOnboardingChoices = Object.assign({}, PUBLIC_ONBOARDING_DEFAULTS);
+    let _publicOnboardingTimer = null;
     let _shellAuthBootstrapped = false;
 
 
     let _bootReleaseComplete = false;
     let _bootPendingMessageTimer = null;
     let _libraryPendingBannerTimer = null;
+    let _lastDashboardRelease = {
+        requestedSurface: null,
+        releasedSurface: null,
+        releaseReason: 'boot',
+        firstVisibleLibraryState: null,
+        source: null,
+        ownerReady: false,
+        blockedBy: null,
+        hiddenSectionOwner: 'releaseDashboardSectionVisibility',
+        at: null
+    };
 
 // Shell-resident interaction banner
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,6 +128,12 @@ window.rcInteraction = (function () {
   // Single active slot
   let _active = null;  // { key, sevName, severity, message, actions, timer }
   let _el = null;
+
+  const PLAYBACK_SURFACE_KEYS = new Set(['tts:cloud-restart']);
+
+  function _isPlaybackSurfaceKey(key) {
+    return PLAYBACK_SURFACE_KEYS.has(String(key || ''));
+  }
 
   function _defaultOpenLogin() {
     try {
@@ -200,6 +231,9 @@ window.rcInteraction = (function () {
   // ── Core show logic ───────────────────────────────────────────────────────
 
   function _show(key, sevName, message, actions) {
+    // Playback notices have a dedicated reading-view surface driven by
+    // syncShellPlaybackControls(). Keep them out of the global shell banner.
+    if (_isPlaybackSurfaceKey(key)) return;
     const sev = SEV[sevName] ?? 0;
 
     // A different key at higher severity keeps its banner — do not override
@@ -250,6 +284,7 @@ window.rcInteraction = (function () {
   }
 
   function clear(key) {
+    if (_isPlaybackSurfaceKey(key)) return;
     if (!_active) return;
     if (!key || _active.key === key) {
       if (_active.timer) clearTimeout(_active.timer);
@@ -374,6 +409,8 @@ window.rcInteraction = (function () {
         clearBootPendingMessage();
         try { document.body.classList.remove('boot-pending'); } catch (_) {}
         try { document.body.classList.remove('auth-hydrating'); } catch (_) {}
+        try { markDashboardPendingVisibleIfNeeded('boot-release'); } catch (_) {}
+        try { applySignedInAccountControlReadiness('boot-release'); } catch (_) {}
         const scrim = document.getElementById('boot-scrim');
         if (!scrim) return;
         try {
@@ -384,20 +421,32 @@ window.rcInteraction = (function () {
         } catch (_) {}
     }
 
-    let SHELL_DEBUG = {
-        seq: 0,
-        lastPlaybackSync: null,
-        lastControlAction: null,
-        lastSkipAction: null,
-        lastProgressSnapshot: null
+    let _lastShellRelease = {
+        requestedSurface: null,
+        releasedSurface: null,
+        releaseReason: 'boot',
+        blockedBy: null,
+        at: null
     };
-    function shellDebugRemember(slot, data) {
-        const entry = Object.assign({ seq: ++SHELL_DEBUG.seq, at: new Date().toISOString() }, data || {});
-        SHELL_DEBUG[slot] = entry;
-        try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
-        return entry;
-    }
+    // =========================================================================
+    // SLICE 7 MODULE BOUNDARY 3/6 — Account-Control Readiness
+    // Logical boundary declaration only — code not physically separated yet.
+    // Primary content: signed-in control state record, readiness reader,
+    //   readiness poll. Auth presentation layer (sign-in/sign-up/sign-out
+    //   shell, profile tabs, subscription surface rendering) continues after
+    //   the Modal Opener Provenance block below.
+    // =========================================================================
 
+    let _accountControlsTransientBlock = null;
+    let _lastSignedInAccountReadiness = {
+        signedInInteractionReady: false,
+        authCallable: false,
+        accountControlsEnabled: false,
+        visibleAccountControlsEnabled: false,
+        blockedBy: 'boot',
+        reason: 'boot',
+        at: null
+    };
     function setInlineBusy(button, busyLabel, enabledLabel, disabled) {
         if (!button) return;
         if (busyLabel) {
@@ -446,7 +495,53 @@ window.rcInteraction = (function () {
 
     function isPublicAbandonSurface(sectionId) {
         if (isAuthedUser()) return false;
-        return sectionId === 'landing-page' || (sectionId === 'dashboard' && isIntroLibraryVisible());
+        return sectionId === 'landing-page' || sectionId === 'public-onboarding' || (sectionId === 'dashboard' && isIntroLibraryVisible());
+    }
+
+    function isPublicRuntimeSurface(sectionId) {
+        const section = normalizeSection(sectionId);
+        if (isAuthedUser()) return false;
+        return section === 'landing-page' || section === 'public-onboarding' || section === 'reading-mode' || (section === 'dashboard' && isIntroLibraryVisible());
+    }
+
+    function readPublicRuntimeBoundaryReport() {
+        try {
+            if (window.rcSync && typeof window.rcSync.getPublicRuntimeBoundaryReport === 'function') return window.rcSync.getPublicRuntimeBoundaryReport();
+        } catch (_) {}
+        try {
+            if (typeof window.getPublicRuntimeBoundaryReport === 'function') return window.getPublicRuntimeBoundaryReport();
+        } catch (_) {}
+        return null;
+    }
+
+    function ensurePublicRuntimeBeforeRelease(sectionId, reason) {
+        if (!isPublicRuntimeSurface(sectionId)) return { allowed: true, report: readPublicRuntimeBoundaryReport() };
+        let report = null;
+        try {
+            if (window.rcSync && typeof window.rcSync.ensurePublicRuntimeBoundary === 'function') {
+                report = window.rcSync.ensurePublicRuntimeBoundary(reason || ('shell-release:' + sectionId));
+            } else {
+                report = readPublicRuntimeBoundaryReport();
+            }
+        } catch (_) {
+            report = readPublicRuntimeBoundaryReport();
+        }
+        const allowed = !!(report && report.publicRuntimeReady === true);
+        if (!allowed) {
+            _lastShellRelease = {
+                requestedSurface: sectionId,
+                releasedSurface: getCurrentVisibleSection(),
+                releaseReason: reason || 'shell-release',
+                blockedBy: 'publicRuntime',
+                at: new Date().toISOString()
+            };
+            shellTrailPush('public-release-blocked', {
+                sectionId,
+                reason: reason || 'shell-release',
+                report: report || null,
+            });
+        }
+        return { allowed, report };
     }
 
     function clearPaidIntentForPublicAbandon(sectionId) {
@@ -458,7 +553,8 @@ window.rcInteraction = (function () {
 
     function resolveSectionForAuth(id) {
         const normalized = normalizeSection(id);
-        if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'login-page')) return 'dashboard';
+        if (normalized === 'login-page' && isPasswordRecoveryActive()) return 'login-page';
+        if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'public-onboarding' || normalized === 'login-page')) return 'dashboard';
         if (!isAuthedUser() && normalized === 'profile-page') return 'landing-page';
         if (!isAuthedUser() && normalized === 'dashboard' && !isIntroLibraryVisible()) return 'landing-page';
         return normalized;
@@ -487,7 +583,9 @@ window.rcInteraction = (function () {
     function readSectionFromLocation() {
         try {
             const params = new URLSearchParams(window.location.search || '');
-            return normalizeSection(params.get('view') || 'landing-page');
+            const requestedView = String(params.get('view') || 'landing-page').trim();
+            if (requestedView === 'reset-password') return 'login-page';
+            return normalizeSection(requestedView);
         } catch (_) {
             return 'landing-page';
         }
@@ -522,6 +620,246 @@ window.rcInteraction = (function () {
         } else {
             subtitle.innerHTML = `You've completed <strong>${sessions} session${sessions === 1 ? '' : 's'}</strong> all time. Keep the momentum going.`;
         }
+    }
+
+    function getSignedInAccountControlElements() {
+        const logoutButtons = Array.from(document.querySelectorAll('[onclick="shellSignOut()"]')).filter(Boolean);
+        const profileTriggers = Array.from(document.querySelectorAll('#nav-profile-trigger')).filter(Boolean);
+        return { logoutButtons, profileTriggers, all: profileTriggers.concat(logoutButtons) };
+    }
+
+    function isControlEnabled(el) {
+        return !!(el && !el.disabled && el.getAttribute('aria-disabled') !== 'true');
+    }
+
+    function readSignedInAccountControlReadiness(reason = 'readiness-read') {
+        const controls = getSignedInAccountControlElements();
+        const authed = !!isAuthedUser();
+        const authKnown = !!(window.rcAuth && typeof window.rcAuth.isReady === 'function' && window.rcAuth.isReady());
+        const authCallable = !!(window.rcAuth && typeof window.rcAuth.signOut === 'function');
+        const shellPending = !!(document.body.classList.contains('boot-pending') || document.body.classList.contains('auth-hydrating'));
+        let blockedBy = null;
+        if (!authed) blockedBy = 'auth:signed-out';
+        else if (!authKnown) blockedBy = 'auth:not-ready';
+        else if (!authCallable) blockedBy = 'auth:signout-unavailable';
+        else if (_accountControlsTransientBlock) blockedBy = _accountControlsTransientBlock;
+        else if (shellPending) blockedBy = 'shell:boot-pending';
+
+        const signedInInteractionReady = authed && !blockedBy;
+        const visibleControls = controls.all.filter(isElementVisible);
+        return {
+            signedInInteractionReady,
+            authCallable,
+            accountControlsEnabled: signedInInteractionReady && controls.all.length > 0 && controls.all.every(isControlEnabled),
+            visibleAccountControlsEnabled: signedInInteractionReady && visibleControls.length > 0 && visibleControls.every(isControlEnabled),
+            blockedBy,
+            signedIn: authed,
+            authKnown,
+            shellPending,
+            profileControlCount: controls.profileTriggers.length,
+            logoutControlCount: controls.logoutButtons.length,
+            visibleControlCount: visibleControls.length,
+            reason,
+            at: new Date().toISOString()
+        };
+    }
+
+    function applySignedInAccountControlReadiness(reason = 'account-control-settlement') {
+        const initial = readSignedInAccountControlReadiness(reason);
+        const controls = getSignedInAccountControlElements();
+        const shouldEnable = !!initial.signedInInteractionReady;
+        controls.all.forEach((control) => {
+            try {
+                control.disabled = !shouldEnable;
+                if (shouldEnable) {
+                    control.removeAttribute('aria-disabled');
+                    control.removeAttribute('data-shell-blocked-by');
+                } else {
+                    control.setAttribute('aria-disabled', 'true');
+                    if (initial.blockedBy) control.setAttribute('data-shell-blocked-by', initial.blockedBy);
+                }
+            } catch (_) {}
+        });
+        _lastSignedInAccountReadiness = readSignedInAccountControlReadiness(reason);
+        shellTrailPush('account-control-readiness', {
+            reason,
+            signedInInteractionReady: _lastSignedInAccountReadiness.signedInInteractionReady,
+            authCallable: _lastSignedInAccountReadiness.authCallable,
+            accountControlsEnabled: _lastSignedInAccountReadiness.accountControlsEnabled,
+            visibleAccountControlsEnabled: _lastSignedInAccountReadiness.visibleAccountControlsEnabled,
+            blockedBy: _lastSignedInAccountReadiness.blockedBy
+        });
+        return _lastSignedInAccountReadiness;
+    }
+
+    // =========================================================================
+    // SLICE 7 MODULE BOUNDARY 2/6 — Dashboard/Library Visible Settlement
+    // Logical boundary declaration only — code not physically separated yet.
+    // Primary content here: dashboard pending/ready release decision, owner
+    //   report reads, settlement thresholds, releaseDashboardSectionVisibility().
+    // Library table rendering (the visible settlement output) continues further
+    //   in this file — see the matching MODULE BOUNDARY 2/6 continuation marker.
+    // =========================================================================
+
+    // ── Dashboard release seam ────────────────────────────────────────────────
+    // Shell owns the first-visible dashboard state decision before the section
+    // is made visible. Dashboard hidden-section removal is owned exclusively by
+    // releaseDashboardSectionVisibility(). showSection() is the requester, not
+    // the release authority, for the dashboard surface.
+    //
+    // Retirement condition: remove or narrow after dashboard release contract is
+    // runtime-accepted and direct reveal paths are retired.
+
+    function readDashboardLibraryState() {
+        const dashboardEl = document.getElementById('dashboard');
+        const raw = dashboardEl ? String(dashboardEl.getAttribute('data-library-state') || '').trim() : '';
+        return raw || null;
+    }
+
+    function isSettledDashboardLibraryState(state) {
+        return state === 'populated' || state === 'empty' || state === 'error';
+    }
+
+    // Derives release state from authoritative owner signals only — never from
+    // shell-held mirror state. Signed-in path can never produce 'sample'.
+    function readDashboardLibraryOwnerReport(reason = 'dashboard-release') {
+        const authed = !!isAuthedUser();
+        const intro = isIntroLibraryVisible();
+        const ownerReady = typeof localBooksGetAll === 'function';
+        const initialResolved = !!_libraryInitialResolutionComplete;
+        if (!authed) {
+            const state = intro ? 'sample' : 'pending';
+            return { state, ownerReady: false, initialResolved, authed, source: intro ? 'public-sample' : 'public-blocked', reason, at: new Date().toISOString() };
+        }
+        if (!ownerReady) {
+            return { state: 'pending', ownerReady, initialResolved, authed, source: 'signed-in-pending', pendingReason: 'owner-not-ready', reason, at: new Date().toISOString() };
+        }
+        if (!initialResolved) {
+            return { state: 'pending', ownerReady, initialResolved, authed, source: 'signed-in-pending', pendingReason: 'resolution-pending', reason, at: new Date().toISOString() };
+        }
+        // Only read committed DOM state after owner has resolved — not before.
+        const committed = readDashboardLibraryState();
+        const state = isSettledDashboardLibraryState(committed) ? committed : 'pending';
+        return { state, ownerReady, initialResolved, authed, source: 'signed-in-settled', reason, at: new Date().toISOString() };
+    }
+
+    function applyDashboardLibraryChrome(state, reason = 'dashboard-library-chrome') {
+        const authed = !!isAuthedUser();
+        const libraryToolbar = document.getElementById('library-toolbar');
+        const manageBtn = document.getElementById('manageLibraryBtn');
+        const importBtn = document.getElementById('importBookBtn');
+        // Shell coordinates chrome visibility only. Library/import truth remains
+        // owned by refreshLibrary(), localBooksGetAll(), and importer guards.
+        const toolbarAllowed = authed
+            ? isSettledDashboardLibraryState(state)
+            : (state === 'sample' && isIntroLibraryVisible());
+        if (libraryToolbar) {
+            libraryToolbar.classList.toggle('hidden-section', !toolbarAllowed);
+            libraryToolbar.setAttribute('data-shell-library-state', state || 'pending');
+        }
+        [manageBtn, importBtn].forEach((btn) => {
+            if (!btn) return;
+            try {
+                btn.disabled = !toolbarAllowed;
+                if (toolbarAllowed) btn.removeAttribute('aria-disabled');
+                else btn.setAttribute('aria-disabled', 'true');
+                btn.setAttribute('data-shell-library-state', state || 'pending');
+            } catch (_) {}
+        });
+        return { state, toolbarAllowed };
+    }
+
+    function prepareDashboardRelease(requestedSurface, options = {}) {
+        const reason = options.releaseReason || 'dashboard-release';
+        const report = readDashboardLibraryOwnerReport(reason);
+        const firstVisibleState = report.state;
+        setLibrarySurfaceState(firstVisibleState, reason);
+        if (firstVisibleState === 'pending') scheduleLibraryPendingBanner();
+        const chrome = applyDashboardLibraryChrome(firstVisibleState, reason);
+        _lastDashboardRelease = {
+            requestedSurface,
+            releasedSurface: 'dashboard',
+            releaseReason: reason,
+            firstVisibleLibraryState: firstVisibleState,
+            source: report.source,
+            ownerReady: !!report.ownerReady,
+            blockedBy: null,
+            toolbarAllowed: chrome.toolbarAllowed,
+            hiddenSectionOwner: 'releaseDashboardSectionVisibility',
+            at: new Date().toISOString()
+        };
+        return _lastDashboardRelease;
+    }
+
+    // Single owner of dashboard hidden-section removal. showSection() is the
+    // requester only — it must not directly remove hidden-section from dashboard.
+    function releaseDashboardSectionVisibility(requestedSurface, options = {}) {
+        const release = prepareDashboardRelease(requestedSurface, options);
+        ALL_SECTIONS.forEach((sectionId) => {
+            const el = document.getElementById(sectionId);
+            if (el) el.classList.add('hidden-section');
+        });
+        const target = document.getElementById('dashboard');
+        if (target) target.classList.remove('hidden-section');
+        _currentSection = 'dashboard';
+        _lastShellRelease = {
+            requestedSurface,
+            releasedSurface: 'dashboard',
+            releaseReason: release.releaseReason,
+            blockedBy: null,
+            at: new Date().toISOString()
+        };
+        return release;
+    }
+
+    function waitForDashboardLibrarySettlementOrThreshold(targetId, thresholdMs, reason = 'dashboard-library-reveal') {
+        if (targetId !== 'dashboard') {
+            return Promise.resolve({ targetId, settled: true, state: null, elapsedMs: 0, reason });
+        }
+        const started = performance.now();
+        return new Promise((resolve) => {
+            const done = (settled, state) => {
+                const elapsedMs = Math.round(performance.now() - started);
+                const report = { targetId, settled, state, elapsedMs, thresholdMs, reason, at: new Date().toISOString() };
+                _lastDashboardLibraryRevealTransaction = Object.assign({}, _lastDashboardLibraryRevealTransaction || {}, report);
+                resolve(report);
+            };
+            const check = () => {
+                const state = readDashboardLibraryState();
+                const authed = !!isAuthedUser();
+                const settled = authed
+                    ? (!!_libraryInitialResolutionComplete && isSettledDashboardLibraryState(state))
+                    : (state === 'sample' || state === 'pending');
+                if (settled) {
+                    done(true, state);
+                    return;
+                }
+                if (performance.now() - started >= thresholdMs) {
+                    done(false, state || 'pending');
+                    return;
+                }
+                window.setTimeout(check, 25);
+            };
+            check();
+        });
+    }
+
+    function releaseStandardSectionVisibility(requestedSurface, targetId, options = {}) {
+        prepareAuthSurfaceForRelease(targetId, options);
+        ALL_SECTIONS.forEach((sectionId) => {
+            const el = document.getElementById(sectionId);
+            if (el) el.classList.add('hidden-section');
+        });
+        const target = document.getElementById(targetId);
+        if (target) target.classList.remove('hidden-section');
+        _currentSection = targetId;
+        _lastShellRelease = {
+            requestedSurface,
+            releasedSurface: targetId,
+            releaseReason: options.releaseReason || ('show-section:' + targetId),
+            blockedBy: null,
+            at: new Date().toISOString()
+        };
     }
 
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
@@ -570,8 +908,12 @@ window.rcInteraction = (function () {
         const librarySample = document.getElementById('library-public-sample');
         const publicSampleCopy = document.getElementById('library-public-sample-copy');
         const publicSampleSubcopy = document.getElementById('library-public-sample-subcopy');
-        if (libraryToolbar) libraryToolbar.classList.toggle('hidden-section', !(authed || isIntroLibraryVisible()));
-        if (librarySample) librarySample.classList.add('hidden-section');
+        if (id === 'dashboard') {
+            applyDashboardLibraryChrome(readDashboardLibraryState() || (authed ? 'pending' : 'sample'), 'sync-auth-presentation:' + id);
+        } else if (libraryToolbar) {
+            libraryToolbar.classList.toggle('hidden-section', !(authed || isIntroLibraryVisible()));
+        }
+        if (librarySample && id !== 'dashboard') librarySample.classList.add('hidden-section');
         if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your own library.';
         if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Start free, keep your place, and come back anytime.';
         renderLibrarySubtitle(authed);
@@ -598,40 +940,42 @@ window.rcInteraction = (function () {
         const avatarSrc = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
         if (profileAvatarMain) profileAvatarMain.src = avatarSrc;
         if (profileAvatarSettings) profileAvatarSettings.src = avatarSrc;
+        // One shared account-control readiness writer owns Logout/Profile
+        // disabled state across dashboard, profile, refresh, and auth cycling.
+        applySignedInAccountControlReadiness('sync-auth-presentation:' + id);
     }
 
     function showSection(id, options = {}) {
         const targetId = resolveSectionForAuth(id);
+        const publicBoundary = ensurePublicRuntimeBeforeRelease(targetId, 'show-section:' + targetId);
+        if (!publicBoundary.allowed) return Promise.resolve(publicBoundary.report || null);
         if (targetId === 'landing-page' && !options.preserveIntroLibrary) _publicIntroLibraryVisible = false;
+        // Route entry must not resume a stale onboarding pane. Browser history
+        // can re-enter ?view=public-onboarding after the final transition has
+        // been active; reset before release so Step 1 is the visible owner.
+        if (targetId === 'public-onboarding') resetPublicOnboardingQuiz();
         const readingModeEl = document.getElementById('reading-mode');
         const wasReading = readingModeEl && !readingModeEl.classList.contains('hidden-section');
 
-        ALL_SECTIONS.forEach((s) => {
-            const el = document.getElementById(s);
-            if (el) el.classList.add('hidden-section');
-        });
-        const target = document.getElementById(targetId);
-        if (target) target.classList.remove('hidden-section');
-        _currentSection = targetId;
+        // showSection is the requester only. Dashboard hidden-section removal is
+        // owned exclusively by releaseDashboardSectionVisibility().
         if (targetId === 'dashboard') {
-            shellTrailPush('dashboard-reveal', {
-                historyMode: options.historyMode || 'push',
-                authed: !!isAuthedUser(),
-                hasLocalLibraryOwner: typeof localBooksGetAll === 'function'
-            });
+            releaseDashboardSectionVisibility(id, Object.assign({
+                releaseReason: options.releaseReason || 'dashboard-release:show-section'
+            }, options));
+        } else {
+            releaseStandardSectionVisibility(id, targetId, options);
         }
 
         const footer = document.getElementById('landing-footer');
         if (footer) footer.classList.toggle('hidden-section', targetId !== 'landing-page');
 
         const mainNav = document.querySelector('nav');
-        if (mainNav) mainNav.style.display = targetId === 'reading-mode' ? 'none' : '';
+        if (mainNav) mainNav.style.display = targetId === 'reading-mode' || targetId === 'public-onboarding' ? 'none' : '';
         if (wasReading && targetId !== 'reading-mode') {
             try {
-                let exitResult = null;
-                if (typeof exitReadingSession === 'function') exitResult = exitReadingSession();
+                if (typeof exitReadingSession === 'function') exitReadingSession();
                 else cleanupReadingTransientState();
-                shellDebugRemember('lastControlAction', { type: 'exit-reading', exitResult });
             } catch(_) {}
         }
         document.body.classList.toggle('reading-active', targetId === 'reading-mode');
@@ -664,6 +1008,15 @@ window.rcInteraction = (function () {
         return _sectionRefreshPromise || Promise.resolve();
     }
 
+    // =========================================================================
+    // SLICE 7 MODULE BOUNDARY 6/6 — Public Route Coordination
+    // Logical boundary declaration only — code not physically separated yet.
+    // Primary content: focus mode, public sample entry/exit, reading session
+    //   entry, preview modal, session-complete surface. Shell frames user
+    //   intent into runtime reading transitions — reading truth stays with
+    //   the runtime owner.
+    // =========================================================================
+
     // ── Focus mode fade ──────────────────────────────────────────
     let focusModeTimer   = null;
     let focusModeHandler = null;
@@ -686,6 +1039,16 @@ window.rcInteraction = (function () {
 
 
 
+    // =========================================================================
+    // SLICE 7 MODULE BOUNDARY 4/6 — Modal Opener Provenance
+    // Logical boundary declaration only — code not physically separated yet.
+    // Primary content: openModal(), closeModal(), ownership guards,
+    //   promptOwnershipAction(). Opener truth for pricing-modal is currently
+    //   inferred, not authoritative — see getActiveModalReport() HELD comment
+    //   (Bucket F). Do not treat this section as provenance-complete until
+    //   Bucket F retirement conditions are met.
+    // =========================================================================
+
     // ── Modals ───────────────────────────────────────────────────
     function openModal(id)  {
         const el = document.getElementById(id);
@@ -699,8 +1062,13 @@ window.rcInteraction = (function () {
     }
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
-    function login() {
-        showSigninPane();
+    function installPricingModalClickAway() {
+        const pricingModal = document.getElementById('pricing-modal');
+        if (!pricingModal || pricingModal.__jublyPricingClickAwayBound) return;
+        pricingModal.__jublyPricingClickAwayBound = true;
+        pricingModal.addEventListener('click', (event) => {
+            if (event.target === pricingModal) closeModal('pricing-modal');
+        });
     }
 
     function continueWithFree() {
@@ -708,7 +1076,7 @@ window.rcInteraction = (function () {
             window.rcBilling.continueWithFree();
             return;
         }
-        login();
+        showSigninPane();
     }
 
     function showSigninPane() {
@@ -716,6 +1084,7 @@ window.rcInteraction = (function () {
         closeModal('ownership-modal');
         _authMode = 'signin';
         _signupStep = 1;
+        _passwordRecoveryActive = false;
         toggleAuthMode(true);
         showSection('login-page');
     }
@@ -745,6 +1114,10 @@ window.rcInteraction = (function () {
             } catch (_) {}
             return;
         }
+        if (_authMode === 'forgot' || _authMode === 'reset') {
+            showSigninPane();
+            return;
+        }
         returnToPublicEntry();
     }
 
@@ -753,8 +1126,147 @@ window.rcInteraction = (function () {
         closeModal('pricing-modal');
         _authMode = 'signup';
         _signupStep = 1;
+        _passwordRecoveryActive = false;
         toggleAuthMode(true);
         showSection('login-page');
+    }
+
+    function clearPublicOnboardingTimer() {
+        if (_publicOnboardingTimer) window.clearTimeout(_publicOnboardingTimer);
+        _publicOnboardingTimer = null;
+    }
+
+    function getPublicOnboardingPanes() {
+        const card = document.getElementById('public-onboarding-card');
+        return card ? Array.from(card.querySelectorAll('[data-onboarding-pane]')) : [];
+    }
+
+    function updatePublicOnboardingProgress(step) {
+        document.querySelectorAll('[data-onboarding-progress]').forEach((dot) => {
+            dot.classList.toggle('active', dot.getAttribute('data-onboarding-progress') === String(step));
+        });
+    }
+
+    function setPublicOnboardingPane(name) {
+        clearPublicOnboardingTimer();
+        getPublicOnboardingPanes().forEach((pane) => {
+            const active = pane.getAttribute('data-onboarding-pane') === name;
+            pane.classList.toggle('active', active);
+            if (active && pane.getAttribute('data-onboarding-step')) updatePublicOnboardingProgress(pane.getAttribute('data-onboarding-step'));
+        });
+        try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch (_) { window.scrollTo(0, 0); }
+    }
+
+    function goToPublicOnboardingStep(step) {
+        setPublicOnboardingPane('step-' + step);
+    }
+
+    function showPublicOnboardingTransition(id, destination, delay) {
+        setPublicOnboardingPane('interstitial-' + id);
+        _publicOnboardingTimer = window.setTimeout(() => {
+            _publicOnboardingTimer = null;
+            try { destination(); } catch (_) {}
+        }, delay);
+    }
+
+    function applyPublicOnboardingTheme(theme) {
+        const safeTheme = ['default', 'green', 'purple'].includes(String(theme || 'default')) ? String(theme || 'default') : 'default';
+        document.body.classList.remove('theme-green', 'theme-purple');
+        if (safeTheme !== 'default') document.body.classList.add('theme-' + safeTheme);
+        return safeTheme;
+    }
+
+    function syncPublicOnboardingSpeed(rate) {
+        const value = Math.max(0.5, Math.min(2, Number(rate || 1) || 1));
+        _publicOnboardingChoices.speed = value;
+        const slider = document.getElementById('public-onboarding-speed');
+        const label = document.getElementById('public-onboarding-speed-value');
+        if (slider) {
+            slider.value = String(value);
+            const min = Number(slider.min || 0.5);
+            const max = Number(slider.max || 2);
+            const pct = ((value - min) / (max - min) * 100).toFixed(1) + '%';
+            slider.style.setProperty('--fill', pct);
+        }
+        if (label) label.textContent = (Number.isInteger(value) ? value.toFixed(1) : String(value)) + '×';
+        const shellSpeed = document.getElementById('shell-speed');
+        if (shellSpeed) shellSpeed.value = String(value);
+        shellSetSpeed(value);
+        return value;
+    }
+
+    function resetPublicOnboardingQuiz() {
+        clearPublicOnboardingTimer();
+        _publicOnboardingChoices = Object.assign({}, PUBLIC_ONBOARDING_DEFAULTS);
+        window.__jublyPublicOnboarding = Object.assign({ source: 'public-onboarding', durable: false }, _publicOnboardingChoices);
+        applyPublicOnboardingTheme('default');
+        document.querySelectorAll('#public-onboarding [role="radiogroup"]').forEach((group) => {
+            const choices = Array.from(group.querySelectorAll('[role="radio"]'));
+            choices.forEach((choice, index) => {
+                const selected = index === 0;
+                choice.classList.toggle('selected', selected);
+                choice.setAttribute('aria-checked', String(selected));
+            });
+        });
+        syncPublicOnboardingSpeed(PUBLIC_ONBOARDING_DEFAULTS.speed);
+        goToPublicOnboardingStep(1);
+    }
+
+    function selectPublicOnboardingChoice(button) {
+        const group = button && button.closest ? button.closest('[data-onboarding-group]') : null;
+        if (!group) return;
+        const key = group.getAttribute('data-onboarding-group');
+        const value = button.getAttribute('data-onboarding-value') || '';
+        Array.from(group.querySelectorAll('[role="radio"]')).forEach((choice) => {
+            const selected = choice === button;
+            choice.classList.toggle('selected', selected);
+            choice.setAttribute('aria-checked', String(selected));
+        });
+        if (key === 'goal' || key === 'voice' || key === 'theme') _publicOnboardingChoices[key] = value;
+        if (key === 'theme') applyPublicOnboardingTheme(value);
+        window.__jublyPublicOnboarding = Object.assign({ source: 'public-onboarding', durable: false }, _publicOnboardingChoices);
+    }
+
+    function initPublicOnboardingSurface() {
+        const surface = document.getElementById('public-onboarding');
+        if (!surface || surface.__jublyOnboardingBound) return;
+        surface.__jublyOnboardingBound = true;
+        surface.addEventListener('click', (event) => {
+            const radio = event.target.closest('[role="radio"]');
+            if (radio && surface.contains(radio)) {
+                selectPublicOnboardingChoice(radio);
+                return;
+            }
+            const nextButton = event.target.closest('[data-onboarding-next]');
+            if (!nextButton || !surface.contains(nextButton)) return;
+            const next = nextButton.getAttribute('data-onboarding-next');
+            if (next === '1') showPublicOnboardingTransition('1', () => goToPublicOnboardingStep(2), 2500);
+            else if (next === '2') goToPublicOnboardingStep(3);
+            else if (next === '3') showPublicOnboardingTransition('3', () => completePublicOnboardingAndStartReading(), 2600);
+        });
+        const speed = document.getElementById('public-onboarding-speed');
+        if (speed) speed.addEventListener('input', () => syncPublicOnboardingSpeed(speed.value));
+        resetPublicOnboardingQuiz();
+    }
+
+    function startPublicOnboardingQuiz() {
+        if (isAuthedUser()) return startPublicSampleReading();
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        _publicIntroLibraryVisible = false;
+        return showSection('public-onboarding', { releaseReason: 'public-onboarding:start' });
+    }
+
+    async function completePublicOnboardingAndStartReading() {
+        clearPublicOnboardingTimer();
+        window.__jublyPublicOnboarding = Object.assign({
+            source: 'public-onboarding',
+            durable: false,
+            completedAt: new Date().toISOString()
+        }, _publicOnboardingChoices);
+        applyPublicOnboardingTheme(_publicOnboardingChoices.theme);
+        syncPublicOnboardingSpeed(_publicOnboardingChoices.speed);
+        await startPublicSampleReading();
     }
 
     async function startPublicSampleReading() {
@@ -765,10 +1277,6 @@ window.rcInteraction = (function () {
         if (signal) signal.classList.add('hidden-section');
         showSection('reading-mode');
         try { if (typeof startReadingFromPreview === 'function') await startReadingFromPreview(PUBLIC_SAMPLE_BOOK_ID); } catch (_) {}
-    }
-
-    function openSampleBookPreview() {
-        startPublicSampleReading().catch(() => {});
     }
 
     function goToPostReadingSurface() {
@@ -785,12 +1293,11 @@ window.rcInteraction = (function () {
         if (window.rcBilling && typeof window.rcBilling.showPricingForGatedAction === 'function') {
             window.rcBilling.showPricingForGatedAction(message);
         } else {
-            const pricingMessage = document.getElementById('pricing-message');
-            if (pricingMessage) {
-                pricingMessage.textContent = message;
-                pricingMessage.classList.remove('hidden-section');
-                pricingMessage.style.color = '#4338ca';
-            }
+            // Fallback: billing module unavailable. Set the gated message directly
+            // before opening. This is the billing-unavailable degradation path only —
+            // when billing is present, showPricingForGatedAction owns message delivery.
+            const msgEl = document.getElementById('pricing-message');
+            if (msgEl) msgEl.textContent = message;
             openModal('pricing-modal');
         }
         return true;
@@ -819,9 +1326,37 @@ window.rcInteraction = (function () {
     // Shell is a thin presenter. It calls rcAuth, reflects state, and routes.
     // It does not own auth state or Supabase operations.
 
-    let _authMode = 'signin'; // 'signin' | 'signup'
+    let _authMode = 'signin'; // 'signin' | 'signup' | 'forgot' | 'reset'
     let _signupStep = 1; // 1=email, 2=username+password
     let _validatedSignupEmail = '';
+    let _passwordRecoveryActive = false;
+
+    function isPasswordRecoveryRoute() {
+        try {
+            const search = new URLSearchParams(window.location.search || '');
+            if (String(search.get('view') || '').trim() === 'reset-password') return true;
+            if (String(search.get('type') || '').trim().toLowerCase() === 'recovery') return true;
+        } catch (_) {}
+        try {
+            const hash = String(window.location.hash || '').replace(/^#/, '');
+            if (!hash) return false;
+            const hashParams = new URLSearchParams(hash);
+            return String(hashParams.get('type') || '').trim().toLowerCase() === 'recovery';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function isPasswordRecoveryActive() {
+        return _passwordRecoveryActive || isPasswordRecoveryRoute();
+    }
+
+    function _authSubmitText() {
+        if (_authMode === 'signup') return _signupStep === 1 ? 'Next' : 'Create Account';
+        if (_authMode === 'forgot') return 'Send Reset Link';
+        if (_authMode === 'reset') return 'Save Password';
+        return 'Sign In';
+    }
 
     function applyAuthModeUi() {
         const heading       = document.getElementById('auth-form-heading');
@@ -833,6 +1368,7 @@ window.rcInteraction = (function () {
         const usernameWrap  = document.getElementById('auth-username-wrap');
         const passwordWrap  = document.getElementById('auth-password-wrap');
         const confirmWrap   = document.getElementById('auth-confirm-wrap');
+        const forgotWrap    = document.getElementById('auth-forgot-wrap');
         const errEl         = document.getElementById('auth-error');
         const okEl          = document.getElementById('auth-success');
         const pwInput       = document.getElementById('loginPassword');
@@ -844,21 +1380,45 @@ window.rcInteraction = (function () {
             if (heading) heading.textContent = 'Create account';
             if (toggleBtn) toggleBtn.textContent = 'Sign in instead';
             if (toggleLabel) toggleLabel.textContent = 'Already have an account?';
+            if (forgotWrap) forgotWrap.classList.add('hidden-section');
             if (_signupStep === 1) {
                 if (emailWrap) emailWrap.classList.remove('hidden-section');
                 if (subheading) subheading.textContent = 'Enter your email to begin.';
                 if (usernameWrap) usernameWrap.classList.add('hidden-section');
                 if (passwordWrap) passwordWrap.classList.add('hidden-section');
                 if (confirmWrap) confirmWrap.classList.add('hidden-section');
-                if (submitBtn) submitBtn.textContent = 'Next';
+                if (submitBtn) submitBtn.textContent = _authSubmitText();
             } else {
                 if (emailWrap) emailWrap.classList.add('hidden-section');
                 if (subheading) subheading.textContent = 'Choose a username and password.';
                 if (usernameWrap) usernameWrap.classList.remove('hidden-section');
                 if (passwordWrap) passwordWrap.classList.remove('hidden-section');
                 if (confirmWrap) confirmWrap.classList.remove('hidden-section');
-                if (submitBtn) submitBtn.textContent = 'Create Account';
+                if (submitBtn) submitBtn.textContent = _authSubmitText();
             }
+            if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
+        } else if (_authMode === 'forgot') {
+            if (heading) heading.textContent = 'Reset password';
+            if (subheading) subheading.textContent = 'Enter your email and we’ll send a reset link.';
+            if (toggleBtn) toggleBtn.textContent = 'Sign in';
+            if (toggleLabel) toggleLabel.textContent = 'Remembered it?';
+            if (emailWrap) emailWrap.classList.remove('hidden-section');
+            if (usernameWrap) usernameWrap.classList.add('hidden-section');
+            if (passwordWrap) passwordWrap.classList.add('hidden-section');
+            if (confirmWrap) confirmWrap.classList.add('hidden-section');
+            if (forgotWrap) forgotWrap.classList.add('hidden-section');
+            if (submitBtn) submitBtn.textContent = _authSubmitText();
+        } else if (_authMode === 'reset') {
+            if (heading) heading.textContent = 'Choose a new password';
+            if (subheading) subheading.textContent = 'Enter a new password for your Jubly account.';
+            if (toggleBtn) toggleBtn.textContent = 'Sign in';
+            if (toggleLabel) toggleLabel.textContent = 'Ready?';
+            if (emailWrap) emailWrap.classList.add('hidden-section');
+            if (usernameWrap) usernameWrap.classList.add('hidden-section');
+            if (passwordWrap) passwordWrap.classList.remove('hidden-section');
+            if (confirmWrap) confirmWrap.classList.remove('hidden-section');
+            if (forgotWrap) forgotWrap.classList.add('hidden-section');
+            if (submitBtn) submitBtn.textContent = _authSubmitText();
             if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
         } else {
             if (heading) heading.textContent = 'Welcome back';
@@ -869,16 +1429,33 @@ window.rcInteraction = (function () {
             if (usernameWrap) usernameWrap.classList.add('hidden-section');
             if (passwordWrap) passwordWrap.classList.remove('hidden-section');
             if (confirmWrap) confirmWrap.classList.add('hidden-section');
-            if (submitBtn) submitBtn.textContent = 'Sign In';
+            if (forgotWrap) forgotWrap.classList.remove('hidden-section');
+            if (submitBtn) submitBtn.textContent = _authSubmitText();
             if (pwInput) pwInput.setAttribute('autocomplete', 'current-password');
         }
     }
 
     function toggleAuthMode(forceApply = false) {
-        if (!forceApply) _authMode = _authMode === 'signin' ? 'signup' : 'signin';
+        if (!forceApply) _authMode = _authMode === 'signup' ? 'signin' : 'signup';
         _signupStep = 1;
         _validatedSignupEmail = '';
+        if (_authMode !== 'reset') _passwordRecoveryActive = false;
         applyAuthModeUi();
+    }
+
+    function showForgotPasswordPane() {
+        closeModal('pricing-modal');
+        closeModal('ownership-modal');
+        _authMode = 'forgot';
+        _signupStep = 1;
+        _validatedSignupEmail = '';
+        _passwordRecoveryActive = false;
+        applyAuthModeUi();
+        showSection('login-page', { preserveAuthMessage: true });
+        try {
+            const emailField = document.getElementById('loginEmail');
+            if (emailField) emailField.focus();
+        } catch (_) {}
     }
 
     function _authShowError(msg) {
@@ -904,6 +1481,55 @@ window.rcInteraction = (function () {
         const ok  = document.getElementById('auth-success');
         if (err) err.classList.add('hidden-section');
         if (ok)  ok.classList.add('hidden-section');
+    }
+
+    function prepareAuthSurfaceForRelease(targetId, options = {}) {
+        if (targetId !== 'login-page') return;
+        if (isPasswordRecoveryRoute()) {
+            _passwordRecoveryActive = true;
+            _authMode = 'reset';
+            _signupStep = 1;
+            _validatedSignupEmail = '';
+            applyAuthModeUi();
+            if (options && options.preserveAuthMessage) return;
+            _authClearMessages();
+            return;
+        }
+        if (options && options.preserveAuthMessage) return;
+        // Route/re-entry into login must not preserve week-old signup or
+        // confirmation-copy as current auth truth. Supabase sign-in remains the
+        // authority for whether the email is actually confirmed.
+        _authClearMessages();
+    }
+
+    function _isEmailNotConfirmedMessage(message) {
+        return /email\s+not\s+confirmed|confirm(?:ed)?\s+email|email.*confirm/i.test(String(message || ''));
+    }
+
+    async function _handleUnconfirmedSignIn(email) {
+        const normalizedEmail = String(email || '').trim();
+        const fallback = 'Please verify your email before signing in.';
+        const resend = window.rcAuth && typeof window.rcAuth.resendSignupVerification === 'function'
+            ? window.rcAuth.resendSignupVerification
+            : null;
+        if (!normalizedEmail || !resend) {
+            _authShowError(fallback);
+            return;
+        }
+
+        try {
+            const result = await resend(normalizedEmail, {
+                emailRedirectTo: buildAuthRedirectForPendingPlan(),
+            });
+            const resendError = result && result.error ? result.error : null;
+            if (resendError) {
+                _authShowError(`${fallback} I couldn't send a fresh verification email right now. Try signing in again in a moment.`);
+                return;
+            }
+            _authShowSuccess(`${fallback} We sent a fresh verification email.`);
+        } catch (_) {
+            _authShowError(fallback);
+        }
     }
 
     function _readAuthPendingPlan() {
@@ -976,6 +1602,17 @@ window.rcInteraction = (function () {
         }
     }
 
+    function buildPasswordResetRedirect() {
+        try {
+            const cfg = window.rcAuth && typeof window.rcAuth.getConfig === 'function' ? window.rcAuth.getConfig() : null;
+            const configured = String((cfg && cfg.resetPasswordRedirectUrl) || '').trim();
+            if (configured) return configured;
+            const base = String((cfg && cfg.appBaseUrl) || '').trim().replace(/\/$/, '');
+            if (base) return `${base}/?view=reset-password`;
+        } catch (_) {}
+        return '';
+    }
+
     async function authFormSubmit() {
         const email    = ((document.getElementById('loginEmail') || {}).value || '').trim();
         const username = ((document.getElementById('signupUsername') || {}).value || '').trim();
@@ -984,6 +1621,90 @@ window.rcInteraction = (function () {
         const btn      = document.getElementById('auth-submit-btn');
 
         _authClearMessages();
+
+        if (_authMode === 'forgot') {
+            if (!email) {
+                _authShowError('Email is required.');
+                return;
+            }
+            if (!(window.rcAuth && typeof window.rcAuth.looksLikeEmail === 'function' && window.rcAuth.looksLikeEmail(email))) {
+                _authShowError('Enter a valid email address.');
+                return;
+            }
+            if (!(window.rcAuth && typeof window.rcAuth.requestPasswordReset === 'function')) {
+                _authShowError('Password reset is not available in this environment.');
+                return;
+            }
+            if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+            try {
+                const result = await window.rcAuth.requestPasswordReset(email, {
+                    redirectTo: buildPasswordResetRedirect(),
+                });
+                const error = result && result.error ? result.error : null;
+                if (error) {
+                    _authShowError(String(error.message || 'Password reset failed. Please try again.'));
+                    return;
+                }
+                // Keep copy generic so reset does not disclose whether an email
+                // belongs to an account. Supabase remains the mail/session owner.
+                _authShowSuccess('If an account exists for that email, we sent a password reset link.');
+            } catch (_) {
+                _authShowError('Password reset failed. Please try again.');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = _authSubmitText();
+                }
+            }
+            return;
+        }
+
+        if (_authMode === 'reset') {
+            if (!password || !confirm) {
+                _authShowError('Enter and confirm your new password.');
+                return;
+            }
+            if (password.length < 8) {
+                _authShowError('Password must be at least 8 characters.');
+                return;
+            }
+            if (password !== confirm) {
+                _authShowError('Passwords do not match.');
+                return;
+            }
+            if (!(window.rcAuth && typeof window.rcAuth.changePassword === 'function')) {
+                _authShowError('Password reset is not available in this environment.');
+                return;
+            }
+            if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+            try {
+                const result = await window.rcAuth.changePassword(password);
+                const error = result && result.error ? result.error : null;
+                if (error) {
+                    _authShowError(String(error.message || 'Password update failed. Please try again.'));
+                    return;
+                }
+
+                _passwordRecoveryActive = false;
+                try {
+                    if (window.rcAuth && typeof window.rcAuth.signOut === 'function') await window.rcAuth.signOut();
+                } catch (_) {}
+                _authMode = 'signin';
+                _signupStep = 1;
+                _validatedSignupEmail = '';
+                applyAuthModeUi();
+                try { syncHistoryForSection('login-page', 'replace'); } catch (_) {}
+                _authShowSuccess('Password updated. Please sign in.');
+            } catch (_) {
+                _authShowError('Password update failed. Please try again.');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = _authSubmitText();
+                }
+            }
+            return;
+        }
 
         if (_authMode === 'signup' && _signupStep === 1) {
             if (!email) {
@@ -1002,7 +1723,7 @@ window.rcInteraction = (function () {
             } finally {
                 if (btn) {
                     btn.disabled = false;
-                    btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
+                    btn.textContent = _authSubmitText();
                 }
             }
             _signupStep = 2;
@@ -1082,7 +1803,11 @@ window.rcInteraction = (function () {
                 const { error } = await window.rcAuth.signIn(email, password);
                 if (error) {
                     const message = String(error.message || 'Sign-in failed. Check your email and password.');
-                    _authShowError(/email\s+not\s+confirmed/i.test(message) ? 'Check your email to verify your account before signing in.' : message);
+                    if (_isEmailNotConfirmedMessage(message)) {
+                        await _handleUnconfirmedSignIn(email);
+                    } else {
+                        _authShowError(message);
+                    }
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     if (pendingPlan === 'pro' || pendingPlan === 'premium') {
@@ -1095,20 +1820,23 @@ window.rcInteraction = (function () {
         } finally {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = _authMode === 'signup' ? (_signupStep === 1 ? 'Next' : 'Create Account') : 'Sign In';
+                btn.textContent = _authSubmitText();
             }
         }
     }
 
     async function shellSignOut() {
         const logoutBtn = document.querySelector('[onclick="shellSignOut()"]');
+        _accountControlsTransientBlock = 'auth:signout';
+        applySignedInAccountControlReadiness('signout-start');
         if (logoutBtn) logoutBtn.disabled = true;
         try { window.rcInteraction && window.rcInteraction.pending('auth:signout', 'Signing out…'); } catch (_) {}
         try {
             if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
                 const result = await window.rcAuth.signOut();
                 if (result && result.ok === false) {
-                    if (logoutBtn) logoutBtn.disabled = false;
+                    _accountControlsTransientBlock = null;
+                    applySignedInAccountControlReadiness('signout-failed');
                     try {
                         const actions = window.rcInteraction && window.rcInteraction.actions
                             ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
@@ -1120,7 +1848,8 @@ window.rcInteraction = (function () {
             }
             try { window.rcInteraction && window.rcInteraction.clear('auth:signout'); } catch (_) {}
         } catch (_) {
-            if (logoutBtn) logoutBtn.disabled = false;
+            _accountControlsTransientBlock = null;
+            applySignedInAccountControlReadiness('signout-error');
             try {
                 const actions = window.rcInteraction && window.rcInteraction.actions
                     ? [window.rcInteraction.actions.retry(shellSignOut), window.rcInteraction.actions.refresh()]
@@ -1133,10 +1862,28 @@ window.rcInteraction = (function () {
     function _handleAuthChanged(e) {
         const { signedIn, source } = e.detail || {};
         const current = getCurrentVisibleSection();
-        try {
-            if (signedIn && window.rcAppearance && typeof window.rcAppearance.restorePersisted === 'function') window.rcAppearance.restorePersisted();
-            else if (!signedIn && window.rcAppearance && typeof window.rcAppearance.load === 'function') window.rcAppearance.load({ fromLocal: false });
-        } catch (_) {}
+        _accountControlsTransientBlock = null;
+        // Appearance ownership stays outside shell auth transitions.
+        // index.html owns first paint, state.js owns runtime adoption, and shell
+        // appearance controls remain user-intent bridges through rcAppearance.set().
+
+        if (source === 'PASSWORD_RECOVERY') {
+            _passwordRecoveryActive = true;
+            _authMode = 'reset';
+            _signupStep = 1;
+            _validatedSignupEmail = '';
+            applyAuthModeUi();
+            if (_shellAuthBootstrapped && current !== 'login-page') {
+                showSection('login-page', {
+                    historyMode: 'replace',
+                    preserveAuthMessage: true,
+                    releaseReason: 'auth-password-recovery',
+                });
+            } else {
+                syncShellAuthPresentation('login-page');
+            }
+            return;
+        }
 
         if (!_shellAuthBootstrapped) {
             syncShellAuthPresentation(resolveSectionForAuth(current));
@@ -1144,14 +1891,17 @@ window.rcInteraction = (function () {
         }
 
         if (signedIn) {
+            if (current === 'login-page' && isPasswordRecoveryActive()) {
+                syncShellAuthPresentation(current);
+                return;
+            }
             const pendingPaid = !!(window.rcBilling && typeof window.rcBilling.hasPendingPaidIntent === 'function' && window.rcBilling.hasPendingPaidIntent());
             if (pendingPaid && (current === 'landing-page' || current === 'login-page')) {
                 syncShellAuthPresentation(current === 'landing-page' ? 'login-page' : current);
                 return;
             }
             if (current === 'landing-page' || current === 'login-page') {
-                showSection('dashboard', { historyMode: 'replace' });
-                try { refreshLibrary('auth-change-dashboard-redirect'); } catch(_) {}
+                showSection('dashboard', { historyMode: 'replace', releaseReason: 'dashboard-release:auth-change' });
                 return;
             }
             syncShellAuthPresentation(current);
@@ -1174,6 +1924,8 @@ window.rcInteraction = (function () {
 
     document.addEventListener('DOMContentLoaded', async () => {
         installOwnershipGuards();
+        installPricingModalClickAway();
+        initPublicOnboardingSurface();
         try {
             document.body.classList.add('auth-hydrating');
             document.body.classList.add('boot-pending');
@@ -1190,21 +1942,23 @@ window.rcInteraction = (function () {
         const requestedSection = readSectionFromLocation();
         const settledSection = resolveSectionForAuth(requestedSection || 'landing-page');
         _shellAuthBootstrapped = true;
-        // Start the library refresh immediately behind the boot hold, then always
-        // wait the full 1000ms before revealing. At reveal time the library is
-        // either settled (show books or empty state directly) or still pending
-        // (show the neutral pending surface). No early release — the hold is a
-        // minimum, not a cap.
-        showSection(settledSection, { historyMode: 'replace' });
+        // Start dashboard/library settlement behind the boot hold. If signed-in
+        // library truth resolves quickly, reveal the settled dashboard directly.
+        // If it is still unresolved at the threshold, reveal neutral pending; if
+        // final truth lands immediately after that, setLibrarySurfaceState() keeps
+        // pending visible for a short readable minimum instead of flashing it.
+        const sectionPromise = Promise.resolve(showSection(settledSection, { historyMode: 'replace' }))
+            .catch((err) => shellTrailPush('boot-section-settlement-error', { message: String(err && err.message || err) }));
         const bootHoldMs = 1000;
         try {
             await Promise.all([
-                new Promise(resolve => setTimeout(resolve, bootHoldMs)),
-                appearancePainted
+                appearancePainted,
+                waitForDashboardLibrarySettlementOrThreshold(settledSection, bootHoldMs, 'boot')
             ]);
             await waitForBootRevealFrame();
         } catch (_) {}
         releaseBootPending();
+        try { await sectionPromise; } catch (_) {}
     });
     // ── Profile tabs ─────────────────────────────────────────────
     function switchTab(tabId) {
@@ -1504,8 +2258,6 @@ window.rcInteraction = (function () {
         return true;
     }
 
-    function promptExplorerUpgrade() { openModal('pricing-modal'); }
-
     // ── F1: TTS Speed Control bridge ─────────────────────────────
     function shellSetSpeed(value) {
         const rate = parseFloat(value) || 1;
@@ -1562,31 +2314,18 @@ window.rcInteraction = (function () {
         return 0;
     }
 
-    // RETIRED (Pass 2): syncVisiblePageAsPlayTarget is no longer called.
-    // Its only call site was handlePausePlay(), which has been updated to
-    // delegate without pre-empting runtime page truth. Runtime owns current-
-    // page targeting through _installScrollPageTracker + __rcReadingTarget.
-    // getVisibleReadingPageIndex() below is kept because it still feeds the
-    // progress display (not launch-critical truth). If progress display is
-    // later moved to a runtime-owned readout, both functions can be deleted.
-    function syncVisiblePageAsPlayTarget() {
-        const idx = getVisibleReadingPageIndex();
-        if (!Number.isFinite(idx) || idx < 0) return false;
-        try {
-            if (typeof window.focusReadingPage === 'function') {
-                const result = window.focusReadingPage(idx, { behavior: 'smooth' });
-                return !!(result && result.ok !== false);
-            }
-        } catch (_) {}
-        return false;
-    }
-
     function bringPlaybackPageIntoView(playbackStatus) {
         const idx = getActivePlaybackPageIndex(playbackStatus);
         if (!Number.isFinite(idx) || idx < 0) return false;
         const pageEl = document.querySelector(`.page[data-page-index="${idx}"]`) || document.querySelectorAll('.page')[idx];
         if (!pageEl) return false;
-        try { pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) { return false; }
+        try {
+            if (typeof window.__rcScrollReadingPageIntoView === 'function') {
+                window.__rcScrollReadingPageIntoView(pageEl, { behavior: 'smooth', reason: 'shell-playback-page' });
+            } else {
+                pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        } catch (_) { return false; }
         return true;
     }
 
@@ -1614,6 +2353,57 @@ window.rcInteraction = (function () {
 
     // ── Bottom bar controls ──────────────────────────────────────
 
+    const SHELL_PLAYBACK_CLOUD_RESTART_VISIBLE_AFTER_MS = 400;
+
+    function getShellVoiceVolumeLevel() {
+        try {
+            const voice = document.getElementById('vol_voice');
+            if (voice && voice.value !== '') return Number(voice.value);
+        } catch (_) {}
+        try {
+            const stored = JSON.parse(localStorage.getItem('rc_volumes') || '{}');
+            if (typeof stored.voice === 'number') return Number(stored.voice);
+        } catch (_) {}
+        return null;
+    }
+
+    function computeShellPlaybackIndicatorMessage(status, countdown, support, eligibility) {
+        const supportReason = String(support && support.reason || eligibility?.reasons?.canPlay || '').trim();
+        const browserVoiceUnavailable = support && support.playable === false && support.browserVoiceAvailable === false;
+        if (browserVoiceUnavailable || (!support?.playable && supportReason)) {
+            return supportReason || 'No browser English voice is available on this device.';
+        }
+
+        const voiceVolume = getShellVoiceVolumeLevel();
+        if (status?.active && Number.isFinite(voiceVolume) && voiceVolume <= 0) {
+            return 'Voice volume is off';
+        }
+
+        const pending = status?.cloudRestartPending || null;
+        const cloudRestartActive = !!(status?.cloudRestartInFlight || pending?.active);
+        const elapsedMs = Number(pending?.elapsedMs || 0);
+        if (cloudRestartActive && elapsedMs >= SHELL_PLAYBACK_CLOUD_RESTART_VISIBLE_AFTER_MS) {
+            return String(pending?.message || 'Loading audio…');
+        }
+
+        // Playback-start failure is intentionally not inferred here. The current
+        // runtime getter does not expose a retry-exhausted/start-error field.
+        return '';
+    }
+
+    function setShellPlaybackIndicatorMessage(message) {
+        const indicator = document.getElementById('shell-playback-indicator');
+        if (!indicator) return;
+        const text = String(message || '').trim();
+        if (text) {
+            indicator.textContent = text;
+            indicator.hidden = false;
+        } else {
+            indicator.textContent = '';
+            indicator.hidden = true;
+        }
+    }
+
     // Pause/Play — calls app's tts.js functions if available.
     // Guards against first-use case where TTS was never started (TTS_STATE.activeKey is null).
     function syncShellPlaybackControls() {
@@ -1631,12 +2421,15 @@ window.rcInteraction = (function () {
         try { if (typeof getTtsSupportStatus === 'function') support = getTtsSupportStatus() || support; } catch (_) {}
         try { if (typeof getPlaybackControlEligibility === 'function') eligibility = getPlaybackControlEligibility() || eligibility; } catch (_) {}
         const canPlay = !!eligibility.canPlay;
+        const indicatorMessage = computeShellPlaybackIndicatorMessage(status, countdown, support, eligibility);
         if (btn) {
             const label = eligibility.canResume ? 'Resume' : (eligibility.canPause ? 'Pause' : 'Play');
             btn.classList.toggle('active', !!status.active && !status.paused);
-            btn.title = status.active ? (status.paused ? 'Resume narration' : 'Pause narration') : (countdown.active ? 'Resume current page from countdown' : 'Play current page');
-            btn.disabled = !canPlay;
-            btn.setAttribute('aria-disabled', String(!canPlay));
+            btn.title = indicatorMessage || (status.active ? (status.paused ? 'Resume narration' : 'Pause narration') : (countdown.active ? 'Resume current page from countdown' : 'Play current page'));
+            // Keep Play reachable even when runtime reports a blocked state; the
+            // indicator explains why while shell still forwards intent only.
+            btn.disabled = false;
+            btn.setAttribute('aria-disabled', 'false');
             if (labelEl) labelEl.textContent = label;
             if (iconEl) {
                 iconEl.innerHTML = label === 'Pause'
@@ -1662,20 +2455,8 @@ window.rcInteraction = (function () {
             if (disabled) pageBtn.title = support.reason || 'Playback unavailable';
             else pageBtn.removeAttribute('title');
         });
-        // Surface blocked/no-voice/error state visibly rather than leaving dead controls.
-        const blockedMsgEl = document.getElementById('shell-tts-blocked-msg');
-        if (blockedMsgEl) {
-            const blockedReason = !canPlay && !status.active && !countdown.active
-                ? String(support.reason || eligibility.reasons?.canPlay || '')
-                : '';
-            if (blockedReason) {
-                blockedMsgEl.textContent = blockedReason;
-                blockedMsgEl.style.display = '';
-            } else {
-                blockedMsgEl.textContent = '';
-                blockedMsgEl.style.display = 'none';
-            }
-        }
+        // Surface playback/support status without taking ownership of runtime truth.
+        setShellPlaybackIndicatorMessage(indicatorMessage);
         // PATCH(speed-sync): Keep #shell-speed in sync with TTS_STATE.rate.
         // Previously, if setPlaybackRate() was called from any path other than
         // the shell select itself (e.g. programmatic change, restored preference),
@@ -1690,36 +2471,13 @@ window.rcInteraction = (function () {
                 if (hasOpt) speedSel.value = runtimeRate;
             }
         } catch (_) {}
-
-        shellDebugRemember('lastPlaybackSync', {
-            type: 'playback-sync',
-            playback: status,
-            countdown,
-            support,
-            eligibility,
-            speedSynced: true,
-            controls: {
-                playDisabled: !!(btn && btn.disabled),
-                prevDisabled: !!(prevBtn && prevBtn.disabled),
-                nextDisabled: !!(nextBtn && nextBtn.disabled),
-                blockedReasons: {
-                    play: (!canPlay && eligibility.reasons) ? (eligibility.reasons.canPlay || '') : null,
-                    prev: (!eligibility.canSkipPrev && eligibility.reasons) ? (eligibility.reasons.canSkipPrev || '') : null,
-                    next: (!eligibility.canSkipNext && eligibility.reasons) ? (eligibility.reasons.canSkipNext || '') : null,
-                }
-            }
-        });
     }
 
     function handlePausePlay() {
         // Shell is a pure delegate. All routing — resume, pause, countdown
         // cancel+restart, and fresh-start — is owned by pauseOrResumeReading()
         // in tts.js. Shell does not inspect eligibility or countdown here.
-        // PASS2: Removed syncVisiblePageAsPlayTarget() call. Runtime owns
-        // current-page truth via _installScrollPageTracker (library.js), which
-        // keeps __rcReadingTarget.pageIndex current on every scroll frame.
-        // startFocusedPageTts() reads that directly. Shell must not pre-empt
-        // the runtime's page truth with a DOM-visibility inference.
+        // Runtime owns current-page truth; shell only forwards play/pause intent.
         const before = {
             playback: (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null,
             countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
@@ -1731,12 +2489,6 @@ window.rcInteraction = (function () {
         if (afterPlayback?.active && !afterPlayback.paused && (!before.playback?.active || before.playback?.paused || before.countdown?.active)) {
             bringPlaybackPageIntoView(afterPlayback);
         }
-        shellDebugRemember('lastControlAction', {
-            type: 'play-toggle',
-            before,
-            result,
-            after: afterPlayback,
-        });
         return result;
     }
 
@@ -1751,69 +2503,73 @@ window.rcInteraction = (function () {
             const cb = document.getElementById('autoplayToggle');
             if (cb) cb.checked = next;
         } catch(_) {}
-        shellDebugRemember('lastControlAction', { type: 'autoplay-toggle', enabled: next });
         return next;
     }
 
 
 
     function handleTtsStep(delta) {
-        const before = {
-            playback: (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null,
-            countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
-            runtime: (typeof getRuntimeUiState === 'function') ? getRuntimeUiState() : null
-        };
         let moved = false;
-        let route = 'unavailable';
         try {
-            if (typeof ttsJumpSentence === 'function') {
-                moved = !!ttsJumpSentence(delta);
-                if (moved) route = 'block-session-transition';
-                else route = 'block-session-unavailable';
-            }
+            if (typeof ttsJumpSentence === 'function') moved = !!ttsJumpSentence(delta);
         } catch (_) {}
         syncShellPlaybackControls();
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
         if (moved && afterPlayback?.active && !afterPlayback.paused) {
             bringPlaybackPageIntoView(afterPlayback);
         }
-        shellDebugRemember('lastSkipAction', {
-            type: 'skip',
-            delta,
-            route,
-            moved,
-            before,
-            after: {
-                playback: afterPlayback,
-                countdown: (typeof getCountdownStatus === 'function') ? getCountdownStatus() : null,
-                runtime: (typeof getRuntimeUiState === 'function') ? getRuntimeUiState() : null,
-                tts: (typeof getTtsDiagnosticsSnapshot === 'function') ? getTtsDiagnosticsSnapshot() : null
-            }
-        });
         return moved;
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+        // HELD — boot-order bridge. Do not remove without boot timing proof.
+        //
+        // Why this exists: shell.js attaches its rc:runtime-policy-changed listener
+        // during DOMContentLoaded, but state.js is injected later by app.js and emits
+        // rc:runtime-policy-changed when it applies the initial fallback policy. Because
+        // of that load order, shell can miss the first policy event entirely.
+        //
+        // Retirement condition: either prove via dev-only boot timing probes (cold
+        // signed-out, cold signed-in, refresh signed-in) that rc:runtime-policy-changed
+        // always fires after this listener is attached, or replace with a one-time
+        // immediate read from current owner state after listener attachment. Do not
+        // remove this timeout on the assumption it is "just a delay."
         setTimeout(() => {
+            _bootProbe.mark('boot-timeout-fired', {
+                rcPolicyPresent:     !!window.rcPolicy,
+                rcThemePresent:      !!window.rcTheme,
+                rcAppearancePresent: !!window.rcAppearance,
+                rcEntitlementsPresent: !!window.rcEntitlements
+            });
             updateTierPill();
             updateExplorerSwatchState();
             try { if (window.rcTheme) window.rcTheme.syncShellState(); } catch (_) {}
             try { if (window.rcAppearance) window.rcAppearance.syncButtons(); } catch (_) {}
             try { refreshExplorerPanel(); } catch (_) {}
+            // Delayed report: fires after timeout so all marks are present.
+            setTimeout(() => { _bootProbe.report(); }, 150);
         }, 500);
-        patchRefreshHook();
-        // Reading entry is now fully runtime-owned via startReadingFromPreview → __rcLoadBook.
-        // The previous poll/auto-click bridge (bookSel change → waitForPages → loadBtn.click)
-        // has been retired: loadBook() in library.js calls render() directly, and render()
-        // calls __jublyAfterRender itself. No shell polling or synthetic click is needed.
+        // Reading entry is fully runtime-owned via startReadingFromPreview → __rcLoadBook.
     });
 
-    // ── Library table — populated by __jublyLibraryRefresh hook called from library.js ──
+    // =========================================================================
+    // SLICE 7 MODULE BOUNDARY 2/6 (continued) — Dashboard/Library Visible Settlement
+    // Library table rendering: the visible output of the settlement decision
+    // made in the primary 2/6 block above. Refresh is driven by the
+    // rc:local-library-changed event and show-section-dashboard transitions.
+    // =========================================================================
+
+    // ── Library table — refreshed via rc:local-library-changed and show-section-dashboard ──
     function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     let libraryRefreshRetryTimer = null;
     let _loggedFirstLocalLibraryRead = false;
     let _libraryInitialResolutionComplete = false;
     let _libraryRefreshSequence = 0;
+    const DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS = 1000;
+    let _dashboardLibraryPendingVisibleAt = 0;
+    let _dashboardLibraryDeferredFinalTimer = null;
+    let _dashboardLibraryDeferredFinalState = null;
+    let _lastDashboardLibraryRevealTransaction = null;
 
     function scheduleLibraryPendingBanner() {
         if (_libraryPendingBannerTimer || _libraryInitialResolutionComplete) return;
@@ -1836,17 +2592,90 @@ window.rcInteraction = (function () {
         try { window.rcInteraction && window.rcInteraction.clear('library:hydrate'); } catch (_) {}
     }
 
-    function setLibrarySurfaceState(state) {
+    function isDashboardVisibleToUser() {
+        const dashboard = document.getElementById('dashboard');
+        if (!dashboard || dashboard.classList.contains('hidden-section')) return false;
+        try {
+            if (document.body.classList.contains('boot-pending') || document.body.classList.contains('auth-hydrating')) return false;
+        } catch (_) {}
+        return true;
+    }
+
+    function clearDeferredDashboardLibraryFinalState() {
+        if (_dashboardLibraryDeferredFinalTimer) {
+            window.clearTimeout(_dashboardLibraryDeferredFinalTimer);
+            _dashboardLibraryDeferredFinalTimer = null;
+        }
+        _dashboardLibraryDeferredFinalState = null;
+    }
+
+    function markDashboardPendingVisibleIfNeeded(reason = 'dashboard-pending-visible') {
+        const state = readDashboardLibraryState();
+        if (state !== 'pending' || !isDashboardVisibleToUser()) return false;
+        if (!_dashboardLibraryPendingVisibleAt) {
+            _dashboardLibraryPendingVisibleAt = performance.now();
+            _lastDashboardLibraryRevealTransaction = Object.assign({}, _lastDashboardLibraryRevealTransaction || {}, {
+                pendingVisibleAtMs: Math.round(_dashboardLibraryPendingVisibleAt),
+                pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS,
+                pendingVisibleReason: reason,
+                at: new Date().toISOString()
+            });
+        }
+        return true;
+    }
+
+    function applyLibrarySurfaceStateNow(normalized, reason = 'library-surface') {
         const pendingEl = document.getElementById('library-pending');
         const popEl = document.getElementById('library-populated');
         const emptyEl = document.getElementById('library-empty');
         const sampleEl = document.getElementById('library-public-sample');
-        if (pendingEl) pendingEl.classList.toggle('hidden-section', state !== 'pending');
-        if (popEl) popEl.classList.toggle('hidden-section', state !== 'populated');
-        if (emptyEl) emptyEl.classList.toggle('hidden-section', state !== 'empty');
-        if (sampleEl) sampleEl.classList.toggle('hidden-section', state !== 'sample');
+        // pending panel serves both 'pending' and 'error' states
+        if (pendingEl) pendingEl.classList.toggle('hidden-section', normalized !== 'pending' && normalized !== 'error');
+        if (popEl) popEl.classList.toggle('hidden-section', normalized !== 'populated');
+        if (emptyEl) emptyEl.classList.toggle('hidden-section', normalized !== 'empty');
+        if (sampleEl) sampleEl.classList.toggle('hidden-section', normalized !== 'sample');
         const dashboardEl = document.getElementById('dashboard');
-        if (dashboardEl) dashboardEl.setAttribute('data-library-state', state);
+        if (dashboardEl) dashboardEl.setAttribute('data-library-state', normalized);
+        applyDashboardLibraryChrome(normalized, reason);
+
+        if (normalized === 'pending') {
+            markDashboardPendingVisibleIfNeeded(reason);
+        } else if (isSettledDashboardLibraryState(normalized) || normalized === 'sample') {
+            _dashboardLibraryPendingVisibleAt = 0;
+            clearDeferredDashboardLibraryFinalState();
+        }
+    }
+
+    function maybeDeferDashboardLibraryFinalState(normalized, reason = 'library-surface') {
+        if (!isSettledDashboardLibraryState(normalized)) return false;
+        if (!isDashboardVisibleToUser()) return false;
+        if (!_dashboardLibraryPendingVisibleAt) return false;
+        const elapsed = performance.now() - _dashboardLibraryPendingVisibleAt;
+        const remaining = DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS - elapsed;
+        if (remaining <= 0) return false;
+        _dashboardLibraryDeferredFinalState = { state: normalized, reason };
+        if (_dashboardLibraryDeferredFinalTimer) window.clearTimeout(_dashboardLibraryDeferredFinalTimer);
+        _dashboardLibraryDeferredFinalTimer = window.setTimeout(() => {
+            const deferred = _dashboardLibraryDeferredFinalState;
+            clearDeferredDashboardLibraryFinalState();
+            if (!deferred) return;
+            applyLibrarySurfaceStateNow(deferred.state, deferred.reason + ':deferred-final');
+        }, Math.max(0, remaining));
+        _lastDashboardLibraryRevealTransaction = Object.assign({}, _lastDashboardLibraryRevealTransaction || {}, {
+            deferredFinalState: normalized,
+            deferredReason: reason,
+            deferredRemainingMs: Math.round(remaining),
+            pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS,
+            at: new Date().toISOString()
+        });
+        return true;
+    }
+
+    function setLibrarySurfaceState(state, reason = 'library-surface') {
+        const normalized = (state === 'populated' || state === 'empty' || state === 'error' || state === 'sample')
+            ? state : 'pending';
+        if (maybeDeferDashboardLibraryFinalState(normalized, reason)) return;
+        applyLibrarySurfaceStateNow(normalized, reason);
     }
 
     async function refreshLibrary(reason = 'unknown') {
@@ -1857,13 +2686,6 @@ window.rcInteraction = (function () {
         if (!rowsEl) return;
         const authed = !!isAuthedUser();
         const hasLocalLibraryOwner = typeof localBooksGetAll === 'function';
-        shellTrailPush('dashboard-library-refresh', {
-            reason,
-            section: getCurrentVisibleSection(),
-            authed,
-            hasLocalLibraryOwner,
-            initialResolved: _libraryInitialResolutionComplete
-        });
 
         if (!authed) {
             _libraryInitialResolutionComplete = false;
@@ -1872,7 +2694,7 @@ window.rcInteraction = (function () {
                 clearTimeout(libraryRefreshRetryTimer);
                 libraryRefreshRetryTimer = null;
             }
-            setLibrarySurfaceState('sample');
+            setLibrarySurfaceState('sample', reason);
             return;
         }
 
@@ -1883,7 +2705,7 @@ window.rcInteraction = (function () {
         // After that first truthful read, later refreshes keep the current visible
         // surface instead of flashing back through pending.
         if (!_libraryInitialResolutionComplete) {
-            setLibrarySurfaceState('pending');
+            setLibrarySurfaceState('pending', reason);
             scheduleLibraryPendingBanner();
         }
 
@@ -1893,7 +2715,6 @@ window.rcInteraction = (function () {
         // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
         // or successive unavailability creates an infinite chain that hangs the page.
         if (!hasLocalLibraryOwner) {
-            shellTrailPush('dashboard-library-owner-pending', { reason, retryDelayMs: 120 });
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
             return new Promise(resolve => {
                 libraryRefreshRetryTimer = setTimeout(() => {
@@ -1907,17 +2728,12 @@ window.rcInteraction = (function () {
         let books = [];
         try { books = await localBooksGetAll(); } catch(_) { books = []; }
         if (refreshSeq !== _libraryRefreshSequence) return;
-        shellTrailPush('dashboard-library-local-read', {
-            reason,
-            count: Array.isArray(books) ? books.length : 0,
-            firstSuccess: !_loggedFirstLocalLibraryRead
-        });
         _loggedFirstLocalLibraryRead = true;
         _libraryInitialResolutionComplete = true;
         clearLibraryPendingBanner();
         const has = books.length > 0;
         if (!has) {
-            setLibrarySurfaceState('empty');
+            setLibrarySurfaceState('empty', reason);
             try { renderSubscriptionSurface([]); } catch (_) {}
             return;
         }
@@ -1939,34 +2755,10 @@ window.rcInteraction = (function () {
                 <div class="w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
-        setLibrarySurfaceState('populated');
+        setLibrarySurfaceState('populated', reason);
         try { renderSubscriptionSurface(books); } catch (_) {}
 
     }
-    // Hook called by library.js after populateBookSelectWithLocal()
-    window.__jublyLibraryRefresh = refreshLibrary;
-
-    function patchRefreshHook() {
-        let tries = 0;
-        const timer = setInterval(() => {
-            tries += 1;
-            if (typeof window.__rcRefreshBookSelect === 'function') {
-                clearInterval(timer);
-                const prev = window.__rcRefreshBookSelect;
-                if (prev.__jublyWrapped) return;
-                const wrapped = async function() {
-                    const out = await prev.apply(this, arguments);
-                    try { await refreshLibrary('book-select-refresh-hook'); } catch(_) {}
-                    return out;
-                };
-                wrapped.__jublyWrapped = true;
-                window.__rcRefreshBookSelect = wrapped;
-            } else if (tries >= 100) {
-                clearInterval(timer);
-            }
-        }, 100);
-    }
-
     // Scroll affordance — called by library.js via __jublyAfterRender after render()
     window.__jublyAfterRender = function() {
         document.querySelectorAll('#pages .page').forEach(function(pageEl) {
@@ -2163,7 +2955,7 @@ window.rcInteraction = (function () {
     function updateProgressBar() {
         const prog  = document.getElementById('shell-page-progress');
         if (!prog) return;
-        if (!hasActiveReadingCards()) { prog.textContent = '—'; shellDebugRemember('lastProgressSnapshot', { type: 'progress', visible: false, label: '—' }); return; }
+        if (!hasActiveReadingCards()) { prog.textContent = '—'; return; }
         const total = (typeof pages !== 'undefined' && Array.isArray(pages)) ? pages.length : 0;
         let playback = { active: false, paused: false, key: null };
         try { if (typeof getPlaybackStatus === 'function') playback = getPlaybackStatus() || playback; } catch (_) {}
@@ -2173,16 +2965,15 @@ window.rcInteraction = (function () {
         const currentLabel = (typeof getDisplayPageNumber === 'function') ? getDisplayPageNumber(cur) : (cur + 1);
         const totalLabel = (typeof getDisplayPageTotal === 'function') ? getDisplayPageTotal(total) : total;
         prog.textContent = total > 0 ? `Page ${currentLabel} / ${totalLabel}` : '—';
-        shellDebugRemember('lastProgressSnapshot', { type: 'progress', visible: true, label: prog.textContent, current: cur, total });
     }
 
-    // ── App event bridge ─────────────────────────────────────────
-    // Called by app's goToNext() / nextCard equivalent at session end
-    // The app will call showSessionComplete() directly once wired;
-    // this is a fallback shim for the transition period.
-    window.jublySessionComplete = showSessionComplete;
-
     document.addEventListener('DOMContentLoaded', () => {
+        _bootProbe.mark('dcl-handler-entry', {
+            rcPolicyPresent:     !!window.rcPolicy,
+            rcThemePresent:      !!window.rcTheme,
+            rcAppearancePresent: !!window.rcAppearance,
+            rcEntitlementsPresent: !!window.rcEntitlements
+        });
         const goalEditBtn = document.getElementById('profile-goal-edit-btn');
         const goalEditForm = document.getElementById('profile-goal-edit-form');
         const goalCancelBtn = document.getElementById('profile-goal-cancel-btn');
@@ -2310,7 +3101,21 @@ window.rcInteraction = (function () {
                 refreshExplorerPanel();
             });
         }
-        document.addEventListener('rc:runtime-policy-changed', () => {
+        _bootProbe.mark('policy-listener-attached', {
+            rcPolicyPresent:     !!window.rcPolicy,
+            rcThemePresent:      !!window.rcTheme,
+            rcAppearancePresent: !!window.rcAppearance,
+            rcEntitlementsPresent: !!window.rcEntitlements
+        });
+        document.addEventListener('rc:runtime-policy-changed', (e) => {
+            _bootProbe.mark('policy-event-received', {
+                rcPolicyPresent:     !!window.rcPolicy,
+                rcThemePresent:      !!window.rcTheme,
+                rcAppearancePresent: !!window.rcAppearance,
+                rcEntitlementsPresent: !!window.rcEntitlements,
+                resolved:            !!(e && e.detail && e.detail.resolved),
+                reason:              (e && e.detail && e.detail.reason) || null
+            });
             updateTierPill();
             syncTierButtonState();
             updateExplorerSwatchState();
@@ -2401,6 +3206,17 @@ window.rcInteraction = (function () {
         }, 350);
     });
 
+    // =========================================================================
+    // SLICE 7 MODULE BOUNDARY 5/6 — Shell Report & Diagnostics
+    // Logical boundary declaration only — code not physically separated yet.
+    // Primary content: snapshotShellControl(), getVisiblePublicBoundaryFields(),
+    //   isElementVisible(), getActiveModalReport(), getSignedInInteractionReport(),
+    //   and any exported shell report surface (window.rcShell).
+    // These are dev/reporting tools only. They must not become product owners
+    //   or behavior justification. See workflow rule: diagnostics report owner
+    //   truth only and are removable unless accepted as durable diagnostics.
+    // =========================================================================
+
     function snapshotShellControl(selector) {
         const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
         if (!el) return null;
@@ -2419,6 +3235,169 @@ window.rcInteraction = (function () {
         };
     }
 
+    function getVisiblePublicBoundaryFields() {
+        const tierPill = document.getElementById('reading-tier-pill');
+        const explorerBtn = document.getElementById('explorer-swatch-btn');
+        const explorerPanel = document.getElementById('rs-explorer-panel');
+        let tts = null;
+        try { tts = typeof window.getTtsDiagnosticsSnapshot === 'function' ? window.getTtsDiagnosticsSnapshot() : null; } catch (_) { tts = null; }
+        const tierText = String(tierPill ? tierPill.textContent || '' : '').trim().toLowerCase();
+        const requestedPath = String(tts?.routing?.requestedPath || tts?.last?.playRequest?.path || '').trim().toLowerCase();
+        const resolvedPath = String(tts?.last?.resolvedPath || '').trim().toLowerCase();
+        return {
+            publicRuntime: readPublicRuntimeBoundaryReport(),
+            visibleProBadgePresent: /^(pro|premium)$/.test(tierText),
+            visibleExplorerControlsPresent: !!(
+                (explorerBtn && !explorerBtn.classList.contains('explorer-locked')) ||
+                (explorerPanel && explorerPanel.style.display !== 'none') ||
+                document.body.classList.contains('theme-explorer')
+            ),
+            visibleCloudRouteAttempted: requestedPath.indexOf('cloud') !== -1 || resolvedPath.indexOf('cloud') !== -1,
+        };
+    }
+
+
+    function isElementVisible(el) {
+        if (!el) return false;
+        try {
+            const style = window.getComputedStyle(el);
+            if (!style || style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none') return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        } catch (_) { return false; }
+    }
+
+    function getTopmostElementAtCenter(selector) {
+        const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+        if (!el || typeof document.elementFromPoint !== 'function') return null;
+        try {
+            const r = el.getBoundingClientRect();
+            const x = Math.round(r.left + (r.width / 2));
+            const y = Math.round(r.top + (r.height / 2));
+            const top = document.elementFromPoint(x, y);
+            if (!top) return null;
+            return {
+                tag: String(top.tagName || '').toLowerCase(),
+                id: top.id || '',
+                className: String(top.className || ''),
+                text: String(top.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80),
+                matchesTarget: top === el || (typeof el.contains === 'function' && el.contains(top))
+            };
+        } catch (_) { return null; }
+    }
+
+    function getActiveModalReport() {
+        const modals = Array.from(document.querySelectorAll('.modal-overlay'));
+        const open = modals.find((el) => el && !el.classList.contains('hidden-section') && el.style.display !== 'none');
+        return {
+            open: !!open,
+            id: open ? (open.id || '') : null,
+            // HELD — opener is inferred, not truthful provenance.
+            // billing.js entry points (openPricingForSignup, openPricingForAccount,
+            // showPricingForGatedAction) do not persist a shared opener context that
+            // shell can read back. Reporting here is inference from billing side effects
+            // and is not a valid provenance substitute.
+            //
+            // Retirement condition: billing.js must be extended (in a Central-authorized
+            // Station 2 follow-up slice scoping js/billing.js) to write a single readable
+            // pricing-open context — opener, allowed surface, message/source, timestamp —
+            // from the three legitimate entry points only. Shell reads that context here
+            // instead of inferring. Acceptance requires runtime test with probes.
+            opener: open && open.id === 'pricing-modal' ? 'pricing' : (open ? 'unknown' : 'none'),
+            allowedSurface: open ? getCurrentVisibleSection() : null
+        };
+    }
+
+    function getSignedInInteractionReport() {
+        const logoutBtn = document.querySelector('[onclick="shellSignOut()"]');
+        const profileTrigger = document.getElementById('nav-profile-trigger');
+        const dashboard = document.getElementById('dashboard');
+        const dashboardVisible = !!(dashboard && !dashboard.classList.contains('hidden-section'));
+        const dashboardControls = dashboardVisible
+            ? Array.from(dashboard.querySelectorAll('button, a, [role="button"]')).filter(isElementVisible)
+            : [];
+        const readiness = readSignedInAccountControlReadiness('report');
+        return Object.assign({}, readiness, {
+            lastReadiness: _lastSignedInAccountReadiness,
+            logoutEnabled: !!(logoutBtn && isControlEnabled(logoutBtn)),
+            logoutVisibleAndEnabled: !!(logoutBtn && isElementVisible(logoutBtn) && isControlEnabled(logoutBtn)),
+            profileEnabled: !!(profileTrigger && isElementVisible(profileTrigger) && isControlEnabled(profileTrigger)),
+            dashboardCtasEnabled: dashboardControls.some(isControlEnabled),
+            topmostElementAtLogoutCenter: getTopmostElementAtCenter(logoutBtn)
+        });
+    }
+
+
+    function getLibrarySurfaceReport() {
+        const dashboard = document.getElementById('dashboard');
+        const rows = document.getElementById('library-rows');
+        const state = dashboard ? (dashboard.getAttribute('data-library-state') || null) : null;
+        const ownerReport = readDashboardLibraryOwnerReport('report');
+        return {
+            ownerReady: typeof localBooksGetAll === 'function',
+            state: state || (_libraryInitialResolutionComplete ? 'ready-unknown' : 'pending'),
+            initialResolutionComplete: !!_libraryInitialResolutionComplete,
+            count: rows ? rows.children.length : 0,
+            source: ownerReport.source,
+            dashboardRelease: _lastDashboardRelease,
+            revealTransaction: _lastDashboardLibraryRevealTransaction,
+            pendingMinVisibleMs: DASHBOARD_LIBRARY_PENDING_MIN_VISIBLE_MS,
+            pendingVisible: !!_dashboardLibraryPendingVisibleAt,
+            deferredFinalState: _dashboardLibraryDeferredFinalState ? _dashboardLibraryDeferredFinalState.state : null
+        };
+    }
+
+    function getPricingSurfaceReport(modalReport, readingVisible) {
+        let pendingPlan = null;
+        let pendingPaidIntent = false;
+        try { pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? window.rcBilling.readPendingPlan() : null; } catch (_) { pendingPlan = null; }
+        try { pendingPaidIntent = !!(window.rcBilling && typeof window.rcBilling.hasPendingPaidIntent === 'function' && window.rcBilling.hasPendingPaidIntent()); } catch (_) {}
+        const modal = document.getElementById('pricing-modal');
+        const modalOpen = !!(modalReport && modalReport.open && modalReport.id === 'pricing-modal');
+        return {
+            modalOpen,
+            opener: modalOpen ? (pendingPaidIntent ? 'pending-paid-intent' : 'unknown') : 'none',
+            openerAllowed: modalOpen ? !readingVisible : true,
+            pricingOverReading: modalOpen && !!readingVisible,
+            planUiSettledAtOpen: modalOpen ? !(modal && modal.classList.contains('pricing-modal-settling')) : null,
+            pendingPlan: pendingPlan || null
+        };
+    }
+
+    function getShellSurfaceReport() {
+        const visibleSection = getCurrentVisibleSection();
+        const readingMode = document.getElementById('reading-mode');
+        const readingVisible = !!(readingMode && !readingMode.classList.contains('hidden-section'));
+        const modal = getActiveModalReport();
+        const user = getAuthUser();
+        return {
+            shell: {
+                requestedSurface: _lastShellRelease.requestedSurface,
+                releasedSurface: _lastShellRelease.releasedSurface || visibleSection,
+                releaseReason: _lastShellRelease.releaseReason,
+                blockedBy: _lastShellRelease.blockedBy,
+                visibleSection,
+                bootPending: document.body.classList.contains('boot-pending'),
+                authHydrating: document.body.classList.contains('auth-hydrating')
+            },
+            auth: {
+                known: !!(window.rcAuth && typeof window.rcAuth.isReady === 'function' && window.rcAuth.isReady()),
+                signedIn: !!isAuthedUser(),
+                userIdPresent: !!(user && user.id),
+                source: 'rcAuth'
+            },
+            publicRuntime: readPublicRuntimeBoundaryReport(),
+            signedInInteraction: getSignedInInteractionReport(),
+            dashboardRelease: _lastDashboardRelease,
+            library: getLibrarySurfaceReport(),
+            modal,
+            pricing: getPricingSurfaceReport(modal, readingVisible),
+            publicBoundary: getVisiblePublicBoundaryFields()
+        };
+    }
+
+    window.getShellSurfaceReport = getShellSurfaceReport;
+
     window.getShellDiagnosticsSnapshot = function getShellDiagnosticsSnapshot() {
         const topBar = document.getElementById('reading-top-bar');
         const bottomBar = document.querySelector('.reading-bottom-bar');
@@ -2431,6 +3410,8 @@ window.rcInteraction = (function () {
         const progress = document.getElementById('shell-page-progress');
         return {
             readingVisible: !!(readingMode && !readingMode.classList.contains('hidden-section')),
+            publicBoundary: getVisiblePublicBoundaryFields(),
+            surfaceReport: getShellSurfaceReport(),
             settingsOpen: !!(typeof window.isReadingSettingsModalOpen === 'function' && window.isReadingSettingsModalOpen()),
             progressLabel: progress ? progress.textContent : null,
             playback: (typeof window.getPlaybackStatus === 'function') ? window.getPlaybackStatus() : null,
@@ -2451,7 +3432,6 @@ window.rcInteraction = (function () {
                 activeCount: pageBtns.filter((btn) => btn.classList.contains('tts-active')).length,
                 sample: pageBtns.slice(0, 3).map((btn) => snapshotShellControl(btn))
             },
-            debug: SHELL_DEBUG,
             layout: {
                 topBar: topBar ? { clientWidth: topBar.clientWidth, scrollWidth: topBar.scrollWidth } : null,
                 topCluster: topCluster ? { clientWidth: topCluster.clientWidth, scrollWidth: topCluster.scrollWidth, offsetLeft: topCluster.offsetLeft } : null,
@@ -2462,9 +3442,3 @@ window.rcInteraction = (function () {
             }
         };
     };
-    // Engine scripts load dynamically after window.load; refresh shell library once boot settles.
-    // refreshLibrary() removed from this timer — it was a timing workaround that
-    // raced against auth and could show the unauthenticated sample state after
-    // auth had resolved. DOMContentLoaded now awaits refreshLibrary() before
-    // removing auth-hydrating, so this stale call is no longer needed.
-    window.addEventListener('load', () => setTimeout(() => { patchRefreshHook(); }, 350));

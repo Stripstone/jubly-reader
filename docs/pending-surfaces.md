@@ -42,8 +42,10 @@ Maintenance rule:
 
 | Surface | What it does | Status |
 |---|---|---|
-| Login page → **Sign In** button | Supabase signIn | ✅ Inline button state: `Please wait…` during await |
+| Login page → **Sign In** button | Supabase signIn | ✅ Inline button state: `Please wait…` during await. Stale signup/verification copy is cleared on login re-entry; if Supabase returns email-not-confirmed, the app shows fresh verification-required copy and attempts a signup-confirmation resend. |
 | Login page → **Create Account** button | Supabase signUp | ✅ Inline button state: `Please wait…` during await |
+| Login page → **Forgot password?** button | Supabase `resetPasswordForEmail` | ✅ Inline button state: `Sending…` during await. Success copy stays generic: `If an account exists for that email, we sent a password reset link.` |
+| Reset password page → **Save Password** button | Supabase `updateUser({ password })` | ✅ Inline button state: `Saving…` during await. Recovery link returns to `/?view=reset-password`; successful update signs out locally and sends the user back to Log In with `Password updated. Please sign in.` |
 | Sidebar → **Logout** button | Supabase signOut | ✅ Banner: `Signing out…` → recoverable error with standardized actions `Try again` / `Refresh` |
 | App cold load (no button) | Session restore on boot | ✅ Delayed boot-scrim copy: `Checking your account…` if auth settle takes long |
 
@@ -90,7 +92,7 @@ Maintenance rule:
 | Importer → **Import** button (post-scan) | `POST /api/content?action=page-break` then IndexedDB write | ✅ Inline progress stage now includes explicit page-builder step before save |
 | Importer → **Import** button (non-EPUB file) | Upload → FreeConvert → poll → fetch EPUB → parse | ✅ Existing inline multi-step copy retained (`Preparing upload…`, `Uploading…`, `Converting…`, `Reading book…`) |
 | Importer → **Import Text** button | Markdown chapter parse + IndexedDB write | ✅ Inline button state: `Importing…` + progress stage appears before page-break await |
-| Importer opens (no button) | `GET /api/app?kind=import-capacity` | ✅ Inline copy while actions are locked: `Checking import availability…` |
+| Importer capacity gate (file/drop/text/scan/import/final save) | `POST /api/app?kind=import-capacity` | ◐ Server-backed action gate. The importer opens normally; local `Saved on this device` count is display/cache only and never capacity authority. Intake/scan/populate/final-save checks use `source: server-durable` with reasons `allowed`, `library_full`, `auth_required`, or `server_error`. `library_full` at intake keeps the importer open and shows `Your library is full. See plans for more options.`; scan/populate/final-save denial drops the queued import and surfaces `Book import failed. Your library is full.` |
 
 ---
 
@@ -98,11 +100,23 @@ Maintenance rule:
 
 | Surface | What it does | Status |
 |---|---|---|
-| Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ✅ In-surface pending remains the primary seam; delayed banner appears only if hydration noticeably stalls |
+| Dashboard → **Library grid** (renders on auth) | IndexedDB read + remote sync | ✅ Dashboard/library release is a settlement transaction: refresh/login begins behind the boot/settlement boundary; quick `populated`/`empty`/`error` truth may release directly; otherwise release neutral pending, keep it readable for a minimum duration, then replace with final truth. Empty/import guidance appears only after owner-empty truth plus empty grace. Local read failure stays in error/pending rather than pretending empty. Delayed banner appears only if hydration noticeably stalls |
 | Library modal → **Delete** book button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
 | Deleted files modal → **Restore** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Restoring…` on the clicked row |
 | Deleted files modal → **Delete** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` on the clicked row |
 | Deleted files modal → **Delete All** button | `syncRemoteLibraryItemState` | ✅ Inline button state: `Deleting…` while batch delete runs |
+
+### Dashboard/library release transaction
+
+The signed-in dashboard must not become visible as importer-neutral or fake-empty while library truth is still resolving. On refresh/login:
+
+1. Start dashboard/library settlement behind the boot/settlement boundary.
+2. If `populated`, `empty`, or `error` resolves quickly, release dashboard directly in that final state.
+3. If not resolved by the threshold, release a neutral pending dashboard/library state.
+4. Once pending is visible, keep pending for a minimum readable duration before replacing it.
+5. If empty resolves, show library-empty/import guidance only after empty truth plus empty grace.
+
+Allowed first visible dashboard/library states are `pending`, `populated`, `empty`, or `error`. Importer-neutral is not a default first visible signed-in dashboard state.
 
 ---
 
@@ -110,8 +124,9 @@ Maintenance rule:
 
 | Surface | What it does | Status |
 |---|---|---|
-| Reading mode → **Play** / `Read page` cloud start | Cloud TTS `POST /api/ai?action=tts` | ✅ No routine pending banner for normal start; preserve normal countdown/flow. Surface real playback errors with `Try again`. Transient cloud/server transport failures must stop cleanly and leave Play immediately retryable. |
-| Reading mode → **Skip forward / back** buttons | Runtime route decision and cloud seek/restart | ◐ Immediate by default. During an already-started cloud seek/restart under poor connection, a visible `Loading audio…` / poor-connection pending banner may appear; rapid skip intents received during that pending restart are coalesced so the latest same-page target wins when audio is ready. |
+| Reading mode → **Play** / `Read page` cloud start | Cloud TTS `POST /api/ai?action=tts` | ✅ No routine pending banner for normal start; preserve normal countdown/flow. Surface real playback errors with `Try again` when runtime exposes a settled start-failure signal. Transient cloud/server transport failures must stop cleanly and leave Play immediately retryable. |
+| Reading view → `#shell-playback-indicator` | Shell-presented floating playback/support notice from runtime getter truth through `syncShellPlaybackControls()` | ◐ Hidden when playback is healthy. Floats centered above the bottom playback bar; shows browser voice unavailable/support copy, voice-volume-off copy, and delayed cloud-restart copy after the no-flash threshold. Playback-start failure remains held until runtime exposes a retry-exhausted/start-error signal outside `tts.js`. |
+| Reading mode → **Skip forward / back** buttons | Runtime route decision and cloud seek/restart | ◐ Immediate by default. During an already-started cloud seek/restart under poor connection, `#shell-playback-indicator` may show `Loading audio…` / poor-connection copy after the no-flash threshold; rapid skip intents received during that pending restart are coalesced so the latest same-page target wins when audio is ready. |
 
 ---
 
@@ -131,20 +146,21 @@ Pending UI should not be added to every control.
 
 | Group | Wired / intentional | Remaining follow-up |
 |---|---|---|
-| Auth | 4 | 0 |
+| Auth | 6 | 0 |
 | Account / Profile | 4 | 0 |
 | Billing & Subscription | 6 | 0 |
 | Usage | 1 | 0 |
 | Importer | 5 | 0 |
 | Library | 5 | 0 |
-| Reading / TTS | 1 wired, 1 conditional/local pending | 0 |
+| Reading / TTS | 1 wired, 2 conditional/local pending | 0 |
 | Settings / persistence | 1 wired, 1 intentionally immediate | 0 |
-| **Total surfaces covered** | **27** | **0 in this bounded pass** |
+| **Total surfaces covered** | **30** | **0 in this bounded pass** |
 
 ## Notes locked by this pass
 
 - Button-owned waits prefer inline busy states before any global banner.
 - App-level or cross-surface truth settles may use the bottom interaction banner.
 - Skip controls remain immediate in routine operation; the only TTS skip pending surface is the poor-connection cloud seek/restart seam, where audio is already in a restart transition and the user needs honest loading visibility.
+- Playback-start failure migration is not complete until runtime exposes a settled retry-exhausted/start-error signal that shell can read without touching `tts.js`.
 - Settings stay optimistic/local first; the shared save-failure seam is enough for this pass.
 - Recoverable error banners now standardize to `Try again`, `Refresh`, `Open login`, or `Dismiss`.

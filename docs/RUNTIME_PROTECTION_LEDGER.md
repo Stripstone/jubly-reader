@@ -88,7 +88,7 @@ Every future patch or acceptance handoff must include:
 
 ### Shell / presentation owner
 
-The shell may own presentation, routing display, modal display, public CTA surfaces, visual layout, and user-facing staged flow.
+The shell may own presentation, routing display, modal display, public CTA surfaces, visual layout, and user-facing staged flow. For signed-in dashboard/library release, shell may own the release transaction: hold refresh/login behind boot/settlement, release direct final state when owner truth resolves quickly, or release neutral pending with readable duration and empty grace before final empty/import guidance. Shell still does not own library/import truth.
 
 The shell must not own:
 
@@ -815,10 +815,11 @@ Use this as a risk-adjusted checklist. Do not run the entire matrix for every ti
 ### Always-worth-checking basics
 
 1. Cold boot settles into the correct public/signed-in surface without obvious wrong-state flash.
-2. Public sample reading opens without account wall.
-3. Exiting sample reading lands in expected public shell.
-4. Settings opens and closes normally.
-5. Signed-out/public mode does not show stale signed-in entitlement, appearance, Explorer, or cloud voice state.
+2. Signed-in refresh/login dashboard release never first-paints as importer-neutral/fake-empty; it releases direct final truth when quick, or neutral pending with readable duration before final state.
+3. Public sample reading opens without account wall.
+4. Exiting sample reading lands in expected public shell.
+5. Settings opens and closes normally.
+6. Signed-out/public mode does not show stale signed-in entitlement, appearance, Explorer, or cloud voice state.
 
 ### Reading/TTS checks when runtime or TTS was touched
 

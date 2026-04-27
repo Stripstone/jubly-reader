@@ -17,7 +17,8 @@ function parseExplicitPageMarker(block) {
   const match = raw.match(/^(?:##\s*)?page\s+(\d+)\s*$/i);
   if (!match) return null;
   const pageNumber = Number(match[1]);
-  return Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : null;
+  // Reject implausibly large numbers (OCR/conversion artifacts e.g. Page 15642).
+  return Number.isFinite(pageNumber) && pageNumber > 0 && pageNumber <= 9999 ? pageNumber : null;
 }
 
 function stripMarkerBlocks(blocks) {

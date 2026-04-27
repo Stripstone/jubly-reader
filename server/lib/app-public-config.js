@@ -42,6 +42,7 @@ export default async function handler(req, res) {
   const anonKey = String(process.env.SUPABASE_ANON_KEY || '').trim();
   const appBaseUrl = requestOrigin(req);
   const authRedirectUrl = appBaseUrl ? `${appBaseUrl}/?view=login-page&auth=verified` : '';
+  const resetPasswordRedirectUrl = appBaseUrl ? `${appBaseUrl}/?view=reset-password` : '';
   const stripe = {
     plans: attachPublicTrialMetadata(await getPublicPlanCatalog().catch(() => ({
       pro: { available: !!(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO), amountLabel: 'Configured in Stripe', intervalLabel: '' },
@@ -56,6 +57,7 @@ export default async function handler(req, res) {
       anonKey: '',
       appBaseUrl,
       authRedirectUrl,
+      resetPasswordRedirectUrl,
       stripe,
     });
   }
@@ -66,6 +68,7 @@ export default async function handler(req, res) {
     anonKey,
     appBaseUrl,
     authRedirectUrl,
+    resetPasswordRedirectUrl,
     stripe,
   });
 }

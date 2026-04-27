@@ -1336,7 +1336,9 @@ function ttsRunPageHandoff(input = {}) {
     try {
       const pageEls = document.querySelectorAll('.page');
       const nextPageEl = pageEls[nextIndex];
-      if (nextPageEl) nextPageEl.scrollIntoView({ behavior, block: 'start' });
+      if (nextPageEl && typeof window.__rcScrollReadingPageIntoView === 'function') {
+        window.__rcScrollReadingPageIntoView(nextPageEl, { behavior, reason: 'tts-page-handoff-fallback' });
+      }
     } catch (_) {}
   }
   if (typeof setReadingTarget === 'function') {
