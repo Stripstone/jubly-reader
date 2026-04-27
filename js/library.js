@@ -28,6 +28,128 @@
     return 0;
   }
 
+  // Runtime-owned reading viewport movement.
+  //
+  // Keep existing UX intent (smooth stays smooth, auto stays auto), but do not
+  // let page-card scrollIntoView choose an unclamped document position. The
+  // helper is movement-only: page truth remains owned by the explicit caller
+  // paths below (restore, Next/Previous, Read Page, Play, TTS handoff).
+  let __rcReadingViewportMoveUntil = 0;
+
+  function markReadingViewportMove(ms) {
+    const duration = Math.max(120, Number(ms) || 420);
+    __rcReadingViewportMoveUntil = Date.now() + duration;
+    try { window.__rcReadingViewportMoveUntil = __rcReadingViewportMoveUntil; } catch (_) {}
+  }
+
+  function isReadingViewportMoveActive() {
+    return Date.now() < __rcReadingViewportMoveUntil;
+  }
+
+  function getReadingDocumentScroller() {
+    return document.scrollingElement || document.documentElement || document.body;
+  }
+
+  function getReadingTopChromeOffset() {
+    try {
+      const bar = document.querySelector('#reading-mode .reading-top-bar, .reading-top-bar, #reading-top-bar');
+      const rect = bar ? bar.getBoundingClientRect() : null;
+      if (rect && rect.height > 0) return Math.ceil(rect.height + 8);
+    } catch (_) {}
+    return 8;
+  }
+
+  function getReadingBottomChromeOffset() {
+    try {
+      const bar = document.querySelector('#reading-mode .playback-bar, #reading-mode .reading-bottom-bar, .playback-bar, .reading-bottom-bar, #reading-bottom-bar');
+      const rect = bar ? bar.getBoundingClientRect() : null;
+      if (rect && rect.height > 0) return Math.ceil(rect.height + 16);
+    } catch (_) {}
+    return 96;
+  }
+
+  function getReadingContentMaxScrollTop(scroller) {
+    try {
+      const scrollTop = Number(window.scrollY || window.pageYOffset || scroller.scrollTop || 0);
+      const viewportHeight = Number(window.innerHeight || scroller.clientHeight || 0);
+      const pageEls = Array.from(document.querySelectorAll('#reading-mode #pages .page, #pages .page'));
+      if (!pageEls.length || !Number.isFinite(viewportHeight) || viewportHeight <= 0) return Infinity;
+
+      let contentBottom = 0;
+      for (const el of pageEls) {
+        const rect = el.getBoundingClientRect();
+        if (!rect || rect.height <= 0) continue;
+        contentBottom = Math.max(contentBottom, scrollTop + rect.bottom);
+      }
+
+      const nextSurface = document.querySelector('#reading-mode .next-chapter-surface');
+      if (nextSurface) {
+        const rect = nextSurface.getBoundingClientRect();
+        if (rect && rect.height > 0) contentBottom = Math.max(contentBottom, scrollTop + rect.bottom);
+      }
+
+      if (!contentBottom) return Infinity;
+      return Math.max(0, Math.ceil(contentBottom + getReadingBottomChromeOffset() - viewportHeight));
+    } catch (_) {
+      return Infinity;
+    }
+  }
+
+  function scrollReadingPageIntoView(target, options = {}) {
+    try {
+      const el = (target && typeof target.getBoundingClientRect === 'function')
+        ? target
+        : Array.from(document.querySelectorAll('.page'))[Number(target)];
+      if (!el) return { ok: false, reason: 'missing-target' };
+
+      const scroller = getReadingDocumentScroller();
+      if (!scroller) return { ok: false, reason: 'missing-scroller' };
+
+      const rect = el.getBoundingClientRect();
+      if (!rect || rect.height <= 0) return { ok: false, reason: 'hidden-target' };
+
+      const currentTop = Math.max(0, Number(window.scrollY || window.pageYOffset || scroller.scrollTop || 0));
+      const viewportHeight = Number(window.innerHeight || scroller.clientHeight || 0);
+      const rawMaxTop = Math.max(0, Number(scroller.scrollHeight || 0) - Math.max(0, viewportHeight));
+      const contentMaxTop = getReadingContentMaxScrollTop(scroller);
+      const maxTop = Math.min(rawMaxTop, Number.isFinite(contentMaxTop) ? contentMaxTop : rawMaxTop);
+      const desiredTop = Math.round(currentTop + rect.top - getReadingTopChromeOffset());
+      const targetTop = Math.max(0, Math.min(maxTop, desiredTop));
+
+      const requestedBehavior = String(options.behavior || 'smooth');
+      const behavior = requestedBehavior === 'smooth' ? 'smooth' : 'auto';
+      markReadingViewportMove(behavior === 'smooth' ? 700 : 240);
+
+      try {
+        window.scrollTo({ top: targetTop, behavior });
+      } catch (_) {
+        try { window.scrollTo(0, targetTop); } catch (_) {}
+      }
+
+      // Final clamp only corrects out-of-range settling; it should be a no-op in
+      // normal smooth movement, preserving the existing feel.
+      setTimeout(() => {
+        try {
+          const s = getReadingDocumentScroller();
+          const rawMax = Math.max(0, Number(s.scrollHeight || 0) - Number(window.innerHeight || s.clientHeight || 0));
+          const contentMax = getReadingContentMaxScrollTop(s);
+          const max = Math.min(rawMax, Number.isFinite(contentMax) ? contentMax : rawMax);
+          const now = Math.max(0, Number(window.scrollY || window.pageYOffset || s.scrollTop || 0));
+          if (now > max + 1) window.scrollTo({ top: max, behavior: 'auto' });
+        } catch (_) {}
+      }, behavior === 'smooth' ? 760 : 80);
+
+      return { ok: true, top: targetTop, maxTop, behavior };
+    } catch (_) {
+      return { ok: false, reason: 'exception' };
+    }
+  }
+
+  try {
+    window.__rcScrollReadingPageIntoView = scrollReadingPageIntoView;
+    window.__rcIsReadingViewportMoveActive = isReadingViewportMoveActive;
+  } catch (_) {}
+
   async function flushCurrentReadingProgress(reason) {
     try {
       if (!(window.rcSync && typeof window.rcSync.saveProgressNow === 'function')) return null;
@@ -61,7 +183,7 @@
       const pageEls = document.querySelectorAll('.page');
       const target = pageEls[idx];
       if (!target) return false;
-      target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      scrollReadingPageIntoView(target, { behavior: 'auto', reason: 'restore-reading-position' });
       lastFocusedPageIndex = idx;
       try { currentPageIndex = idx; } catch (_) {}
       // Advance reading target to the restored page; preserve source context set by render().
@@ -71,7 +193,7 @@
       } catch (_) {}
       // Store index for post-reveal re-anchor (Patch B). The CSS restore-pending
       // guard (Patch A) locks document scroll while this runs, making the
-      // scrollIntoView() above a no-op. startReadingFromPreview() re-applies it
+      // the first restore movement may be hidden. startReadingFromPreview() reapplies it
       // after reading-restore-pending is removed and scroll is unlocked.
       window.__rcLastRestoredPageIndex = idx;
       window.__rcPendingRestorePageIndex = -1;
@@ -2856,10 +2978,12 @@ function _installScrollPageTracker() {
   var settleTimer = 0;
 
   function reconcileVisiblePage(reason) {
+    if (isReadingViewportMoveActive()) return;
     if (raf) return;
     raf = requestAnimationFrame(function () {
       raf = 0;
       try {
+        if (isReadingViewportMoveActive()) return;
         if (!Array.isArray(pages) || !pages.length) return;
         const pageEls = Array.from(document.querySelectorAll('.page'));
         if (!pageEls.length) return;
@@ -3010,7 +3134,7 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   const activeClass = 'page-active';
   document.querySelectorAll('.' + activeClass).forEach((el) => el.classList.remove(activeClass));
   target.classList.add(activeClass);
-  target.scrollIntoView({ behavior: options.behavior || 'smooth', block: 'start' });
+  scrollReadingPageIntoView(target, { behavior: options.behavior || 'smooth', reason: options.reason || 'focus-reading-page' });
   lastFocusedPageIndex = idx;
   try { currentPageIndex = idx; } catch (_) {}
   updateReadingMetricsPage(idx);
@@ -3228,13 +3352,13 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
   try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
   // Patch B: Re-anchor scroll to the restored page now that reading-restore-pending
   // is removed and the html overflow:hidden lock (Patch A) has lifted. The
-  // scrollIntoView() call inside applyPendingReadingRestore() was a no-op while
+  // initial restore movement inside applyPendingReadingRestore() may be hidden while
   // the lock was active, so this is the authoritative scroll for restore sessions.
   try {
     const _ri = Number(window.__rcLastRestoredPageIndex ?? -1);
     if (Number.isFinite(_ri) && _ri >= 0) {
       const _rEl = document.querySelectorAll('.page')[_ri];
-      if (_rEl) _rEl.scrollIntoView({ behavior: 'auto', block: 'start' });
+      if (_rEl) scrollReadingPageIntoView(_rEl, { behavior: 'auto', reason: 'post-restore-reanchor' });
       window.__rcLastRestoredPageIndex = -1;
     }
   } catch (_) {}

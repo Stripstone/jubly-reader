@@ -2319,7 +2319,13 @@ window.rcInteraction = (function () {
         if (!Number.isFinite(idx) || idx < 0) return false;
         const pageEl = document.querySelector(`.page[data-page-index="${idx}"]`) || document.querySelectorAll('.page')[idx];
         if (!pageEl) return false;
-        try { pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) { return false; }
+        try {
+            if (typeof window.__rcScrollReadingPageIntoView === 'function') {
+                window.__rcScrollReadingPageIntoView(pageEl, { behavior: 'smooth', reason: 'shell-playback-page' });
+            } else {
+                pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        } catch (_) { return false; }
         return true;
     }
 
