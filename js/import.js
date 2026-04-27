@@ -206,17 +206,13 @@ async function requestServerPageBreak(payload) {
     let _inputMode = 'file';
 
     // Action locks — prevent duplicate concurrent operations.
-    // _capacityVerified: false until background server check resolves after modal open.
-    //   Action buttons are disabled during this window to prevent capacity bypass.
-    // _scanInProgress / _importInProgress: prevent re-entrant scans or imports from
-    //   rapid button clicks. Set synchronously before the first await in each operation.
-    let _capacityVerified = false;
+    // Capacity is not checked on modal open. The shared server gate below runs
+    // only when the user attempts text import, Scan Contents, or final save.
     let _scanInProgress = false;
     let _importInProgress = false;
 
     function _setActionButtonsLocked(locked) {
-      // Apply/release the capacity verification lock on action surfaces.
-      // Each button's final enabled state also respects its own readiness condition.
+      // Used only for active operations; never as a modal-open capacity verdict.
       if (scanBtn) scanBtn.disabled = locked || !_file;
       if (doImportBtn) doImportBtn.disabled = locked || !(_tocItems.some(x => x.selected));
       if (textImportBtn) textImportBtn.disabled = locked || !(textBodyInput && String(textBodyInput.value || '').trim());
@@ -242,10 +238,6 @@ async function requestServerPageBreak(payload) {
     }
 
     function syncIdleStatus(snapshot = null) {
-      if (!_capacityVerified) {
-        setStatus('Checking import availability…');
-        return;
-      }
       if (_inputMode === 'file' && _file) {
         setStatus(getSelectedFileStatus(_file));
         return;
@@ -271,9 +263,8 @@ async function requestServerPageBreak(payload) {
       _activeId = null;
       _spineHrefs = [];
       _bookTitle = '';
-      // Reset action locks on every close. Next open will re-verify capacity.
+      // Reset operation locks on close. Capacity is checked at action time.
       if (!keepModalOpen) {
-        _capacityVerified = false;
         _scanInProgress = false;
         _importInProgress = false;
       }
@@ -310,36 +301,16 @@ async function requestServerPageBreak(payload) {
     };
 
     // One authoritative entry path when a file is already in hand (e.g. page-level
-    // drag/drop). Opens the modal immediately so there is no perceptible lag after
-    // drop, then verifies capacity in the background and unlocks actions afterward.
+    // drag/drop). Shell forwards the file here; import.js owns the Scan Contents gate.
     window.openImporterWithFile = async function openImporterWithFile(file) {
       if (!file || !modal) return false;
       try { document.body.classList.add('import-drop-pending'); } catch (_) {}
-      const localSnapshot = await getImportCapacitySnapshot();
-      syncImportEntryState(localSnapshot);
-      _capacityVerified = false;
       resetImporterState({ keepModalOpen: true });
-      syncIdleStatus(localSnapshot);
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
-      _setActionButtonsLocked(true);
-      onFileSelected(file);
+      try { syncIdleStatus(await getImportCapacitySnapshot()); } catch (_) { syncIdleStatus(); }
       try { document.body.classList.remove('import-drop-pending'); } catch (_) {}
-      guardImportCapacity().then(guard => {
-        if (modal.style.display === 'none') return;
-        if (!guard.ok) {
-          syncIdleStatus(guard.snapshot);
-          resetImporterState({ keepModalOpen: false });
-        } else {
-          _capacityVerified = true;
-          syncIdleStatus(guard.snapshot);
-          _setActionButtonsLocked(false);
-        }
-      }).catch(() => {
-        _capacityVerified = true;
-        syncIdleStatus(localSnapshot);
-        _setActionButtonsLocked(false);
-      });
+      await onFileSelected(file);
       return true;
     };
 
@@ -392,8 +363,7 @@ async function requestServerPageBreak(payload) {
       const hasText = !!(textBodyInput && String(textBodyInput.value || '').trim());
       textImportBtn.disabled = !hasText;
       if (_inputMode === 'text') {
-        if (!_capacityVerified) setStatus('Checking import availability…');
-        else setStatus(hasText ? 'Text will be split into pages using the normal importer page-breaking behavior.' : 'Paste text to import it as a book.');
+        setStatus(hasText ? 'Text will be split into pages using the normal importer page-breaking behavior.' : 'Paste text to import it as a book.');
       }
     }
 
@@ -414,7 +384,7 @@ async function requestServerPageBreak(payload) {
     }
 
     async function savePastedTextImport() {
-      if (_importInProgress || !_capacityVerified) return;
+      if (_importInProgress) return;
       const raw = String(textBodyInput && textBodyInput.value || '').trim();
       if (!raw) return;
       _importInProgress = true;
@@ -488,40 +458,16 @@ async function requestServerPageBreak(payload) {
     }
 
     async function showModal() {
-      // Open the modal immediately using the local capacity snapshot — no perceptible lag.
-      // Action buttons are locked until the server confirms capacity, preventing the window
-      // where a user could start an import before a server-side denial arrives.
+      // Open normally. Local count is display/cache only; the server gate runs
+      // only when the user attempts text import, Scan Contents, or final save.
       const localSnapshot = await getImportCapacitySnapshot();
       syncImportEntryState(localSnapshot);
       resetImporterState({ keepModalOpen: true });
-      _capacityVerified = false;
       syncIdleStatus(localSnapshot);
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
       syncInputMode();
       syncTextImportState();
-      // Lock all action buttons until server check resolves.
-      _setActionButtonsLocked(true);
-
-      guardImportCapacity().then(guard => {
-        if (modal.style.display === 'none') return;
-        if (!guard.ok) {
-          syncIdleStatus(guard.snapshot);
-          // Server denied — close modal (guardImportCapacity already set status and
-          // may have opened the pricing modal).
-          resetImporterState({ keepModalOpen: false });
-        } else {
-          // Server confirmed capacity — unlock actions.
-          _capacityVerified = true;
-          syncIdleStatus(guard.snapshot);
-          _setActionButtonsLocked(false);
-        }
-      }).catch(() => {
-        // Server unreachable — trust local verdict and unlock.
-        _capacityVerified = true;
-        syncIdleStatus(localSnapshot);
-        _setActionButtonsLocked(false);
-      });
     }
 
     function hideModal() {
@@ -571,11 +517,30 @@ async function requestServerPageBreak(payload) {
       } catch (_) { return {}; }
     }
 
+    function showImportFullInlineHelper() {
+      if (!uploadStatus) return;
+      uploadStatus.style.display = 'block';
+      uploadStatus.innerHTML = '';
+      const prefix = document.createElement('span');
+      prefix.textContent = 'Your library is full. ';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'See plans';
+      btn.className = 'link-button import-see-plans-btn';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try { if (typeof openModal === 'function') openModal('pricing-modal'); } catch (_) {}
+      });
+      const suffix = document.createElement('span');
+      suffix.textContent = ' for more options.';
+      uploadStatus.append(prefix, btn, suffix);
+    }
+
     async function guardImportCapacity() {
       const snapshot = await getImportCapacitySnapshot();
-      // Pass 3: back the capacity verdict with a server-owned policy check.
-      // The server resolves its own tier (production ignores client claims).
-      // count is still client-provided (interim until Pass 4 durable tracking).
+      // This is an action gate, not a modal-open gate. It stops the attempted
+      // import work and keeps the importer surface open for the inline plan link.
       let hasCapacity = snapshot.hasCapacity;
       try {
         const resp = await fetch(
@@ -589,9 +554,9 @@ async function requestServerPageBreak(payload) {
         );
         if (resp.ok) {
           const data = await resp.json();
-          hasCapacity = !!data.hasCapacity;
-          // Sync server-resolved limit back so display stays accurate.
+          hasCapacity = !!(data.allowed ?? data.hasCapacity);
           if (typeof data.limit !== 'undefined') snapshot.limit = data.limit;
+          if (typeof data.count !== 'undefined') snapshot.count = data.count;
         }
       } catch (_) {
         // Server unreachable: fall back to client snapshot verdict.
@@ -599,12 +564,8 @@ async function requestServerPageBreak(payload) {
         // Real owner: /api/app?kind=import-capacity.
       }
       if (hasCapacity) return { ok: true, snapshot };
-      const msg = snapshot.limit == null
-        ? 'Import is currently unavailable.'
-        : `This tier is full (${snapshot.count}/${snapshot.limit} saved books). Delete a book or upgrade to add another.`;
-      setStatus(msg);
-      try { if (typeof openModal === 'function') openModal('pricing-modal'); } catch (_) {}
-      return { ok: false, snapshot, message: msg };
+      showImportFullInlineHelper();
+      return { ok: false, snapshot, message: 'Your library is full. See plans for more options.' };
     }
 
     function describeCapacity(snapshot) {
@@ -624,11 +585,9 @@ async function requestServerPageBreak(payload) {
 
     function syncImportEntryState(snapshot) {
       if (!openBtn) return;
-      const blocked = !!snapshot && snapshot.hasCapacity === false;
-      openBtn.dataset.slotBlocked = blocked ? 'true' : 'false';
-      openBtn.title = blocked
-        ? `Import limit reached (${snapshot.count}/${snapshot.limit}). Delete a book or upgrade to add another.`
-        : 'Import a book to this device';
+      // Local count is display/cache only and must not block importer open.
+      openBtn.dataset.slotBlocked = 'false';
+      openBtn.title = snapshot ? describeCapacity(snapshot) : 'Import a book to this device';
     }
 
     function setProgress(pct, meta, detail) {
@@ -791,7 +750,7 @@ async function requestServerPageBreak(payload) {
     }
 
     async function scanContents() {
-      if (!_file || _scanInProgress || !_capacityVerified) return;
+      if (!_file || _scanInProgress) return;
       // Lock immediately — before any await — so rapid clicks cannot trigger
       // concurrent scans regardless of which code path runs next.
       _scanInProgress = true;
@@ -801,6 +760,9 @@ async function requestServerPageBreak(payload) {
       }
 
       try {
+        const guard = await guardImportCapacity();
+        syncImportEntryState(guard.snapshot);
+        if (!guard.ok) return;
 
       // Branch to the FreeConvert conversion path for all non-EPUB formats.
       if (_needsConversion) { await scanContentsViaConversion(); return; }
@@ -1017,7 +979,7 @@ async function requestServerPageBreak(payload) {
     }
 
     async function doImportSelected() {
-      if (!_file || !_zip || _importInProgress || !_capacityVerified) return;
+      if (!_file || !_zip || _importInProgress) return;
       const selectedFile = _file;
       const selectedZip = _zip;
       const selectedTocItems = Array.isArray(_tocItems) ? _tocItems.slice() : [];
@@ -1033,8 +995,6 @@ async function requestServerPageBreak(payload) {
 
       try {
         // Re-verify capacity at write time as a server-side safety check.
-        // (Capacity was already verified when the modal opened, but this catches
-        // edge cases like another device importing during the same session.)
         const guard = await guardImportCapacity();
         syncImportEntryState(guard.snapshot);
         if (!guard.ok) {

@@ -92,7 +92,7 @@ Maintenance rule:
 | Importer → **Import** button (post-scan) | `POST /api/content?action=page-break` then IndexedDB write | ✅ Inline progress stage now includes explicit page-builder step before save |
 | Importer → **Import** button (non-EPUB file) | Upload → FreeConvert → poll → fetch EPUB → parse | ✅ Existing inline multi-step copy retained (`Preparing upload…`, `Uploading…`, `Converting…`, `Reading book…`) |
 | Importer → **Import Text** button | Markdown chapter parse + IndexedDB write | ✅ Inline button state: `Importing…` + progress stage appears before page-break await |
-| Importer opens (no button) | `GET /api/app?kind=import-capacity` | ✅ Inline copy while actions are locked: `Checking import availability…` |
+| Importer capacity gate (Import Text / Scan Contents / final save) | `POST /api/app?kind=import-capacity` | ◐ Server-backed action gate. The importer opens normally; selecting or dropping a file is not the capacity gate. Import Text and Scan Contents run the shared gate before parsing/import work. `library_full` at those user action gates keeps the importer surface open and shows `Your library is full. See plans for more options.`; the See plans link is explicit user intent for opening billing. |
 
 ---
 
