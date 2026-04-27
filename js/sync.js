@@ -769,13 +769,7 @@ window.rcSync = (function () {
       body: typeof init.body !== 'undefined' ? JSON.stringify(init.body) : undefined,
     });
     const data = await resp.json().catch(() => null);
-    const allowOperationEnvelope = !!init.allowOperationEnvelope;
-    const hasOperationEnvelope = !!(data && (data.operation || data.outcome || data.reason || Array.isArray(data.results)));
-    if (!data) {
-      throw new Error(`Durable sync ${resp.status}`);
-    }
-    if (!resp.ok || data.ok === false) {
-      if (allowOperationEnvelope && hasOperationEnvelope) return { seq, data };
+    if (!resp.ok || !data || data.ok === false) {
       throw new Error(String((data && (data.error || data.reason)) || `Durable sync ${resp.status}`));
     }
     return { seq, data };
@@ -1263,43 +1257,6 @@ window.rcSync = (function () {
   try { document.addEventListener('input', _handleSettingsControlEvent, true); } catch (_) {}
   try { window.getPublicRuntimeBoundaryReport = () => _getPublicRuntimeBoundaryReport(); } catch (_) {}
 
-  function _libraryOperationFailure(operation, reason, detail = {}) {
-    return {
-      ok: false,
-      operation,
-      outcome: 'blocked',
-      reason: String(reason || 'server_error'),
-      row: null,
-      ...detail,
-    };
-  }
-
-  function _libraryOperationPayload(bookId, options = {}) {
-    const payload = {
-      ...(options && typeof options.payload === 'object' && options.payload ? options.payload : {}),
-      book_id: _normalizeBookId(bookId),
-    };
-    const record = options && typeof options.record === 'object' && options.record ? options.record : null;
-    if (record) {
-      const title = String(record.title || '').trim();
-      const sourceName = String(record.sourceName || record.source_name || '').trim();
-      const contentFingerprint = String(record.contentFingerprint || record.content_fingerprint || '').trim();
-      if (title && !payload.title) payload.title = title;
-      if (sourceName) {
-        if (!payload.sourceName) payload.sourceName = sourceName;
-        if (!payload.source_name) payload.source_name = sourceName;
-      }
-      if (contentFingerprint) {
-        if (!payload.contentFingerprint) payload.contentFingerprint = contentFingerprint;
-        if (!payload.content_fingerprint) payload.content_fingerprint = contentFingerprint;
-      }
-      if (record.importKind && !payload.importKind) payload.importKind = record.importKind;
-      if (Number.isFinite(Number(record.byteSize)) && payload.byteSize == null) payload.byteSize = Number(record.byteSize);
-      if (Number.isFinite(Number(record.pageCount)) && payload.pageCount == null) payload.pageCount = Number(record.pageCount);
-    }
-    return payload;
-  }
-
   return {
     scheduleProgressSync,
     saveProgressNow,
@@ -1335,59 +1292,18 @@ window.rcSync = (function () {
       publicRuntime: _getPublicRuntimeBoundaryReport(),
     }),
     deleteLibraryItem: async (bookId, options = {}) => {
-      const operation = options && options.purge ? 'purge' : 'delete';
-      if (!_ready()) return _libraryOperationFailure(operation, 'auth_required');
-      const payload = _libraryOperationPayload(bookId, options);
-      payload.purge = !!(options && options.purge);
-      try {
-        const { seq, data } = await _serverSync('snapshot', {
-          method: 'POST',
-          body: { action: 'delete_library_item', payload },
-          allowOperationEnvelope: true,
-        });
-        if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
-        return data || _libraryOperationFailure(operation, 'server_error');
-      } catch (error) {
-        return _libraryOperationFailure(operation, 'server_error', { error: String(error?.message || error || '') });
-      }
+      if (!_ready()) return null;
+      const payload = { book_id: _normalizeBookId(bookId), purge: !!options.purge };
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'delete_library_item', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      return data && data.row ? data.row : null;
     },
-    deleteLibraryItems: async (items = [], options = {}) => {
-      const operation = options && options.purge === false ? 'delete' : 'purge';
-      if (!_ready()) return _libraryOperationFailure(operation, 'auth_required', { results: [] });
-      const payload = {
-        items: (Array.isArray(items) ? items : []).map((item) => (
-          typeof item === 'string'
-            ? _libraryOperationPayload(item, options)
-            : _libraryOperationPayload(item?.book_id || item?.bookId || item?.storage_ref || item?.storageRef || item?.id, { ...options, record: item })
-        )),
-        purge: options && options.purge === false ? false : true,
-      };
-      try {
-        const { seq, data } = await _serverSync('snapshot', {
-          method: 'POST',
-          body: { action: 'delete_library_items', payload },
-          allowOperationEnvelope: true,
-        });
-        if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
-        return data || _libraryOperationFailure(operation, 'server_error', { results: [] });
-      } catch (error) {
-        return _libraryOperationFailure(operation, 'server_error', { error: String(error?.message || error || ''), results: [] });
-      }
-    },
-    restoreLibraryItem: async (bookId, options = {}) => {
-      if (!_ready()) return _libraryOperationFailure('restore', 'auth_required');
-      const payload = _libraryOperationPayload(bookId, options);
-      try {
-        const { seq, data } = await _serverSync('snapshot', {
-          method: 'POST',
-          body: { action: 'restore_library_item', payload },
-          allowOperationEnvelope: true,
-        });
-        if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
-        return data || _libraryOperationFailure('restore', 'server_error');
-      } catch (error) {
-        return _libraryOperationFailure('restore', 'server_error', { error: String(error?.message || error || '') });
-      }
+    restoreLibraryItem: async (bookId) => {
+      if (!_ready()) return null;
+      const payload = { book_id: _normalizeBookId(bookId) };
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'restore_library_item', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      return data && data.row ? data.row : null;
     },
   };
 })();
