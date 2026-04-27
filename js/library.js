@@ -367,6 +367,59 @@
     return task;
   }
 
+  function getRestoreCapacityAuthHeaders() {
+    try {
+      const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function'
+        ? window.rcAuth.getAccessToken()
+        : '';
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    } catch (_) { return {}; }
+  }
+
+  async function getRestoreCapacitySnapshot() {
+    let books = [];
+    try { books = await localBooksGetAll(); } catch (_) { books = []; }
+    const count = Array.isArray(books) ? books.length : 0;
+    const limit = (window.rcPolicy && typeof window.rcPolicy.getImportSlotLimit === 'function')
+      ? window.rcPolicy.getImportSlotLimit()
+      : null;
+    const hasCapacity = (window.rcPolicy && typeof window.rcPolicy.hasImportCapacity === 'function')
+      ? window.rcPolicy.hasImportCapacity(count)
+      : true;
+    return { count, limit, hasCapacity };
+  }
+
+  async function guardRestoreCapacity() {
+    const snapshot = await getRestoreCapacitySnapshot();
+    // Restore consumes the same local library slot as Scan Contents/import, so it
+    // uses the same action-time capacity seam. Do not precheck when Trash opens.
+    let hasCapacity = snapshot.hasCapacity;
+    try {
+      const resp = await fetch(
+        (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=import-capacity') : '/api/app?kind=import-capacity'),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getRestoreCapacityAuthHeaders() },
+          body: JSON.stringify({ count: snapshot.count }),
+          cache: 'no-store',
+        }
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        hasCapacity = !!(data.allowed ?? data.hasCapacity);
+        if (typeof data.limit !== 'undefined') snapshot.limit = data.limit;
+        if (typeof data.count !== 'undefined') snapshot.count = data.count;
+      }
+    } catch (_) {
+      // Match the importer bridge: if the server is unreachable, use the local
+      // snapshot as the temporary stability fallback rather than moving truth
+      // ownership into Trash.
+    }
+    return hasCapacity
+      ? { ok: true, snapshot }
+      : { ok: false, snapshot, message: 'Restoring failed. Your library is full.' };
+  }
+
   function setButtonBusy(btn, busy, busyLabel) {
     if (!btn) return;
     if (busy) {
@@ -2789,6 +2842,21 @@
       try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
     }
 
+    function showDeletedServiceMessage(message) {
+      if (!deletedListEl) return;
+      const text = String(message || '').trim();
+      let el = deletedListEl.querySelector('[data-deleted-service-message="true"]');
+      if (!text) { if (el) el.remove(); return; }
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'import-status';
+        el.dataset.deletedServiceMessage = 'true';
+        const anchor = deletedListEl.firstElementChild ? deletedListEl.firstElementChild.nextSibling : null;
+        deletedListEl.insertBefore(el, anchor || deletedListEl.firstChild);
+      }
+      el.textContent = text;
+    }
+
     async function renderDeletedCount() {
       if (!deletedCountEl) return;
       let deleted = [];
@@ -2897,6 +2965,7 @@
       info.className = 'import-status';
       info.textContent = 'Deleted Files use this device storage until you permanently delete them. Restore puts the book back in Library.';
       deletedListEl.appendChild(info);
+      showDeletedServiceMessage('');
       if (!deleted.length) {
         const empty = document.createElement('div');
         empty.className = 'import-status';
@@ -2956,7 +3025,14 @@ This removes them from Deleted Files and frees the device storage.`);
           restore.textContent = 'Restore';
           restore.addEventListener('click', async () => {
             setButtonBusy(restore, true, 'Restoring…');
+            showDeletedServiceMessage('');
             try {
+              const guard = await guardRestoreCapacity();
+              if (!guard.ok) {
+                setButtonBusy(restore, false);
+                showDeletedServiceMessage(guard.message || 'Restoring failed. Your library is full.');
+                return;
+              }
               await restoreDeletedLocalBook(b.id);
               await refreshBookSelect();
               emitLibraryChanged();
@@ -2965,7 +3041,7 @@ This removes them from Deleted Files and frees the device storage.`);
               renderDeleted();
             } catch (_) {
               setButtonBusy(restore, false);
-              alert('Restore failed.');
+              showDeletedServiceMessage('Restore failed.');
             }
           });
           const purge = document.createElement('button');
