@@ -28,6 +28,57 @@
     return 0;
   }
 
+  function sampleVisibleReadingPageIndexForPlayback() {
+    try {
+      const pageEls = Array.from(document.querySelectorAll('#reading-mode #pages .page, #pages .page, .page'));
+      if (!pageEls.length) return -1;
+      const viewportTop = Math.max(0, typeof getReadingTopChromeOffset === 'function' ? getReadingTopChromeOffset() : 0);
+      const viewportBottom = Math.max(viewportTop + 1, Number(window.innerHeight || document.documentElement.clientHeight || 0) - (typeof getReadingBottomChromeOffset === 'function' ? getReadingBottomChromeOffset() : 0));
+      let bestIdx = -1;
+      let bestVisible = -1;
+      let bestDistance = Infinity;
+
+      for (let i = 0; i < pageEls.length; i += 1) {
+        const el = pageEls[i];
+        const rect = el.getBoundingClientRect();
+        if (!rect || rect.height <= 0) continue;
+        const visible = Math.max(0, Math.min(rect.bottom, viewportBottom) - Math.max(rect.top, viewportTop));
+        const distance = Math.abs(rect.top - viewportTop);
+        const rawIdx = parseInt(el.dataset?.pageIndex || String(i), 10);
+        const idx = Number.isFinite(rawIdx) ? rawIdx : i;
+        if (visible > bestVisible || (visible === bestVisible && distance < bestDistance)) {
+          bestVisible = visible;
+          bestDistance = distance;
+          bestIdx = idx;
+        }
+      }
+
+      if (bestIdx >= 0 && bestVisible > 0) return bestIdx;
+
+      // Fallback for unusual layouts: choose the card closest to the reading
+      // chrome, but do not use inferCurrentPageIndex() here because its
+      // near-bottom shortcut can intentionally return the final page. Bottom
+      // Play must sample the visible page, not the document-bottom sentinel.
+      bestIdx = -1;
+      bestDistance = Infinity;
+      for (let i = 0; i < pageEls.length; i += 1) {
+        const el = pageEls[i];
+        const rect = el.getBoundingClientRect();
+        if (!rect || rect.height <= 0) continue;
+        const distance = Math.abs(rect.top - viewportTop);
+        const rawIdx = parseInt(el.dataset?.pageIndex || String(i), 10);
+        const idx = Number.isFinite(rawIdx) ? rawIdx : i;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIdx = idx;
+        }
+      }
+      return bestIdx;
+    } catch (_) {
+      return -1;
+    }
+  }
+
   // Runtime-owned reading viewport movement.
   //
   // Keep existing UX intent (smooth stays smooth, auto stays auto), but do not
@@ -3207,9 +3258,7 @@ window.startFocusedPageTts = function startFocusedPageTts() {
   // allowed to be a volatile restore/runtime hint and may intentionally lag
   // passive scroll during re-entry settling.
   let sampledIdx = -1;
-  try {
-    if (typeof inferCurrentPageIndex === 'function') sampledIdx = Number(inferCurrentPageIndex());
-  } catch (_) {}
+  try { sampledIdx = Number(sampleVisibleReadingPageIndexForPlayback()); } catch (_) {}
   if (!Number.isFinite(sampledIdx) || sampledIdx < 0) sampledIdx = getFocusedOrInferredReadingPageIndex();
   const idx = Math.max(0, Math.min(Number(sampledIdx) || 0, (Array.isArray(pages) ? pages.length : 1) - 1));
   const text = (Array.isArray(pages) && pages[idx]) ? pages[idx] : '';
