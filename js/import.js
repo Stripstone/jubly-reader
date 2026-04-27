@@ -207,7 +207,7 @@ async function requestServerPageBreak(payload) {
 
     // Action locks — prevent duplicate concurrent operations.
     // Capacity is not checked on modal open. The shared server gate below runs
-    // only when the user attempts intake, scanning/population, or final save.
+    // only when the user attempts text import, Scan Contents, or final save.
     let _scanInProgress = false;
     let _importInProgress = false;
 
@@ -301,7 +301,7 @@ async function requestServerPageBreak(payload) {
     };
 
     // One authoritative entry path when a file is already in hand (e.g. page-level
-    // drag/drop). Shell forwards the file here; import.js owns the shared gate.
+    // drag/drop). Shell forwards the file here; import.js owns the Scan Contents gate.
     window.openImporterWithFile = async function openImporterWithFile(file) {
       if (!file || !modal) return false;
       try { document.body.classList.add('import-drop-pending'); } catch (_) {}
@@ -310,7 +310,7 @@ async function requestServerPageBreak(payload) {
       modal.setAttribute('aria-hidden', 'false');
       try { syncIdleStatus(await getImportCapacitySnapshot()); } catch (_) { syncIdleStatus(); }
       try { document.body.classList.remove('import-drop-pending'); } catch (_) {}
-      await attemptFileIntake(file, 'forwarded-drop');
+      await onFileSelected(file);
       return true;
     };
 
@@ -394,8 +394,9 @@ async function requestServerPageBreak(payload) {
       }
 
       try {
-        const intakeGate = await checkImportCapacityGate({ phase: 'intake', source: 'text' });
-        if (!intakeGate.ok) return;
+        const guard = await guardImportCapacity();
+        syncImportEntryState(guard.snapshot);
+        if (!guard.ok) return;
 
         showStage('progress');
         doneBtn.style.display = 'none';
@@ -432,8 +433,6 @@ async function requestServerPageBreak(payload) {
         };
 
         setProgress(75, 'Saving to device', `${pages.length} pages created`);
-        const finalGate = await checkImportCapacityGate({ phase: 'populate', source: 'text-final-save' });
-        if (!finalGate.ok) return;
         if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
         else if (typeof localBookPut === 'function') await localBookPut(record);
         setProgress(100, 'Import complete', `${pages.length} pages created`);
@@ -460,7 +459,7 @@ async function requestServerPageBreak(payload) {
 
     async function showModal() {
       // Open normally. Local count is display/cache only; the server gate runs
-      // only when the user attempts intake, scan/populate, or final save.
+      // only when the user attempts text import, Scan Contents, or final save.
       const localSnapshot = await getImportCapacitySnapshot();
       syncImportEntryState(localSnapshot);
       resetImporterState({ keepModalOpen: true });
@@ -503,7 +502,10 @@ async function requestServerPageBreak(payload) {
       const limit = (window.rcPolicy && typeof window.rcPolicy.getImportSlotLimit === 'function')
         ? window.rcPolicy.getImportSlotLimit()
         : null;
-      return { count, limit };
+      const hasCapacity = (window.rcPolicy && typeof window.rcPolicy.hasImportCapacity === 'function')
+        ? window.rcPolicy.hasImportCapacity(count)
+        : true;
+      return { count, limit, hasCapacity };
     }
 
     function getAuthHeaders() {
@@ -513,70 +515,6 @@ async function requestServerPageBreak(payload) {
           : '';
         return token ? { Authorization: `Bearer ${token}` } : {};
       } catch (_) { return {}; }
-    }
-
-    function normalizeImportCapacityReason(data, resp) {
-      const raw = String(
-        data?.reason ||
-        data?.verdict ||
-        data?.status ||
-        data?.result ||
-        ''
-      ).trim().toLowerCase();
-      if (raw === 'allowed' || data?.allowed === true) return 'allowed';
-      if (raw === 'library_full') return 'library_full';
-      if (raw === 'auth_required') return 'auth_required';
-      if (raw === 'server_error') return 'server_error';
-      if (resp && (resp.status === 401 || resp.status === 403)) return 'auth_required';
-      return 'server_error';
-    }
-
-    async function requestImportCapacityVerdict() {
-      let snapshot = null;
-      try { snapshot = await getImportCapacitySnapshot(); } catch (_) { snapshot = null; }
-      try { if (snapshot) syncImportEntryState(snapshot); } catch (_) {}
-      try {
-        const resp = await fetch(
-          (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=import-capacity') : '/api/app?kind=import-capacity'),
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-            body: JSON.stringify({}),
-            cache: 'no-store',
-          }
-        );
-        const data = await resp.json().catch(() => null);
-        const reason = normalizeImportCapacityReason(data || {}, resp);
-        if (!resp.ok && reason === 'allowed') return { ok: false, reason: 'server_error', snapshot, data };
-        return { ok: reason === 'allowed', reason, snapshot, data };
-      } catch (_) {
-        return { ok: false, reason: 'server_error', snapshot, data: null };
-      }
-    }
-
-    function discardQueuedImportAfterCapacityDenial() {
-      _file = null;
-      _zip = null;
-      _needsConversion = false;
-      _inputFormat = '';
-      _tocItems = [];
-      _activeId = null;
-      _spineHrefs = [];
-      _bookTitle = '';
-      if (fileInput) fileInput.value = '';
-      if (dropzone) dropzone.classList.remove('is-dragover');
-      if (tocList) tocList.innerHTML = '';
-      if (filterInput) filterInput.value = '';
-      if (selectionMeta) selectionMeta.textContent = 'No sections selected';
-      if (previewTitle) previewTitle.textContent = '';
-      if (previewBody) previewBody.innerHTML = '';
-      if (progMeta) progMeta.textContent = '';
-      if (progDetail) progDetail.textContent = '';
-      if (progFill) progFill.style.width = '0%';
-      if (doneBtn) doneBtn.style.display = 'none';
-      if (scanBtn) scanBtn.disabled = true;
-      if (doImportBtn) doImportBtn.disabled = true;
-      showStage('upload');
     }
 
     function showImportFullInlineHelper() {
@@ -599,47 +537,35 @@ async function requestServerPageBreak(payload) {
       uploadStatus.append(prefix, btn, suffix);
     }
 
-    function showImportCapacityNotification(message) {
-      if (window.rcInteraction && typeof window.rcInteraction.error === 'function') {
-        window.rcInteraction.error('import:capacity', message);
-        return;
+    async function guardImportCapacity() {
+      const snapshot = await getImportCapacitySnapshot();
+      // This is an action gate, not a modal-open gate. It stops the attempted
+      // import work and keeps the importer surface open for the inline plan link.
+      let hasCapacity = snapshot.hasCapacity;
+      try {
+        const resp = await fetch(
+          (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=import-capacity') : '/api/app?kind=import-capacity'),
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ count: snapshot.count }),
+            cache: 'no-store',
+          }
+        );
+        if (resp.ok) {
+          const data = await resp.json();
+          hasCapacity = !!(data.allowed ?? data.hasCapacity);
+          if (typeof data.limit !== 'undefined') snapshot.limit = data.limit;
+          if (typeof data.count !== 'undefined') snapshot.count = data.count;
+        }
+      } catch (_) {
+        // Server unreachable: fall back to client snapshot verdict.
+        // BRIDGE: client verdict is the fallback until server is reachable.
+        // Real owner: /api/app?kind=import-capacity.
       }
-      setStatus(message);
-    }
-
-    function handleImportCapacityDenial(reason, phase) {
-      const isLibraryFull = reason === 'library_full';
-      const phaseKey = String(phase || 'intake');
-      const isIntake = phaseKey === 'intake';
-      discardQueuedImportAfterCapacityDenial();
-      if (isLibraryFull && isIntake) {
-        showImportFullInlineHelper();
-        return;
-      }
-      if (isLibraryFull) {
-        showImportCapacityNotification('Book import failed. Your library is full.');
-        return;
-      }
-      setStatus(reason === 'auth_required' ? 'Sign in to import books.' : 'Book import failed. Try again shortly.');
-    }
-
-    async function checkImportCapacityGate(opts = {}) {
-      const phase = opts.phase || 'intake';
-      const verdict = await requestImportCapacityVerdict();
-      if (verdict.ok) return verdict;
-      handleImportCapacityDenial(verdict.reason, phase);
-      return verdict;
-    }
-
-    async function attemptFileIntake(file, source) {
-      if (!file) {
-        await onFileSelected(null);
-        return false;
-      }
-      const gate = await checkImportCapacityGate({ phase: 'intake', source: source || 'file' });
-      if (!gate.ok) return false;
-      await onFileSelected(file);
-      return true;
+      if (hasCapacity) return { ok: true, snapshot };
+      showImportFullInlineHelper();
+      return { ok: false, snapshot, message: 'Your library is full. See plans for more options.' };
     }
 
     function describeCapacity(snapshot) {
@@ -834,9 +760,9 @@ async function requestServerPageBreak(payload) {
       }
 
       try {
-
-      const scanGate = await checkImportCapacityGate({ phase: 'scan', source: 'scan' });
-      if (!scanGate.ok) return;
+        const guard = await guardImportCapacity();
+        syncImportEntryState(guard.snapshot);
+        if (!guard.ok) return;
 
       // Branch to the FreeConvert conversion path for all non-EPUB formats.
       if (_needsConversion) { await scanContentsViaConversion(); return; }
@@ -918,12 +844,9 @@ async function requestServerPageBreak(payload) {
 
       } finally {
         // Release the in-progress lock whether the scan succeeded, failed, or was
-        // short-circuited by an early return before the inner scan finally runs.
+        // short-circuited by an early return. Button state is managed by the inner
+        // finally above; this only resets the concurrency guard.
         _scanInProgress = false;
-        if (scanBtn) {
-          _setButtonBusy(scanBtn, false, 'Scanning…', 'Scan Contents');
-          scanBtn.disabled = !_file;
-        }
       }
     }
 
@@ -1057,6 +980,12 @@ async function requestServerPageBreak(payload) {
 
     async function doImportSelected() {
       if (!_file || !_zip || _importInProgress) return;
+      const selectedFile = _file;
+      const selectedZip = _zip;
+      const selectedTocItems = Array.isArray(_tocItems) ? _tocItems.slice() : [];
+      const selectedSpineHrefs = Array.isArray(_spineHrefs) ? _spineHrefs.slice() : [];
+      const selectedIds = new Set(selectedTocItems.filter(x => x.selected).map(x => x.id));
+      if (selectedIds.size === 0) return;
       // Lock immediately — before any await — so rapid clicks cannot trigger concurrent imports.
       _importInProgress = true;
       if (doImportBtn) {
@@ -1065,15 +994,13 @@ async function requestServerPageBreak(payload) {
       }
 
       try {
-        const populateGate = await checkImportCapacityGate({ phase: 'populate', source: 'import-selected' });
-        if (!populateGate.ok) return;
-
-        const selectedFile = _file;
-        const selectedZip = _zip;
-        const selectedTocItems = Array.isArray(_tocItems) ? _tocItems.slice() : [];
-        const selectedSpineHrefs = Array.isArray(_spineHrefs) ? _spineHrefs.slice() : [];
-        const selectedIds = new Set(selectedTocItems.filter(x => x.selected).map(x => x.id));
-        if (selectedIds.size === 0) return;
+        // Re-verify capacity at write time as a server-side safety check.
+        const guard = await guardImportCapacity();
+        syncImportEntryState(guard.snapshot);
+        if (!guard.ok) {
+          showStage('upload');
+          return;
+        }
 
         showStage('progress');
         doneBtn.style.display = 'none';
@@ -1130,10 +1057,7 @@ async function requestServerPageBreak(payload) {
           pageCount: createdPages,
           markdown: md
         };
-        const finalGate = await checkImportCapacityGate({ phase: 'populate', source: 'file-final-save' });
-        if (!finalGate.ok) return;
-        if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
-        else if (typeof localBookPut === 'function') await localBookPut(record);
+        await localBookPut(record);
 
         setProgress(100, 'Import complete', `${createdPages} pages created`);
         try {
@@ -1199,9 +1123,9 @@ async function requestServerPageBreak(payload) {
     dropzone?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') fileInput?.click();
     });
-    fileInput?.addEventListener('change', async (e) => {
+    fileInput?.addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0];
-      await attemptFileIntake(f, 'browse');
+      onFileSelected(f);
     });
 
     // Drag/drop
@@ -1209,9 +1133,9 @@ async function requestServerPageBreak(payload) {
     ['dragenter','dragover','dragleave','drop'].forEach((ev) => {
       dropzone?.addEventListener(ev, prevent);
     });
-    dropzone?.addEventListener('drop', async (e) => {
+    dropzone?.addEventListener('drop', (e) => {
       const f = e.dataTransfer?.files && e.dataTransfer.files[0];
-      if (f) await attemptFileIntake(f, 'drop');
+      if (f) onFileSelected(f);
     });
 
     modeFileBtn?.addEventListener('click', () => { _inputMode = 'file'; syncInputMode(); });

@@ -211,6 +211,8 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         .import-hint { margin-top:12px; font-size:0.8rem; color:#64748b; }
         .import-status { margin-top:12px; font-size:0.82rem; font-weight:600; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:10px 12px; }
         .import-status a { color:#4f46e5; text-decoration:underline; cursor:pointer; }
+        .import-status .link-button { background:none; border:none; padding:0; margin:0; font:inherit; font-weight:inherit; color:#4f46e5; text-decoration:underline; cursor:pointer; display:inline; vertical-align:baseline; }
+        .import-status .link-button:hover { color:#4338ca; }
         .import-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
         .import-picker { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(280px,0.9fr); gap:16px; }
         @media (max-width: 900px) { .import-picker { grid-template-columns:1fr; } }
