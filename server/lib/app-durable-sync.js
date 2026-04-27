@@ -231,6 +231,159 @@ async function findLibraryItemById(userId, libraryItemId) {
 }
 
 
+function normalizeLibraryItemId(value) {
+  return String(value || '').trim() || null;
+}
+
+function normalizeContentFingerprint(value) {
+  return String(value == null ? '' : value).trim() || null;
+}
+
+function durableRowTimestamp(row, key) {
+  const date = row && row[key] ? new Date(row[key]) : null;
+  const time = date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+  return time;
+}
+
+function compareCanonicalLibraryRows(a, b) {
+  const updatedDiff = durableRowTimestamp(b, 'updated_at') - durableRowTimestamp(a, 'updated_at');
+  if (updatedDiff) return updatedDiff;
+  const createdDiff = durableRowTimestamp(b, 'created_at') - durableRowTimestamp(a, 'created_at');
+  if (createdDiff) return createdDiff;
+  return String(a?.id || '').localeCompare(String(b?.id || ''));
+}
+
+function selectCanonicalLibraryRow(rows = []) {
+  return (Array.isArray(rows) ? rows : []).filter(Boolean).sort(compareCanonicalLibraryRows)[0] || null;
+}
+
+function libraryIdentityKeyForRow(row = {}) {
+  const fingerprint = normalizeContentFingerprint(row.content_fingerprint);
+  if (fingerprint) return `fp:${fingerprint}`;
+  const storageRef = normalizeBookId(row.storage_ref);
+  if (storageRef) return `sr:${storageRef}`;
+  return row.id ? `id:${row.id}` : null;
+}
+
+function dedupeLibraryRowsByIdentity(rows = []) {
+  const seen = new Set();
+  let count = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const key = libraryIdentityKeyForRow(row);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    count += 1;
+  }
+  return count;
+}
+
+async function getLibraryIdentityCounts(userId) {
+  const rows = await getLibraryItemsRows(userId, { includeDeleted: true, limit: 10000 }).catch(() => []);
+  return {
+    active: dedupeLibraryRowsByIdentity(rows.filter((row) => String(row?.status || '').trim().toLowerCase() === 'active')),
+    deleted: dedupeLibraryRowsByIdentity(rows.filter((row) => String(row?.status || '').trim().toLowerCase() === 'deleted')),
+  };
+}
+
+function normalizeLibraryIdentityHints(patch = {}) {
+  return {
+    rowId: normalizeLibraryItemId(patch?.library_item_id || patch?.libraryItemId || patch?.row_id || patch?.rowId || patch?.id),
+    contentFingerprint: normalizeContentFingerprint(patch?.content_fingerprint || patch?.contentFingerprint),
+    storageRef: normalizeBookId(patch?.storage_ref || patch?.storageRef || patch?.book_id || patch?.bookId),
+  };
+}
+
+async function getLibraryRowsByContentFingerprint(userId, fingerprint, { includeDeleted = true, limit = 100 } = {}) {
+  const fp = normalizeContentFingerprint(fingerprint);
+  if (!fp) return [];
+  const filters = [`user_id=eq.${encodeURIComponent(userId)}`, `content_fingerprint=eq.${encodeURIComponent(fp)}`];
+  if (!includeDeleted) filters.push('status=eq.active');
+  const data = await supabaseRest(`/rest/v1/user_library_items?${filters.join('&')}&select=*&order=updated_at.desc&limit=${Math.max(1, toInt(limit, 100))}`, {
+    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
+  }).catch(() => null);
+  return Array.isArray(data) ? data : [];
+}
+
+async function getLibraryRowsByStorageRef(userId, storageRef, { includeDeleted = true, limit = 100 } = {}) {
+  const ref = normalizeBookId(storageRef);
+  if (!ref) return [];
+  const filters = [`user_id=eq.${encodeURIComponent(userId)}`, `storage_ref=eq.${encodeURIComponent(ref)}`];
+  if (!includeDeleted) filters.push('status=eq.active');
+  const data = await supabaseRest(`/rest/v1/user_library_items?${filters.join('&')}&select=*&order=updated_at.desc&limit=${Math.max(1, toInt(limit, 100))}`, {
+    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
+  }).catch(() => null);
+  return Array.isArray(data) ? data : [];
+}
+
+async function findDurableLibraryIdentityGroup(userId, patch = {}, { includeDeleted = true } = {}) {
+  const hints = normalizeLibraryIdentityHints(patch);
+  let matchKind = 'none';
+  let rows = [];
+  if (hints.rowId) {
+    const seed = await findLibraryItemById(userId, hints.rowId).catch(() => null);
+    if (seed) {
+      const seedFingerprint = normalizeContentFingerprint(seed.content_fingerprint);
+      const seedStorageRef = normalizeBookId(seed.storage_ref);
+      matchKind = 'id';
+      if (seedFingerprint) rows = await getLibraryRowsByContentFingerprint(userId, seedFingerprint, { includeDeleted }).catch(() => []);
+      else if (seedStorageRef) rows = await getLibraryRowsByStorageRef(userId, seedStorageRef, { includeDeleted }).catch(() => []);
+      else rows = [seed];
+    }
+  }
+  if (!rows.length && hints.contentFingerprint) {
+    matchKind = 'content_fingerprint';
+    rows = await getLibraryRowsByContentFingerprint(userId, hints.contentFingerprint, { includeDeleted }).catch(() => []);
+  }
+  if (!rows.length && hints.storageRef) {
+    matchKind = 'storage_ref';
+    rows = await getLibraryRowsByStorageRef(userId, hints.storageRef, { includeDeleted }).catch(() => []);
+  }
+  const canonical = selectCanonicalLibraryRow(rows);
+  return { hints, matchKind: rows.length ? matchKind : 'none', canonical, rows };
+}
+
+function buildDurableLifecycleResult({ ok = true, operation, outcome, reason, group = null, affectedRowIds = [], counts = null, capacity = null, row = null, results = null } = {}) {
+  const matchedRows = Array.isArray(group?.rows) ? group.rows : [];
+  const canonical = group?.canonical || selectCanonicalLibraryRow(matchedRows);
+  const body = {
+    ok: !!ok,
+    operation,
+    outcome,
+    reason,
+    identity: {
+      matchKind: group?.matchKind || 'none',
+      canonicalRowId: canonical?.id || null,
+      matchedRowIds: matchedRows.map((item) => item?.id).filter(Boolean),
+    },
+    affected: {
+      rowIds: Array.isArray(affectedRowIds) ? affectedRowIds.filter(Boolean) : [],
+      count: Array.isArray(affectedRowIds) ? affectedRowIds.filter(Boolean).length : 0,
+    },
+    counts: counts || { active: null, deleted: null },
+    row: row || canonical || null,
+  };
+  if (capacity) body.capacity = capacity;
+  if (Array.isArray(results)) body.results = results;
+  return body;
+}
+
+function buildLifecycleCapacityVerdict(body = {}, { checked = true, stage = 'restore' } = {}) {
+  return {
+    checked: !!checked,
+    allowed: typeof body?.allowed === 'boolean' ? body.allowed : null,
+    count: Number.isFinite(Number(body?.count)) ? Math.max(0, Math.trunc(Number(body.count))) : null,
+    limit: body?.limit == null ? null : Math.max(0, Math.trunc(Number(body.limit))),
+    source: body?.source || 'server-durable',
+    stage: body?.stage || stage,
+  };
+}
+
+function hasSafeRestoreCreateMetadata(patch = {}) {
+  const storageRef = normalizeBookId(patch?.storage_ref || patch?.storageRef || patch?.book_id || patch?.bookId);
+  const title = toText(patch?.title || patch?.source_name || patch?.sourceName, null);
+  return !!(storageRef && title);
+}
+
 function buildImportCapacityError(result) {
   const body = result?.body || {
     ok: false,
@@ -256,7 +409,10 @@ async function assertActiveLibrarySlotAvailable(req, userId, { stage = 'final-wr
 async function ensureLibraryItem(userId, patch = {}, options = {}) {
   const storageRef = normalizeBookId(patch?.storage_ref || patch?.storageRef || patch?.book_id || patch?.bookId);
   if (!storageRef) throw new Error('storage_ref is required');
-  const existing = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: true }).catch(() => null);
+  const group = await findDurableLibraryIdentityGroup(userId, patch, { includeDeleted: true }).catch(() => null);
+  const groupRows = Array.isArray(group?.rows) ? group.rows : [];
+  const activeGroupRows = groupRows.filter((row) => String(row?.status || '').trim().toLowerCase() === 'active');
+  const existing = selectCanonicalLibraryRow(activeGroupRows) || group?.canonical || null;
   const existingStatus = String(existing?.status || '').trim().toLowerCase();
   const wouldConsumeActiveSlot = !existing?.id || existingStatus !== 'active';
   if (wouldConsumeActiveSlot) {
@@ -463,7 +619,8 @@ async function deleteBookMetricsForLibraryItem(libraryItemId) {
 }
 
 async function getRestoreRow(userId, storageRef) {
-  const item = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: false }).catch(() => null);
+  const group = await findDurableLibraryIdentityGroup(userId, { storage_ref: storageRef }, { includeDeleted: false }).catch(() => null);
+  const item = group?.canonical || null;
   if (!item || String(item.status || '') !== 'active') return null;
   const row = await getProgressRowByLibraryItemId(item.id).catch(() => null);
   if (!row) return null;
@@ -540,36 +697,219 @@ async function addSession(userId, patch = {}, options = {}) {
   };
 }
 
-async function setLibraryItemStatus(userId, storageRef, nextStatus, options = {}) {
-  const item = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: true }).catch(() => null);
-  if (!item) return null;
-  if (nextStatus === 'active' && String(item.status || '').trim().toLowerCase() !== 'active') {
-    await assertActiveLibrarySlotAvailable(options?.req, userId, { stage: options?.stage || 'final-write' });
-  }
-  const now = new Date();
-  if (nextStatus === 'deleted') {
-    await deleteProgressForLibraryItem(item.id).catch(() => null);
-  }
-  if (nextStatus === 'purge') {
-    await Promise.all([
-      deleteProgressForLibraryItem(item.id).catch(() => null),
-      deleteBookMetricsForLibraryItem(item.id).catch(() => null),
-    ]);
-    await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(item.id)}&user_id=eq.${encodeURIComponent(userId)}`, {
-      method: 'DELETE', asService: true,
-    }).catch(() => null);
-    return { id: item.id, storage_ref: item.storage_ref, status: 'purged' };
-  }
-  const payload = {
-    status: nextStatus === 'active' ? 'active' : 'deleted',
-    deleted_at: nextStatus === 'active' ? null : now.toISOString(),
-    purge_after: nextStatus === 'active' ? null : new Date(now.getTime() + Math.max(1, toInt(options.purgeAfterDays, 30)) * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: now.toISOString(),
-  };
-  const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(item.id)}&select=*`, {
+async function patchLibraryItemStatusById(row, payload) {
+  if (!row?.id) return null;
+  const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(row.id)}&select=*`, {
     method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
   }).catch(() => null);
-  return Array.isArray(data) && data[0] ? data[0] : { ...item, ...payload };
+  return Array.isArray(data) && data[0] ? data[0] : { ...row, ...payload };
+}
+
+async function setLibraryItemStatus(userId, storageRef, nextStatus, options = {}) {
+  const operation = nextStatus === 'purge' ? 'purge' : (nextStatus === 'active' ? 'restore' : 'delete');
+  const group = await findDurableLibraryIdentityGroup(userId, { ...(options || {}), storage_ref: storageRef }, { includeDeleted: true }).catch(() => null);
+  const countsBefore = await getLibraryIdentityCounts(userId).catch(() => ({ active: null, deleted: null }));
+  if (!group || !Array.isArray(group.rows) || !group.rows.length) {
+    if (operation === 'restore' && hasSafeRestoreCreateMetadata({ ...(options || {}), storage_ref: storageRef })) {
+      const capacityResult = await resolveImportCapacity(options?.req, { stage: options?.stage || 'restore', user: { id: userId } }).catch(() => null);
+      const capacity = buildLifecycleCapacityVerdict(capacityResult?.body || {}, { stage: options?.stage || 'restore' });
+      if (!capacityResult?.body?.allowed) {
+        return buildDurableLifecycleResult({
+          ok: false,
+          operation,
+          outcome: 'blocked',
+          reason: capacityResult?.body?.reason || 'library_full',
+          group: { matchKind: 'none', canonical: null, rows: [] },
+          affectedRowIds: [],
+          counts: countsBefore,
+          capacity,
+          row: null,
+        });
+      }
+      const created = await ensureLibraryItem(userId, { ...(options || {}), storage_ref: storageRef }, { req: options?.req, stage: options?.stage || 'restore' });
+      const counts = await getLibraryIdentityCounts(userId).catch(() => countsBefore);
+      return buildDurableLifecycleResult({
+        ok: true,
+        operation,
+        outcome: 'restored',
+        reason: 'missing_row_recreated',
+        group: { matchKind: 'storage_ref', canonical: created, rows: [created] },
+        affectedRowIds: created?.id ? [created.id] : [],
+        counts,
+        capacity,
+        row: created || null,
+      });
+    }
+    return buildDurableLifecycleResult({
+      ok: operation === 'restore' ? false : true,
+      operation,
+      outcome: operation === 'restore' ? 'blocked' : 'already_absent',
+      reason: operation === 'restore' ? 'missing_safe_restore_metadata' : 'no_matching_server_row',
+      group: { matchKind: 'none', canonical: null, rows: [] },
+      affectedRowIds: [],
+      counts: countsBefore,
+      row: null,
+    });
+  }
+
+  const now = new Date();
+  const rows = group.rows;
+  if (nextStatus === 'deleted') {
+    const activeRows = rows.filter((row) => String(row?.status || '').trim().toLowerCase() === 'active');
+    if (!activeRows.length) {
+      return buildDurableLifecycleResult({
+        ok: true,
+        operation,
+        outcome: 'already_deleted',
+        reason: 'no_active_rows_in_matched_group',
+        group,
+        affectedRowIds: [],
+        counts: countsBefore,
+        row: group.canonical || null,
+      });
+    }
+    await Promise.all(activeRows.map((row) => deleteProgressForLibraryItem(row.id).catch(() => null)));
+    const payload = {
+      status: 'deleted',
+      deleted_at: now.toISOString(),
+      purge_after: new Date(now.getTime() + Math.max(1, toInt(options.purgeAfterDays, 30)) * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: now.toISOString(),
+    };
+    const updated = await Promise.all(activeRows.map((row) => patchLibraryItemStatusById(row, payload)));
+    const counts = await getLibraryIdentityCounts(userId).catch(() => countsBefore);
+    return buildDurableLifecycleResult({
+      ok: true,
+      operation,
+      outcome: 'deleted',
+      reason: 'matched_active_group_deleted',
+      group: { ...group, rows: updated.filter(Boolean).length ? updated.filter(Boolean) : rows },
+      affectedRowIds: activeRows.map((row) => row.id),
+      counts,
+      row: selectCanonicalLibraryRow(updated.filter(Boolean)) || group.canonical || null,
+    });
+  }
+
+  if (nextStatus === 'purge') {
+    await Promise.all(rows.map((row) => Promise.all([
+      deleteProgressForLibraryItem(row.id).catch(() => null),
+      deleteBookMetricsForLibraryItem(row.id).catch(() => null),
+    ])));
+    await Promise.all(rows.map((row) => supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(row.id)}&user_id=eq.${encodeURIComponent(userId)}`, {
+      method: 'DELETE', asService: true,
+    }).catch(() => null)));
+    const counts = await getLibraryIdentityCounts(userId).catch(() => countsBefore);
+    return buildDurableLifecycleResult({
+      ok: true,
+      operation,
+      outcome: 'purged',
+      reason: 'matched_group_purged',
+      group,
+      affectedRowIds: rows.map((row) => row.id),
+      counts,
+      row: group.canonical ? { id: group.canonical.id, storage_ref: group.canonical.storage_ref, outcome: 'purged' } : null,
+    });
+  }
+
+  if (nextStatus === 'active') {
+    const activeRows = rows.filter((row) => String(row?.status || '').trim().toLowerCase() === 'active');
+    if (activeRows.length) {
+      const canonicalActive = selectCanonicalLibraryRow(activeRows);
+      return buildDurableLifecycleResult({
+        ok: true,
+        operation,
+        outcome: 'already_active',
+        reason: 'matched_group_already_active',
+        group: { ...group, canonical: canonicalActive },
+        affectedRowIds: [],
+        counts: countsBefore,
+        capacity: { checked: false, allowed: true, count: countsBefore.active, limit: null, source: 'server-durable', stage: options?.stage || 'restore' },
+        row: canonicalActive || group.canonical || null,
+      });
+    }
+    const deletedRows = rows.filter((row) => String(row?.status || '').trim().toLowerCase() === 'deleted');
+    const target = selectCanonicalLibraryRow(deletedRows);
+    if (!target) {
+      return buildDurableLifecycleResult({
+        ok: false,
+        operation,
+        outcome: 'blocked',
+        reason: 'no_deleted_row_to_restore',
+        group,
+        affectedRowIds: [],
+        counts: countsBefore,
+        row: group.canonical || null,
+      });
+    }
+    const capacityResult = await resolveImportCapacity(options?.req, { stage: options?.stage || 'restore', user: { id: userId } }).catch(() => null);
+    const capacity = buildLifecycleCapacityVerdict(capacityResult?.body || {}, { stage: options?.stage || 'restore' });
+    if (!capacityResult?.body?.allowed) {
+      return buildDurableLifecycleResult({
+        ok: false,
+        operation,
+        outcome: 'blocked',
+        reason: capacityResult?.body?.reason || 'library_full',
+        group: { ...group, canonical: target },
+        affectedRowIds: [],
+        counts: countsBefore,
+        capacity,
+        row: target,
+      });
+    }
+    const payload = {
+      status: 'active',
+      deleted_at: null,
+      purge_after: null,
+      updated_at: now.toISOString(),
+    };
+    const updated = await patchLibraryItemStatusById(target, payload);
+    const counts = await getLibraryIdentityCounts(userId).catch(() => countsBefore);
+    return buildDurableLifecycleResult({
+      ok: true,
+      operation,
+      outcome: 'restored',
+      reason: 'canonical_deleted_row_restored',
+      group: { ...group, canonical: updated || target, rows: [updated || target] },
+      affectedRowIds: [target.id],
+      counts,
+      capacity,
+      row: updated || target,
+    });
+  }
+
+  return buildDurableLifecycleResult({
+    ok: false,
+    operation,
+    outcome: 'blocked',
+    reason: 'unsupported_lifecycle_status',
+    group,
+    affectedRowIds: [],
+    counts: countsBefore,
+    row: group.canonical || null,
+  });
+}
+
+async function setLibraryItemsStatusBatch(userId, items = [], nextStatus, options = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const results = [];
+  const affectedIds = [];
+  for (const item of list) {
+    const storageRef = item?.storage_ref || item?.storageRef || item?.book_id || item?.bookId || item;
+    const result = await setLibraryItemStatus(userId, storageRef, nextStatus, { ...(typeof item === 'object' && item ? item : {}), ...(options || {}) });
+    results.push(result);
+    if (Array.isArray(result?.affected?.rowIds)) affectedIds.push(...result.affected.rowIds);
+  }
+  const counts = await getLibraryIdentityCounts(userId).catch(() => ({ active: null, deleted: null }));
+  return buildDurableLifecycleResult({
+    ok: results.every((item) => item?.ok !== false),
+    operation: nextStatus === 'purge' ? 'purge_all' : (nextStatus === 'deleted' ? 'delete_all' : 'restore_all'),
+    outcome: results.some((item) => item?.outcome === 'blocked') ? 'partial' : 'completed',
+    reason: 'batch_completed',
+    group: { matchKind: 'batch', canonical: null, rows: [] },
+    affectedRowIds: affectedIds,
+    counts,
+    results,
+    row: null,
+  });
 }
 
 function summarizeUsage(usageRow, usageDailyLimit) {
@@ -712,6 +1052,7 @@ export default async function handler(req, res) {
     const action = String(body?.action || '').trim().toLowerCase();
     try {
       let row = null;
+      let durableResult = null;
       switch (action) {
         case 'sync_user':
           row = await upsertUsersRow(auth.user);
@@ -726,14 +1067,31 @@ export default async function handler(req, res) {
           row = await addSession(auth.user.id, body?.payload || {}, { req, stage: 'final-write' });
           break;
         case 'delete_library_item': {
-          const storageRef = body?.payload?.storage_ref || body?.payload?.storageRef || body?.payload?.book_id || body?.payload?.bookId;
-          const purge = toBool(body?.payload?.purge, false);
-          row = await setLibraryItemStatus(auth.user.id, storageRef, purge ? 'purge' : 'deleted', body?.payload || {});
+          const payload = body?.payload || {};
+          const items = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload?.book_ids) ? payload.book_ids : null);
+          const purge = toBool(payload?.purge, false);
+          if (items) {
+            durableResult = await setLibraryItemsStatusBatch(auth.user.id, items, purge ? 'purge' : 'deleted', payload);
+          } else {
+            const storageRef = payload?.storage_ref || payload?.storageRef || payload?.book_id || payload?.bookId;
+            durableResult = await setLibraryItemStatus(auth.user.id, storageRef, purge ? 'purge' : 'deleted', payload);
+          }
+          row = durableResult?.row || null;
+          break;
+        }
+        case 'delete_library_items': {
+          const payload = body?.payload || {};
+          const items = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload?.book_ids) ? payload.book_ids : []);
+          const purge = typeof payload?.purge === 'undefined' ? true : toBool(payload?.purge, true);
+          durableResult = await setLibraryItemsStatusBatch(auth.user.id, items, purge ? 'purge' : 'deleted', payload);
+          row = durableResult?.row || null;
           break;
         }
         case 'restore_library_item': {
-          const storageRef = body?.payload?.storage_ref || body?.payload?.storageRef || body?.payload?.book_id || body?.payload?.bookId;
-          row = await setLibraryItemStatus(auth.user.id, storageRef, 'active', { ...(body?.payload || {}), req, stage: 'final-write' });
+          const payload = body?.payload || {};
+          const storageRef = payload?.storage_ref || payload?.storageRef || payload?.book_id || payload?.bookId;
+          durableResult = await setLibraryItemStatus(auth.user.id, storageRef, 'active', { ...payload, req, stage: 'restore' });
+          row = durableResult?.row || null;
           break;
         }
         case 'reset_usage_window': {
@@ -755,6 +1113,9 @@ export default async function handler(req, res) {
           throw new Error('Unsupported sync action.');
       }
       const snapshot = await buildSnapshot(req, auth.user).catch(() => null);
+      if (durableResult) {
+        return json(res, 200, { ...durableResult, snapshot });
+      }
       return json(res, 200, { ok: true, row, snapshot });
     } catch (error) {
       if (error?.importCapacityBody) {

@@ -1181,6 +1181,21 @@ async function requestServerPageBreak(payload) {
     window.addEventListener('rc:local-library-changed', () => {
       try { getImportCapacitySnapshot().then(syncImportEntryState).catch(() => {}); } catch (_) {}
     });
+    window.addEventListener('rc:durable-library-settled', () => {
+      try { getImportCapacitySnapshot().then(syncImportEntryState).catch(() => {}); } catch (_) {}
+      try {
+        requestImportCapacityVerdict().then((verdict) => {
+          if (!uploadStatus) return;
+          const showingCapacityBlock = !!uploadStatus.querySelector('.import-see-plans-btn');
+          if (!showingCapacityBlock) return;
+          if (verdict && verdict.ok) {
+            setStatus('Library updated. You can try importing again.');
+          } else if (verdict && verdict.reason === 'library_full') {
+            showImportFullInlineHelper();
+          }
+        }).catch(() => {});
+      } catch (_) {}
+    });
 
     // Upload
     // Keep behavior consistent: desktop supports click-to-browse + drag/drop.
