@@ -133,8 +133,6 @@ const TTS_CLOUD_WINDOW = {
   promotionApplied: false,
   promotionFetchPromise: null,
   promotionResult: null,
-  fullPageUnavailable: false,
-  fullPageUnavailableReason: '',
   engagementSignal: null,
   charsPhase1: 0,
   charsFullPage: 0,
@@ -381,8 +379,6 @@ function restoreNaturalWindowStateForHandoff(sessionId, key, pageText, chunkATex
   TTS_CLOUD_WINDOW.promotionApplied = false;
   TTS_CLOUD_WINDOW.promotionFetchPromise = null;
   TTS_CLOUD_WINDOW.promotionResult = null;
-  TTS_CLOUD_WINDOW.fullPageUnavailable = false;
-  TTS_CLOUD_WINDOW.fullPageUnavailableReason = '';
   TTS_CLOUD_WINDOW.charsPhase1 = phase1.length || Number(TTS_CLOUD_WINDOW.charsPhase1 || 0);
   TTS_CLOUD_WINDOW.charsFullPage = text.length || Number(TTS_CLOUD_WINDOW.charsFullPage || 0);
   TTS_CLOUD_WINDOW.charsSessionTotal = TTS_CLOUD_WINDOW.charsPhase1;
@@ -439,28 +435,6 @@ function ttsBeginNaturalWindowHandoff(sessionId, key, reason = 'chunk-ended-natu
   return true;
 }
 
-function markTtsWindowFullPageUnavailable(sessionId, key, reason = 'full-page-unavailable', context = {}) {
-  if (TTS_STATE.activeSessionId !== sessionId) return false;
-  if (String(TTS_STATE.activeKey || '') !== String(key || '')) return false;
-  if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.sessionId !== sessionId || String(TTS_CLOUD_WINDOW.pageKey || '') !== String(key || '')) return false;
-  TTS_CLOUD_WINDOW.fullPageUnavailable = true;
-  TTS_CLOUD_WINDOW.fullPageUnavailableReason = String(reason || 'full-page-unavailable');
-  TTS_CLOUD_WINDOW.mode = 'full-page-unavailable';
-  TTS_CLOUD_WINDOW.promotionApplied = false;
-  TTS_CLOUD_WINDOW.pendingSkipSettling = false;
-  ttsDiagPush('window-full-page-unavailable', {
-    sessionId, key, reason: TTS_CLOUD_WINDOW.fullPageUnavailableReason,
-    returnedMarksCount: Number(context.returnedMarksCount || 0),
-    chunkASentenceCount: Number(context.chunkASentenceCount || TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
-    error: context.error ? String(context.error) : '',
-    phase: context.phase || 'case-b-handoff',
-    requestMode: 'full-page',
-    nextRequestMode: 'block-window',
-    chosenHandoffBlock: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
-  });
-  return true;
-}
-
 function clearTtsCloudWindow() {
   TTS_CLOUD_WINDOW.active = false;
   TTS_CLOUD_WINDOW.mode = 'idle';
@@ -472,8 +446,6 @@ function clearTtsCloudWindow() {
   TTS_CLOUD_WINDOW.promotionApplied = false;
   TTS_CLOUD_WINDOW.promotionFetchPromise = null;
   TTS_CLOUD_WINDOW.promotionResult = null;
-  TTS_CLOUD_WINDOW.fullPageUnavailable = false;
-  TTS_CLOUD_WINDOW.fullPageUnavailableReason = '';
   TTS_CLOUD_WINDOW.engagementSignal = null;
   TTS_CLOUD_WINDOW.charsPhase1 = 0;
   TTS_CLOUD_WINDOW.charsFullPage = 0;
@@ -1576,66 +1548,6 @@ function ttsMaybePrepareSentenceHighlight(key, rawText, marks) {
   textEl.innerHTML = spansHtml.join('');
   TTS_STATE.highlightSpans = Array.from(textEl.querySelectorAll('.tts-sentence'));
   try { const h = pageEl.querySelector('.hint-btn'); if (h) h.disabled = true; } catch (_) {}
-}
-
-function ttsPrepareWindowContinuationHighlight(key, pageText, startBlock, marks) {
-  if (!optsForKeySentenceMarks(key) || !Array.isArray(marks) || !marks.length) return false;
-  const _parsed = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
-  const pageIndex = _parsed ? _parsed.pageIndex : -1;
-  if (!Number.isFinite(pageIndex) || pageIndex < 0) return false;
-  const pageEl = document.querySelectorAll('.page')[pageIndex];
-  if (!pageEl) return false;
-  const textEl = pageEl.querySelector('.page-text');
-  if (!textEl) return false;
-
-  const text = String(pageText || textEl.textContent || '');
-  const ranges = splitIntoSentenceRanges(text);
-  const offset = Math.max(0, Number(startBlock || 0));
-  if (!ranges.length || offset >= ranges.length) return false;
-
-  ttsClearSentenceHighlight();
-  const spansHtml = [];
-  let cursor = 0;
-  const globalMarks = ranges.map((r, idx) => {
-    if (r.start > cursor) spansHtml.push(escapeHTML(text.slice(cursor, r.start)));
-    spansHtml.push(`<span class="tts-sentence" data-tts-sent="${idx}">${escapeHTML(text.slice(r.start, r.end))}</span>`);
-    cursor = r.end;
-    return { time: Number.MAX_SAFE_INTEGER, start: r.start, end: r.end };
-  });
-  if (cursor < text.length) spansHtml.push(escapeHTML(text.slice(cursor)));
-
-  for (let i = 0; i < marks.length; i++) {
-    const globalIdx = offset + i;
-    if (!globalMarks[globalIdx]) break;
-    globalMarks[globalIdx] = {
-      time: Number(marks[i].time) || 0,
-      start: globalMarks[globalIdx].start,
-      end: globalMarks[globalIdx].end,
-    };
-  }
-  const chunkEnd = Math.min(globalMarks.length - 1, offset + marks.length - 1);
-  for (let i = 0; i < offset; i++) {
-    globalMarks[i].time = -1;
-  }
-
-  TTS_STATE.highlightPageKey = key;
-  TTS_STATE.highlightPageEl = textEl;
-  TTS_STATE.highlightOriginalHTML = textEl.innerHTML;
-  TTS_STATE.highlightMarks = globalMarks;
-  TTS_STATE.highlightEnds = globalMarks.map((r, i) => {
-    if (i < offset) return -1;
-    if (i < chunkEnd && globalMarks[i + 1]) return globalMarks[i + 1].time;
-    return i === chunkEnd ? Infinity : Number.MAX_SAFE_INTEGER;
-  });
-  TTS_STATE.highlightMarksProvenance = 'timed-window-continuation';
-  textEl.innerHTML = spansHtml.join('');
-  TTS_STATE.highlightSpans = Array.from(textEl.querySelectorAll('.tts-sentence'));
-  try { const h = pageEl.querySelector('.hint-btn'); if (h) h.disabled = true; } catch (_) {}
-  ttsDiagPush('window-continuation-highlight-ready', {
-    sessionId: TTS_STATE.activeSessionId, key, startBlock: offset,
-    marksCount: marks.length, blockCount: globalMarks.length, chunkEnd,
-  });
-  return true;
 }
 
 function ttsPrepareEstimatedHighlight(key, rawText, audio) {
@@ -3209,17 +3121,7 @@ async function cloudFetchWithRetry(text, opts, { maxAttempts = 3, sessionId, get
 //   and pause immediately see full-page marks.
 
 function _ttsWindowTriggerPromotion(signal) {
-  if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.promotionTriggered || TTS_CLOUD_WINDOW.fullPageUnavailable) {
-    if (TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.fullPageUnavailable) {
-      ttsDiagPush('window-promotion-suppressed-unavailable', {
-        signal,
-        sessionId: TTS_CLOUD_WINDOW.sessionId,
-        key: TTS_CLOUD_WINDOW.pageKey,
-        reason: TTS_CLOUD_WINDOW.fullPageUnavailableReason || 'full-page-unavailable',
-      });
-    }
-    return;
-  }
+  if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.promotionTriggered) return;
   const { sessionId, pageKey: key, pageText } = TTS_CLOUD_WINDOW;
   if (TTS_STATE.activeSessionId !== sessionId) return;
 
@@ -3730,163 +3632,7 @@ async function ttsSpeakQueue(key, parts) {
             });
           }
 
-          const playWindowContinuationFrom = async (initialCursor, unavailableReason, unavailableContext = {}) => {
-            const pageSentences = ttsWindowSplitSentences(pageText);
-            const chunkSize = Math.max(1, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0) || 2);
-            let cursor = Math.max(chunkSize, Number(initialCursor || chunkSize));
-            const requestId = Number(TTS_STATE.cloudRestartRequestId || 0) + 1;
-            TTS_STATE.cloudRestartRequestId = requestId;
-            TTS_STATE.cloudRestartInFlight = true;
-            beginCloudRestartPendingState({ requestId, sessionId, key, targetBlock: cursor, reason: 'window-continuation' });
-            ttsDiagPush('window-continuation-start', {
-              sessionId, key, requestId, startBlock: cursor, chunkSize,
-              reason: unavailableReason, requestMode: 'block-window',
-              pageSentenceCount: pageSentences.length,
-              ...unavailableContext,
-            });
-
-            const isCurrentContinuation = () => (
-              Number(TTS_STATE.cloudRestartRequestId || 0) === requestId &&
-              Number(TTS_STATE.activeSessionId || 0) === Number(sessionId || 0) &&
-              String(TTS_STATE.activeKey || '') === String(key || '') &&
-              TTS_CLOUD_WINDOW.active &&
-              TTS_CLOUD_WINDOW.fullPageUnavailable === true &&
-              TTS_CLOUD_WINDOW.sessionId === sessionId &&
-              String(TTS_CLOUD_WINDOW.pageKey || '') === String(key || '')
-            );
-
-            const fetchContinuationChunk = (startBlock, source) => {
-              const chunkText = pageSentences.slice(startBlock, startBlock + chunkSize).join('');
-              if (!chunkText.trim()) return null;
-              ttsDiagPush(source === 'prefetch' ? 'window-continuation-prefetch-start' : 'window-continuation-fetch-start', {
-                sessionId, key, requestId, startBlock, chunkSize, requestMode: 'block-window',
-              });
-              return cloudFetchWithRetry(
-                chunkText,
-                { sentenceMarks: true, requestMode: 'block-window' },
-                { maxAttempts: 3, sessionId, getSessionId: () => TTS_STATE.activeSessionId }
-              ).then(tts => ({ startBlock, chunkText, tts, source }));
-            };
-
-            let prefetched = null;
-            const startPrefetch = (nextBlock) => {
-              if (nextBlock >= pageSentences.length || !isCurrentContinuation()) return;
-              const promise = fetchContinuationChunk(nextBlock, 'prefetch');
-              if (!promise) return;
-              prefetched = { startBlock: nextBlock, promise: promise.then(result => {
-                if (!isCurrentContinuation()) {
-                  ttsDiagPush('window-continuation-prefetch-discarded', { sessionId, key, requestId, startBlock: nextBlock, reason: 'stale-session' });
-                  return null;
-                }
-                ttsDiagPush('window-continuation-prefetch-ready', {
-                  sessionId, key, requestId, startBlock: nextBlock,
-                  returnedMarksCount: Array.isArray(result?.tts?.sentenceMarks) ? result.tts.sentenceMarks.length : 0,
-                  requestMode: 'block-window',
-                });
-                return result;
-              }) };
-            };
-
-            let current = await fetchContinuationChunk(cursor, 'direct');
-            while (current && current.startBlock < pageSentences.length) {
-              if (!isCurrentContinuation()) return false;
-
-              const queuedTarget = Number(TTS_CLOUD_RESTART_PENDING.queuedTargetBlock ?? -1);
-              const pendingTarget = Math.max(
-                Number.isFinite(Number(TTS_CLOUD_WINDOW.pendingSkipBlock)) ? Number(TTS_CLOUD_WINDOW.pendingSkipBlock) : -1,
-                Number.isFinite(queuedTarget) ? queuedTarget : -1
-              );
-              if (pendingTarget >= 0 && pendingTarget > current.startBlock) {
-                const boundedTarget = Math.min(Math.max(cursor, pendingTarget), pageSentences.length - 1);
-                ttsDiagPush('window-continuation-prefetch-discarded', { sessionId, key, requestId, startBlock: current.startBlock, reason: 'skip-mismatch', targetBlock: boundedTarget });
-                prefetched = null;
-                TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
-                TTS_CLOUD_WINDOW.pendingSkipSettling = false;
-                TTS_CLOUD_RESTART_PENDING.queuedTargetBlock = -1;
-                current = await fetchContinuationChunk(boundedTarget, 'direct');
-                continue;
-              }
-
-              const tts = current.tts;
-              if (!tts || !Array.isArray(tts.sentenceMarks) || !tts.sentenceMarks.length) {
-                throw new Error('window-continuation-missing-marks');
-              }
-              applyCloudCapabilityForRuntime({ key, sessionId, capability: tts.capability, sentenceMarks: tts.sentenceMarks });
-              if (!ttsPrepareWindowContinuationHighlight(key, pageText, current.startBlock, tts.sentenceMarks)) {
-                throw new Error('window-continuation-highlight-unavailable');
-              }
-
-              const nextBlock = Math.min(pageSentences.length, current.startBlock + Math.max(1, tts.sentenceMarks.length));
-              TTS_CLOUD_WINDOW.mode = 'continuing';
-              TTS_STATE.activeBlockIndex = current.startBlock;
-              try { ttsHighlightBlock(current.startBlock); } catch (_) {}
-              ttsDiagPush('window-continuation-chunk-ready', {
-                sessionId, key, requestId, startBlock: current.startBlock, nextBlock,
-                returnedMarksCount: tts.sentenceMarks.length, requestMode: 'block-window',
-                cacheHit: tts.capability?.cache?.audio?.status === 'hit',
-              });
-
-              startPrefetch(nextBlock);
-
-              await new Promise((resolve, reject) => {
-                const audio = TTS_AUDIO_ELEMENT;
-                try { audio.loop = false; audio.pause(); } catch (_) {}
-                audio.src = tts.url;
-                TTS_STATE.audio = audio;
-                try { audio.volume = Math.max(0, Math.min(1, Number(TTS_STATE.volume ?? 1))); } catch (_) {}
-                try { audio.defaultPlaybackRate = Number(TTS_STATE.rate || 1); audio.playbackRate = Number(TTS_STATE.rate || 1); } catch (_) {}
-                const applyPending = (reason) => { try { applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason); } catch (_) {} };
-                try { audio.onloadedmetadata = () => applyPending('loadedmetadata'); } catch (_) {}
-                try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
-                audio.onended = () => {
-                  if (nextBlock < pageSentences.length && isCurrentContinuation()) {
-                    TTS_STATE.cloudRestartInFlight = true;
-                    beginCloudRestartPendingState({ requestId, sessionId, key, targetBlock: nextBlock, reason: 'window-continuation' });
-                    ttsDiagPush('window-continuation-pending', { sessionId, key, requestId, nextBlock, requestMode: 'block-window' });
-                  } else {
-                    ttsClearSentenceHighlight();
-                  }
-                  resolve();
-                };
-                audio.onerror = () => reject(new Error('Audio playback failed'));
-                audio.play().then(() => {
-                  if (!isCurrentContinuation()) { resolve(); return; }
-                  clearTtsStartupBanner();
-                  applyPending('play-start');
-                  ttsStartHighlightLoop(audio);
-                  TTS_STATE.cloudRestartInFlight = false;
-                  clearCloudRestartPendingState(requestId, 'continuation-chunk-playing');
-                }).catch(reject);
-              });
-
-              if (!isCurrentContinuation()) return false;
-              cursor = nextBlock;
-              if (cursor >= pageSentences.length) break;
-              if (prefetched && prefetched.startBlock === cursor) {
-                current = await prefetched.promise;
-                prefetched = null;
-                if (!current) return false;
-              } else {
-                current = await fetchContinuationChunk(cursor, 'direct');
-              }
-            }
-
-            if (!isCurrentContinuation()) return false;
-            clearCloudRestartTransition({ invalidateRequest: false, unmute: true, reason: 'window-continuation-complete' });
-            ttsDiagPush('window-continuation-complete', { sessionId, key, requestId, finalBlock: cursor, requestMode: 'block-window' });
-            clearTtsCloudWindow();
-            return true;
-          };
-
-          let fullResult = null;
-          try {
-            fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
-          } catch (err) {
-            markTtsWindowFullPageUnavailable(sessionId, key, 'promotion-fetch-failed', { error: String(err?.message || err), phase: 'case-b-handoff' });
-            const continued = await playWindowContinuationFrom(Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0), 'promotion-fetch-failed', { error: String(err?.message || err) });
-            if (continued) continue;
-            throw err;
-          }
+          const fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
           if (!fullResult || TTS_STATE.activeSessionId !== sessionId) {
             clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
             return;
@@ -3923,12 +3669,10 @@ async function ttsSpeakQueue(key, parts) {
               phase: 'case-b-handoff',
               ttsCloudMode: 'stale-phase1-rejected',
             });
-            markTtsWindowFullPageUnavailable(sessionId, key, 'stale-phase1-promotion-result', { returnedMarksCount: _caseBMarkCount, chunkASentenceCount: _caseBChunkACount, phase: 'case-b-handoff' });
-            const continued = await playWindowContinuationFrom(_caseBChunkACount, 'stale-phase1-promotion-result', { returnedMarksCount: _caseBMarkCount });
-            if (continued) continue;
             clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
             throw new Error('stale-phase1-promotion-result');
           }
+
           applyCloudCapabilityForRuntime({ key, sessionId, capability: fullResult.capability, sentenceMarks: fullResult.sentenceMarks });
           if (fullResult.sentenceMarks && fullResult.sentenceMarks.length) {
             ttsMaybePrepareSentenceHighlight(key, pageText, fullResult.sentenceMarks);
