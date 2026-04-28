@@ -27,8 +27,7 @@ async function applyEntitlementFromSubscription(subscription, fallback = {}) {
   const customerId = subscription.customer || fallback.customerId || null;
   const subscriptionId = subscription.id || fallback.subscriptionId || null;
   const existing = await getEntitlementByStripeRefs({ customerId, subscriptionId }).catch(() => null);
-  const planId = metadata.plan_id || fallback.planId || pricePlan?.planId || existing?.plan_id || null;
-  const tier = metadata.tier || fallback.tier || pricePlan?.tier || existing?.tier || 'free';
+  const tier = metadata.tier || fallback.tier || pricePlan?.tier || existing?.tier || 'basic';
   const userId = metadata.user_id || fallback.userId || fallback.clientReferenceId || existing?.user_id || null;
   if (!userId) return null;
 
@@ -70,13 +69,13 @@ export default async function handler(req, res) {
           await applyEntitlementFromSubscription(subscription, {
             userId: session.client_reference_id || session.metadata?.user_id || null,
             customerId: session.customer || null,
-            planId: session.metadata?.plan_id || null,
             tier: session.metadata?.tier || null,
             subscriptionId: session.subscription,
           });
         }
         break;
       }
+      case 'customer.subscription.created':
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         const subscription = event?.data?.object;
@@ -88,6 +87,7 @@ export default async function handler(req, res) {
     }
     return json(res, 200, { received: true });
   } catch (error) {
+    console.error("[stripe-webhook]", error);
     return json(res, 500, { error: error.message || 'Webhook processing failed.' });
   }
 }

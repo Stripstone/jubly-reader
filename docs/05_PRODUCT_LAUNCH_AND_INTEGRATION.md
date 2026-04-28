@@ -11,7 +11,7 @@ If earlier docs, prototype UI, audit notes, or older onboarding language conflic
 This document does not override architectural disqualifiers; launch is not honest when it depends on structural non-compliance.
 
 ## Product experience in one paragraph
-The user should see value quickly with low friction. A new visitor lands in a clean library-style entry surface, sees one sample book, and may enter reading without creating an account. Ownership and expansion actions gently require account creation. Plan choice appears early and clearly through pricing. Once a user signs up and pays, the product should stay out of the way: they remain signed in, keep their place, keep their settings where appropriate, understand what they have access to, and move through upgrades, downgrades, and usage resets without losing progress.
+The user should see value quickly with low friction. A new visitor lands on a focused landing page, uses **Try it now** to enter the sample reading experience directly, and may exit into the intro library without creating an account. Ownership and expansion actions gently require account creation. Plan choice appears early and clearly through pricing. Once a user signs up and pays, the product should stay out of the way: they remain signed in, keep their place, keep their settings where appropriate, understand what they have access to, and move through upgrades, downgrades, and usage resets without losing progress.
 
 ## Launch promise
 Launch is honest only when a user can:
@@ -29,7 +29,7 @@ Launch is honest only when a user can:
 3. Account-backed continuity is the real ownership promise.
 4. Pricing should appear early, once, then get out of the way.
 5. There is no throwaway guest-session business path.
-6. Free, Pro, and Premium remain visible user-facing plans.
+6. Basic, Pro, and Premium remain visible user-facing plans.
 7. Usage exhaustion should fall back gracefully rather than destroy progress.
 8. Tier loss should reduce capability and defaults, not delete user history.
 9. Billing and account surfaces should feel like quiet support systems, not a second product.
@@ -40,8 +40,8 @@ Launch is honest only when a user can:
 A visitor has not signed in and has not created an account.
 
 Should see:
-- app-like library entry surface
-- one sample book
+- landing page
+- Try it now
 - Login
 - Sign Up
 
@@ -60,9 +60,9 @@ Account creation should be prompted by:
 - importing books
 - expanding the library beyond the sample
 - actions that imply durable ownership or synced continuity
-- paid-only or account-only feature paths
+- non-basic or account-only feature paths
 
-### Signed-in Free user
+### Signed-in Basic user
 Should have:
 - durable account identity
 - 2 book import slots
@@ -75,7 +75,7 @@ Should have:
 - 5 book import slots
 - some cloud voices
 - some themes
-- more daily usage than Free
+- more daily usage than Basic
 
 ### Signed-in Premium user
 Should have:
@@ -88,8 +88,8 @@ Premium remains intentional and visible even if packaging evolves later.
 ## Route and page intent
 
 ### Public routes
-- `/` — entry library-like experience with sample book
-- `/pricing` — plan choice
+- `/` — landing page with direct sample-reading entry
+- `/pricing` — intended plan-choice route; interim modal or section-based pricing may remain while route-backed flow is completed
 - `/login` — sign in
 - `/signup` — account creation after plan choice
 
@@ -105,15 +105,16 @@ Premium remains intentional and visible even if packaging evolves later.
 
 ### New user acquisition flow
 1. User lands on `/`
-2. Sees sample book and Login / Sign Up
-3. May open the sample and read
-4. When ready to own or expand, chooses Sign Up
-5. Pricing presents Free, Pro trial, or Premium
-6. User chooses plan
-7. User completes signup
-8. If selected plan is Free, user enters `/app` immediately
-9. If selected plan is paid, backend initiates Stripe checkout as needed
-10. Runtime boots with account and entitlement truth
+2. Sees the landing CTA **Try it now** plus Login / Sign Up
+3. `Try it now` opens the sample reading experience directly with no account wall
+4. Exiting sample reading reveals the intro library
+5. From the intro library, account-backed actions open pricing
+6. Pricing presents Basic, Pro, or Premium with a settled first visible paint
+7. User chooses plan; Basic uses the user-facing `Continue for free` entry
+8. User completes signup or login
+9. If selected plan is Basic, user enters `/app` immediately
+10. If selected plan is Pro or Premium, backend initiates Stripe checkout as needed
+11. Runtime boots with account and entitlement truth
 
 ### Returning user flow
 1. User opens `/login` or returns with an existing session
@@ -121,6 +122,24 @@ Premium remains intentional and visible even if packaging evolves later.
 3. If valid, user goes directly to `/app`
 4. Signed-in users bypass public friction by default
 5. Runtime restores owned library, progress, settings, and entitlement truth after durable state is available
+
+### Email verification flow
+1. New user submits email on signup
+2. App validates email format before moving to username/password
+3. Existing-account emails are redirected toward Log In rather than continuing through signup
+4. New-account signup success communicates `Check your email to verify your account`
+5. Verification link returns to the canonical login surface, not a localhost fallback
+6. Paid continuation preserves `next=checkout` plus `tier=pro|premium` through verification and login
+7. User logs in only after verification is complete
+
+### Password reset flow
+1. User opens Log In and chooses `Forgot password?`
+2. User enters email
+3. App calls Supabase password reset with redirect to `/?view=reset-password`
+4. Reset email uses the Supabase-owned `{{ .ConfirmationURL }}`
+5. Recovery link returns to Jubly's reset password surface
+6. User enters and confirms a new password
+7. App calls Supabase `updateUser` through the auth owner, signs out locally, and sends the user back to Log In
 
 ### Visitor tries an account-owned action
 1. Visitor taps import or owned-library action
@@ -133,8 +152,8 @@ Premium remains intentional and visible even if packaging evolves later.
 2. App shows a focused upgrade prompt tied to the value unlocked
 3. User proceeds to pricing or checkout
 4. Stripe updates billing
-5. Backend writes durable entitlement state
-6. App refreshes entitlement truth
+5. Backend writes durable entitlement state from checkout and subscription webhook events
+6. App returns with `checkout=success`, shows a pending update state, and polls resolved entitlement truth briefly instead of showing Basic as settled truth
 7. User returns to the same flow with new capability available
 
 ### Manage Billing flow
@@ -147,19 +166,29 @@ Premium remains intentional and visible even if packaging evolves later.
 ## Surface wiring rules
 
 ### Public surfaces
-- `Try it free` is acceptable as copy, but it must feed the canonical Sign Up → pricing path
+- avoid `free` as canonical plan vocabulary; marketing copy may invite trial, but product/runtime language must stay `basic / pro / premium`
 - `Sign Up` is the canonical public acquisition action
 - `Login` is the canonical returning-user entry
+- `Try it now` is the canonical landing CTA for entering the sample reading experience
 - `Continue with Google` and Email/Password should preserve selected plan intent
+- email verification redirects should use the canonical public login URL built from deployed app origin config, not a localhost fallback
 - sample-book reading should remain available pre-account
-- account-only actions should prompt auth rather than pretending to work
+- account-only actions should prompt pricing/auth rather than pretending to work
+- intro-library conversion copy should use `Get Started`; pricing Basic entry should use `Continue for free`
 
 ### Signed-in surfaces
 - `Profile` appears only for signed-in users
 - `Manage Billing` should be a thin launcher into Stripe portal
-- subscription summary should display resolved durable entitlement truth
+- subscription summary should display resolved durable entitlement truth, including trialing paid access as paid access with remaining trial time when `period_end` is available
+- signed-in pricing must not present a trial CTA unless server-owned trial eligibility confirms that the user can receive the trial; otherwise it should use ordinary upgrade copy
 - token or usage display should appear only where it is truly helpful and backed by real values
 - manual tier selector buttons are development-only and must not remain production authority
+
+### Pending and re-hydration framework requirement
+- account, billing, usage, restore, and other server-backed shell/value surfaces must use safe pending, neutral, hidden, or locked states rather than believable wrong values
+- `pending-surfaces.md` is the maintained framework companion for these surfaces and must be updated when they change
+- dead-end account or billing buttons are launch failures, not minor polish issues
+- interim modal or section-based public flows still have to obey this framework while route-backed final surfaces are being completed
 
 ## Data ownership and authority map
 
@@ -201,22 +230,27 @@ Premium remains intentional and visible even if packaging evolves later.
 - creating Stripe billing portal sessions
 - verifying Stripe webhooks
 - writing resulting entitlement state to durable records
+- treating `customer.subscription.created`, subscription updates, and checkout completion as valid entitlement-write surfaces for paid trials/subscriptions
 - provider selection, prompt-bearing work, and other protected logic moved off the browser
 
 ## Plan and feature resolution model
 Public plan labels:
-- Free
+- Basic
 - Pro
 - Premium
 
 At runtime boot, derive one resolved entitlement object such as:
-- `plan_id`
+- `tier`
+- `status`
+- `provider`
 - `import_slot_limit`
 - `usage_daily_limit`
 - `cloud_voice_access`
 - `theme_access`
 - `premium_feature_flags`
 
+`tier` is the canonical runtime feature-gate vocabulary and must use only `basic / pro / premium`.
+`provider` and `status` support billing/source interpretation, but must not replace `tier` as the feature gate.
 Shell and runtime should consume resolved entitlement truth.
 Do not scatter plan logic across many DOM checks or cosmetic UI states.
 
@@ -319,7 +353,7 @@ Obfuscation may be used as friction, not as the main protection model.
 - heavy local assets remain device-local
 
 ## Current Supabase scope
-Planned durable records:
+Durable records:
 - users
 - owned library items
 - reading progress
@@ -327,25 +361,22 @@ Planned durable records:
 - compact daily stats
 - durable user preferences that are intentionally synced
 - entitlement state
+- trial claim records (`user_trial_claims`)
 - usage window summary
 
-Still pending:
-- frontend `supabase-js` integration
-- signed-in progress sync
-- signed-in durable settings sync
-- backend JWT verification
-- Stripe webhook write path
-- auth-linked routing decisions
-
 ## Environment variables
-Authoritative names:
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `SUPABASE_SECRET_KEY`
+Full authoritative reference: `docs/_ops/ENVIRONMENT_VARIABLES_REFERENCE.md`
+
+Key groups:
+- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SECRET_KEY` — Supabase client and service access
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`, `STRIPE_PREMIUM_PRICE_ID` — Stripe billing
+- `PLAN_PRO_TRIAL_DAYS`, `PLAN_PREMIUM_TRIAL_DAYS`, `PLAN_TRIAL_REQUIRE_UNIQUE_IP`, and related `PLAN_*` vars — trial and subscription policy
+- `APP_BASE_URL` — canonical public origin used for checkout and auth redirect URLs
 
 Rules:
 - only `SUPABASE_URL` and `SUPABASE_ANON_KEY` belong in frontend client initialization
-- `SUPABASE_SECRET_KEY` is backend-only
+- `SUPABASE_SECRET_KEY` and all Stripe keys are backend-only
+- `APP_BASE_URL` must be the real resolved URL, not the literal text `APP_BASE_URL`
 
 ## Validation checklist
 First apply the structural compliance gate from `03_ARCHITECTURE_AND_GUARDRAILS.md`.
@@ -358,6 +389,7 @@ For persistence and account-backed behavior, always check:
 - reading continuity
 
 Launch-failing examples include:
+- changing account, billing, or usage loading behavior without updating `pending-surfaces.md`
 - flashing page 1 before restore catches up
 - showing a believable but wrong usage value before account truth loads
 - showing a setting change immediately and then snapping back unexpectedly
@@ -383,6 +415,13 @@ Remove or hide from production:
 
 Replace with real flows:
 - login scaffold → Supabase auth
-- local tier simulation → resolved entitlement object
+- local entitlement simulation → resolved entitlement object
 - static subscription summary → durable subscription truth
 - pricing modal-only thinking → route-backed pricing surface
+
+
+## Operator redirect contract
+- `APP_BASE_URL` is the canonical public app origin for verified auth continuation and billing continuation redirects.
+- Supabase Site URL should equal the bare resolved `APP_BASE_URL` origin.
+- Supabase dashboard values must use the real resolved URL, not the literal text `APP_BASE_URL`.
+- Supabase Redirect URLs should include the exact verified login continuation paths for plain login, verified login, verified paid continuation, and password reset.

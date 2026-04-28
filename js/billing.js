@@ -4,6 +4,8 @@
 
 window.rcBilling = (function () {
   let _configPromise = null;
+  let _pricingRenderToken = 0;
+  let _checkoutInFlightPlan = '';
 
   function setMessage(id, message, tone = 'info') {
     const el = document.getElementById(id);
@@ -39,7 +41,11 @@ window.rcBilling = (function () {
 
   async function authenticatedPost(url, body) {
     const token = getAccessToken();
-    if (!token) throw new Error('Sign in required.');
+    if (!token) {
+      const err = new Error('Sign in required.');
+      err.code = 'auth_required';
+      throw err;
+    }
     const resp = await fetch(url, {
       method: 'POST',
       headers: {
@@ -50,16 +56,55 @@ window.rcBilling = (function () {
       cache: 'no-store',
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data?.error || `Request failed (${resp.status})`);
+    if (!resp.ok) {
+      const err = new Error(data?.error || `Request failed (${resp.status})`);
+      if (resp.status === 401 || resp.status === 403) err.code = 'auth_required';
+      throw err;
+    }
     return data;
+  }
+
+  async function authenticatedGet(url, { allowSignedOut = false } = {}) {
+    const token = getAccessToken();
+    if (!token && !allowSignedOut) {
+      const err = new Error('Sign in required.');
+      err.code = 'auth_required';
+      throw err;
+    }
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers,
+      cache: 'no-store',
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const err = new Error(data?.error || `Request failed (${resp.status})`);
+      if (resp.status === 401 || resp.status === 403) err.code = 'auth_required';
+      throw err;
+    }
+    return data;
+  }
+
+  function isAuthRequiredError(error) {
+    const code = String(error && error.code || '').trim().toLowerCase();
+    if (code === 'auth_required') return true;
+    const msg = String(error && error.message || error || '').trim().toLowerCase();
+    return msg === 'sign in required.' || msg === 'sign in required';
   }
 
   function syncPlanIdQuery(plan) {
     try {
       const url = new URL(window.location.href);
       const normalized = normalizePlan(plan);
-      if (normalized === 'pro' || normalized === 'premium') url.searchParams.set('plan_id', normalized);
-      else url.searchParams.delete('plan_id');
+      if (normalized === 'pro' || normalized === 'premium') {
+        url.searchParams.set('tier', normalized);
+        url.searchParams.set('next', 'checkout');
+      } else {
+        url.searchParams.delete('tier');
+        if (String(url.searchParams.get('next') || '').trim().toLowerCase() === 'checkout') url.searchParams.delete('next');
+      }
       window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
     } catch (_) {}
   }
@@ -73,7 +118,7 @@ window.rcBilling = (function () {
   function readPendingPlan() {
     try {
       const url = new URL(window.location.href);
-      const fromUrl = normalizePlan(url.searchParams.get('plan_id') || '');
+      const fromUrl = normalizePlan(url.searchParams.get('tier') || '');
       if (fromUrl) return fromUrl;
     } catch (_) {}
     try { return normalizePlan(sessionStorage.getItem('rc_pending_plan') || ''); } catch (_) { return ''; }
@@ -95,11 +140,40 @@ window.rcBilling = (function () {
     return normalized;
   }
 
-  function openPricingForSignup() {
+  function normalizeRuntimeTier(tier) {
+    const normalized = String(tier || '').trim().toLowerCase();
+    if (normalized === 'free') return 'basic';
+    if (normalized === 'paid') return 'pro';
+    return ['basic', 'pro', 'premium'].includes(normalized) ? normalized : 'basic';
+  }
+
+  function showPricingModalNow() {
+    const el = document.getElementById('pricing-modal');
+    if (!el) return;
+    el.classList.remove('hidden-section');
+    if (el.classList.contains('modal-overlay')) el.style.display = 'flex';
+  }
+
+  async function openPricingForSignup() {
     clearPendingPlan();
+    setMessage('pricing-message', '', 'info');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
-    if (typeof openModal === 'function') openModal('pricing-modal');
-    renderPricingUi().catch(() => {});
+    await renderPricingUi();
+    showPricingModalNow();
+  }
+
+  async function openPricingForAccount(message = '') {
+    clearPendingPlan();
+    setMessage('pricing-message', message || '', 'info');
+    await renderPricingUi();
+    showPricingModalNow();
+  }
+
+  async function showPricingForGatedAction(message) {
+    setMessage('pricing-message', message || 'Create an account to import books, save your place, and build your own library.', 'info');
+    if (typeof closeModal === 'function') closeModal('ownership-modal');
+    await renderPricingUi();
+    showPricingModalNow();
   }
 
   function rememberPlanAndOpenSignup(plan) {
@@ -114,7 +188,96 @@ window.rcBilling = (function () {
     const normalized = normalizePlan(plan);
     if (normalized === 'premium') return 'Premium';
     if (normalized === 'pro') return 'Pro';
-    return 'Free';
+    return 'Basic';
+  }
+
+  function getPlanTrialDays(plans, plan) {
+    const normalized = normalizePlan(plan);
+    const raw = normalized === 'premium' ? plans?.premium?.trialDays : normalized === 'pro' ? plans?.pro?.trialDays : 0;
+    const days = Number(raw);
+    return Number.isFinite(days) && days > 0 ? Math.trunc(days) : 0;
+  }
+
+  function normalizeTrialEligibility(eligibility) {
+    const trial = eligibility?.trial && typeof eligibility.trial === 'object' ? eligibility.trial : eligibility;
+    if (!trial || typeof trial !== 'object') return null;
+    return {
+      eligible: trial.eligible === true,
+      resolved: trial.resolved === true,
+      days: Number.isFinite(Number(trial.days)) ? Math.max(0, Math.trunc(Number(trial.days))) : 0,
+      reason: String(trial.reason || '').trim().toLowerCase(),
+    };
+  }
+
+  function trialEligibilityAllowsTrialCopy(eligibility, signedIn) {
+    const trial = normalizeTrialEligibility(eligibility);
+    if (!trial) return !signedIn;
+    if (trial.eligible && trial.days > 0) return true;
+    // Public/signed-out users may still see trial marketing only when the
+    // server could not resolve account eligibility and did not find a known IP block.
+    return !signedIn && trial.resolved === false && trial.days > 0;
+  }
+
+  function trialCtaLabel(plan, fallback, plans, eligibility = null, signedIn = false) {
+    const normalized = normalizePlan(plan);
+    if (normalized === 'pro') {
+      const trial = normalizeTrialEligibility(eligibility);
+      const days = trial?.days > 0 ? trial.days : getPlanTrialDays(plans, 'pro');
+      if (days > 0 && trialEligibilityAllowsTrialCopy(eligibility, signedIn)) return `${days}-Day Trial`;
+    }
+    return fallback;
+  }
+
+  async function fetchTrialEligibility(plan, signedIn) {
+    const normalized = normalizePlan(plan);
+    if (normalized !== 'pro' && normalized !== 'premium') return null;
+    try {
+      return await authenticatedGet(`/api/billing?action=trial-eligibility&plan=${encodeURIComponent(normalized)}`, {
+        allowSignedOut: !signedIn,
+      });
+    } catch (_) {
+      // If signed-in eligibility cannot be verified, avoid advertising a trial.
+      // Public marketing may still show the configured trial because account truth is unknown.
+      return null;
+    }
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function entitlementMatchesCheckoutPlan(entitlement, expectedPlan) {
+    if (!entitlement || typeof entitlement !== 'object') return false;
+    const status = String(entitlement.status || '').trim().toLowerCase();
+    if (status !== 'active' && status !== 'trialing') return false;
+    const tier = normalizeRuntimeTier(entitlement.tier);
+    const expected = normalizePlan(expectedPlan);
+    if (expected === 'pro' || expected === 'premium') return tier === expected;
+    return tier === 'pro' || tier === 'premium';
+  }
+
+  async function waitForCheckoutEntitlement(expectedPlan) {
+    const attempts = [0, 700, 1200, 1800, 2600, 3600, 5000];
+    for (const waitMs of attempts) {
+      if (waitMs > 0) await delay(waitMs);
+      const snapshot = await fetchRuntimeSnapshot();
+      const entitlement = snapshot?.meta?.entitlement || null;
+      if (entitlementMatchesCheckoutPlan(entitlement, expectedPlan)) {
+        await refreshRuntimeFromAccount();
+        await renderSubscriptionUi();
+        await renderPricingUi();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function daysLeftLabel(endDateLike) {
+    const end = endDateLike ? new Date(endDateLike).getTime() : NaN;
+    if (!Number.isFinite(end)) return '';
+    const days = Math.max(0, Math.ceil((end - Date.now()) / (24 * 60 * 60 * 1000)));
+    if (days <= 0) return 'Last trial day';
+    return days === 1 ? '1 day left' : `${days} days left`;
   }
 
   function applyPlanButtonState(button, label, onclick, disabled = false) {
@@ -126,13 +289,70 @@ window.rcBilling = (function () {
     button.classList.toggle('cursor-not-allowed', !!disabled);
   }
 
+  function setButtonBusy(button, busyLabel) {
+    if (!button) return;
+    if (!button.dataset.idleLabel) button.dataset.idleLabel = button.textContent || '';
+    button.disabled = true;
+    button.classList.add('opacity-60', 'cursor-not-allowed');
+    if (busyLabel) button.textContent = busyLabel;
+  }
+
+  function clearButtonBusy(button) {
+    if (!button) return;
+    if (button.dataset.idleLabel) button.textContent = button.dataset.idleLabel;
+    delete button.dataset.idleLabel;
+    button.classList.remove('opacity-60', 'cursor-not-allowed');
+  }
+
+  function setPricingModalSettling(signedIn) {
+    const modal = document.getElementById('pricing-modal');
+    const freeBtn = document.getElementById('pricing-free-btn');
+    const proBtn = document.getElementById('pricing-pro-btn');
+    const premiumBtn = document.getElementById('pricing-premium-btn');
+    if (modal) modal.classList.add('pricing-modal-settling');
+    // Seed the final labels while hidden so the first visible modal paint is
+    // coherent instead of showing Loading... then morphing button text.
+    if (signedIn) {
+      applyPlanButtonState(freeBtn, 'Basic', null, true);
+      applyPlanButtonState(proBtn, 'Pro', null, true);
+      applyPlanButtonState(premiumBtn, 'Premium', null, true);
+      return;
+    }
+    applyPlanButtonState(freeBtn, 'Continue for free', null, true);
+    applyPlanButtonState(proBtn, 'Choose Pro', null, true);
+    applyPlanButtonState(premiumBtn, 'Choose Premium', null, true);
+  }
+
+  function clearPricingModalSettling() {
+    const modal = document.getElementById('pricing-modal');
+    if (modal) modal.classList.remove('pricing-modal-settling');
+  }
+
+  function getSignedInPlanButtonModel(currentTier, plans, proTrialEligibility = null) {
+    const tier = normalizeRuntimeTier(currentTier || 'basic');
+    const isBasicLocked = tier === 'pro' || tier === 'premium';
+    const isProLocked = tier === 'premium';
+    return {
+      free: {
+        label: tier === 'basic' ? 'Current Plan' : 'Basic',
+        disabled: tier === 'basic' || isBasicLocked,
+        onclick: tier === 'basic' ? () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); } : null,
+      },
+      pro: {
+        label: tier === 'pro' ? 'Current Plan' : trialCtaLabel('pro', 'Upgrade to Pro', plans, proTrialEligibility, true),
+        disabled: !plans?.pro?.available || tier === 'pro' || isProLocked,
+        onclick: tier === 'pro' || isProLocked ? null : () => startCheckout('pro'),
+      },
+      premium: {
+        label: tier === 'premium' ? 'Current Plan' : 'Upgrade to Premium',
+        disabled: !plans?.premium?.available || tier === 'premium',
+        onclick: tier === 'premium' ? null : () => startCheckout('premium'),
+      },
+    };
+  }
+
   async function renderPricingUi() {
-    const config = await fetchPublicConfig();
-    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
-    const snapshot = await fetchRuntimeSnapshot();
-    const entitlement = snapshot?.meta?.entitlement || null;
-    const currentTier = String(entitlement?.tier || snapshot?.tier || 'free').toLowerCase();
-    const plans = config?.stripe?.plans || {};
+    const token = ++_pricingRenderToken;
     const freeBtn = document.getElementById('pricing-free-btn');
     const proBtn = document.getElementById('pricing-pro-btn');
     const premiumBtn = document.getElementById('pricing-premium-btn');
@@ -140,6 +360,18 @@ window.rcBilling = (function () {
     const proInterval = document.getElementById('pricing-pro-interval');
     const premiumAmount = document.getElementById('pricing-premium-amount');
     const premiumInterval = document.getElementById('pricing-premium-interval');
+    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+    setPricingModalSettling(signedIn);
+
+    const [config, snapshot] = await Promise.all([fetchPublicConfig(), fetchRuntimeSnapshot()]);
+    if (token !== _pricingRenderToken) return;
+    const entitlement = snapshot?.meta?.entitlement || null;
+    const currentTier = normalizeRuntimeTier(entitlement?.tier || snapshot?.meta?.effectiveTier || snapshot?.policy?.tier || snapshot?.tier || 'basic');
+    const plans = config?.stripe?.plans || {};
+    const proTrialEligibility = plans?.pro?.available && getPlanTrialDays(plans, 'pro') > 0
+      ? await fetchTrialEligibility('pro', signedIn)
+      : null;
+    if (token !== _pricingRenderToken) return;
 
     if (proAmount) proAmount.textContent = plans?.pro?.amountLabel || 'Configured in Stripe';
     if (proInterval) proInterval.textContent = plans?.pro?.intervalLabel || '';
@@ -147,22 +379,31 @@ window.rcBilling = (function () {
     if (premiumInterval) premiumInterval.textContent = plans?.premium?.intervalLabel || '';
 
     if (!signedIn) {
-      applyPlanButtonState(freeBtn, 'Free', () => rememberPlanAndOpenSignup('free'));
-      applyPlanButtonState(proBtn, 'Choose Pro', () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
+      applyPlanButtonState(freeBtn, 'Continue for free', () => rememberPlanAndOpenSignup('free'));
+      applyPlanButtonState(proBtn, trialCtaLabel('pro', 'Choose Pro', plans, proTrialEligibility, false), () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
       applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
+      clearPricingModalSettling();
       return;
     }
 
-    applyPlanButtonState(freeBtn, currentTier === 'free' ? 'Current Plan' : 'Free Plan', () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); }, currentTier === 'free');
-    applyPlanButtonState(proBtn, currentTier === 'paid' ? 'Current Plan' : 'Upgrade to Pro', () => startCheckout('pro'), !plans?.pro?.available || currentTier === 'paid');
-    applyPlanButtonState(premiumBtn, currentTier === 'premium' ? 'Current Plan' : 'Upgrade to Premium', () => startCheckout('premium'), !plans?.premium?.available || currentTier === 'premium');
+    const buttonModel = getSignedInPlanButtonModel(currentTier, plans, proTrialEligibility);
+    applyPlanButtonState(freeBtn, buttonModel.free.label, buttonModel.free.onclick, buttonModel.free.disabled);
+    applyPlanButtonState(proBtn, buttonModel.pro.label, buttonModel.pro.onclick, buttonModel.pro.disabled);
+    applyPlanButtonState(premiumBtn, buttonModel.premium.label, buttonModel.premium.onclick, buttonModel.premium.disabled);
+    clearPricingModalSettling();
   }
 
   function continueWithFree() {
+    if (!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn())) {
+      rememberPlanAndOpenSignup('free');
+      setMessage('pricing-message', 'Create an account to continue with Basic.', 'info');
+      setMessage('billing-message', 'Create an account to continue with Basic.', 'info');
+      return;
+    }
     clearPendingPlan();
     if (typeof closeModal === 'function') closeModal('pricing-modal');
     if (typeof closeModal === 'function') closeModal('ownership-modal');
-    if (typeof login === 'function') login();
+    if (typeof showSection === 'function') showSection('dashboard');
   }
 
   async function refreshRuntimeFromAccount() {
@@ -193,17 +434,28 @@ window.rcBilling = (function () {
     const billingState = document.getElementById('subscription-billing-state');
     const primaryBtn = document.getElementById('subscription-primary-btn');
     const secondaryBtn = document.getElementById('subscription-secondary-btn');
+
+    // Neutral pending while account truth is in flight
+    if (statusCopy) statusCopy.textContent = 'Checking your account…';
+    if (billingState) billingState.textContent = '—';
+    if (primaryBtn) primaryBtn.disabled = true;
+    if (secondaryBtn) secondaryBtn.disabled = true;
+
     const config = await fetchPublicConfig();
     const snapshot = await fetchRuntimeSnapshot();
     const entitlement = snapshot?.meta?.entitlement || null;
     const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+
+    // Truth has arrived — unlock buttons before populating settled state
+    if (primaryBtn) primaryBtn.disabled = false;
+    if (secondaryBtn) secondaryBtn.disabled = false;
 
     if (!signedIn) {
       if (statusCopy) statusCopy.textContent = 'Sign in to view your plan details and billing options.';
       if (billingState) billingState.textContent = 'Not signed in';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
-        primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
+        primaryBtn.onclick = function () { if (window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') window.rcBilling.openPricingForAccount(); else if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
       if (secondaryBtn) {
         secondaryBtn.textContent = 'Sign in first';
@@ -213,27 +465,35 @@ window.rcBilling = (function () {
     }
 
     if (entitlement && (entitlement.status === 'active' || entitlement.status === 'trialing')) {
-      const tierLabel = entitlement.tier === 'premium' ? 'Premium' : entitlement.tier === 'paid' ? 'Pro' : 'Free';
+      const resolvedTier = normalizeRuntimeTier(entitlement?.tier);
+      const tierLabel = resolvedTier === 'premium' ? 'Premium' : resolvedTier === 'pro' ? 'Pro' : 'Free';
+      const status = String(entitlement.status || '').trim().toLowerCase();
       const renewsAt = entitlement.renewsAt || entitlement.periodEnd || null;
       const renewsLabel = renewsAt
         ? new Date(renewsAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
         : `${tierLabel} active`;
-      if (statusCopy) statusCopy.textContent = `Your ${tierLabel} plan is active.`;
-      if (billingState) billingState.textContent = renewsLabel;
+      if (status === 'trialing') {
+        const remaining = daysLeftLabel(renewsAt);
+        if (statusCopy) statusCopy.textContent = `Your ${tierLabel} free trial is active.`;
+        if (billingState) billingState.textContent = remaining ? `Free trial · ${remaining}` : 'Free trial active';
+      } else {
+        if (statusCopy) statusCopy.textContent = `Your ${tierLabel} plan is active.`;
+        if (billingState) billingState.textContent = renewsLabel;
+      }
       if (primaryBtn) {
         primaryBtn.textContent = 'Manage Billing';
         primaryBtn.onclick = function () { openCustomerPortal(); };
       }
       if (secondaryBtn) {
         secondaryBtn.textContent = 'View Pricing';
-        secondaryBtn.onclick = function () { if (typeof openModal === 'function') openModal('pricing-modal'); };
+        secondaryBtn.onclick = function () { if (window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') window.rcBilling.openPricingForAccount(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
     } else {
-      if (statusCopy) statusCopy.textContent = 'You are on the Free plan. Upgrade whenever you want more books, storage, and features.';
-      if (billingState) billingState.textContent = 'Free';
+      if (statusCopy) statusCopy.textContent = 'You are on the Basic plan. Upgrade whenever you want more books, storage, and features.';
+      if (billingState) billingState.textContent = 'Basic';
       if (primaryBtn) {
         primaryBtn.textContent = 'View Pricing';
-        primaryBtn.onclick = function () { if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
+        primaryBtn.onclick = function () { if (window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') window.rcBilling.openPricingForAccount(); else if (typeof openPricingForSignup === 'function') openPricingForSignup(); else if (typeof openModal === 'function') openModal('pricing-modal'); };
       }
       if (secondaryBtn) {
         const stripeReady = !!(config?.stripe?.plans?.pro?.available || config?.stripe?.plans?.premium?.available);
@@ -256,53 +516,137 @@ window.rcBilling = (function () {
       setMessage('billing-message', `Create an account to continue with ${planDisplayLabel(normalized)}.`, 'info');
       return;
     }
+    if (_checkoutInFlightPlan === normalized) return;
+    _checkoutInFlightPlan = normalized;
+
+    // Lock plan buttons immediately — do not let a second tap queue a second request
+    const proBtn = document.getElementById('pricing-pro-btn');
+    const premiumBtn = document.getElementById('pricing-premium-btn');
+    [proBtn, premiumBtn].forEach((btn) => {
+      if (btn) { btn.disabled = true; btn.classList.add('opacity-60', 'cursor-not-allowed'); }
+    });
+    const clickedBtn = normalized === 'premium' ? premiumBtn : proBtn;
+    setButtonBusy(clickedBtn, 'Preparing…');
+    try { window.rcInteraction && window.rcInteraction.pending('billing:checkout', 'Preparing checkout…'); } catch (_) {}
+
     try {
       const data = await authenticatedPost('/api/billing?action=checkout', { plan: normalized });
-      if (data?.url) window.location.href = data.url;
-    } catch (error) {
-      setMessage('pricing-message', error.message || 'Unable to start checkout.', 'error');
-      setMessage('billing-message', error.message || 'Unable to start checkout.', 'error');
+      if (data?.url) {
+        // Banner stays as 'Preparing checkout…' — page is about to navigate away
+        window.location.href = data.url;
+      } else {
+        _checkoutInFlightPlan = '';
+        [proBtn, premiumBtn].forEach((btn) => {
+          if (btn) { clearButtonBusy(btn); btn.disabled = false; }
+        });
+        try { window.rcInteraction && window.rcInteraction.clear('billing:checkout'); } catch (_) {}
+      }
+    } catch (err) {
+      _checkoutInFlightPlan = '';
+      [proBtn, premiumBtn].forEach((btn) => {
+        if (btn) { clearButtonBusy(btn); btn.disabled = false; }
+      });
+      try {
+        const actions = window.rcInteraction && window.rcInteraction.actions
+          ? (isAuthRequiredError(err)
+              ? [window.rcInteraction.actions.openLogin()]
+              : [window.rcInteraction.actions.retry(() => startCheckout(plan))])
+          : [];
+        window.rcInteraction && window.rcInteraction.error(
+          'billing:checkout',
+          isAuthRequiredError(err) ? 'Sign in to continue with checkout.' : 'Checkout couldn\'t be opened right now.',
+          { actions }
+        );
+      } catch (_) {}
+      setMessage('pricing-message', isAuthRequiredError(err) ? 'Sign in to continue with checkout.' : (err.message || 'Unable to start checkout.'), 'error');
+      setMessage('billing-message', isAuthRequiredError(err) ? 'Sign in to continue with checkout.' : (err.message || 'Unable to start checkout.'), 'error');
     }
   }
 
   async function openCustomerPortal() {
     if (!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn())) {
       setMessage('billing-message', 'Sign in to manage billing.', 'info');
-      if (typeof showSigninPane === 'function') showSigninPane();
+      try {
+        const actions = window.rcInteraction && window.rcInteraction.actions ? [window.rcInteraction.actions.openLogin()] : [];
+        window.rcInteraction && window.rcInteraction.error('billing:portal', 'Sign in to manage billing.', { actions });
+      } catch (_) {}
       return;
     }
+
+    // Disable both subscription buttons immediately — portal open is one-shot
+    const primaryBtn = document.getElementById('subscription-primary-btn');
+    const secondaryBtn = document.getElementById('subscription-secondary-btn');
+    [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) btn.disabled = true; });
+    setButtonBusy(secondaryBtn, 'Opening…');
+    try { window.rcInteraction && window.rcInteraction.pending('billing:portal', 'Opening billing…'); } catch (_) {}
+
     try {
       const data = await authenticatedPost('/api/billing?action=portal', {});
-      if (data?.url) window.location.href = data.url;
-    } catch (error) {
-      setMessage('billing-message', error.message || 'Unable to open billing portal.', 'error');
+      if (data?.url) {
+        // Page is navigating away — banner stays as 'Opening billing…'
+        window.location.href = data.url;
+      } else {
+        [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) { clearButtonBusy(btn); btn.disabled = false; } });
+        try { window.rcInteraction && window.rcInteraction.clear('billing:portal'); } catch (_) {}
+      }
+    } catch (err) {
+      [primaryBtn, secondaryBtn].forEach((btn) => { if (btn) { clearButtonBusy(btn); btn.disabled = false; } });
+      try {
+        const actions = window.rcInteraction && window.rcInteraction.actions
+          ? (isAuthRequiredError(err)
+              ? [window.rcInteraction.actions.openLogin()]
+              : [window.rcInteraction.actions.retry(openCustomerPortal)])
+          : [];
+        window.rcInteraction && window.rcInteraction.error(
+          'billing:portal',
+          isAuthRequiredError(err) ? 'Sign in to manage billing.' : 'Billing couldn\'t be opened right now.',
+          { actions }
+        );
+      } catch (_) {}
+      setMessage('billing-message', isAuthRequiredError(err) ? 'Sign in to manage billing.' : (err.message || 'Unable to open billing portal.'), 'error');
     }
   }
 
-  function handleQueryFeedback() {
+  async function handleQueryFeedback() {
     try {
       const url = new URL(window.location.href);
       const checkout = url.searchParams.get('checkout');
       const portal = url.searchParams.get('portal');
       if (checkout === 'success') {
-        clearPendingPlan();
+        const expectedPlan = normalizePlan(url.searchParams.get('checkout_plan') || readPendingPlan());
         setMessage('pricing-message', 'Checkout completed. Refreshing your account access…', 'success');
         setMessage('billing-message', 'Checkout completed. Refreshing your account access…', 'success');
-        refreshRuntimeFromAccount();
+        try { window.rcInteraction && window.rcInteraction.pending('billing:return', 'Updating your plan…'); } catch (_) {}
+        const confirmed = await waitForCheckoutEntitlement(expectedPlan);
+        if (!confirmed) {
+          await refreshRuntimeFromAccount();
+          await renderSubscriptionUi();
+          setMessage('billing-message', 'Checkout completed. Your account access is still updating. Refresh if it does not appear shortly.', 'info');
+        }
+        clearPendingPlan();
+        try { window.rcInteraction && window.rcInteraction.clear('billing:return'); } catch (_) {}
       } else if (checkout === 'cancel') {
         clearPendingPlan();
       }
       if (portal === 'return') {
         clearPendingPlan();
         setMessage('billing-message', 'Returned from billing portal. Refreshing your account access…', 'success');
-        refreshRuntimeFromAccount();
+        try { window.rcInteraction && window.rcInteraction.pending('billing:return', 'Refreshing billing status…'); } catch (_) {}
+        await refreshRuntimeFromAccount();
+        try { window.rcInteraction && window.rcInteraction.clear('billing:return'); } catch (_) {}
       }
       if (checkout || portal) {
         url.searchParams.delete('checkout');
+        url.searchParams.delete('checkout_plan');
         url.searchParams.delete('portal');
         window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
       }
-    } catch (_) {}
+    } catch (_) {
+      try {
+        const actions = window.rcInteraction && window.rcInteraction.actions ? [window.rcInteraction.actions.refresh()] : [];
+        window.rcInteraction && window.rcInteraction.error('billing:return', 'We couldn\'t confirm your billing update yet.', { actions });
+      } catch (_) {}
+    }
   }
 
   async function handleAuthChanged(e) {
@@ -318,7 +662,12 @@ window.rcBilling = (function () {
         return;
       }
     }
-    await refreshRuntimeFromAccount();
+    // Do NOT call refreshRuntimeFromAccount() here. Policy is owned by sync.js;
+    // calling refreshForTier() on every auth event (including tab-return token
+    // refreshes) races against the durable-sync cache projection and can
+    // transiently apply a basic fallback, stripping access mid-session.
+    // renderSubscriptionUi / renderPricingUi each call fetchRuntimeSnapshot()
+    // internally and do not need a prior global policy refresh.
     await renderSubscriptionUi();
     await renderPricingUi();
   }
@@ -337,6 +686,8 @@ window.rcBilling = (function () {
     renderSubscriptionUi,
     renderPricingUi,
     rememberPendingPlan,
+    showPricingForGatedAction,
+    openPricingForAccount,
     readPendingPlan,
     clearPendingPlan,
     openPricingForSignup,
@@ -349,4 +700,5 @@ window.startCheckout = function startCheckout(plan) { return window.rcBilling.st
 window.openCustomerPortal = function openCustomerPortal() { return window.rcBilling.openCustomerPortal(); };
 
 window.openPricingForSignup = function openPricingForSignup() { return window.rcBilling.openPricingForSignup(); };
+window.openPricingForAccount = function openPricingForAccount(message) { return window.rcBilling.openPricingForAccount(message); };
 window.continueWithFree = function continueWithFree() { return window.rcBilling.continueWithFree(); };

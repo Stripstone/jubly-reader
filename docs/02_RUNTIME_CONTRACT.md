@@ -83,6 +83,9 @@ Chapter, page, continue reading, and restore behavior: responsive or unresponsiv
 
 ## Responsiveness patterns required by this contract
 
+`pending-surfaces.md` is the maintained framework companion for the pending, loading, hydration, and re-auth behavior covered in this section.
+When a pass changes a user-visible server-backed surface, keep that document aligned with this contract rather than treating pending behavior as an optional implementation detail.
+
 ### Render the safe state before slow work
 If a transition needs a pending, hidden, or locked safe state, that state must appear before any await or network roundtrip that could stall the visible surface.
 
@@ -101,6 +104,15 @@ But cache must not become a second durable authority or blindly overwrite freshe
 
 ### Visible surfaces should not jump while truth settles
 If a label, subtitle, status line, or similar surface is expected to change after hydration, reserve its space or stabilize the placement so the page does not shake while text updates.
+
+### Pending and re-hydration surfaces are part of runtime truth
+For account, billing, usage, restore, library, importer-capacity, and similar server-backed surfaces:
+- show a safe pending, hidden, or locked state before slow truth is available
+- do not show a believable wrong account, plan, usage, continue, or restore value while waiting
+- keep actions locked when the action depends on server-backed truth that is not settled yet
+- if a surface is intentionally immediate with no routine pending state, surface real failure honestly and keep control truth intact
+
+The maintained surface-by-surface framework for these cases lives in `pending-surfaces.md`.
 
 ## Reading contract
 
@@ -167,6 +179,7 @@ What must be true:
 ### Page navigation
 What must be true:
 - Next advances to the next page
+- Next Chapter appears below non-final chapters and advances through the runtime chapter-selection path
 - displayed page numbers preserve source or actual document numbering when that metadata exists
 - a document does not restart visible page labels at chapter 1 when source numbering should continue across the book
 - page numbering behavior is fixed runtime truth, not a user-configurable preference
@@ -229,6 +242,7 @@ A build is acceptable only if all of the following are true:
 - speed is truthful, including during active TTS where supported
 - importer state is honest
 - library state is honest during load
+- account, billing, and usage surfaces use safe pending states instead of believable wrong values
 - exit cleanup is complete
 - restore lands on the correct page
 - footer never covers content

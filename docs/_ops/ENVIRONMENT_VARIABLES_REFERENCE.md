@@ -1,5 +1,7 @@
 # -----------------------------
 # PLAN / BILLING BEHAVIOR
+# Canonical entitlement vocabulary: basic / pro / premium
+# Stripe-backed paid plans: pro / premium
 # -----------------------------
 PLAN_REQUIRE_CARD = false # Whether paid plan checkout should require a payment method up front
 PLAN_TRIAL_MISSING_PAYMENT_METHOD_BEHAVIOR = cancel # What to do when a trial ends without a payment method (for example: cancel or pause)
@@ -8,8 +10,9 @@ PLAN_LIMIT_ONE_SUBSCRIPTION = true # Whether to block users from starting a seco
 
 PLAN_PRO_MONTHLY_USD_CENTS = 900 # Display/reference monthly price for the Pro plan in USD cents ($9.00)
 PLAN_PREMIUM_MONTHLY_USD_CENTS = 1700 # Display/reference monthly price for the Premium plan in USD cents ($17.00)
-PLAN_PRO_TRIAL_DAYS = 3 # Number of free trial days for the Pro plan
-PLAN_PREMIUM_TRIAL_DAYS = 0 # Number of free trial days for the Premium plan
+PLAN_PRO_TRIAL_DAYS = 3 # Number of trial days for the Pro plan
+PLAN_PREMIUM_TRIAL_DAYS = 0 # Number of trial days for the Premium plan
+PLAN_TRIAL_REQUIRE_UNIQUE_IP = true # Whether a trial should be blocked when the same server-observed IP footprint already claimed one
 
 # -----------------------------
 # STRIPE
@@ -28,6 +31,7 @@ DEV_CREDA = *** # Developer account auth
 SUPABASE_URL = *** # Supabase project URL
 SUPABASE_ANON_KEY = *** # Supabase public anon key used by the frontend client
 SUPABASE_SECRET_KEY = *** # Supabase server-side secret key used by backend/server functions
+APP_BASE_URL = https://*** # Canonical public app origin used for auth emails and redirect construction
 
 # -----------------------------
 # AZURE SPEECH
@@ -48,3 +52,12 @@ FREECONVERT_API_KEY = *** # FreeConvert API key
 AWS_S3_BUCKET = *** # AWS S3 bucket name
 AWS_ACCESS_KEY_ID = *** # AWS access key ID
 AWS_SECRET_ACCESS_KEY = *** # AWS secret access key
+
+Supabase Auth dashboard values (operator-set, not code-owned):
+- Site URL = the resolved `APP_BASE_URL` value, not the literal text `APP_BASE_URL`
+- Redirect URLs should include the resolved app origin, for example:
+  - https://your-app.example.com/?view=login-page
+  - https://your-app.example.com/?view=login-page&auth=verified
+  - https://your-app.example.com/?view=login-page&auth=verified&next=checkout&tier=pro
+  - https://your-app.example.com/?view=login-page&auth=verified&next=checkout&tier=premium
+  - https://your-app.example.com/?view=reset-password

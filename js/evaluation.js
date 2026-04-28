@@ -160,7 +160,11 @@
       const isEditable = ta && !ta.readOnly && !ta.disabled;
       // In reading mode there is no textarea — advance to the next page regardless.
       if (appMode === 'reading' || isEditable) {
-        pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (appMode === 'reading' && typeof window.__rcScrollReadingPageIntoView === 'function') {
+          window.__rcScrollReadingPageIntoView(pageEl, { behavior: 'smooth', reason: 'reading-next-fallback' });
+        } else {
+          pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
         if (appMode === 'reading') {
           activatePageCard(pageEl, j);
         }

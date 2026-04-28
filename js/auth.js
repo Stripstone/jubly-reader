@@ -101,6 +101,18 @@ window.rcAuth = (function () {
       _user = null;
     }
 
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      if (String(params.get('auth') || '').trim().toLowerCase() === 'verified' && _session) {
+        // Supabase may create a browser session during email confirmation.
+        // Jubly's verified continuation contract returns to Login first so paid
+        // intent is preserved but the user explicitly signs in before checkout.
+        try { await _client.auth.signOut({ scope: 'local' }); } catch (_) { try { await _client.auth.signOut(); } catch (__) {} }
+        _session = null;
+        _user = null;
+      }
+    } catch (_) {}
+
     _ready = true;
     _emitAuthChanged('init');
 
@@ -132,25 +144,129 @@ window.rcAuth = (function () {
   function getClient() { return _client; }
   function getConfig() { return _config ? { ..._config } : null; }
 
-  async function signUp(email, password, username) {
+
+  function _emailValidationMessage(email) {
+    const value = String(email || '').trim();
+    if (!value || value.length > 254) return 'Enter a valid email address.';
+    const at = value.indexOf('@');
+    if (at <= 0 || at !== value.lastIndexOf('@')) return 'Enter a valid email address.';
+
+    const local = value.slice(0, at);
+    const domain = value.slice(at + 1);
+    if (!local || !domain || local.length > 64) return 'Enter a valid email address.';
+    if (local.startsWith('.') || local.endsWith('.') || local.includes('..')) return 'Enter a valid email address.';
+    if (!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local)) return 'Enter a valid email address.';
+
+    if (domain.startsWith('.') || domain.endsWith('.') || domain.includes('..')) return 'Enter a valid email address.';
+    const labels = domain.split('.');
+    if (labels.length < 2) return 'Enter a valid email address.';
+    for (const label of labels) {
+      if (!label || label.length > 63) return 'Enter a valid email address.';
+      if (label.startsWith('-') || label.endsWith('-')) return 'Enter a valid email address.';
+      if (!/^[A-Za-z0-9-]+$/.test(label)) return 'Enter a valid email address.';
+    }
+    const tld = labels[labels.length - 1] || '';
+    if (!/^[A-Za-z]{2,24}$/.test(tld)) return 'Enter a valid email address.';
+    return '';
+  }
+
+  function looksLikeEmail(email) {
+    return !_emailValidationMessage(email);
+  }
+
+  async function inspectEmail(email) {
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!looksLikeEmail(normalized)) {
+      return { ok: false, exists: false, error: { message: 'Enter a valid email address.' } };
+    }
+    try {
+      const resp = await fetch(`/api/app?kind=auth-email-check&email=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data || typeof data !== 'object') {
+        return { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
+      }
+      return { ok: !!data.ok, exists: !!data.exists, error: data.ok ? null : { message: String(data.error || 'Unable to verify email yet.') } };
+    } catch (_) {
+      return { ok: false, exists: false, error: { message: 'Unable to verify email yet.' } };
+    }
+  }
+
+  async function signUp(email, password, username, authOptions) {
     if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
+    const normalizedEmail = String(email || '').trim();
+    const emailError = _emailValidationMessage(normalizedEmail);
+    if (emailError) return { error: { message: emailError } };
     const options = {};
-    const redirect = String(_config && _config.authRedirectUrl || '').trim();
+    const requestedRedirect = authOptions && typeof authOptions === 'object' ? String(authOptions.emailRedirectTo || '').trim() : '';
+    const redirect = requestedRedirect || String(_config && _config.authRedirectUrl || '').trim();
     if (redirect) options.emailRedirectTo = redirect;
     const name = String(username || '').trim();
     if (name) options.data = { full_name: name, name };
-    return _client.auth.signUp({ email, password, options });
+    return _client.auth.signUp({ email: normalizedEmail, password, options });
   }
 
   async function signIn(email, password) {
     if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
-    return _client.auth.signInWithPassword({ email, password });
+    const normalizedEmail = String(email || '').trim();
+    const emailError = _emailValidationMessage(normalizedEmail);
+    if (emailError) return { error: { message: emailError } };
+    return _client.auth.signInWithPassword({ email: normalizedEmail, password });
+  }
+
+  async function resendSignupVerification(email, authOptions) {
+    if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
+    const normalizedEmail = String(email || '').trim();
+    const emailError = _emailValidationMessage(normalizedEmail);
+    if (emailError) return { error: { message: emailError } };
+    if (!_client.auth || typeof _client.auth.resend !== 'function') {
+      return { error: { message: 'Verification resend is not available in this environment.' } };
+    }
+
+    const options = {};
+    const requestedRedirect = authOptions && typeof authOptions === 'object' ? String(authOptions.emailRedirectTo || '').trim() : '';
+    const redirect = requestedRedirect || String(_config && _config.authRedirectUrl || '').trim();
+    if (redirect) options.emailRedirectTo = redirect;
+
+    return _client.auth.resend({
+      type: 'signup',
+      email: normalizedEmail,
+      options,
+    });
+  }
+
+  async function requestPasswordReset(email, authOptions) {
+    if (!_client) return { error: { message: 'Auth not initialized — check Supabase configuration.' } };
+    const normalizedEmail = String(email || '').trim();
+    const emailError = _emailValidationMessage(normalizedEmail);
+    if (emailError) return { error: { message: emailError } };
+    if (!_client.auth || typeof _client.auth.resetPasswordForEmail !== 'function') {
+      return { error: { message: 'Password reset is not available in this environment.' } };
+    }
+
+    const options = {};
+    const requestedRedirect = authOptions && typeof authOptions === 'object'
+      ? String(authOptions.redirectTo || authOptions.emailRedirectTo || '').trim()
+      : '';
+    const fallbackRedirect = String((_config && (_config.resetPasswordRedirectUrl || (_config.appBaseUrl ? `${String(_config.appBaseUrl).replace(/\/$/, '')}/?view=reset-password` : ''))) || '').trim();
+    const redirect = requestedRedirect || fallbackRedirect;
+    if (redirect) options.redirectTo = redirect;
+
+    return _client.auth.resetPasswordForEmail(normalizedEmail, options);
   }
 
   async function signOut() {
-    if (!_client) return;
-    try { await _client.auth.signOut(); } catch (_) {}
+    if (!_client) return { ok: true };
+    let signOutError = null;
+    try {
+      const result = await _client.auth.signOut();
+      if (result && result.error) signOutError = result.error;
+    } catch (e) {
+      signOutError = e;
+    }
     try { if (window.rcHelp && typeof window.rcHelp.shutdown === 'function') window.rcHelp.shutdown(); } catch (_) {}
+    return signOutError
+      ? { ok: false, error: String(signOutError.message || 'Sign-out failed.') }
+      : { ok: true };
   }
 
   async function updateDisplayName(displayName) {
@@ -191,7 +307,11 @@ window.rcAuth = (function () {
     getConfig,
     signUp,
     signIn,
+    resendSignupVerification,
+    requestPasswordReset,
     signOut,
+    looksLikeEmail,
+    inspectEmail,
     updateDisplayName,
     changePassword,
   };
