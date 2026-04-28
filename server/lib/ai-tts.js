@@ -42,7 +42,7 @@ function sha256Hex(s) {
 }
 
 const TTS_ARTIFACT_VERSION = "v3-s3-sidecar-sentence-marks-trailing-ranges";
-const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-preserve-trailing-text-v1";
+const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-protected-tokens-v2";
 
 function toSafePrefix(prefix) {
   let p = String(prefix || "").trim();
@@ -89,20 +89,157 @@ function escapeXml(str) {
     .replace(/'/g, "&apos;");
 }
 
+const TTS_SENTENCE_ABBREVIATIONS = new Set([
+  "mr", "mrs", "ms", "miss", "dr", "prof", "rev", "hon", "sr", "jr",
+  "capt", "maj", "lt", "sgt", "col", "gen", "cpl", "pvt", "cmdr", "cdr", "adm", "brig",
+  "gov", "sen", "rep", "atty", "insp", "supt", "pres", "st", "ave", "blvd", "rd", "ln", "ct", "sq",
+  "dept", "est", "corp", "inc", "ltd", "co", "bros", "assn", "intl", "etc", "vs", "approx",
+  "vol", "chap", "sec", "no", "art", "fig", "ed", "trans", "repr", "rev", "supp", "pp", "ibid", "op", "cf",
+]);
+const TTS_SENTENCE_INITIAL_CHAIN_RE = /(?:\b[A-Za-z]\.){2,}\s*$/;
+const TTS_SENTENCE_SINGLE_INITIAL_RE = /(?:^|\s)[A-Za-z]\.\s*$/;
+const TTS_SENTENCE_CLOSER_CHARS = "'’\"”)]}>";
+const TTS_PROTECTED_TOKEN_LEFT_EDGE_CHARS = "<([{'\"“‘";
+const TTS_PROTECTED_TOKEN_RIGHT_EDGE_CHARS = ">)]}'\"”’.,!?;:";
+
+function isTtsAbbreviationTail(source, punctEnd) {
+  let end = Math.max(0, Number(punctEnd) || 0);
+  while (end > 0 && /\s/.test(source[end - 1])) end--;
+  if (source[end - 1] !== ".") return false;
+  end--;
+
+  let start = end;
+  while (start > 0 && /[A-Za-z]/.test(source[start - 1])) start--;
+  if (start === end) return false;
+  return TTS_SENTENCE_ABBREVIATIONS.has(source.slice(start, end).toLowerCase());
+}
+
+function getTtsDomainCandidate(value) {
+  const raw = String(value || "");
+  const markerIndexes = ["/", ":", "?", "#"]
+    .map((marker) => raw.indexOf(marker))
+    .filter((index) => index >= 0);
+  const end = markerIndexes.length ? Math.min(...markerIndexes) : raw.length;
+  return raw.slice(0, end);
+}
+
+function isTtsDomainLabel(value) {
+  const label = String(value || "");
+  if (!label || label.startsWith("-") || label.endsWith("-")) return false;
+  for (const ch of label) {
+    if (!/[A-Za-z0-9-]/.test(ch)) return false;
+  }
+  return true;
+}
+
+function isTtsDomainToken(value) {
+  const domain = getTtsDomainCandidate(value);
+  if (!domain || !domain.includes(".")) return false;
+  const labels = domain.split(".");
+  if (labels.length < 2 || labels.some((label) => !isTtsDomainLabel(label))) return false;
+  return /^[A-Za-z]{2,}$/.test(labels[labels.length - 1]);
+}
+
+function isTtsUrlToken(value) {
+  const raw = String(value || "");
+  const lower = raw.toLowerCase();
+  if (lower.startsWith("http://") || lower.startsWith("https://")) {
+    return isTtsDomainToken(raw.slice(raw.indexOf("://") + 3));
+  }
+  return lower.startsWith("www.") && isTtsDomainToken(raw);
+}
+
+function isTtsEmailToken(value) {
+  const raw = String(value || "");
+  const at = raw.indexOf("@");
+  if (at <= 0 || at !== raw.lastIndexOf("@") || at >= raw.length - 1) return false;
+  const local = raw.slice(0, at);
+  const domain = raw.slice(at + 1);
+  if (!local || /[\s<>]/.test(local) || /[\s<>]/.test(domain)) return false;
+  return isTtsDomainToken(domain);
+}
+
+function getTtsNonSpaceTokenBounds(source, index) {
+  let start = Math.max(0, Number(index) || 0);
+  let end = Math.min(String(source || "").length, start + 1);
+  while (start > 0 && !/\s/u.test(source[start - 1])) start--;
+  while (end < source.length && !/\s/u.test(source[end])) end++;
+  return { start, end, raw: source.slice(start, end) };
+}
+
+function countTtsLeadingProtectedEdgeChars(raw) {
+  let count = 0;
+  while (count < raw.length && TTS_PROTECTED_TOKEN_LEFT_EDGE_CHARS.includes(raw[count])) count++;
+  return count;
+}
+
+function countTtsTrailingProtectedEdgeChars(raw) {
+  let count = 0;
+  while (count < raw.length && TTS_PROTECTED_TOKEN_RIGHT_EDGE_CHARS.includes(raw[raw.length - 1 - count])) count++;
+  return count;
+}
+
+function getTtsProtectedTokenCore(source, index) {
+  const bounds = getTtsNonSpaceTokenBounds(source, index);
+  const leftTrim = countTtsLeadingProtectedEdgeChars(bounds.raw);
+  const rightTrim = countTtsTrailingProtectedEdgeChars(bounds.raw);
+  const coreStart = bounds.start + leftTrim;
+  const coreEnd = bounds.end - rightTrim;
+  if (coreEnd <= coreStart) return null;
+  return { start: coreStart, end: coreEnd, value: source.slice(coreStart, coreEnd) };
+}
+
+function isInsideTtsProtectedToken(source, index) {
+  const core = getTtsProtectedTokenCore(source, index);
+  if (!core || index < core.start || index >= core.end) return false;
+  const token = core.value;
+  return isTtsEmailToken(token) || isTtsUrlToken(token) || isTtsDomainToken(token);
+}
+
+function isTtsDecimalPoint(source, index) {
+  return source[index] === "." && /\d/u.test(source[index - 1] || "") && /\d/u.test(source[index + 1] || "");
+}
+
+function getTtsSentenceStop(source, punctIndex) {
+  const ch = source[punctIndex];
+  if (ch !== "." && ch !== "?" && ch !== "!") return null;
+  if (isInsideTtsProtectedToken(source, punctIndex)) return null;
+  if (isTtsDecimalPoint(source, punctIndex)) return null;
+
+  let punctEnd = punctIndex + 1;
+  while (punctEnd < source.length && /[.!?]/u.test(source[punctEnd])) punctEnd++;
+
+  if (ch === ".") {
+    if (punctEnd === punctIndex + 1 && punctIndex + 1 < source.length && /[a-z]/.test(source[punctIndex + 1])) return null;
+    const tail = source.slice(0, punctEnd);
+    if (isTtsAbbreviationTail(source, punctEnd)) return null;
+    if (TTS_SENTENCE_INITIAL_CHAIN_RE.test(tail)) return null;
+    if (TTS_SENTENCE_SINGLE_INITIAL_RE.test(tail)) return null;
+  }
+
+  let cut = punctEnd;
+  while (cut < source.length && TTS_SENTENCE_CLOSER_CHARS.includes(source[cut])) cut++;
+  if (cut < source.length && !/\s/u.test(source[cut])) return null;
+  while (cut < source.length && /\s/u.test(source[cut])) cut++;
+  return { cut };
+}
+
 function splitIntoSentenceRanges(text) {
   const source = String(text || "");
-  const sentenceRegex = /[^.!?]*[.!?]+["']?\s*/g;
   const ranges = [];
-  let match;
-  let lastEnd = 0;
-  while ((match = sentenceRegex.exec(source)) !== null) {
-    const end = match.index + match[0].length;
-    ranges.push({ start: match.index, end });
-    lastEnd = end;
+  let start = 0;
+
+  for (let i = 0; i < source.length; i++) {
+    const stop = getTtsSentenceStop(source, i);
+    if (!stop) continue;
+    ranges.push({ start, end: stop.cut });
+    start = stop.cut;
+    i = Math.max(i, stop.cut - 1);
   }
+
   // Preserve trailing visible text even when the page ends without terminal
   // punctuation. Form rows and labels may be final readable content.
-  if (lastEnd < source.length) ranges.push({ start: lastEnd, end: source.length });
+  if (start < source.length) ranges.push({ start, end: source.length });
   if (!ranges.length) ranges.push({ start: 0, end: source.length });
   return ranges.filter((range) => range.end > range.start);
 }
