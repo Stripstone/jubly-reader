@@ -423,7 +423,6 @@
       diagPanel.style.border = '2px solid var(--border)';
       diagPanel.style.borderRadius = '10px';
       diagPanel.style.background = 'var(--secondary-bg)';
-      diagPanel.style.color = 'var(--text-primary)';
       diagPanel.style.boxShadow = '0 8px 28px rgba(0,0,0,0.22)';
       diagPanel.innerHTML = `
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
@@ -474,7 +473,7 @@
             const remaining = usageSnapshot && usageSnapshot.remaining != null ? usageSnapshot.remaining : (remoteUsageSummary && remoteUsageSummary.remaining != null ? remoteUsageSummary.remaining : '—');
             const allowance = usageSnapshot && usageSnapshot.allowance != null ? usageSnapshot.allowance : (remoteUsageSummary && remoteUsageSummary.limit != null ? remoteUsageSummary.limit : null);
             return {
-              tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'unknown',
+              tier: (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : (typeof appTier !== 'undefined' ? appTier : 'unknown'),
               remaining,
               allowance,
               authoritative: !!(usageSnapshot && usageSnapshot.authoritative),
@@ -658,10 +657,10 @@
   const select = document.getElementById('tierSelect');
   if (!select) return;
 
-  const VALID_TIERS = ['basic', 'pro', 'premium'];
+  const VALID_TIERS = ['free', 'paid', 'premium'];
 
-  // Seed display from current resolved policy
-  select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
+  // Restore persisted tier
+  select.value = appTier;
 
   function applyTierSimulationUi() {
     const policyApi = window.rcPolicy || {};
@@ -678,43 +677,41 @@
     });
   }
 
-  function syncTierUiFromCurrentPolicy() {
-    select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
-    applyTierSimulationUi();
-    applyTierAccess();
-    try { if (typeof window.populateBrowserVoicePicker === 'function') window.populateBrowserVoicePicker(); } catch (_) {}
-  }
-
   async function syncTierPolicy(nextTier) {
-    const targetTier = VALID_TIERS.includes(String(nextTier || '').toLowerCase()) ? String(nextTier).toLowerCase() : 'basic';
+    const targetTier = VALID_TIERS.includes(String(nextTier || '').toLowerCase()) ? String(nextTier).toLowerCase() : 'free';
+    appTier = targetTier;
     if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
       try { await window.rcPolicy.refreshForTier(targetTier); } catch (_) {}
     } else {
       try { if (typeof tokenReset === 'function') tokenReset(); } catch (_) {}
     }
-    syncTierUiFromCurrentPolicy();
+    select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : appTier;
+    applyTierSimulationUi();
+    applyTierAccess();
+    try { if (typeof window.populateBrowserVoicePicker === 'function') window.populateBrowserVoicePicker(); } catch (_) {}
   }
 
   select.addEventListener('change', () => {
     const policyApi = window.rcPolicy || {};
     if (typeof policyApi.canSimulateTier === 'function' && !policyApi.canSimulateTier()) {
-      select.value = typeof policyApi.getTier === 'function' ? policyApi.getTier() : 'basic';
+      select.value = typeof policyApi.getTier === 'function' ? policyApi.getTier() : 'free';
       return;
     }
     const newTier = select.value;
-    const currentTier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
-    if (!VALID_TIERS.includes(newTier) || newTier === currentTier) return;
+    if (!VALID_TIERS.includes(newTier) || newTier === appTier) return;
     syncTierPolicy(newTier);
   });
 
   document.addEventListener('rc:runtime-policy-changed', () => {
     try {
-      syncTierUiFromCurrentPolicy();
+      select.value = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : appTier;
+      applyTierSimulationUi();
+      applyTierAccess();
     } catch (_) {}
   });
 
-  // Reflect current resolved policy on boot without creating a second-owner refresh path.
-  syncTierUiFromCurrentPolicy();
+  // Apply on boot
+  syncTierPolicy(appTier);
 
   function applyTierAccess() {
     const policyApi = window.rcPolicy || {};
@@ -774,20 +771,16 @@
 (function initAutoplayToggle() {
   const checkbox = document.getElementById('autoplayToggle');
   if (!checkbox) return;
-  const bootEnabled = (() => {
-    try { return localStorage.getItem('rc_autoplay') === '1'; } catch (_) { return !!checkbox.checked; }
-  })();
-  if (window.applyAutoplayRuntimePreference && typeof window.applyAutoplayRuntimePreference === 'function') {
-    try { window.applyAutoplayRuntimePreference(bootEnabled, { source: 'ui-init', syncControl: true, persist: false }); } catch (_) {}
-  } else {
-    checkbox.checked = !!bootEnabled;
+  try {
+    checkbox.checked = localStorage.getItem('rc_autoplay') === '1';
+    AUTOPLAY_STATE.enabled = checkbox.checked;
+  } catch (_) {
+    checkbox.checked = !!AUTOPLAY_STATE.enabled;
   }
   checkbox.addEventListener('change', () => {
-    if (window.applyAutoplayRuntimePreference && typeof window.applyAutoplayRuntimePreference === 'function') {
-      try { window.applyAutoplayRuntimePreference(!!checkbox.checked, { source: 'ui-change', syncControl: true, persist: true }); } catch (_) {}
-    } else {
-      try { localStorage.setItem('rc_autoplay', checkbox.checked ? '1':'0'); } catch (_) {}
-    }
+    AUTOPLAY_STATE.enabled = checkbox.checked;
+    try { localStorage.setItem('rc_autoplay', checkbox.checked ? '1':'0'); } catch (_) {}
+    if (!AUTOPLAY_STATE.enabled) ttsAutoplayCancelCountdown();
   });
 })();
 

@@ -31,11 +31,6 @@ const TTS_STATE = {
   pausedPageKey: null,
   lastPageKey: null,
 
-  backendCapability: null,
-  backendCapabilityKey: null,
-  backendCapabilitySessionId: 0,
-  backendCapabilityAppliedAt: null,
-
   audio: null,
   abort: null,
   volume: 1,
@@ -53,20 +48,9 @@ const TTS_STATE = {
   browserIntentionalCancelUntil: 0,
   browserIntentionalCancelReason: null,
   browserIntentionalCancelMeta: null,
-  browserRestartTimerId: 0,
-  browserRestartRequestId: 0,
-  browserExpectedEntryBlockIndex: -1,
 
   playbackBlockedReason: '',
-  pendingCloudSeekKey: null,
-  pendingCloudSeekSessionId: 0,
-  pendingCloudSeekBlockIndex: -1,
-  pendingCloudSeekLeadMs: 0,
-  cloudRestartRequestId: 0,
-  cloudRestartInFlight: false,
-  activeSessionSkipCount: 0,
 
-  highlightMarksProvenance: null,
   highlightPageKey: null,
   highlightPageEl: null,
   highlightOriginalHTML: null,
@@ -83,478 +67,12 @@ const TTS_DEBUG = {
   lastError: null,
   lastCloudRequest: null,
   lastCloudResponse: null,
-  lastCapability: null,
   lastPlayRequest: null,
   lastResolvedPath: null,
   lastPauseStrategy: null,
   lastRouteDecision: null,
   lastSkip: null,
 };
-
-// ─── Cloud synthesis window state ─────────────────────────────────────────────
-//
-// Tracks the block-window → full-page promotion lifecycle for a single session.
-// Cleared on every new cloud session start and on ttsStop().
-//
-//   mode:
-//     'idle'         — no active window session
-//     'block-window' — chunk A (sentences 0+1) is synthesising or playing
-//     'promoting'    — full-page fetch is in-flight; chunk A still playing
-//     'promoted'     — full-page result is available; switch has been applied
-//       or is pending the chunk-A onended handoff
-//
-//   promotionApplied — true when _ttsWindowApplyPromotion performed the mid-
-//       playback src-swap; tells the post-loop code the full page already played.
-
-// Engagement gate constants.
-//
-//   TTS_WINDOW_ENGAGEMENT_THRESHOLD_S — minimum seconds of real audio playback
-//     (audio.currentTime on the chunk-A element) before full-page synthesis is
-//     allowed. Uses audio.currentTime so countdown, loading, and pause time are
-//     excluded automatically: currentTime only advances during active playback.
-//
-//   TTS_WINDOW_SMALL_PAGE_CHARS — full-page character threshold below which the
-//     entire page is short enough that window mode adds no meaningful savings and
-//     full-page synthesis is acceptable immediately. This guard is on the FULL
-//     PAGE length, not on chunk A. A page with a short opening sentence but a
-//     long body still uses block-window; only a genuinely short full page skips it.
-
-const TTS_WINDOW_ENGAGEMENT_THRESHOLD_S = 3;
-const TTS_WINDOW_SMALL_PAGE_CHARS = 200;
-
-const TTS_CLOUD_WINDOW = {
-  active: false,
-  mode: 'idle',
-  sessionId: 0,
-  pageKey: null,
-  pageText: '',
-  chunkASentenceCount: 0,
-  promotionTriggered: false,
-  promotionApplied: false,
-  promotionFetchPromise: null,
-  promotionResult: null,
-  fullPageUnavailable: false,
-  fullPageUnavailableReason: '',
-  engagementSignal: null,
-  charsPhase1: 0,
-  charsFullPage: 0,
-  charsSessionTotal: 0,
-  // Desired full-page block index from a forward-skip past the chunk-A boundary.
-  // Set by ttsJumpSentence; consumed by _ttsWindowApplyPromotion and the Case B
-  // handoff in ttsSpeakQueue so the seek targets the intended block, not just the
-  // currently-active one.
-  pendingSkipBlock: -1,
-  // True while a forward skip has been captured during the block-window →
-  // full-page promotion seam. While set, extra skip clicks are coalesced into
-  // the same pending same-page intent instead of restarting chunk-A audio.
-  pendingSkipSettling: false,
-};
-const TTS_CLOUD_RESTART_PENDING_KEY = 'tts:cloud-restart';
-const TTS_CLOUD_RESTART_SLOW_MS = 5000;
-const TTS_CLOUD_RESTART_VERY_SLOW_MS = 30000;
-
-const TTS_CLOUD_RESTART_PENDING = {
-  requestId: 0,
-  sessionId: 0,
-  key: null,
-  targetBlock: -1,
-  queuedTargetBlock: -1,
-  reason: '',
-  startedAt: 0,
-  slowTimerId: 0,
-  verySlowTimerId: 0,
-  message: '',
-};
-
-function clearCloudRestartPendingTimers() {
-  if (TTS_CLOUD_RESTART_PENDING.slowTimerId) {
-    try { clearTimeout(TTS_CLOUD_RESTART_PENDING.slowTimerId); } catch (_) {}
-  }
-  if (TTS_CLOUD_RESTART_PENDING.verySlowTimerId) {
-    try { clearTimeout(TTS_CLOUD_RESTART_PENDING.verySlowTimerId); } catch (_) {}
-  }
-  TTS_CLOUD_RESTART_PENDING.slowTimerId = 0;
-  TTS_CLOUD_RESTART_PENDING.verySlowTimerId = 0;
-}
-
-function getCloudRestartPendingElapsedMs() {
-  const startedAt = Number(TTS_CLOUD_RESTART_PENDING.startedAt || 0);
-  return startedAt > 0 ? Math.max(0, Date.now() - startedAt) : 0;
-}
-
-function setCloudRestartPendingMessage(requestId, message, phase = 'pending') {
-  if (Number(TTS_CLOUD_RESTART_PENDING.requestId || 0) !== Number(requestId || 0)) return false;
-  TTS_CLOUD_RESTART_PENDING.message = String(message || 'Loading audio…');
-  try { window.rcInteraction && window.rcInteraction.pending(TTS_CLOUD_RESTART_PENDING_KEY, TTS_CLOUD_RESTART_PENDING.message); } catch (_) {}
-  ttsDiagPush('cloud-restart-pending-visible', {
-    requestId,
-    phase,
-    message: TTS_CLOUD_RESTART_PENDING.message,
-    elapsedMs: getCloudRestartPendingElapsedMs(),
-    targetBlock: TTS_CLOUD_RESTART_PENDING.targetBlock,
-    queuedTargetBlock: TTS_CLOUD_RESTART_PENDING.queuedTargetBlock,
-    sessionId: TTS_CLOUD_RESTART_PENDING.sessionId,
-    key: TTS_CLOUD_RESTART_PENDING.key,
-  });
-  return true;
-}
-
-function beginCloudRestartPendingState({ requestId, sessionId, key, targetBlock, reason }) {
-  clearCloudRestartPendingTimers();
-  TTS_CLOUD_RESTART_PENDING.requestId = Number(requestId || 0);
-  TTS_CLOUD_RESTART_PENDING.sessionId = Number(sessionId || 0);
-  TTS_CLOUD_RESTART_PENDING.key = String(key || '');
-  TTS_CLOUD_RESTART_PENDING.targetBlock = Number.isFinite(Number(targetBlock)) ? Number(targetBlock) : -1;
-  TTS_CLOUD_RESTART_PENDING.queuedTargetBlock = -1;
-  TTS_CLOUD_RESTART_PENDING.reason = String(reason || 'cloud-restart');
-  TTS_CLOUD_RESTART_PENDING.startedAt = Date.now();
-  TTS_CLOUD_RESTART_PENDING.message = 'Loading audio…';
-  setCloudRestartPendingMessage(requestId, TTS_CLOUD_RESTART_PENDING.message, 'pending');
-  TTS_CLOUD_RESTART_PENDING.slowTimerId = setTimeout(() => {
-    if (Number(TTS_STATE.cloudRestartRequestId || 0) !== Number(requestId || 0)) return;
-    if (!TTS_STATE.cloudRestartInFlight) return;
-    setCloudRestartPendingMessage(requestId, 'Still loading audio… poor connection may slow this down.', 'slow');
-    ttsDiagPush('cloud-restart-pending-slow', { requestId, sessionId, key, elapsedMs: getCloudRestartPendingElapsedMs(), targetBlock: TTS_CLOUD_RESTART_PENDING.targetBlock });
-  }, TTS_CLOUD_RESTART_SLOW_MS);
-  TTS_CLOUD_RESTART_PENDING.verySlowTimerId = setTimeout(() => {
-    if (Number(TTS_STATE.cloudRestartRequestId || 0) !== Number(requestId || 0)) return;
-    if (!TTS_STATE.cloudRestartInFlight) return;
-    setCloudRestartPendingMessage(requestId, 'Poor connection — still trying to load this audio.', 'very-slow');
-    ttsDiagPush('cloud-restart-pending-very-slow', { requestId, sessionId, key, elapsedMs: getCloudRestartPendingElapsedMs(), targetBlock: TTS_CLOUD_RESTART_PENDING.targetBlock });
-  }, TTS_CLOUD_RESTART_VERY_SLOW_MS);
-}
-
-function clearCloudRestartPendingState(requestId, reason = 'clear') {
-  if (requestId != null && Number(TTS_CLOUD_RESTART_PENDING.requestId || 0) !== Number(requestId || 0)) {
-    ttsDiagPush('cloud-restart-pending-clear-suppressed', {
-      requestId,
-      activeRequestId: TTS_CLOUD_RESTART_PENDING.requestId,
-      reason,
-    });
-    return false;
-  }
-  const hadPending = Number(TTS_CLOUD_RESTART_PENDING.requestId || 0) > 0;
-  const elapsedMs = getCloudRestartPendingElapsedMs();
-  const activeRequestId = TTS_CLOUD_RESTART_PENDING.requestId;
-  clearCloudRestartPendingTimers();
-  TTS_CLOUD_RESTART_PENDING.requestId = 0;
-  TTS_CLOUD_RESTART_PENDING.sessionId = 0;
-  TTS_CLOUD_RESTART_PENDING.key = null;
-  TTS_CLOUD_RESTART_PENDING.targetBlock = -1;
-  TTS_CLOUD_RESTART_PENDING.queuedTargetBlock = -1;
-  TTS_CLOUD_RESTART_PENDING.reason = '';
-  TTS_CLOUD_RESTART_PENDING.startedAt = 0;
-  TTS_CLOUD_RESTART_PENDING.message = '';
-  try { window.rcInteraction && window.rcInteraction.clear(TTS_CLOUD_RESTART_PENDING_KEY); } catch (_) {}
-  if (hadPending) ttsDiagPush('cloud-restart-pending-cleared', { requestId: activeRequestId, reason, elapsedMs });
-  return true;
-}
-
-function queueCloudRestartPendingTarget(targetBlock, context = {}) {
-  const requestId = Number(TTS_CLOUD_RESTART_PENDING.requestId || 0);
-  if (!requestId || !TTS_STATE.cloudRestartInFlight) return false;
-  if (Number(TTS_STATE.cloudRestartRequestId || 0) !== requestId) return false;
-  const target = Number.isFinite(Number(targetBlock)) ? Number(targetBlock) : -1;
-  if (target < 0) return false;
-  const previousQueuedTarget = TTS_CLOUD_RESTART_PENDING.queuedTargetBlock;
-  TTS_CLOUD_RESTART_PENDING.queuedTargetBlock = target;
-  setCloudRestartPendingMessage(requestId, 'Loading audio at your new spot…', 'coalesced-skip');
-  ttsDiagPush('cloud-restart-skip-coalesced', {
-    requestId,
-    targetBlock: target,
-    previousQueuedTarget,
-    sourceBlock: context.sourceBlock,
-    sourcePage: context.sourcePage,
-    delta: context.delta,
-    elapsedMs: getCloudRestartPendingElapsedMs(),
-  });
-  return true;
-}
-
-function applyQueuedCloudRestartTargetIfNeeded(audio, requestId, key, sessionId) {
-  if (!audio) return null;
-  if (Number(TTS_CLOUD_RESTART_PENDING.requestId || 0) !== Number(requestId || 0)) return null;
-  const target = Number(TTS_CLOUD_RESTART_PENDING.queuedTargetBlock ?? -1);
-  if (!Number.isFinite(target) || target < 0) return null;
-  if (String(TTS_STATE.activeKey || '') !== String(key || '')) return null;
-  if (Number(TTS_STATE.activeSessionId || 0) !== Number(sessionId || 0)) return null;
-  const marks = TTS_STATE.highlightMarks;
-  if (!Array.isArray(marks) || !marks[target]) return null;
-  const seekTime = Math.max(0, Number(marks[target].time || 0) / 1000);
-  try { audio.currentTime = seekTime; } catch (err) {
-    ttsDiagPush('cloud-restart-queued-target-apply-failed', { requestId, key, sessionId, targetBlock: target, seekTime, error: String(err?.message || err) });
-    return null;
-  }
-  TTS_STATE.activeBlockIndex = target;
-  try { ttsHighlightBlock(target); } catch (_) {}
-  const waitForSeek = !!audio.seeking || Number(audio.readyState || 0) < 2;
-  ttsDiagPush('cloud-restart-queued-target-applied', { requestId, key, sessionId, targetBlock: target, seekTime, waitForSeek, elapsedMs: getCloudRestartPendingElapsedMs() });
-  return { targetBlock: target, seekTime, waitForSeek };
-
-}
-
-function getCloudRestartPendingStatus() {
-  const requestId = Number(TTS_CLOUD_RESTART_PENDING.requestId || 0);
-  return {
-    active: !!requestId && !!TTS_STATE.cloudRestartInFlight,
-    requestId,
-    elapsedMs: getCloudRestartPendingElapsedMs(),
-    targetBlock: TTS_CLOUD_RESTART_PENDING.targetBlock,
-    queuedTargetBlock: TTS_CLOUD_RESTART_PENDING.queuedTargetBlock,
-    message: TTS_CLOUD_RESTART_PENDING.message || '',
-    reason: TTS_CLOUD_RESTART_PENDING.reason || '',
-  };
-}
-
-
-
-// Runtime-only memory of pages that have successfully latched full-page cloud
-// audio/marks in this tab. This avoids re-entering the fragile chunk-A window
-// when the user stops and immediately replays the same page. It is intentionally
-// not persisted and is only set after validated full-page marks are live.
-const TTS_FULL_PAGE_READY_KEYS = new Set();
-
-function markTtsFullPageReady(key, context = {}) {
-  const stableKey = String(key || '');
-  if (!stableKey) return false;
-  TTS_FULL_PAGE_READY_KEYS.add(stableKey);
-  ttsDiagPush('window-full-page-ready-recorded', {
-    key: stableKey,
-    sessionId: Number(context.sessionId || TTS_STATE.activeSessionId || 0),
-    source: String(context.source || 'unknown'),
-    marksCount: Number(context.marksCount || 0),
-  });
-  return true;
-}
-
-function hasTtsFullPageReady(key) {
-  return TTS_FULL_PAGE_READY_KEYS.has(String(key || ''));
-}
-
-function isPassiveTtsWindowPromotionSignal(signal) {
-  const value = String(signal || '');
-  return value === 'engagement-threshold-met' || value === 'chunk-a-ended-no-engagement' || value === 'chunk-ended-natural';
-}
-
-function getTtsCloudMarkCount() {
-  return Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0;
-}
-
-function getTtsChunkWindowLimit() {
-  const windowCount = Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0);
-  return Math.max(2, Number.isFinite(windowCount) ? windowCount : 0);
-}
-
-function isStaleChunkWindowCloudSession() {
-  const key = String(TTS_STATE.activeKey || TTS_STATE.pausedPageKey || '');
-  if (!key || !TTS_STATE.audio) return false;
-  const marksCount = getTtsCloudMarkCount();
-  const chunkLimit = getTtsChunkWindowLimit();
-  const lastCapabilityCount = Number(TTS_DEBUG.lastCapability?.returnedMarksCount || 0);
-  const audioEnded = !!TTS_STATE.audio.ended;
-  const paused = !!TTS_STATE.audio.paused;
-  const chunkOnlyMarks = marksCount > 0 && marksCount <= chunkLimit;
-  const chunkOnlyCapability = lastCapabilityCount > 0 && lastCapabilityCount <= chunkLimit;
-  // Only ended chunk-window audio is stale. A paused, non-ended Phase 1 session
-  // with 2 valid marks is a real media pause and must resume from audio.currentTime.
-  // If natural chunk-end continuation already triggered promotion, it is an
-  // in-flight handoff, not a stale Resume target.
-  if (TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.promotionTriggered && !TTS_CLOUD_WINDOW.promotionApplied) return false;
-  if (TTS_STATE.cloudRestartInFlight && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied) return false;
-  return paused && audioEnded && (chunkOnlyMarks || chunkOnlyCapability);
-}
-
-function restoreNaturalWindowStateForHandoff(sessionId, key, pageText, chunkAText, source = 'unknown') {
-  if (TTS_STATE.activeSessionId !== sessionId || String(TTS_STATE.activeKey || '') !== String(key || '')) return false;
-  if (TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.sessionId === sessionId && TTS_CLOUD_WINDOW.pageKey === key) return true;
-
-  const text = String(pageText || '');
-  const phase1 = String(chunkAText || '');
-  const chunkCount = Math.max(2, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0) || 2);
-  TTS_CLOUD_WINDOW.active = true;
-  TTS_CLOUD_WINDOW.mode = 'handoff-pending';
-  TTS_CLOUD_WINDOW.sessionId = sessionId;
-  TTS_CLOUD_WINDOW.pageKey = key;
-  TTS_CLOUD_WINDOW.pageText = text;
-  TTS_CLOUD_WINDOW.chunkASentenceCount = chunkCount;
-  TTS_CLOUD_WINDOW.promotionTriggered = false;
-  TTS_CLOUD_WINDOW.promotionApplied = false;
-  TTS_CLOUD_WINDOW.promotionFetchPromise = null;
-  TTS_CLOUD_WINDOW.promotionResult = null;
-  TTS_CLOUD_WINDOW.fullPageUnavailable = false;
-  TTS_CLOUD_WINDOW.fullPageUnavailableReason = '';
-  TTS_CLOUD_WINDOW.charsPhase1 = phase1.length || Number(TTS_CLOUD_WINDOW.charsPhase1 || 0);
-  TTS_CLOUD_WINDOW.charsFullPage = text.length || Number(TTS_CLOUD_WINDOW.charsFullPage || 0);
-  TTS_CLOUD_WINDOW.charsSessionTotal = TTS_CLOUD_WINDOW.charsPhase1;
-  TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
-  TTS_CLOUD_WINDOW.pendingSkipSettling = false;
-  ttsDiagPush('window-natural-handoff-window-restored', {
-    sessionId, key, source,
-    chunkASentenceCount: TTS_CLOUD_WINDOW.chunkASentenceCount,
-    charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
-    charsFullPage: TTS_CLOUD_WINDOW.charsFullPage,
-    activeBlockIndex: Number(TTS_STATE.activeBlockIndex ?? -1),
-    reason: 'lost-window-state-before-natural-handoff',
-  });
-  return true;
-}
-
-function ttsBeginNaturalWindowHandoff(sessionId, key, reason = 'chunk-ended-natural') {
-  if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.sessionId !== sessionId) return false;
-  if (TTS_STATE.activeSessionId !== sessionId || String(TTS_STATE.activeKey || '') !== String(key || '')) return false;
-  if (TTS_CLOUD_WINDOW.promotionApplied) return false;
-
-  const promotionTriggeredBefore = !!TTS_CLOUD_WINDOW.promotionTriggered;
-  const promotionReadyBefore = !!TTS_CLOUD_WINDOW.promotionResult;
-
-  if (!promotionTriggeredBefore) {
-    try { _ttsWindowTriggerPromotion(reason); } catch (err) {
-      ttsDiagPush('window-chunk-ended-natural-trigger-failed', { sessionId, key, reason, error: String(err?.message || err) });
-    }
-  }
-
-  const promotionReady = !!TTS_CLOUD_WINDOW.promotionResult;
-  const promotionPending = !!TTS_CLOUD_WINDOW.promotionFetchPromise && !promotionReady;
-  const chunkAEnd = Math.max(0, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0));
-
-  TTS_CLOUD_WINDOW.mode = promotionReady ? 'promoted' : 'handoff-pending';
-  TTS_STATE.cloudRestartInFlight = true;
-
-  ttsDiagPush('window-chunk-ended-natural', {
-    sessionId, key, reason,
-    userInitiated: false,
-    promotionTriggeredBefore,
-    promotionTriggeredAfter: !!TTS_CLOUD_WINDOW.promotionTriggered,
-    promotionReadyBefore,
-    promotionReady,
-    promotionPending,
-    chosenHandoffBlock: chunkAEnd,
-    activeBlockIndex: Number(TTS_STATE.activeBlockIndex ?? -1),
-    chunkASentenceCount: TTS_CLOUD_WINDOW.chunkASentenceCount,
-    audioEnded: !!TTS_STATE.audio?.ended,
-    audioCurrentTimeMs: TTS_STATE.audio ? Number(TTS_STATE.audio.currentTime || 0) * 1000 : null,
-    staleWindowGuard: 'bypassed-natural-continuation',
-    ttsCloudMode: TTS_CLOUD_WINDOW.mode,
-  });
-  return true;
-}
-
-function markTtsWindowFullPageUnavailable(sessionId, key, reason = 'full-page-unavailable', context = {}) {
-  if (TTS_STATE.activeSessionId !== sessionId) return false;
-  if (String(TTS_STATE.activeKey || '') !== String(key || '')) return false;
-  if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.sessionId !== sessionId || String(TTS_CLOUD_WINDOW.pageKey || '') !== String(key || '')) return false;
-  TTS_CLOUD_WINDOW.fullPageUnavailable = true;
-  TTS_CLOUD_WINDOW.fullPageUnavailableReason = String(reason || 'full-page-unavailable');
-  TTS_CLOUD_WINDOW.mode = 'full-page-unavailable';
-  TTS_CLOUD_WINDOW.promotionApplied = false;
-  TTS_CLOUD_WINDOW.pendingSkipSettling = false;
-  ttsDiagPush('window-full-page-unavailable', {
-    sessionId, key, reason: TTS_CLOUD_WINDOW.fullPageUnavailableReason,
-    returnedMarksCount: Number(context.returnedMarksCount || 0),
-    chunkASentenceCount: Number(context.chunkASentenceCount || TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
-    error: context.error ? String(context.error) : '',
-    phase: context.phase || 'case-b-handoff',
-    requestMode: 'full-page',
-    nextRequestMode: 'block-window',
-    chosenHandoffBlock: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
-  });
-  return true;
-}
-
-function clearTtsCloudWindow() {
-  TTS_CLOUD_WINDOW.active = false;
-  TTS_CLOUD_WINDOW.mode = 'idle';
-  TTS_CLOUD_WINDOW.sessionId = 0;
-  TTS_CLOUD_WINDOW.pageKey = null;
-  TTS_CLOUD_WINDOW.pageText = '';
-  TTS_CLOUD_WINDOW.chunkASentenceCount = 0;
-  TTS_CLOUD_WINDOW.promotionTriggered = false;
-  TTS_CLOUD_WINDOW.promotionApplied = false;
-  TTS_CLOUD_WINDOW.promotionFetchPromise = null;
-  TTS_CLOUD_WINDOW.promotionResult = null;
-  TTS_CLOUD_WINDOW.fullPageUnavailable = false;
-  TTS_CLOUD_WINDOW.fullPageUnavailableReason = '';
-  TTS_CLOUD_WINDOW.engagementSignal = null;
-  TTS_CLOUD_WINDOW.charsPhase1 = 0;
-  TTS_CLOUD_WINDOW.charsFullPage = 0;
-  TTS_CLOUD_WINDOW.charsSessionTotal = 0;
-  TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
-  TTS_CLOUD_WINDOW.pendingSkipSettling = false;
-}
-
-// Split page text into sentence strings preserving trailing whitespace.
-// Mirrors server-side splitIntoSentenceRanges but returns strings not ranges.
-function ttsWindowRecordForwardSkipIntent(reason, context = {}) {
-  if (!TTS_CLOUD_WINDOW.active) return false;
-  const delta = Number(context.delta || 0);
-  if (delta <= 0) return false;
-
-  const sourceBlock = Number.isFinite(Number(context.sourceBlock))
-    ? Number(context.sourceBlock) : Number(TTS_STATE.activeBlockIndex ?? 0);
-  const sourcePage = Number.isFinite(Number(context.sourcePage)) ? Number(context.sourcePage) : -1;
-  const key = context.key || TTS_STATE.activeKey || TTS_CLOUD_WINDOW.pageKey || '';
-  const minFullPageBlock = Math.max(0, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0));
-  const desiredBlock = Math.max(sourceBlock + 1, minFullPageBlock);
-  const existing = Number.isFinite(Number(TTS_CLOUD_WINDOW.pendingSkipBlock))
-    ? Number(TTS_CLOUD_WINDOW.pendingSkipBlock) : -1;
-  const wasPending = existing >= 0 || TTS_CLOUD_WINDOW.pendingSkipSettling === true;
-  const resolvedBlock = Math.max(existing, desiredBlock);
-
-  TTS_CLOUD_WINDOW.pendingSkipBlock = resolvedBlock;
-  TTS_CLOUD_WINDOW.pendingSkipSettling = true;
-
-  if (!TTS_CLOUD_WINDOW.promotionTriggered) {
-    try { _ttsWindowTriggerPromotion(reason || 'skip-forward-window-deferred'); } catch (_) {}
-  }
-
-  const event = wasPending ? 'window-skip-coalesced' : 'window-skip-deferred';
-  ttsDiagPush(event, {
-    reason,
-    key,
-    delta,
-    sourcePage,
-    sourceBlock,
-    desiredBlock,
-    pendingSkipBlock: TTS_CLOUD_WINDOW.pendingSkipBlock,
-    sessionId: TTS_STATE.activeSessionId,
-    mode: TTS_CLOUD_WINDOW.mode,
-    promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
-    cloudRestartInFlight: !!TTS_STATE.cloudRestartInFlight,
-  });
-
-  const skipResult = {
-    at: new Date().toISOString(),
-    type: 'block',
-    delta,
-    sourcePage,
-    sourceBlock,
-    resolvedPage: sourcePage,
-    resolvedBlock: TTS_CLOUD_WINDOW.pendingSkipBlock,
-    crossPage: false,
-    moved: false,
-    queued: true,
-    path: wasPending ? 'window-forward-skip-coalesced' : 'window-forward-skip-deferred',
-    clippingProtection: false,
-    sessionId: TTS_STATE.activeSessionId,
-  };
-  TTS_DEBUG.lastSkip = skipResult;
-  ttsDiagPush('skip-block', skipResult);
-  return true;
-}
-
-function ttsWindowSplitSentences(text) {
-  const src = String(text || '');
-  const regex = /[^.!?]*[.!?]+["']?\s*/g;
-  const results = [];
-  let lastEnd = 0;
-  let match;
-  while ((match = regex.exec(src)) !== null) {
-    results.push(src.slice(match.index, match.index + match[0].length));
-    lastEnd = match.index + match[0].length;
-  }
-  if (lastEnd < src.length) results.push(src.slice(lastEnd));
-  return results.filter(s => s.trim().length > 0);
-}
 
 function ttsDiagPush(event, data = {}) {
   const entry = { seq: ++TTS_DEBUG.seq, at: new Date().toISOString(), event, data };
@@ -563,119 +81,6 @@ function ttsDiagPush(event, data = {}) {
   if (TTS_DEBUG.recent.length > 60) TTS_DEBUG.recent.shift();
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
   return entry;
-}
-
-
-function normalizeTtsCapability(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const preciseSeek = raw.preciseSeek && typeof raw.preciseSeek === 'object' ? raw.preciseSeek : {};
-  const marks = raw.marks && typeof raw.marks === 'object' ? raw.marks : {};
-  const cache = raw.cache && typeof raw.cache === 'object' ? raw.cache : {};
-  const artifact = raw.artifact && typeof raw.artifact === 'object' ? raw.artifact : {};
-  return {
-    provider: raw.provider == null ? null : String(raw.provider || ''),
-    preciseSeek: {
-      available: !!preciseSeek.available,
-      reason: preciseSeek.reason == null ? '' : String(preciseSeek.reason || ''),
-      provenance: preciseSeek.provenance == null ? 'none' : String(preciseSeek.provenance || 'none'),
-      includedInResponse: !!preciseSeek.includedInResponse,
-    },
-    marks: {
-      requested: !!marks.requested,
-      includedInResponse: !!marks.includedInResponse,
-      provenance: marks.provenance == null ? 'none' : String(marks.provenance || 'none'),
-      cacheStatus: marks.cacheStatus == null ? null : String(marks.cacheStatus || ''),
-    },
-    cache: {
-      audio: { status: cache && cache.audio ? (cache.audio.status == null ? null : String(cache.audio.status || '')) : null },
-      marks: { status: cache && cache.marks ? (cache.marks.status == null ? null : String(cache.marks.status || '')) : null },
-    },
-    artifact: {
-      version: artifact.version == null ? null : String(artifact.version || ''),
-      hash: artifact.hash == null ? null : String(artifact.hash || ''),
-    },
-  };
-}
-
-function getTtsCapabilityStatus() {
-  const backend = TTS_STATE.backendCapability ? JSON.parse(JSON.stringify(TTS_STATE.backendCapability)) : null;
-  const pageKey = TTS_STATE.backendCapabilityKey || TTS_STATE.activeKey || TTS_STATE.pausedPageKey || null;
-  const sentenceMarksRequested = !!(backend && backend.marks && backend.marks.requested);
-  const marksReturnedCount = Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0;
-  const runtimeHighlight = TTS_STATE.highlightMarksProvenance || 'none';
-  let authority = 'none';
-  let mismatch = null;
-  if (backend) {
-    authority = 'backend-capability';
-    if (backend.preciseSeek.available && sentenceMarksRequested && !backend.marks.includedInResponse) {
-      mismatch = 'precise-seek-available-but-marks-not-included';
-    } else if (!backend.preciseSeek.available && runtimeHighlight === 'timed') {
-      mismatch = 'timed-highlight-without-backend-precise-seek';
-    }
-  } else if (runtimeHighlight !== 'none') {
-    authority = 'legacy-runtime-inference';
-    mismatch = 'backend-capability-missing';
-  }
-  const usingTimedMarks = runtimeHighlight === 'timed';
-  return {
-    authority,
-    pageKey,
-    sessionId: Number(TTS_STATE.backendCapabilitySessionId || TTS_STATE.activeSessionId || 0),
-    appliedAt: TTS_STATE.backendCapabilityAppliedAt || null,
-    backend,
-    runtime: {
-      highlightProvenance: runtimeHighlight,
-      usingTimedMarks,
-      usingEstimatedMarks: runtimeHighlight === 'estimated',
-      marksReturnedCount,
-      preciseSeekReadyNow: !!(backend && backend.preciseSeek && backend.preciseSeek.available && backend.marks && backend.marks.includedInResponse && usingTimedMarks),
-    },
-    mismatch,
-  };
-}
-
-function applyCloudCapabilityForRuntime({ key, sessionId, capability, sentenceMarks } = {}) {
-  const normalized = normalizeTtsCapability(capability);
-  TTS_STATE.backendCapability = normalized;
-  TTS_STATE.backendCapabilityKey = key ? String(key) : null;
-  TTS_STATE.backendCapabilitySessionId = Number(sessionId || 0) || 0;
-  TTS_STATE.backendCapabilityAppliedAt = new Date().toISOString();
-
-  const returnedMarksCount = Array.isArray(sentenceMarks) ? sentenceMarks.length : 0;
-  const summary = {
-    authority: normalized ? 'backend-capability' : 'legacy-runtime-inference',
-    key: key ? String(key) : null,
-    sessionId: Number(sessionId || 0) || 0,
-    provider: normalized?.provider || null,
-    preciseSeekAvailable: !!normalized?.preciseSeek?.available,
-    preciseSeekReason: normalized?.preciseSeek?.reason || (returnedMarksCount > 0 ? 'legacy-sentence-marks-only' : 'backend-capability-missing'),
-    preciseSeekProvenance: normalized?.preciseSeek?.provenance || 'none',
-    marksRequested: !!normalized?.marks?.requested,
-    marksIncludedInResponse: !!normalized?.marks?.includedInResponse,
-    returnedMarksCount,
-    marksProvenance: normalized?.marks?.provenance || 'none',
-    audioCacheStatus: normalized?.cache?.audio?.status || null,
-    marksCacheStatus: normalized?.cache?.marks?.status || null,
-    artifactVersion: normalized?.artifact?.version || null,
-    artifactHash: normalized?.artifact?.hash || null,
-    mismatch: null,
-  };
-  if (summary.preciseSeekAvailable && summary.marksRequested && !summary.marksIncludedInResponse) {
-    summary.mismatch = 'precise-seek-available-but-marks-not-included';
-  } else if (!normalized && returnedMarksCount > 0) {
-    summary.mismatch = 'backend-capability-missing';
-  }
-  TTS_DEBUG.lastCapability = summary;
-  ttsDiagPush('cloud-capability-applied', summary);
-  return summary;
-}
-
-
-function clearTtsBackendCapabilityState() {
-  TTS_STATE.backendCapability = null;
-  TTS_STATE.backendCapabilityKey = null;
-  TTS_STATE.backendCapabilitySessionId = 0;
-  TTS_STATE.backendCapabilityAppliedAt = null;
 }
 
 function ttsBlockSnapshot() {
@@ -689,55 +94,6 @@ function ttsBlockSnapshot() {
     pausedBlockIndex: TTS_STATE.pausedBlockIndex,
     pausedPageKey: TTS_STATE.pausedPageKey,
     playback: getPlaybackStatus(),
-  };
-}
-
-function ttsExcerptText(value, maxLen = 96) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  if (!text) return '';
-  return text.length > maxLen ? `${text.slice(0, maxLen - 1)}…` : text;
-}
-
-function ttsGetPageTextForKey(key) {
-  const parsed = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(String(key || '')) : null;
-  const pageIndex = parsed ? parsed.pageIndex : -1;
-  if (!Number.isFinite(pageIndex) || pageIndex < 0) return { pageIndex: -1, text: '', pageEl: null, textEl: null };
-  const pageEl = document.querySelectorAll('.page')[pageIndex] || null;
-  const textEl = pageEl ? pageEl.querySelector('.page-text') : null;
-  const text = String(textEl ? (textEl.textContent || '') : '');
-  return { pageIndex, text, pageEl, textEl };
-}
-
-function ttsGetBlockPreview(key, blockIdx) {
-  const target = Number(blockIdx);
-  if (!Number.isFinite(target) || target < 0) return null;
-  const page = ttsGetPageTextForKey(key);
-  const text = String(page.text || '');
-  const browserRanges = Array.isArray(TTS_STATE.browserSentenceRanges) ? TTS_STATE.browserSentenceRanges : null;
-  const highlightRanges = Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks : null;
-  const browserRange = browserRanges && browserRanges[target];
-  const highlightRange = highlightRanges && highlightRanges[target];
-  const range = browserRange || highlightRange;
-  if (!range) return {
-    pageIndex: page.pageIndex,
-    blockIndex: target,
-    rangeSource: browserRange ? 'browser-ranges' : (highlightRange ? 'highlight-marks' : 'none'),
-    text: '',
-    excerpt: '',
-    start: -1,
-    end: -1,
-  };
-  const start = Number.isFinite(Number(range.start)) ? Number(range.start) : -1;
-  const end = Number.isFinite(Number(range.end)) ? Number(range.end) : -1;
-  const slice = (start >= 0 && end >= start && text) ? text.slice(start, end) : '';
-  return {
-    pageIndex: page.pageIndex,
-    blockIndex: target,
-    rangeSource: browserRange ? 'browser-ranges' : 'highlight-marks',
-    text: slice,
-    excerpt: ttsExcerptText(slice),
-    start,
-    end,
   };
 }
 
@@ -791,463 +147,7 @@ const AUTOPLAY_STATE = {
   countdownPageIndex: -1,
   countdownSec: 0,
   countdownTimerId: null,
-  countdownDeadlineTs: 0,
 };
-
-const AUTOPLAY_NEXT_DELAY_MS = 3000;
-
-const AUTOPLAY_PRESYNTH_STATE = {
-  tokenId: 0,
-  token: null,
-};
-
-function getAutoplayRouteFingerprint(routeInfo = getPreferredTtsRouteInfo()) {
-  const selected = routeInfo && routeInfo.selected ? routeInfo.selected : {};
-  return [
-    routeInfo && routeInfo.tier ? routeInfo.tier : '',
-    routeInfo && routeInfo.requestedPath ? routeInfo.requestedPath : '',
-    routeInfo && routeInfo.reason ? routeInfo.reason : '',
-    selected.stored || '',
-    selected.type || '',
-    selected.requestedCloudVoiceId || '',
-    String(TTS_STATE.voiceVariant || 'female'),
-  ].join('|');
-}
-
-function isAutoplayPresynthCloudEligible(routeInfo = getPreferredTtsRouteInfo()) {
-  if (!routeInfo || !routeInfo.cloudCapable) return false;
-  return routeInfo.requestedPath !== 'browser-selected';
-}
-
-function getKeyForAutoplayResolvedTarget(resolved) {
-  if (!resolved) return '';
-  const target = {
-    sourceType: resolved.sourceType || '',
-    bookId: resolved.bookId || '',
-    chapterIndex: resolved.chapterIndex != null ? resolved.chapterIndex : -1,
-    pageIndex: resolved.nextIndex,
-  };
-  try { return (typeof readingTargetToKey === 'function') ? readingTargetToKey(target) : `page-${resolved.nextIndex}`; } catch (_) {
-    return `page-${resolved.nextIndex}`;
-  }
-}
-
-function invalidateAutoplayPresynth(reason = 'unknown', opts = {}) {
-  const token = AUTOPLAY_PRESYNTH_STATE.token;
-  if (!token) return false;
-  token.valid = false;
-  token.invalidReason = String(reason || 'unknown');
-  if (opts.abort !== false && token.controller) {
-    try { token.controller.abort(); } catch (_) {}
-  }
-  ttsDiagPush('autoplay-presynth-discarded', {
-    tokenId: token.id,
-    reason: token.invalidReason,
-    nextKey: token.nextKey || null,
-    nextPageIndex: token.nextPageIndex,
-    status: token.status || 'unknown',
-    ready: !!token.ready,
-    pending: token.status === 'pending',
-  });
-  AUTOPLAY_PRESYNTH_STATE.token = null;
-  return true;
-}
-
-function recordTtsUserSkip(reason = 'skip') {
-  TTS_STATE.activeSessionSkipCount = Number(TTS_STATE.activeSessionSkipCount || 0) + 1;
-  invalidateAutoplayPresynth(reason, { abort: true });
-}
-
-async function checkAutoplayPresynthUsageAllowed(token) {
-  const base = {
-    tokenId: token ? token.id : 0,
-    nextKey: token ? token.nextKey : null,
-    nextPageIndex: token ? token.nextPageIndex : -1,
-    usageSpendPolicy: 'normal-playback-owner-only',
-  };
-  if (!token || !isAutoplayPresynthTokenCurrent(token)) {
-    return { allowed: false, reason: 'stale-token', verdict: null };
-  }
-  if (!(window.rcUsage && typeof window.rcUsage.check === 'function')) {
-    ttsDiagPush('autoplay-presynth-usage-preflight', {
-      ...base,
-      allowed: true,
-      reason: 'no-usage-check-owner',
-      spendNow: false,
-    });
-    return { allowed: true, reason: 'no-usage-check-owner', verdict: null };
-  }
-  try {
-    const verdict = await window.rcUsage.check('tts');
-    const allowed = !!verdict?.allowed;
-    ttsDiagPush('autoplay-presynth-usage-preflight', {
-      ...base,
-      allowed,
-      reason: verdict?.reason || (allowed ? 'ok' : 'denied'),
-      remaining: verdict?.remaining,
-      limit: verdict?.limit,
-      cost: verdict?.cost,
-      spendNow: false,
-    });
-    return { allowed, reason: verdict?.reason || (allowed ? 'ok' : 'denied'), verdict };
-  } catch (err) {
-    // Match normal TTS degraded behavior: if the usage service is unreachable,
-    // do not make the client invent a capacity denial.
-    ttsDiagPush('autoplay-presynth-usage-preflight', {
-      ...base,
-      allowed: true,
-      reason: 'usage-check-error-proceed',
-      error: String(err?.message || err),
-      spendNow: false,
-    });
-    return { allowed: true, reason: 'usage-check-error-proceed', verdict: null };
-  }
-}
-
-async function fetchAutoplayFullPagePrep(text, token) {
-  const payload = { text: String(text || ''), speechMarks: 'sentence', requestMode: 'full-page' };
-  const selectedVoicePref = token && token.selectedVoice ? token.selectedVoice : getSelectedVoicePreference();
-  if (selectedVoicePref.explicitCloud && selectedVoicePref.requestedCloudVoiceId) payload.voiceId = selectedVoicePref.requestedCloudVoiceId;
-  try { const qs = new URLSearchParams(window.location.search); if (qs.get('debug') === '1') payload.debug = '1'; } catch (_) {}
-  try { if (String(TTS_STATE.voiceVariant || '').toLowerCase() === 'male') payload.voiceVariant = 'male'; } catch (_) {}
-  try { if (localStorage.getItem('tts_nocache') === '1') payload.nocache = true; } catch (_) {}
-
-  const endpoint = apiUrl('/api/ai?action=tts');
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: token && token.controller ? token.controller.signal : undefined,
-  });
-  let data = null, rawText = '';
-  try { rawText = await res.text(); data = rawText ? JSON.parse(rawText) : null; } catch (_) {}
-  if (!res.ok || !data?.url) {
-    const detail = data?.detail || data?.message || rawText || '';
-    const msg = data?.error ? `${data.error}${detail ? `: ${detail}` : ''}` : `TTS request failed (${res.status})${detail ? `: ${detail}` : ''}`;
-    throw new Error(msg);
-  }
-  return {
-    url: data.url,
-    sentenceMarks: Array.isArray(data.sentenceMarks) ? data.sentenceMarks : null,
-    capability: normalizeTtsCapability(data?.capability),
-    cacheHit: !!data?.cacheHit,
-  };
-}
-
-function isAutoplayPresynthTokenCurrent(token) {
-  return !!token && AUTOPLAY_PRESYNTH_STATE.token === token && token.valid !== false;
-}
-
-function isAutoplayPresynthTokenRouteValid(token) {
-  if (!token) return false;
-  const routeInfo = getPreferredTtsRouteInfo();
-  if (!isAutoplayPresynthCloudEligible(routeInfo)) return false;
-  return String(token.routeFingerprint || '') === getAutoplayRouteFingerprint(routeInfo);
-}
-
-function beginAutoplayFullPagePrep(resolved) {
-  const routeInfo = getPreferredTtsRouteInfo();
-  const priorSkipCount = Number(TTS_STATE.activeSessionSkipCount || 0);
-  const nextKey = getKeyForAutoplayResolvedTarget(resolved);
-  const nextText = String(resolved && resolved.text ? resolved.text : '');
-  const nextSentences = ttsWindowSplitSentences(nextText);
-  const eligible = !!resolved && !!nextKey && !!nextText && priorSkipCount === 0 && isAutoplayPresynthCloudEligible(routeInfo);
-
-  if (!eligible) {
-    ttsDiagPush('autoplay-presynth-discarded', {
-      reason: priorSkipCount > 0 ? 'prior-skip' : (!isAutoplayPresynthCloudEligible(routeInfo) ? 'route-not-cloud' : 'not-eligible'),
-      priorSkipCount,
-      nextKey: nextKey || null,
-      nextPageIndex: resolved ? resolved.nextIndex : -1,
-      requested: false,
-    });
-    return null;
-  }
-
-  const token = {
-    id: ++AUTOPLAY_PRESYNTH_STATE.tokenId,
-    valid: true,
-    status: 'pending',
-    ready: false,
-    consumed: false,
-    fallbackStarted: false,
-    requestedAt: Date.now(),
-    readyAt: 0,
-    currentPageIndex: resolved.currentIndex,
-    nextPageIndex: resolved.nextIndex,
-    nextKey,
-    nextTextLength: nextText.length,
-    nextSentenceCount: nextSentences.length,
-    countdownPageIndex: resolved.currentIndex,
-    countdownDeadlineTs: Number(AUTOPLAY_STATE.countdownDeadlineTs || 0),
-    priorCompletedNaturally: true,
-    priorSkipCount,
-    routeFingerprint: getAutoplayRouteFingerprint(routeInfo),
-    selectedVoice: getSelectedVoicePreference(),
-    voiceVariant: String(TTS_STATE.voiceVariant || 'female'),
-    usagePreflight: null,
-    usageSpendPolicy: 'normal-playback-owner-only',
-    presynthBackendWorkStarted: false,
-    controller: new AbortController(),
-    result: null,
-    error: null,
-  };
-  AUTOPLAY_PRESYNTH_STATE.token = token;
-
-  ttsDiagPush('autoplay-presynth-requested', {
-    tokenId: token.id,
-    nextKey,
-    currentPageIndex: token.currentPageIndex,
-    nextPageIndex: token.nextPageIndex,
-    priorCompletedNaturally: true,
-    priorSkipCount,
-    routeFingerprint: token.routeFingerprint,
-    chars: token.nextTextLength,
-    sentences: token.nextSentenceCount,
-    requestMode: 'full-page',
-    usageSpendPolicy: token.usageSpendPolicy,
-    usagePreflight: 'pending',
-  });
-
-  token.promise = checkAutoplayPresynthUsageAllowed(token).then((usage) => {
-    token.usagePreflight = usage;
-    if (!usage.allowed || !isAutoplayPresynthTokenCurrent(token)) {
-      token.status = usage.allowed ? 'discarded' : 'usage-blocked';
-      token.valid = false;
-      token.invalidReason = usage.allowed ? 'stale-token-before-fetch' : 'usage-blocked';
-      ttsDiagPush('autoplay-presynth-discarded', {
-        tokenId: token.id,
-        nextKey: token.nextKey,
-        nextPageIndex: token.nextPageIndex,
-        reason: token.invalidReason,
-        usageAllowed: !!usage.allowed,
-        usageReason: usage.reason || null,
-        requestStarted: false,
-        usageSpendPolicy: token.usageSpendPolicy,
-      });
-      if (AUTOPLAY_PRESYNTH_STATE.token === token) AUTOPLAY_PRESYNTH_STATE.token = null;
-      return null;
-    }
-    token.presynthBackendWorkStarted = true;
-    return fetchAutoplayFullPagePrep(nextText, token);
-  }).then((result) => {
-    if (!result) return null;
-    const marksCount = Array.isArray(result.sentenceMarks) ? result.sentenceMarks.length : 0;
-    const longWindowCandidate = token.nextSentenceCount > 2 && token.nextTextLength >= TTS_WINDOW_SMALL_PAGE_CHARS;
-    const coverageOk = !longWindowCandidate || marksCount > getTtsChunkWindowLimit();
-    if (!isAutoplayPresynthTokenCurrent(token) || !isAutoplayPresynthTokenRouteValid(token) || token.fallbackStarted || token.consumed || !coverageOk) {
-      token.status = 'discarded';
-      token.result = result;
-      ttsDiagPush(token.fallbackStarted ? 'autoplay-presynth-late-cache-only' : 'autoplay-presynth-discarded', {
-        tokenId: token.id,
-        nextKey: token.nextKey,
-        nextPageIndex: token.nextPageIndex,
-        reason: token.fallbackStarted ? 'fallback-already-started' : (!coverageOk ? 'coverage-insufficient' : (!isAutoplayPresynthTokenRouteValid(token) ? 'route-mismatch' : 'stale-token')),
-        cacheOnly: true,
-        marksCount,
-        audioCacheStatus: result.capability?.cache?.audio?.status || null,
-        marksCacheStatus: result.capability?.cache?.marks?.status || null,
-        artifactHash: result.capability?.artifact?.hash || null,
-        usageSpendPolicy: token.usageSpendPolicy,
-        usagePreflightReason: token.usagePreflight?.reason || null,
-      });
-      if (AUTOPLAY_PRESYNTH_STATE.token === token) AUTOPLAY_PRESYNTH_STATE.token = null;
-      return result;
-    }
-    token.status = 'ready';
-    token.ready = true;
-    token.readyAt = Date.now();
-    token.result = result;
-    ttsDiagPush('autoplay-presynth-ready', {
-      tokenId: token.id,
-      nextKey: token.nextKey,
-      nextPageIndex: token.nextPageIndex,
-      elapsedMs: token.readyAt - token.requestedAt,
-      marksCount,
-      audioCacheStatus: result.capability?.cache?.audio?.status || null,
-      marksCacheStatus: result.capability?.cache?.marks?.status || null,
-      artifactHash: result.capability?.artifact?.hash || null,
-      usageSpendPolicy: token.usageSpendPolicy,
-      usagePreflightReason: token.usagePreflight?.reason || null,
-      spendNow: false,
-    });
-    return result;
-  }).catch((err) => {
-    if (!isAutoplayPresynthTokenCurrent(token)) return null;
-    token.status = 'failed';
-    token.error = String(err?.message || err);
-    ttsDiagPush('autoplay-presynth-failed', {
-      tokenId: token.id,
-      nextKey: token.nextKey,
-      nextPageIndex: token.nextPageIndex,
-      elapsedMs: Date.now() - token.requestedAt,
-      error: token.error,
-      usageSpendPolicy: token.usageSpendPolicy,
-      usagePreflightReason: token.usagePreflight?.reason || null,
-    });
-    return null;
-  });
-  return token;
-}
-
-function consumeAutoplayPresynthForResolved(resolved) {
-  const token = AUTOPLAY_PRESYNTH_STATE.token;
-  const nextKey = getKeyForAutoplayResolvedTarget(resolved);
-  const base = {
-    tokenId: token ? token.id : 0,
-    nextKey: nextKey || null,
-    nextPageIndex: resolved ? resolved.nextIndex : -1,
-  };
-  if (!token || !nextKey || token.nextKey !== nextKey || token.valid === false) {
-    ttsDiagPush('autoplay-next-page-mode', { ...base, mode: 'phase1-block-window', reason: 'no-valid-presynth-token', presynthUsageRisk: false });
-    return { mode: 'phase1-block-window', token: null, reason: 'no-valid-presynth-token', presynthUsageRisk: false };
-  }
-  const focusedPageIndex = (typeof lastFocusedPageIndex === 'number') ? Number(lastFocusedPageIndex) : -1;
-  if (focusedPageIndex >= 0 && Number(token.countdownPageIndex) >= 0 && focusedPageIndex !== Number(token.countdownPageIndex)) {
-    invalidateAutoplayPresynth('manual-page-change-during-countdown', { abort: true });
-    ttsDiagPush('autoplay-next-page-mode', { ...base, mode: 'phase1-block-window', reason: 'manual-page-change-during-countdown', presynthUsageRisk: false, focusedPageIndex });
-    return { mode: 'phase1-block-window', token: null, reason: 'manual-page-change-during-countdown', presynthUsageRisk: false };
-  }
-  if (!isAutoplayPresynthTokenRouteValid(token)) {
-    invalidateAutoplayPresynth('route-or-voice-mismatch', { abort: true });
-    ttsDiagPush('autoplay-next-page-mode', { ...base, mode: 'phase1-block-window', reason: 'route-or-voice-mismatch', presynthUsageRisk: false });
-    return { mode: 'phase1-block-window', token: null, reason: 'route-or-voice-mismatch', presynthUsageRisk: false };
-  }
-  if (token.ready && token.status === 'ready') {
-    token.consumed = true;
-    token.status = 'consumed';
-    markTtsFullPageReady(nextKey, { source: 'autoplay-presynth-consumed', marksCount: Array.isArray(token.result?.sentenceMarks) ? token.result.sentenceMarks.length : 0 });
-    ttsDiagPush('autoplay-presynth-consumed', {
-      ...base,
-      elapsedMs: token.readyAt ? token.readyAt - token.requestedAt : Date.now() - token.requestedAt,
-      marksCount: Array.isArray(token.result?.sentenceMarks) ? token.result.sentenceMarks.length : 0,
-      artifactHash: token.result?.capability?.artifact?.hash || null,
-      usageSpendPolicy: token.usageSpendPolicy,
-      usagePreflightReason: token.usagePreflight?.reason || null,
-      spendNow: false,
-    });
-    ttsDiagPush('autoplay-next-page-mode', { ...base, mode: 'autoplay-full-page', reason: 'presynth-ready', presynthUsageRisk: false });
-    AUTOPLAY_PRESYNTH_STATE.token = null;
-    return { mode: 'autoplay-full-page', token, reason: 'presynth-ready', presynthUsageRisk: false };
-  }
-
-  token.fallbackStarted = true;
-  ttsDiagPush('autoplay-presynth-not-ready-fallback', {
-    ...base,
-    pending: token.status === 'pending',
-    failed: token.status === 'failed',
-    status: token.status,
-    elapsedMs: Date.now() - token.requestedAt,
-    presynthUsageRisk: token.status === 'pending',
-    usageSpendPolicy: token.usageSpendPolicy,
-    usagePreflightReason: token.usagePreflight?.reason || null,
-    backendWorkStarted: !!token.presynthBackendWorkStarted,
-  });
-  ttsDiagPush('autoplay-next-page-mode', {
-    ...base,
-    mode: 'phase1-block-window',
-    reason: token.status === 'failed' ? 'presynth-failed' : 'presynth-not-ready',
-    presynthUsageRisk: token.status === 'pending',
-    usageSpendPolicy: token.usageSpendPolicy,
-    usagePreflightReason: token.usagePreflight?.reason || null,
-    backendWorkStarted: !!token.presynthBackendWorkStarted,
-  });
-  return { mode: 'phase1-block-window', token, reason: token.status === 'failed' ? 'presynth-failed' : 'presynth-not-ready', presynthUsageRisk: token.status === 'pending' };
-}
-
-function queuePendingCloudSeek(key, sessionId, blockIdx, leadMs = 0) {
-  TTS_STATE.pendingCloudSeekKey = String(key || '');
-  TTS_STATE.pendingCloudSeekSessionId = Number(sessionId || 0) || 0;
-  TTS_STATE.pendingCloudSeekBlockIndex = Number.isFinite(Number(blockIdx)) ? Number(blockIdx) : -1;
-  TTS_STATE.pendingCloudSeekLeadMs = Number.isFinite(Number(leadMs)) ? Math.max(0, Number(leadMs)) : 0;
-}
-
-function clearPendingCloudSeek() {
-  TTS_STATE.pendingCloudSeekKey = null;
-  TTS_STATE.pendingCloudSeekSessionId = 0;
-  TTS_STATE.pendingCloudSeekBlockIndex = -1;
-  TTS_STATE.pendingCloudSeekLeadMs = 0;
-}
-
-function clearCloudRestartTransition(opts = {}) {
-  const audio = TTS_STATE.audio;
-  const shouldUnmute = opts.unmute !== false;
-  const activeRequestId = Number(TTS_STATE.cloudRestartRequestId || 0);
-  TTS_STATE.cloudRestartInFlight = false;
-  if (opts.invalidateRequest !== false) {
-    clearCloudRestartPendingState(activeRequestId, opts.reason || 'transition-cleared');
-    TTS_STATE.cloudRestartRequestId = activeRequestId + 1;
-  } else {
-    clearCloudRestartPendingState(activeRequestId, opts.reason || 'transition-cleared-no-invalidate');
-  }
-  if (shouldUnmute && audio) {
-    try { audio.muted = false; } catch (_) {}
-  }
-}
-
-function isCloudRestartTransitionActive() {
-  return !!TTS_STATE.audio && !!TTS_STATE.cloudRestartInFlight;
-}
-
-function clearPendingBrowserRestartTimer() {
-  const timerId = Number(TTS_STATE.browserRestartTimerId || 0);
-  if (timerId > 0) {
-    try { clearTimeout(timerId); } catch (_) {}
-  }
-  TTS_STATE.browserRestartTimerId = 0;
-}
-
-function resetBrowserRestartOwnership() {
-  clearPendingBrowserRestartTimer();
-  TTS_STATE.browserRestarting = false;
-  TTS_STATE.browserRestartRequestId = 0;
-  TTS_STATE.browserExpectedEntryBlockIndex = -1;
-}
-
-function isBrowserStaleEntryBlock(blockIdx) {
-  const expected = Number(TTS_STATE.browserExpectedEntryBlockIndex);
-  return Number.isFinite(expected) && expected >= 0 && Number(blockIdx) !== expected;
-}
-
-function isRecoverablePlaybackFailure(err) {
-  const msg = String(err && err.message ? err.message : err || '');
-  // Recoverable failures should surface clearly but must not permanently lock
-  // playback controls. In particular, transient cloud/server transport issues
-  // (for example websocket 1006 / unable-to-contact-server) should leave Play
-  // immediately retryable after the failed session is cleaned up.
-  return /audio playback failed|stale-phase1-promotion-result|notallowederror|interrupted|notsupportederror|mediaerror|unable to contact server|statuscode:\s*1006|failed to fetch|networkerror|network request failed|timeout|timed out|service unavailable|bad gateway|gateway timeout|tts request failed \(5\d\d\)|server error/i.test(msg);
-}
-
-function isRecoverableBrowserUtteranceError(evt) {
-  const code = String(evt && (evt.error || evt.name || evt.type) ? (evt.error || evt.name || evt.type) : '').toLowerCase();
-  return /interrupted|canceled|cancelled|audio-busy/.test(code);
-}
-
-function applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason) {
-  if (!audio || !key) return false;
-  if (String(TTS_STATE.pendingCloudSeekKey || '') !== String(key)) return false;
-  if (Number(TTS_STATE.pendingCloudSeekSessionId || 0) !== Number(sessionId || 0)) return false;
-  const target = Number(TTS_STATE.pendingCloudSeekBlockIndex);
-  const marks = TTS_STATE.highlightMarks;
-  if (!Array.isArray(marks) || !marks.length || !Number.isFinite(target) || target < 0 || target >= marks.length) return false;
-  const leadMs = Number.isFinite(Number(TTS_STATE.pendingCloudSeekLeadMs)) ? Math.max(0, Number(TTS_STATE.pendingCloudSeekLeadMs)) : 0;
-  const rawTimeS = Number(marks[target].time || 0) / 1000;
-  const seekTime = Math.max(0, rawTimeS - leadMs / 1000);
-  try {
-    audio.currentTime = seekTime;
-    TTS_STATE.activeBlockIndex = target;
-    ttsHighlightBlock(target);
-    if (isRuntimePausedForContract()) {
-      TTS_STATE.pausedBlockIndex = target;
-      TTS_STATE.pausedPageKey = key;
-    }
-    clearPendingCloudSeek();
-    ttsDiagPush('cloud-seek-applied', { key, sessionId, blockIndex: target, seekTime, leadMs, reason: reason || 'media-ready' });
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
 
 function ttsKeepWarmForAutoplay() {
   if (!AUTOPLAY_STATE.enabled) return;
@@ -1285,13 +185,10 @@ function ttsSetHintButton(key, disabled) {
   } catch (_) {}
 }
 
-function ttsAutoplayCancelCountdown(reason = 'cancel') {
+function ttsAutoplayCancelCountdown() {
   const idx = AUTOPLAY_STATE.countdownPageIndex;
-  const keepPresynth = String(reason || '') === 'countdown-complete';
-  if (!keepPresynth) invalidateAutoplayPresynth(`countdown-${reason || 'cancel'}`, { abort: true });
   if (AUTOPLAY_STATE.countdownTimerId) clearInterval(AUTOPLAY_STATE.countdownTimerId);
   AUTOPLAY_STATE.countdownTimerId = null;
-  AUTOPLAY_STATE.countdownDeadlineTs = 0;
   AUTOPLAY_STATE.countdownPageIndex = -1;
   AUTOPLAY_STATE.countdownSec = 0;
   try {
@@ -1303,138 +200,45 @@ function ttsAutoplayCancelCountdown(reason = 'cancel') {
   } catch (_) {}
 }
 
-function applyAutoplayRuntimePreference(enabled, opts = {}) {
-  const next = !!enabled;
-  AUTOPLAY_STATE.enabled = next;
-  if (!next) ttsAutoplayCancelCountdown('autoplay-disabled');
-  if (opts.syncControl !== false) {
-    try {
-      const checkbox = document.getElementById('autoplayToggle');
-      if (checkbox) checkbox.checked = next;
-    } catch (_) {}
-  }
-  if (opts.persist !== false) {
-    try { localStorage.setItem('rc_autoplay', next ? '1' : '0'); } catch (_) {}
-  }
-  ttsDiagPush('autoplay-runtime-applied', {
-    enabled: next,
-    source: String(opts.source || 'unknown'),
-    persisted: opts.persist !== false,
-    syncedControl: opts.syncControl !== false,
-  });
-  return AUTOPLAY_STATE.enabled;
-}
-
-function ttsBuildPageHandoffTarget(input = {}) {
-  const raw = (typeof input === 'number') ? { pageIndex: input } : (input || {});
-  const baseFromKey = (typeof readingTargetFromKey === 'function' && raw.key) ? readingTargetFromKey(String(raw.key)) : null;
-  const baseFromTarget = raw.targetContext && typeof raw.targetContext === 'object' ? raw.targetContext : null;
-  const baseFromReading = window.__rcReadingTarget || null;
-  const base = baseFromKey || baseFromTarget || baseFromReading || {};
-  const currentIndex = Number.isFinite(Number(raw.pageIndex)) ? Number(raw.pageIndex) : Number(base.pageIndex);
-  const delta = Number.isFinite(Number(raw.delta)) ? Number(raw.delta) : 1;
-  const nextIndex = Number.isFinite(currentIndex) ? currentIndex + (delta < 0 ? -1 : 1) : NaN;
-  if (!Number.isFinite(nextIndex) || nextIndex < 0) return null;
-  if (typeof pages === 'undefined' || !pages[nextIndex]) return null;
-  return {
-    currentIndex: Number.isFinite(currentIndex) ? currentIndex : -1,
-    nextIndex,
-    sourceType: base.sourceType || '',
-    bookId: base.bookId || '',
-    chapterIndex: base.chapterIndex != null ? base.chapterIndex : -1,
-    text: pages[nextIndex],
-    targetBlockIndex: Number.isFinite(Number(raw.targetBlockIndex)) ? Number(raw.targetBlockIndex) : 0,
-    behavior: raw.behavior || 'smooth',
-    reason: raw.reason || '',
-  };
-}
-
-function ttsRunPageHandoff(input = {}) {
-  const mode = String(input.mode || 'speak');
-  const resolved = ttsBuildPageHandoffTarget(input);
-  if (!resolved) return false;
-  const { currentIndex, nextIndex, sourceType, bookId, chapterIndex, text, targetBlockIndex, behavior, reason } = resolved;
-  if (String(reason || '') !== 'autoplay-countdown-complete') {
-    invalidateAutoplayPresynth(`page-handoff-${reason || 'manual'}`, { abort: true });
-  }
-  const focusResult = (typeof window.focusReadingPage === 'function')
-    ? window.focusReadingPage(nextIndex, { behavior })
-    : { ok: false };
-  if ((!focusResult || focusResult.ok === false) && behavior) {
-    try {
-      const pageEls = document.querySelectorAll('.page');
-      const nextPageEl = pageEls[nextIndex];
-      if (nextPageEl && typeof window.__rcScrollReadingPageIntoView === 'function') {
-        window.__rcScrollReadingPageIntoView(nextPageEl, { behavior, reason: 'tts-page-handoff-fallback' });
-      }
-    } catch (_) {}
-  }
-  if (typeof setReadingTarget === 'function') {
-    setReadingTarget({ sourceType, bookId, chapterIndex, pageIndex: nextIndex });
-  }
-  const nextTarget = window.__rcReadingTarget || { sourceType, bookId, chapterIndex, pageIndex: nextIndex };
-  const nextKey = (typeof readingTargetToKey === 'function') ? readingTargetToKey(nextTarget) : `page-${nextIndex}`;
-  TTS_STATE.playbackBlockedReason = '';
-  clearPendingCloudSeek();
-
-  if (mode === 'paused') {
-    if (TTS_STATE.audio) {
-      void ttsPreparePausedCloudPage(nextIndex);
-    } else {
-      browserSpeakQueue(nextKey, [text], { startPaused: true, pausedBlockIndex: targetBlockIndex });
-    }
-  } else if (mode === 'speak') {
-    try { ttsKeepWarmForAutoplay(); } catch (_) {}
-    ttsSpeakQueue(nextKey, [text]);
-  }
-
-  TTS_DEBUG.lastSkip = {
-    at: new Date().toISOString(),
-    type: 'page',
-    resolved: 'page-handoff',
-    sourcePageIndex: currentIndex,
-    targetPageIndex: nextIndex,
-    mode,
-    reason: reason || '',
-    activeKey: TTS_STATE.activeKey || null,
-  };
-  ttsDiagPush('page-handoff', TTS_DEBUG.lastSkip);
-  return true;
-}
-
-function ttsAutoplayScheduleNext(pageInfo) {
+function ttsAutoplayScheduleNext(pageIndex) {
   if (!AUTOPLAY_STATE.enabled) return;
-  const resolved = ttsBuildPageHandoffTarget(typeof pageInfo === 'number' ? { pageIndex: pageInfo, reason: 'autoplay-countdown' } : { ...(pageInfo || {}), reason: (pageInfo && pageInfo.reason) || 'autoplay-countdown' });
-  if (!resolved) return;
   const pageEls = document.querySelectorAll('.page');
-  const currentPageEl = pageEls[resolved.currentIndex];
+  const nextIndex = pageIndex + 1;
+  if (nextIndex >= pageEls.length) return;
+  const currentPageEl = pageEls[pageIndex];
   if (!currentPageEl) return;
   const btn = currentPageEl.querySelector('.tts-btn[data-tts="page"]');
   if (!btn) return;
-  ttsAutoplayCancelCountdown('new-countdown');
-  AUTOPLAY_STATE.countdownPageIndex = resolved.currentIndex;
-  AUTOPLAY_STATE.countdownDeadlineTs = Date.now() + AUTOPLAY_NEXT_DELAY_MS;
-  AUTOPLAY_STATE.countdownSec = Math.max(1, Math.ceil(AUTOPLAY_NEXT_DELAY_MS / 1000));
-  beginAutoplayFullPagePrep(resolved);
+  AUTOPLAY_STATE.countdownPageIndex = pageIndex;
+  AUTOPLAY_STATE.countdownSec = 3;
   btn.classList.add('tts-active');
-  const updateBtn = () => { try { btn.textContent = `⏸ Next in ${AUTOPLAY_STATE.countdownSec}…`; } catch (_) {} };
+  function updateBtn() { if (btn) btn.textContent = `⏸ Next in ${AUTOPLAY_STATE.countdownSec}…`; }
   updateBtn();
   AUTOPLAY_STATE.countdownTimerId = setInterval(() => {
-    const remainingMs = Math.max(0, Number(AUTOPLAY_STATE.countdownDeadlineTs || 0) - Date.now());
-    AUTOPLAY_STATE.countdownSec = Math.max(0, Math.ceil(remainingMs / 1000));
-    if (remainingMs <= 0) {
-      ttsAutoplayCancelCountdown('countdown-complete');
-      consumeAutoplayPresynthForResolved(resolved);
-      ttsRunPageHandoff({
-        pageIndex: resolved.currentIndex,
-        targetContext: { sourceType: resolved.sourceType, bookId: resolved.bookId, chapterIndex: resolved.chapterIndex, pageIndex: resolved.currentIndex },
-        mode: 'speak',
-        behavior: 'smooth',
-        reason: 'autoplay-countdown-complete',
-      });
-    } else {
-      updateBtn();
-    }
+    AUTOPLAY_STATE.countdownSec -= 1;
+    if (AUTOPLAY_STATE.countdownSec <= 0) {
+      ttsAutoplayCancelCountdown();
+      const focusResult = (typeof window.focusReadingPage === 'function')
+        ? window.focusReadingPage(nextIndex, { behavior: 'smooth' })
+        : { ok: false };
+      if (!focusResult || focusResult.ok === false) {
+        const nextPageEl = pageEls[nextIndex];
+        if (nextPageEl) nextPageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      setTimeout(() => {
+        const text = (typeof pages !== 'undefined' && pages[nextIndex]) ? pages[nextIndex] : '';
+        if (!text) return;
+        if (!focusResult || focusResult.ok === false) {
+          const _cur = window.__rcReadingTarget || {};
+          if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _cur.sourceType || '', bookId: _cur.bookId || '', chapterIndex: _cur.chapterIndex != null ? _cur.chapterIndex : -1, pageIndex: nextIndex });
+        }
+        const activeTarget = window.__rcReadingTarget || {};
+        const nextKey = (typeof readingTargetToKey === 'function')
+          ? readingTargetToKey(activeTarget)
+          : `page-${nextIndex}`;
+        ttsSpeakQueue(nextKey, [text]);
+      }, 280);
+    } else { updateBtn(); }
   }, 1000);
 }
 
@@ -1467,29 +271,20 @@ function escapeHTML(s) {
 }
 
 function splitIntoSentenceRanges(text) {
-  const source = String(text || '');
   const sentenceRegex = /[^.!?]*[.!?]+["']?\s*/g;
   const ranges = [];
   let match;
-  let lastEnd = 0;
-  while ((match = sentenceRegex.exec(source)) !== null) {
-    const end = match.index + match[0].length;
-    ranges.push({ start: match.index, end });
-    lastEnd = end;
+  while ((match = sentenceRegex.exec(text)) !== null) {
+    ranges.push({ start: match.index, end: match.index + match[0].length });
   }
-  // Preserve visible trailing text even when it has no terminal punctuation.
-  // This keeps TTS/highlight blocks aligned with .page-text content such as
-  // form rows or box labels that end without a period.
-  if (lastEnd < source.length) ranges.push({ start: lastEnd, end: source.length });
-  if (!ranges.length) ranges.push({ start: 0, end: source.length });
-  return ranges.filter(r => r.end > r.start);
+  if (!ranges.length) ranges.push({ start: 0, end: text.length });
+  return ranges;
 }
 
 // ─── Highlight ────────────────────────────────────────────────────────────────
 
 function ttsClearSentenceHighlight() {
   if (TTS_STATE.highlightRAF) { cancelAnimationFrame(TTS_STATE.highlightRAF); TTS_STATE.highlightRAF = null; }
-  TTS_STATE.highlightMarksProvenance = null;
   if (TTS_STATE.highlightPageEl && TTS_STATE.highlightOriginalHTML != null) {
     TTS_STATE.highlightPageEl.innerHTML = TTS_STATE.highlightOriginalHTML;
     try {
@@ -1514,26 +309,14 @@ function ttsHighlightBlock(blockIdx) {
   // so skip/pause/resume all read from a single source of truth.
   if (blockIdx >= 0) TTS_STATE.activeBlockIndex = blockIdx;
   try {
+    const isMobile = window.matchMedia && window.matchMedia('(max-width: 480px)').matches;
     const pane = TTS_STATE.highlightPageEl;
-    const cur = (pane && blockIdx >= 0) ? TTS_STATE.highlightSpans[blockIdx] : null;
-    if (pane && cur) {
-      const styles = window.getComputedStyle ? window.getComputedStyle(pane) : null;
-      const overflowY = styles ? String(styles.overflowY || '').toLowerCase() : '';
-      const paneIsScrollable = (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
-        && (pane.scrollHeight > pane.clientHeight + 4);
-      if (paneIsScrollable) {
-        const viewTop = pane.scrollTop;
-        const viewBottom = viewTop + pane.clientHeight;
-        const blockTop = cur.offsetTop;
-        const blockBottom = blockTop + cur.offsetHeight;
-        const edgePad = Math.max(24, Math.min(96, Math.round(pane.clientHeight * 0.18)));
-        const desiredTop = viewTop + edgePad;
-        const desiredBottom = viewBottom - edgePad;
-        if (blockTop < desiredTop || blockBottom > desiredBottom) {
-          const centered = blockTop - (pane.clientHeight / 2) + (cur.offsetHeight / 2);
-          const maxScroll = Math.max(0, pane.scrollHeight - pane.clientHeight);
-          pane.scrollTop = Math.max(0, Math.min(centered, maxScroll));
-        }
+    if (isMobile && pane && blockIdx >= 0 && TTS_STATE.highlightSpans[blockIdx]) {
+      const cur = TTS_STATE.highlightSpans[blockIdx];
+      const canScroll = pane.scrollHeight > pane.clientHeight + 4;
+      if (canScroll) {
+        const desired = cur.offsetTop - (pane.clientHeight / 2) + (cur.offsetHeight / 2);
+        pane.scrollTop = Math.max(0, Math.min(desired, pane.scrollHeight - pane.clientHeight));
       }
     }
   } catch (_) {}
@@ -1572,70 +355,9 @@ function ttsMaybePrepareSentenceHighlight(key, rawText, marks) {
   TTS_STATE.highlightOriginalHTML = textEl.innerHTML;
   TTS_STATE.highlightMarks = spansMeta;
   TTS_STATE.highlightEnds = spansMeta.map((r, i) => i + 1 < spansMeta.length ? spansMeta[i + 1].time : Infinity);
-  TTS_STATE.highlightMarksProvenance = 'timed';
   textEl.innerHTML = spansHtml.join('');
   TTS_STATE.highlightSpans = Array.from(textEl.querySelectorAll('.tts-sentence'));
   try { const h = pageEl.querySelector('.hint-btn'); if (h) h.disabled = true; } catch (_) {}
-}
-
-function ttsPrepareWindowContinuationHighlight(key, pageText, startBlock, marks) {
-  if (!optsForKeySentenceMarks(key) || !Array.isArray(marks) || !marks.length) return false;
-  const _parsed = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
-  const pageIndex = _parsed ? _parsed.pageIndex : -1;
-  if (!Number.isFinite(pageIndex) || pageIndex < 0) return false;
-  const pageEl = document.querySelectorAll('.page')[pageIndex];
-  if (!pageEl) return false;
-  const textEl = pageEl.querySelector('.page-text');
-  if (!textEl) return false;
-
-  const text = String(pageText || textEl.textContent || '');
-  const ranges = splitIntoSentenceRanges(text);
-  const offset = Math.max(0, Number(startBlock || 0));
-  if (!ranges.length || offset >= ranges.length) return false;
-
-  ttsClearSentenceHighlight();
-  const spansHtml = [];
-  let cursor = 0;
-  const globalMarks = ranges.map((r, idx) => {
-    if (r.start > cursor) spansHtml.push(escapeHTML(text.slice(cursor, r.start)));
-    spansHtml.push(`<span class="tts-sentence" data-tts-sent="${idx}">${escapeHTML(text.slice(r.start, r.end))}</span>`);
-    cursor = r.end;
-    return { time: Number.MAX_SAFE_INTEGER, start: r.start, end: r.end };
-  });
-  if (cursor < text.length) spansHtml.push(escapeHTML(text.slice(cursor)));
-
-  for (let i = 0; i < marks.length; i++) {
-    const globalIdx = offset + i;
-    if (!globalMarks[globalIdx]) break;
-    globalMarks[globalIdx] = {
-      time: Number(marks[i].time) || 0,
-      start: globalMarks[globalIdx].start,
-      end: globalMarks[globalIdx].end,
-    };
-  }
-  const chunkEnd = Math.min(globalMarks.length - 1, offset + marks.length - 1);
-  for (let i = 0; i < offset; i++) {
-    globalMarks[i].time = -1;
-  }
-
-  TTS_STATE.highlightPageKey = key;
-  TTS_STATE.highlightPageEl = textEl;
-  TTS_STATE.highlightOriginalHTML = textEl.innerHTML;
-  TTS_STATE.highlightMarks = globalMarks;
-  TTS_STATE.highlightEnds = globalMarks.map((r, i) => {
-    if (i < offset) return -1;
-    if (i < chunkEnd && globalMarks[i + 1]) return globalMarks[i + 1].time;
-    return i === chunkEnd ? Infinity : Number.MAX_SAFE_INTEGER;
-  });
-  TTS_STATE.highlightMarksProvenance = 'timed-window-continuation';
-  textEl.innerHTML = spansHtml.join('');
-  TTS_STATE.highlightSpans = Array.from(textEl.querySelectorAll('.tts-sentence'));
-  try { const h = pageEl.querySelector('.hint-btn'); if (h) h.disabled = true; } catch (_) {}
-  ttsDiagPush('window-continuation-highlight-ready', {
-    sessionId: TTS_STATE.activeSessionId, key, startBlock: offset,
-    marksCount: marks.length, blockCount: globalMarks.length, chunkEnd,
-  });
-  return true;
 }
 
 function ttsPrepareEstimatedHighlight(key, rawText, audio) {
@@ -1676,7 +398,6 @@ function ttsPrepareEstimatedHighlight(key, rawText, audio) {
     });
     TTS_STATE.highlightMarks = m;
     TTS_STATE.highlightEnds = m.map((x, i) => i + 1 < m.length ? m[i + 1].time : Infinity);
-    TTS_STATE.highlightMarksProvenance = 'estimated';
   }
   buildTimings(60);
   let refined = false;
@@ -1694,7 +415,6 @@ function ttsPrepareEstimatedHighlight(key, rawText, audio) {
 function ttsStartHighlightLoop(audio) {
   if (!audio || !TTS_STATE.highlightSpans || !TTS_STATE.highlightMarks) return;
   let lastIdx = -1;
-  let isFirstTick = true;
   const tick = () => {
     if (!TTS_STATE.audio || TTS_STATE.audio !== audio) return;
     if (!TTS_STATE.highlightSpans || !TTS_STATE.highlightMarks) return;
@@ -1707,42 +427,11 @@ function ttsStartHighlightLoop(audio) {
       const end = ends[i] ?? Infinity;
       if (t >= start && t < end) { idx = i; break; }
     }
-
-    // First tick after loop restart: log proof surface for seek boundary analysis.
-    if (isFirstTick) {
-      isFirstTick = false;
-      ttsDiagPush('raf-first-tick', {
-        audioCurrentTimeMs: t,
-        computedIdx: idx,
-        markTimeMs: (idx >= 0 && marks[idx]) ? marks[idx].time : null,
-      });
-    }
-
     if (idx !== lastIdx) {
       // Track active block on state — this is what skip and pause read.
       if (idx >= 0) TTS_STATE.activeBlockIndex = idx;
       ttsHighlightBlock(idx);
       lastIdx = idx;
-      // Window promotion gate — checked on every block transition once block 1
-      // is reached. All three conditions must hold simultaneously:
-      //
-      //   1. idx >= 1  — user has progressed past the first block
-      //   2. audio.currentTime >= threshold  — at least 3 s of real audio played;
-      //        currentTime only advances during active playback so countdown,
-      //        loading delays, and paused time are excluded automatically
-      //   3. !audio.paused  — playback is live, not paused
-      //
-      // Pause during block 1 never satisfies (3) so it never promotes.
-      // A pause on block 1+ after threshold is already met is fine: the promotion
-      // fetch launched before the pause and the result will be waiting.
-      if (idx >= 1 && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionTriggered) {
-        const _wa = TTS_STATE.audio;
-        const _playing = !!(_wa && !_wa.paused && !_wa.ended);
-        const _elapsed = _wa ? Number(_wa.currentTime || 0) : 0;
-        if (_playing && _elapsed >= TTS_WINDOW_ENGAGEMENT_THRESHOLD_S) {
-          try { _ttsWindowTriggerPromotion('engagement-threshold-met'); } catch (_) {}
-        }
-      }
     }
     TTS_STATE.highlightRAF = requestAnimationFrame(tick);
   };
@@ -1767,7 +456,6 @@ function browserTtsStop() {
   TTS_STATE.browserIntentionalCancelUntil = Date.now() + 1200;
   TTS_STATE.browserIntentionalCancelReason = 'stop-or-replace';
   TTS_STATE.browserIntentionalCancelMeta = { sessionId: TTS_STATE.activeSessionId, key: TTS_STATE.activeKey || null };
-  clearPendingBrowserRestartTimer();
   window.speechSynthesis.cancel();
 }
 
@@ -1847,13 +535,8 @@ function browserSpeakQueue(key, parts, opts = {}) {
   }
 
   const sessionId = ++TTS_STATE.activeSessionId;
-  clearTtsBackendCapabilityState();
-  clearPendingCloudSeek();
-  clearCloudRestartTransition();
-  resetBrowserRestartOwnership();
   TTS_STATE.activeKey = key;
   TTS_STATE.lastPageKey = key;
-  TTS_STATE.activeSessionSkipCount = 0;
   TTS_STATE.browserPaused = startPaused;
   TTS_STATE.playbackBlockedReason = '';
   TTS_STATE.activeBlockIndex = startPaused ? pausedBlockIndex : -1;
@@ -1912,27 +595,13 @@ function browserSpeakQueue(key, parts, opts = {}) {
     } catch (_) {}
   }
 
-  function speakFromBlock(blockIdx, opts = {}) {
+  function speakFromBlock(blockIdx) {
     if (TTS_STATE.activeSessionId !== sessionId) return;
     if (TTS_STATE.activeKey !== key) return;
 
     TTS_STATE.browserCurrentSentenceIndex = blockIdx;
     TTS_STATE.activeBlockIndex = blockIdx;
     ttsHighlightBlock(blockIdx);
-
-    const preview = ttsGetBlockPreview(key, blockIdx);
-    ttsDiagPush('browser-block-entry', {
-      key,
-      blockIdx,
-      sessionId,
-      highlightBlockIndex: TTS_STATE.activeBlockIndex,
-      browserCurrentSentenceIndex: TTS_STATE.browserCurrentSentenceIndex,
-      pageIndex: preview?.pageIndex ?? -1,
-      excerpt: preview?.excerpt || '',
-      rangeSource: preview?.rangeSource || 'none',
-      rangeStart: preview?.start ?? -1,
-      rangeEnd: preview?.end ?? -1,
-    });
 
     if (blockIdx >= ranges.length) {
       TTS_STATE.activeKey = null;
@@ -1943,154 +612,16 @@ function browserSpeakQueue(key, parts, opts = {}) {
       if (isPageRead) {
         const _pp = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
         const pageIndex = _pp ? _pp.pageIndex : -1;
-        if (Number.isFinite(pageIndex) && pageIndex >= 0) ttsAutoplayScheduleNext({ pageIndex, key, reason: 'page-complete' });
+        if (Number.isFinite(pageIndex) && pageIndex >= 0) ttsAutoplayScheduleNext(pageIndex);
       }
       ttsDiagPush('browser-speak-complete', { key, blockCount: ranges.length, sessionId });
       return;
     }
 
-    const requestId = Number.isFinite(Number(opts.restartRequestId)) ? Number(opts.restartRequestId) : 0;
-    const entryReason = String(opts.reason || (requestId > 0 ? 'restart-from-block' : 'queue-progress'));
-    const entrySource = entryReason === 'queue-progress'
-      ? 'natural'
-      : (entryReason.indexOf('skip') >= 0
-        ? 'skip'
-        : (entryReason.indexOf('resume') >= 0 ? 'resume' : (requestId > 0 ? 'restart' : entryReason)));
     const r = ranges[blockIdx];
     const sentenceText = text.slice(r.start, r.end);
-    const scheduledAt = Date.now();
-    const expectedBefore = Number(TTS_STATE.browserExpectedEntryBlockIndex);
-    ttsDiagPush('browser-entry-scheduled', {
-      key,
-      sessionId,
-      pageKey: key,
-      blockIndex: blockIdx,
-      source: entrySource,
-      requestId,
-      expectedBefore,
-      activeBlockIndex: TTS_STATE.activeBlockIndex,
-      pausedBlockIndex: TTS_STATE.pausedBlockIndex,
-      sentenceTextPreview: ttsExcerptText(sentenceText),
-    });
-    // Claim the live browser entry before onstart validation. Natural queue
-    // progression must not be rejected as stale just because the prior block
-    // was the previous expected entry.
-    TTS_STATE.browserExpectedEntryBlockIndex = blockIdx;
-    ttsDiagPush('browser-entry-expected-claimed', {
-      key,
-      sessionId,
-      pageKey: key,
-      blockIndex: blockIdx,
-      source: entrySource,
-      requestId,
-      expectedBefore,
-      expectedAfter: TTS_STATE.browserExpectedEntryBlockIndex,
-    });
     const utter = new SpeechSynthesisUtterance(sentenceText);
     utter.lang = 'en-US';
-    utter.onstart = () => {
-      const startPreview = ttsGetBlockPreview(key, blockIdx);
-      if (TTS_STATE.activeSessionId !== sessionId || TTS_STATE.activeKey !== key) {
-        ttsDiagPush('browser-stale-utterance-start', {
-          key,
-          blockIdx,
-          sessionId,
-          requestId,
-          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
-          activeSessionId: TTS_STATE.activeSessionId,
-          activeKey: TTS_STATE.activeKey || null,
-          pageIndex: startPreview?.pageIndex ?? -1,
-          excerpt: startPreview?.excerpt || ttsExcerptText(sentenceText),
-          reason: 'session-or-page-replaced',
-        });
-        ttsDiagPush('browser-entry-start', {
-          key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
-          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
-          activeBlockIndex: TTS_STATE.activeBlockIndex,
-          accepted: false,
-          rejectReason: 'session-mismatch',
-        });
-        try {
-          markIntentionalBrowserCancel('discard-stale-utterance-start-session-replaced', { key, staleBlock: blockIdx, expectedBlock: TTS_STATE.browserExpectedEntryBlockIndex, requestId });
-          window.speechSynthesis.cancel();
-        } catch (_) {}
-        return;
-      }
-      if (requestId > 0 && Number(TTS_STATE.browserRestartRequestId || 0) !== requestId) {
-        ttsDiagPush('browser-stale-utterance-start', {
-          key,
-          blockIdx,
-          sessionId,
-          requestId,
-          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
-          activeRestartRequestId: TTS_STATE.browserRestartRequestId,
-          pageIndex: startPreview?.pageIndex ?? -1,
-          excerpt: startPreview?.excerpt || ttsExcerptText(sentenceText),
-          reason: 'superseded-by-newer-request',
-        });
-        ttsDiagPush('browser-entry-start', {
-          key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
-          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
-          activeBlockIndex: TTS_STATE.activeBlockIndex,
-          accepted: false,
-          rejectReason: 'session-mismatch',
-        });
-        try {
-          markIntentionalBrowserCancel('discard-stale-utterance-start-superseded', { key, staleBlock: blockIdx, expectedBlock: TTS_STATE.browserExpectedEntryBlockIndex, requestId });
-          window.speechSynthesis.cancel();
-        } catch (_) {}
-        return;
-      }
-      if (isBrowserStaleEntryBlock(blockIdx)) {
-        ttsDiagPush('browser-stale-utterance-start', {
-          key,
-          blockIdx,
-          sessionId,
-          requestId,
-          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
-          highlightBlockIndex: TTS_STATE.activeBlockIndex,
-          pageIndex: startPreview?.pageIndex ?? -1,
-          excerpt: startPreview?.excerpt || ttsExcerptText(sentenceText),
-          reason: entryReason,
-        });
-        ttsDiagPush('browser-entry-start', {
-          key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
-          expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
-          activeBlockIndex: TTS_STATE.activeBlockIndex,
-          accepted: false,
-          rejectReason: 'expected-entry-mismatch',
-        });
-        try {
-          markIntentionalBrowserCancel('discard-stale-utterance-start', { key, staleBlock: blockIdx, expectedBlock: TTS_STATE.browserExpectedEntryBlockIndex, requestId });
-          window.speechSynthesis.cancel();
-        } catch (_) {}
-        return;
-      }
-      if (requestId > 0 && Number(TTS_STATE.browserRestartRequestId || 0) === requestId) {
-        TTS_STATE.browserRestarting = false;
-      }
-      ttsDiagPush('browser-entry-start', {
-        key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
-        expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
-        activeBlockIndex: TTS_STATE.activeBlockIndex,
-        accepted: true,
-        rejectReason: null,
-      });
-      ttsDiagPush('browser-utterance-start', {
-        key,
-        blockIdx,
-        sessionId,
-        requestId,
-        reason: entryReason,
-        highlightBlockIndex: TTS_STATE.activeBlockIndex,
-        browserCurrentSentenceIndex: TTS_STATE.browserCurrentSentenceIndex,
-        pageIndex: startPreview?.pageIndex ?? -1,
-        excerpt: startPreview?.excerpt || ttsExcerptText(sentenceText),
-        rangeSource: startPreview?.rangeSource || 'browser-ranges',
-        rangeStart: startPreview?.start ?? r.start,
-        rangeEnd: startPreview?.end ?? r.end,
-      });
-    };
     utter.rate = Number(TTS_STATE.rate || 1) || 1;
     utter.pitch = 1;
     try { utter.volume = Math.max(0, Math.min(1, Number(TTS_STATE.volume ?? 1))); } catch (_) {}
@@ -2100,41 +631,18 @@ function browserSpeakQueue(key, parts, opts = {}) {
       if (TTS_STATE.activeSessionId !== sessionId) return;
       if (TTS_STATE.activeKey !== key) return;
       if (TTS_STATE.browserPaused) return; // pause captured this slot
-      if (isIntentionalBrowserCancelForSession(sessionId) && TTS_STATE.browserRestarting) {
-        ttsDiagPush('browser-end-transition', {
-          key, blockIdx, sessionId, requestId,
-          reason: TTS_STATE.browserIntentionalCancelReason || 'intentional-cancel',
-          browserRestarting: !!TTS_STATE.browserRestarting,
-        });
-        return;
-      }
-      if (blockIdx !== TTS_STATE.activeBlockIndex && TTS_STATE.activeBlockIndex >= 0) {
-        ttsDiagPush('browser-stale-block-end', {
-          key, blockIdx, activeBlockIndex: TTS_STATE.activeBlockIndex, sessionId, requestId,
-          note: 'onend on stale block — discarding',
-        });
-        return;
-      }
-      ttsDiagPush('browser-entry-end', {
-        key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
-        elapsedMs: Math.max(0, Date.now() - scheduledAt),
-        nextBlockIndex: blockIdx + 1,
-        willContinue: blockIdx + 1 < ranges.length,
-        speechSynthesisSpeaking: !!window.speechSynthesis.speaking,
-        speechSynthesisPaused: !!window.speechSynthesis.paused,
-        speechSynthesisPending: !!window.speechSynthesis.pending,
-      });
-      speakFromBlock(blockIdx + 1, { reason: 'queue-progress' });
+      speakFromBlock(blockIdx + 1);
     };
 
-    utter.onerror = (evt) => {
+    utter.onerror = () => {
       if (TTS_STATE.activeSessionId !== sessionId) return;
       // Guard 1: intentional cancel (pause, skip, resume, stop-or-replace).
-      // Covers the deferred restart window while cancel() flushes old speech.
-      if (isIntentionalBrowserCancelForSession(sessionId) || (TTS_STATE.browserRestarting && isBrowserStaleEntryBlock(blockIdx))) {
+      // Covers the deferred-speak race: the cancel window is 1200ms, long
+      // enough for the 0ms defer in browserSpeakPageFromSentence to flush.
+      if (isIntentionalBrowserCancelForSession(sessionId) || TTS_STATE.browserRestarting) {
         ttsDiagPush('browser-cancel-transition', {
           key, blockIdx, sessionId,
-          reason: TTS_STATE.browserIntentionalCancelReason || 'browser-restarting-stale-entry',
+          reason: TTS_STATE.browserIntentionalCancelReason || 'browser-restarting',
         });
         return;
       }
@@ -2157,37 +665,17 @@ function browserSpeakQueue(key, parts, opts = {}) {
         });
         return;
       }
-      const errorCode = String(evt && (evt.error || evt.name || evt.type) ? (evt.error || evt.name || evt.type) : '').toLowerCase();
-      const recoverable = isRecoverableBrowserUtteranceError(evt);
-      TTS_STATE.playbackBlockedReason = recoverable ? '' : 'speechSynthesis utterance error';
-      TTS_DEBUG.lastError = {
-        at: new Date().toISOString(),
-        path: 'browser',
-        key,
-        message: errorCode ? `speechSynthesis utterance ${errorCode}` : 'speechSynthesis utterance error',
-        blockIdx,
-        recoverable,
-      };
-      ttsDiagPush('browser-entry-error', {
-        key, sessionId, pageKey: key, blockIndex: blockIdx, source: entrySource, requestId,
-        error: errorCode || 'unknown',
-        expectedBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
-        activeBlockIndex: TTS_STATE.activeBlockIndex,
-        speechSynthesisSpeaking: !!window.speechSynthesis.speaking,
-        speechSynthesisPaused: !!window.speechSynthesis.paused,
-        speechSynthesisPending: !!window.speechSynthesis.pending,
-      });
-      ttsDiagPush('browser-utterance-error', { key, blockIdx, sessionId, errorCode, recoverable });
-      ttsReconcileAfterRuntimeError('browser-utterance-error', { key, blockIdx, sessionId, errorCode, recoverable });
-      if (recoverable) TTS_STATE.playbackBlockedReason = '';
+      TTS_STATE.playbackBlockedReason = 'speechSynthesis utterance error';
+      TTS_DEBUG.lastError = { at: new Date().toISOString(), path: 'browser', key, message: 'speechSynthesis utterance error', blockIdx };
+      ttsDiagPush('browser-utterance-error', { key, blockIdx, sessionId });
+      ttsReconcileAfterRuntimeError('browser-utterance-error', { key, blockIdx, sessionId });
     };
 
     window.speechSynthesis.speak(utter);
   }
 
   TTS_STATE.browserSpeakFromBlock = speakFromBlock;
-  TTS_STATE.browserExpectedEntryBlockIndex = startPaused ? pausedBlockIndex : 0;
-  if (!startPaused) speakFromBlock(0, { reason: 'initial-start' });
+  if (!startPaused) speakFromBlock(0);
 }
 
 // Monotonically-incrementing speak-generation counter.
@@ -2196,7 +684,6 @@ function browserSpeakQueue(key, parts, opts = {}) {
 // preventing double-speak when rapid Skip/Resume calls overlap within the
 // one-tick defer window.
 let _browserSpeakGen = 0;
-const BROWSER_RESTART_FLUSH_MS = 32;
 
 // Resume or skip to a specific block within the current browser session.
 //
@@ -2205,7 +692,7 @@ const BROWSER_RESTART_FLUSH_MS = 32;
 // event-loop tick causes the new utterance to be silently cancelled and
 // fire onerror before it starts — observed consistently as a 2-3ms gap
 // between skip/pause and browser-utterance-error in production diagnostics.
-// Fix: defer restart long enough for cancel() to flush before the authoritative block may speak.
+// Fix: defer speak() by one event-loop tick so cancel fully flushes first.
 function browserSpeakPageFromSentence(key, blockIdx, reason) {
   if (!TTS_STATE.browserSpeakFromBlock) return false;
   if (TTS_STATE.activeKey !== key) return false;
@@ -2216,13 +703,8 @@ function browserSpeakPageFromSentence(key, blockIdx, reason) {
   const sessionId = TTS_STATE.activeSessionId;
   const entryReason = reason || 'skip-or-resume';
   // Claim this speak generation. A later call (rapid double-skip) increments
-  // this before our deferred restart fires, so the older request self-aborts.
+  // this before our setTimeout fires, so our deferred call self-aborts.
   const gen = ++_browserSpeakGen;
-  const requestId = Number(TTS_STATE.browserRestartRequestId || 0) + 1;
-  TTS_STATE.browserRestartRequestId = requestId;
-  TTS_STATE.browserExpectedEntryBlockIndex = target;
-  TTS_STATE.browserRestarting = true;
-  clearPendingBrowserRestartTimer();
 
   // Mark intent and cancel synchronously so onerror on the outgoing
   // utterance is recognised as intentional within the 2000ms window.
@@ -2234,69 +716,33 @@ function browserSpeakPageFromSentence(key, blockIdx, reason) {
     window.speechSynthesis.cancel();
   } catch (_) {}
 
-  const reentryPreview = ttsGetBlockPreview(key, target);
   ttsDiagPush('browser-re-entry', {
-    key, blockIdx: target, gen, requestId, reason: entryReason,
+    key, blockIdx: target, gen, reason: entryReason,
     outcomeClass: entryReason === 'speed-change' ? 'live-mutate' : 'preserved-re-entry',
     sessionId,
-    highlightBlockIndex: TTS_STATE.activeBlockIndex,
-    browserCurrentSentenceIndex: TTS_STATE.browserCurrentSentenceIndex,
-    pageIndex: reentryPreview?.pageIndex ?? -1,
-    excerpt: reentryPreview?.excerpt || '',
-    rangeSource: reentryPreview?.rangeSource || 'none',
   });
 
   // Advance state synchronously so getPlaybackStatus() and highlight
   // reflect the target block immediately (before the deferred speak).
   TTS_STATE.browserPaused = false;
+  TTS_STATE.browserRestarting = false;
   TTS_STATE.browserCurrentSentenceIndex = target;
   TTS_STATE.activeBlockIndex = target;
   try { ttsHighlightBlock(target); } catch (_) {}
 
-  // Defer speak long enough for cancel() to flush so stale audio/utterance
-  // entry cannot survive behind the newly landed block.
+  // Defer speak by one event-loop tick so cancel() fully flushes.
   // Four guards ensure only the authoritative call executes:
   //   1. Session must not have been replaced (stop, new Read Page)
   //   2. Active key must still be this page
   //   3. The speak function must not have been replaced (new session)
   //   4. This must be the latest speak generation (rapid double-skip)
-  TTS_STATE.browserRestartTimerId = setTimeout(() => {
-    TTS_STATE.browserRestartTimerId = 0;
-    const guardBase = {
-      key,
-      requestedBlockIdx: target,
-      gen,
-      requestId,
-      sessionId,
-      activeSessionId: TTS_STATE.activeSessionId,
-      activeKey: TTS_STATE.activeKey || null,
-      highlightBlockIndex: TTS_STATE.activeBlockIndex,
-      browserCurrentSentenceIndex: TTS_STATE.browserCurrentSentenceIndex,
-      expectedEntryBlockIndex: TTS_STATE.browserExpectedEntryBlockIndex,
-      activeRestartRequestId: TTS_STATE.browserRestartRequestId,
-    };
-    if (_browserSpeakGen !== gen) {
-      ttsDiagPush('browser-re-entry-suppressed', { ...guardBase, reason: 'superseded-by-newer-generation', latestGen: _browserSpeakGen });
-      return;
-    }
-    if (TTS_STATE.activeSessionId !== sessionId) {
-      ttsDiagPush('browser-re-entry-suppressed', { ...guardBase, reason: 'session-replaced' });
-      return;
-    }
-    if (TTS_STATE.activeKey !== key) {
-      ttsDiagPush('browser-re-entry-suppressed', { ...guardBase, reason: 'page-replaced' });
-      return;
-    }
-    if (TTS_STATE.browserSpeakFromBlock !== speakFn) {
-      ttsDiagPush('browser-re-entry-suppressed', { ...guardBase, reason: 'speak-function-replaced' });
-      return;
-    }
-    if (Number(TTS_STATE.browserRestartRequestId || 0) !== requestId) {
-      ttsDiagPush('browser-re-entry-suppressed', { ...guardBase, reason: 'superseded-by-newer-request' });
-      return;
-    }
-    speakFn(target, { restartRequestId: requestId, reason: entryReason });
-  }, BROWSER_RESTART_FLUSH_MS);
+  setTimeout(() => {
+    if (_browserSpeakGen !== gen) return;           // superseded by newer call
+    if (TTS_STATE.activeSessionId !== sessionId) return;  // session replaced
+    if (TTS_STATE.activeKey !== key) return;              // page replaced
+    if (TTS_STATE.browserSpeakFromBlock !== speakFn) return;  // fn replaced
+    speakFn(target);
+  }, 0);
 
   return true;
 }
@@ -2308,7 +754,7 @@ function getResolvedTtsPolicy() {
   const policy = typeof policyApi.get === 'function' ? policyApi.get() : null;
   const tier = typeof policyApi.getTier === 'function'
     ? String(policyApi.getTier())
-    : ((policy && policy.tier) ? String(policy.tier) : ((typeof appTier !== 'undefined' && appTier) ? String(appTier) : 'basic'));
+    : ((policy && policy.tier) ? String(policy.tier) : ((typeof appTier !== 'undefined' && appTier) ? String(appTier) : 'free'));
   const cloudVoiceAccess = typeof policyApi.canUseCloudVoices === 'function'
     ? !!policyApi.canUseCloudVoices()
     : !!policy?.features?.cloudVoices;
@@ -2379,7 +825,6 @@ function ttsSessionSnapshot() {
     inferredPageIndex: pageIdx,
     hasBrowserResumeHook: !!TTS_STATE.browserSpeakFromBlock,
     hasAudio: !!TTS_STATE.audio,
-    activeSessionSkipCount: Number(TTS_STATE.activeSessionSkipCount || 0),
   };
 }
 
@@ -2403,43 +848,19 @@ function computeSkipEligibility(delta) {
   if (!ctx) return { can: false, reason: 'no-active-or-paused-session' };
   const nextPage = ctx.pageIndex + (delta < 0 ? -1 : 1);
   const hasCrossPageTarget = typeof pages !== 'undefined' && !!pages && Number.isFinite(nextPage) && nextPage >= 0 && !!pages[nextPage];
-  if (ctx.blockCount <= 0) {
-    if (TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied) {
-      return { can: true, reason: 'window-pending-promotion' };
-    }
-    // Runtime skip code does not perform cross-page navigation from an active
-    // no-block cloud session. Do not advertise cross-page skip eligibility when
-    // the live session has no seek/highlight truth.
-    if (TTS_STATE.audio || TTS_STATE.activeKey) {
-      return { can: false, reason: 'no-live-blocks' };
-    }
-    return { can: hasCrossPageTarget, reason: hasCrossPageTarget ? 'cross-page-target' : 'no-blocks-or-page-target' };
-  }
+  if (ctx.blockCount <= 0) return { can: hasCrossPageTarget, reason: hasCrossPageTarget ? 'cross-page-target' : 'no-blocks-or-page-target' };
   const targetBlock = ctx.blockIndex + (delta < 0 ? -1 : 1);
   if (targetBlock >= 0 && targetBlock < ctx.blockCount) return { can: true, reason: 'in-page-target' };
   if (targetBlock < 0) return { can: true, reason: 'restart-block-0' };
-  if (TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.promotionApplied &&
-      ctx.blockCount <= Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0)) {
-    return { can: true, reason: 'window-stale-promotion' };
-  }
-  // targetBlock >= ctx.blockCount — boundary reached.
-  // If in an active block-window session without a confirmed full-page promotion,
-  // the skip will be deferred (not cross-page-navigated). Expose this explicitly so
-  // controls reflect the actual outcome rather than advertising cross-page-target
-  // while the actual skip fires cross-page-disabled.
-  if (TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied) {
-    return { can: true, reason: 'window-pending-promotion' };
-  }
   return { can: hasCrossPageTarget, reason: hasCrossPageTarget ? 'cross-page-target' : 'no-next-page-target' };
 }
 
 function getPlaybackControlEligibility() {
   const countdown = getCountdownStatus();
   const support = getTtsSupportStatus();
-  const cloudRestartInFlight = isCloudRestartTransitionActive();
   let paused = !!TTS_STATE.browserPaused;
   try {
-    if (TTS_STATE.audio) paused = cloudRestartInFlight ? false : !!TTS_STATE.audio.paused;
+    if (TTS_STATE.audio) paused = !!TTS_STATE.audio.paused;
     else if (!TTS_STATE.browserPaused && browserTtsSupported()) paused = !!window.speechSynthesis.paused;
   } catch (_) {}
   const playback = {
@@ -2456,10 +877,7 @@ function getPlaybackControlEligibility() {
   // A session that is "paused" with no hook (browserSpeakFromBlock cleared, or
   // audio element gone) cannot actually resume — marking it resumable would show
   // a Resume label that calls ttsResume() and fails silently.
-  // audio.ended implies audio.paused in all browsers, so exclude ended elements
-  // from the resume hook: an ended audio element has no live position to resume
-  // from, and calling audio.play() on it would restart from t=0 without marks.
-  const hasRealResumeHook = (!cloudRestartInFlight && !!(TTS_STATE.audio && TTS_STATE.audio.paused && !TTS_STATE.audio.ended)) ||
+  const hasRealResumeHook = !!(TTS_STATE.audio && TTS_STATE.audio.paused) ||
     !!(TTS_STATE.browserPaused && TTS_STATE.browserSpeakFromBlock);
   const canResume = !!playback.active && !!playback.paused && hasSession && hasRealResumeHook;
   const canPause = !!playback.active && !playback.paused;
@@ -2512,12 +930,10 @@ function ttsReconcileAfterRuntimeError(kind, details = {}) {
   TTS_STATE.browserSentenceRanges = null;
   TTS_STATE.browserSpeakFromBlock = null;
   TTS_STATE.browserPaused = false;
-  resetBrowserRestartOwnership();
+  TTS_STATE.browserRestarting = false;
   TTS_STATE.browserIntentionalCancelUntil = 0;
   TTS_STATE.browserIntentionalCancelReason = null;
   TTS_STATE.browserIntentionalCancelMeta = null;
-  clearPendingCloudSeek();
-  clearCloudRestartTransition();
   TTS_STATE.highlightRAF = null;
   try { ttsClearSentenceHighlight(); } catch (_) {}
   const after = {
@@ -2537,10 +953,9 @@ function ttsReconcileAfterRuntimeError(kind, details = {}) {
 function getPlaybackStatus() {
   let paused = !!TTS_STATE.browserPaused;
   try {
-    if (TTS_STATE.audio) paused = isCloudRestartTransitionActive() ? false : !!TTS_STATE.audio.paused;
+    if (TTS_STATE.audio) paused = !!TTS_STATE.audio.paused;
     else if (!TTS_STATE.browserPaused && browserTtsSupported()) paused = !!window.speechSynthesis.paused;
   } catch (_) {}
-  const capability = getTtsCapabilityStatus();
   return {
     active: !!TTS_STATE.activeKey,
     paused,
@@ -2549,32 +964,16 @@ function getPlaybackStatus() {
     sessionId: TTS_STATE.activeSessionId,
     activeBlockIndex: TTS_STATE.activeBlockIndex,
     blockCount: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0,
-    cloudRestartInFlight: isCloudRestartTransitionActive(),
-    cloudRestartPending: getCloudRestartPendingStatus(),
-    capability,
   };
 }
 
 function getAutoplayStatus() { return { enabled: !!AUTOPLAY_STATE.enabled }; }
 
 function getCountdownStatus() {
-  const token = AUTOPLAY_PRESYNTH_STATE.token;
   return {
     pageIndex: Number(AUTOPLAY_STATE.countdownPageIndex ?? -1),
     seconds: Number(AUTOPLAY_STATE.countdownSec ?? 0) || 0,
     active: Number(AUTOPLAY_STATE.countdownPageIndex ?? -1) !== -1 && Number(AUTOPLAY_STATE.countdownSec ?? 0) > 0,
-    presynth: token ? {
-      tokenId: token.id,
-      status: token.status,
-      ready: !!token.ready,
-      valid: token.valid !== false,
-      nextPageIndex: token.nextPageIndex,
-      nextKey: token.nextKey || null,
-      priorSkipCount: Number(token.priorSkipCount || 0),
-      fallbackStarted: !!token.fallbackStarted,
-      consumed: !!token.consumed,
-      elapsedMs: token.requestedAt ? Math.max(0, Date.now() - token.requestedAt) : 0,
-    } : null,
   };
 }
 
@@ -2607,15 +1006,11 @@ function setPlaybackRate(rate) {
   return value;
 }
 
-function toggleAutoplay(force, opts = {}) {
-  const next = typeof force === 'boolean' ? !!force : !AUTOPLAY_STATE.enabled;
-  const applied = applyAutoplayRuntimePreference(next, {
-    source: String(opts.source || (typeof force === 'boolean' ? 'force-toggle' : 'toggle')),
-    persist: opts.persist !== false,
-    syncControl: opts.syncControl !== false,
-  });
-  ttsDiagPush('toggle-autoplay', { enabled: !!applied, source: String(opts.source || (typeof force === 'boolean' ? 'force-toggle' : 'toggle')) });
-  return applied;
+function toggleAutoplay(force) {
+  AUTOPLAY_STATE.enabled = typeof force === 'boolean' ? !!force : !AUTOPLAY_STATE.enabled;
+  if (!AUTOPLAY_STATE.enabled) ttsAutoplayCancelCountdown();
+  ttsDiagPush('toggle-autoplay', { enabled: !!AUTOPLAY_STATE.enabled });
+  return AUTOPLAY_STATE.enabled;
 }
 
 // ─── Core controls ────────────────────────────────────────────────────────────
@@ -2666,7 +1061,7 @@ function ttsClearPausedSessionForManualPageAdvance(delta, context = {}) {
 function ttsStop() {
   try { document.querySelectorAll('.tts-btn[data-tts="page"].tts-active').forEach(btn => btn.classList.remove('tts-active')); } catch (_) {}
   try { if (TTS_STATE.activeKey) ttsSetHintButton(TTS_STATE.activeKey, false); } catch (_) {}
-  ttsAutoplayCancelCountdown('stop');
+  ttsAutoplayCancelCountdown();
 
   if (TTS_STATE.abort) { try { TTS_STATE.abort.abort(); } catch (_) {} TTS_STATE.abort = null; }
   if (TTS_STATE.audio) {
@@ -2687,14 +1082,10 @@ function ttsStop() {
   TTS_STATE.browserSpeakFromBlock = null;
   TTS_STATE.activeBrowserVoiceName = null;
   TTS_STATE.browserPaused = false;
-  resetBrowserRestartOwnership();
+  TTS_STATE.browserRestarting = false;
   TTS_STATE.browserIntentionalCancelUntil = 0;
   TTS_STATE.browserIntentionalCancelReason = null;
   TTS_STATE.browserIntentionalCancelMeta = null;
-  clearPendingCloudSeek();
-  clearCloudRestartTransition();
-  clearTtsBackendCapabilityState();
-  clearTtsCloudWindow();
 
   ttsDiagPush('stop', {
     outcomeClass: 'full-stop',
@@ -2726,7 +1117,6 @@ function ttsPause() {
 
   // Cloud path.
   if (TTS_STATE.audio) {
-    clearCloudRestartTransition({ invalidateRequest: true, unmute: true });
     try { TTS_STATE.audio.pause(); } catch (_) {}
     // After audio.pause(), currentTime is frozen. Resolve the exact block at that
     // timestamp so preservedBlock is as accurate as possible (no 16ms RAF lag).
@@ -2831,52 +1221,7 @@ function ttsResume() {
   }
 
   // Cloud path: resume audio from preserved currentTime.
-  if (TTS_STATE.audio && !isCloudRestartTransitionActive() && TTS_STATE.audio.paused) {
-    // Stale-session guard: if the audio element has ended (ended === true implies
-    // paused === true in all browsers), the session completed its playback and the
-    // highlight marks were cleared by the onended handler. Calling audio.play()
-    // would restart the audio from t=0 without marks, producing audio without
-    // highlighting and exposing a corrupt blockCount: 0 / no-highlight state.
-    // Instead, treat this as a fresh Play on the same page.
-    if (TTS_STATE.audio.ended) {
-      const _restartKey = expectedPageKey;
-      const _parsed = _restartKey && typeof readingTargetFromKey === 'function'
-        ? readingTargetFromKey(_restartKey) : null;
-      const _pageIndex = _parsed ? _parsed.pageIndex : -1;
-      // Fully stop the stale session before restarting so ttsSpeakQueue starts
-      // from a clean slate (fresh sessionId, cleared window state, etc.).
-      ttsStop();
-      if (_restartKey && Number.isFinite(_pageIndex) && _pageIndex >= 0 &&
-          typeof pages !== 'undefined' && pages[_pageIndex]) {
-        ttsSpeakQueue(_restartKey, [pages[_pageIndex]]);
-        const after = {
-          playback: getPlaybackStatus(),
-          session: ttsSessionSnapshot(),
-          controls: getPlaybackControlEligibility(),
-        };
-        const payload = {
-          success: true, resumed: false, restarted: true,
-          outcomeClass: 'fresh-restart',
-          route: 'cloud-stale-ended-restart',
-          resumedSessionId: Number(TTS_STATE.activeSessionId || 0),
-          resumedPageKey: _restartKey,
-          resumedBlockIndex: 0,
-          before, after,
-        };
-        ttsDiagPush('resumed', payload);
-        ttsDiagPush('resume-action', payload);
-        ttsDiagPush('control-eligibility', after.controls);
-        return payload;
-      }
-      const failPayload = {
-        success: false, resumed: false, restarted: false,
-        reason: 'stale-ended-no-page-text',
-        before, after: before,
-      };
-      ttsDiagPush('resume-action', failPayload);
-      return failPayload;
-    }
-
+  if (TTS_STATE.audio && TTS_STATE.audio.paused) {
     try {
       // Apply current rate (may have changed during pause) before resuming.
       const resumeRate = Number(TTS_STATE.rate || 1) || 1;
@@ -3040,48 +1385,11 @@ function pauseOrResumeReading() {
   }
 
   if (before.playback.paused) {
-    // A paused chunk-window cloud session is not a useful resume target once it
-    // only has Phase 1 marks. Restart the focused page cleanly instead of making
-    // the user spend one Play cycle clearing stale chunk state.
-    if (isStaleChunkWindowCloudSession()) {
-      route = 'stale-window-paused-restart-focused';
-      ttsDiagPush('pause-resume-action', {
-        action: 'stale-window-resume-cleared',
-        route, outcome: 'clearing-stale-window-session',
-        before,
-        stale: {
-          marksCount: getTtsCloudMarkCount(),
-          chunkLimit: getTtsChunkWindowLimit(),
-          audioEnded: !!TTS_STATE.audio?.ended,
-          cloudWindow: {
-            active: !!TTS_CLOUD_WINDOW.active,
-            mode: TTS_CLOUD_WINDOW.mode,
-            promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
-            promotionApplied: !!TTS_CLOUD_WINDOW.promotionApplied,
-          },
-        },
-        after: ttsBlockSnapshot(),
-      });
-      ttsStop();
-      try {
-        if (typeof window.startFocusedPageTts === 'function') {
-          const started = window.startFocusedPageTts();
-          outcome = started ? 'started' : 'failed';
-          ttsDiagPush('pause-resume-action', {
-            action: 'play', route, outcome,
-            outcomeClass: started ? 'full-restart' : 'blocked',
-            before, after: ttsBlockSnapshot(),
-          });
-        }
-      } catch (_) {}
-      return getPlaybackStatus();
-    }
-
     // Check whether the paused session has a real resume hook before attempting.
     // A stale paused session (browserSpeakFromBlock cleared, audio element gone)
     // should restart the current focused page rather than looping into a failed
     // ttsResume() call.
-    const hasRealResumeHook = (!isCloudRestartTransitionActive() && !!(TTS_STATE.audio && TTS_STATE.audio.paused && !TTS_STATE.audio.ended)) ||
+    const hasRealResumeHook = !!(TTS_STATE.audio && TTS_STATE.audio.paused) ||
       !!(TTS_STATE.browserPaused && TTS_STATE.browserSpeakFromBlock);
     if (!hasRealResumeHook) {
       // Stale session: clear paused state so startFocusedPageTts gets a clean run.
@@ -3132,8 +1440,7 @@ async function cloudFetchUrl(text, opts = {}) {
   const selectedVoicePref = getSelectedVoicePreference();
   if (selectedVoicePref.explicitCloud && selectedVoicePref.requestedCloudVoiceId) payload.voiceId = selectedVoicePref.requestedCloudVoiceId;
   if (opts && opts.sentenceMarks) payload.speechMarks = 'sentence';
-  if (opts && opts.requestMode) payload.requestMode = String(opts.requestMode);
-  TTS_DEBUG.lastCloudRequest = { chars: String(text || '').length, sentenceMarks: !!(opts && opts.sentenceMarks), requestMode: opts && opts.requestMode ? String(opts.requestMode) : '', selectedVoice: selectedVoicePref.stored, selectedVoiceType: selectedVoicePref.type, requestedVoiceId: selectedVoicePref.requestedCloudVoiceId, variant: TTS_STATE.voiceVariant || 'female' };
+  TTS_DEBUG.lastCloudRequest = { chars: String(text || '').length, sentenceMarks: !!(opts && opts.sentenceMarks), selectedVoice: selectedVoicePref.stored, selectedVoiceType: selectedVoicePref.type, requestedVoiceId: selectedVoicePref.requestedCloudVoiceId, variant: TTS_STATE.voiceVariant || 'female' };
   try { const qs = new URLSearchParams(window.location.search); if (qs.get('debug') === '1') payload.debug = '1'; } catch (_) {}
   try { if (String(TTS_STATE.voiceVariant || '').toLowerCase() === 'male') payload.voiceVariant = 'male'; } catch (_) {}
   try { const saved = getStoredSelectedVoice(); if (saved.startsWith('cloud:')) payload.voiceId = saved.slice('cloud:'.length); } catch (_) {}
@@ -3151,309 +1458,9 @@ async function cloudFetchUrl(text, opts = {}) {
     const msg = data?.error ? `${data.error}${detail ? `: ${detail}` : ''}` : `TTS request failed (${res.status})${detail ? `: ${detail}` : ''}`;
     throw new Error(msg);
   }
-  const capability = normalizeTtsCapability(data?.capability);
-  TTS_DEBUG.lastCloudResponse = {
-    ok: true,
-    status: res.status,
-    provider: (capability && capability.provider) || data?.provider || null,
-    cacheHit: !!data?.cacheHit,
-    capability,
-    debug: data?.debug || null,
-  };
-  ttsDiagPush('cloud-response', {
-    ok: true,
-    status: res.status,
-    provider: TTS_DEBUG.lastCloudResponse.provider,
-    cacheHit: !!data?.cacheHit,
-    requestMode: opts && opts.requestMode ? String(opts.requestMode) : '',
-    preciseSeekAvailable: !!capability?.preciseSeek?.available,
-    preciseSeekReason: capability?.preciseSeek?.reason || '',
-    marksIncludedInResponse: !!capability?.marks?.includedInResponse,
-    marksProvenance: capability?.marks?.provenance || 'none',
-    artifactVersion: capability?.artifact?.version || null,
-  });
-  return { url: data.url, sentenceMarks: Array.isArray(data.sentenceMarks) ? data.sentenceMarks : null, capability };
-}
-
-function clearTtsStartupBanner() {
-  try { window.rcInteraction && window.rcInteraction.clear('tts:start'); } catch (_) {}
-}
-
-async function cloudFetchWithRetry(text, opts, { maxAttempts = 3, sessionId, getSessionId } = {}) {
-  let lastErr;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (attempt > 0) {
-      await new Promise(resolve => setTimeout(resolve, attempt * 500));
-      if (typeof getSessionId === 'function' && getSessionId() !== sessionId) return null;
-    }
-    try {
-      return await cloudFetchUrl(text, opts);
-    } catch (err) {
-      lastErr = err;
-      if (!isRecoverablePlaybackFailure(err)) throw err;
-      ttsDiagPush('cloud-fetch-retry', { attempt: attempt + 1, maxAttempts, error: String(err?.message || err) });
-    }
-  }
-  throw lastErr;
-}
-
-// ─── Cloud synthesis window — promotion functions ─────────────────────────────
-//
-// _ttsWindowTriggerPromotion: called from the highlight loop when activeBlockIndex
-//   reaches 1. Fires a non-blocking full-page cloud fetch and wires the result
-//   handler that immediately switches the audio src once the data arrives.
-//
-// _ttsWindowApplyPromotion: called from the .then() of the promotion fetch while
-//   chunk A is still playing. Swaps audio.src to the full-page URL, seeks to the
-//   start of the currently-active block, and restarts the highlight loop so skip
-//   and pause immediately see full-page marks.
-
-function _ttsWindowTriggerPromotion(signal) {
-  if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.promotionTriggered || TTS_CLOUD_WINDOW.fullPageUnavailable) {
-    if (TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.fullPageUnavailable) {
-      ttsDiagPush('window-promotion-suppressed-unavailable', {
-        signal,
-        sessionId: TTS_CLOUD_WINDOW.sessionId,
-        key: TTS_CLOUD_WINDOW.pageKey,
-        reason: TTS_CLOUD_WINDOW.fullPageUnavailableReason || 'full-page-unavailable',
-      });
-    }
-    return;
-  }
-  const { sessionId, pageKey: key, pageText } = TTS_CLOUD_WINDOW;
-  if (TTS_STATE.activeSessionId !== sessionId) return;
-
-  TTS_CLOUD_WINDOW.promotionTriggered = true;
-  TTS_CLOUD_WINDOW.mode = 'promoting';
-  TTS_CLOUD_WINDOW.engagementSignal = signal;
-
-  ttsDiagPush('window-promotion-trigger', {
-    signal,
-    sessionId,
-    key,
-    charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
-    charsFullPage: TTS_CLOUD_WINDOW.charsFullPage,
-    activeBlockIndex: TTS_STATE.activeBlockIndex,
-    ttsCloudMode: 'block-window',
-  });
-
-  const promise = cloudFetchWithRetry(
-    pageText,
-    { sentenceMarks: true, requestMode: 'full-page' },
-    { maxAttempts: 3, sessionId, getSessionId: () => TTS_STATE.activeSessionId }
-  );
-  TTS_CLOUD_WINDOW.promotionFetchPromise = promise;
-
-  promise.then(result => {
-    if (!result || TTS_STATE.activeSessionId !== sessionId || !TTS_CLOUD_WINDOW.active) return;
-
-    // Validate: the full-page result must contain more sentence marks than chunk A.
-    // If the server/cache returned Phase 1 marks (e.g. the chunk-A artifact hash) in
-    // response to requestMode:'full-page', applying it would set promotionApplied = true
-    // with blockCount ≤ chunkASentenceCount. That prematurely closes the skip-safety
-    // window — subsequent skips at the chunk-A boundary see promotionApplied = true and
-    // fall through to cross-page-disabled instead of window-skip-deferred.
-    const _resultMarkCount = result.sentenceMarks ? result.sentenceMarks.length : 0;
-    const _chunkACount = TTS_CLOUD_WINDOW.chunkASentenceCount;
-    if (_resultMarkCount <= _chunkACount) {
-      ttsDiagPush('window-promotion-stale-phase1', {
-        sessionId,
-        key,
-        returnedMarksCount: _resultMarkCount,
-        chunkASentenceCount: _chunkACount,
-        expectedMin: _chunkACount + 1,
-        requestMode: 'full-page',
-        audioCacheStatus: result.capability?.cache?.audio?.status || null,
-        marksCacheStatus: result.capability?.cache?.marks?.status || null,
-        artifactHash: result.capability?.artifact?.hash || null,
-        phase: 'promotion-fetch',
-        ttsCloudMode: 'stale-phase1-rejected',
-      });
-      // Leave the window state intact so the post-chunk-A handoff can see the
-      // rejected promotion and fail through the normal cleanup path instead of
-      // returning from ttsSpeakQueue with activeKey/audio but no live marks.
-      return;
-    }
-
-    TTS_CLOUD_WINDOW.promotionResult = result;
-    TTS_CLOUD_WINDOW.mode = 'promoted';
-    TTS_CLOUD_WINDOW.charsSessionTotal = TTS_CLOUD_WINDOW.charsPhase1 + pageText.length;
-
-    ttsDiagPush('window-promotion-ready', {
-      sessionId,
-      key,
-      cacheHit: result.capability?.cache?.audio?.status === 'hit',
-      returnedMarksCount: _resultMarkCount,
-      chunkASentenceCount: _chunkACount,
-      charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
-      charsFullPage: pageText.length,
-      charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
-      ttsCloudMode: 'full-page',
-      engagementSignal: signal,
-    });
-
-    // Passive engagement should not hot-swap into the currently speaking or
-    // just-spoken Phase 1 block. Leave chunk A playing and let the Case B handoff
-    // start full-page audio at the next unspoken block. Explicit user actions
-    // such as skip keep the immediate apply path so controls remain responsive.
-    const hasPendingExplicitSkip = Number(TTS_CLOUD_WINDOW.pendingSkipBlock || -1) >= 0 || TTS_CLOUD_WINDOW.pendingSkipSettling === true;
-    if (isPassiveTtsWindowPromotionSignal(signal) && !hasPendingExplicitSkip) {
-      ttsDiagPush('window-promotion-passive-handoff-deferred', {
-        sessionId, key,
-        signal,
-        activeBlockIndex: TTS_STATE.activeBlockIndex,
-        chunkASentenceCount: TTS_CLOUD_WINDOW.chunkASentenceCount,
-        returnedMarksCount: _resultMarkCount,
-        ttsCloudMode: 'full-page',
-      });
-      return;
-    }
-
-    // If chunk A is still playing: switch immediately for explicit skip/replay
-    // actions. If chunk A has already ended: _ttsWindowApplyPromotion is a no-op
-    // (audio.ended); the post-loop handoff path in ttsSpeakQueue will handle it.
-    try { _ttsWindowApplyPromotion(sessionId, key, result); } catch (_) {}
-  }).catch(err => {
-    ttsDiagPush('window-promotion-failed', {
-      sessionId,
-      key,
-      error: String(err?.message || err),
-    });
-    // Promotion failed. chunk A will still play to its natural end.
-    // The post-loop handoff will re-await the promise and re-throw, which
-    // propagates into the outer catch of ttsSpeakQueue.
-  });
-}
-
-function _ttsWindowApplyPromotion(sessionId, key, result) {
-  if (TTS_STATE.activeSessionId !== sessionId) return;
-  if (String(TTS_STATE.activeKey || '') !== String(key || '')) return;
-  const audio = TTS_STATE.audio;
-  // Guard: chunk A already ended — let the post-loop handoff in ttsSpeakQueue handle it.
-  if (!audio || audio.ended) return;
-
-  const currentBlock = Math.max(0, Number(TTS_STATE.activeBlockIndex ?? 0));
-
-  // Validate result.sentenceMarks BEFORE mutating runtime state.
-  // Checking after apply (e.g. on TTS_STATE.highlightMarks) is too late — stale
-  // Phase 1 marks would briefly become the live seek truth. Validate on the raw
-  // result first so no state is mutated if the promotion is stale.
-  const _resultMarkCount = result.sentenceMarks ? result.sentenceMarks.length : 0;
-  const _chunkASentCount = TTS_CLOUD_WINDOW.chunkASentenceCount;
-  if (_resultMarkCount <= _chunkASentCount) {
-    ttsDiagPush('window-promotion-stale-phase1', {
-      sessionId, key,
-      returnedMarksCount: _resultMarkCount,
-      chunkASentenceCount: _chunkASentCount,
-      expectedMin: _chunkASentCount + 1,
-      phase: 'apply-promotion',
-      ttsCloudMode: 'stale-phase1-rejected',
-    });
-    // Do not apply — let chunk-A finish naturally. Don't swap src.
-    return;
-  }
-
-  // Apply full-page marks so highlight spans cover the whole page. This calls
-  // ttsClearSentenceHighlight() internally, which cancels the old RAF — we restart
-  // it below after the src swap settles.
-  if (result.sentenceMarks && result.sentenceMarks.length) {
-    ttsMaybePrepareSentenceHighlight(key, TTS_CLOUD_WINDOW.pageText, result.sentenceMarks);
-  }
-  applyCloudCapabilityForRuntime({ key, sessionId, capability: result.capability, sentenceMarks: result.sentenceMarks });
-
-  // Seek target: start of the current block in the full-page audio.
-  // Full-page and chunk-A timings differ (different synthesis context), so we
-  // seek to fullPageMarks[targetBlock].time rather than using audio.currentTime.
-  // If a forward-skip arrived while chunk A was still playing (pendingSkipBlock),
-  // advance to that block instead of the currently-active one.
-  const marks = TTS_STATE.highlightMarks;
-  const _pendingSkip = (Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) && TTS_CLOUD_WINDOW.pendingSkipBlock >= 0)
-    ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1;
-  TTS_CLOUD_WINDOW.pendingSkipBlock = -1; // consume
-  TTS_CLOUD_WINDOW.pendingSkipSettling = false;
-  const resolvedBlock = _pendingSkip >= 0 ? Math.max(currentBlock, _pendingSkip) : currentBlock;
-  const targetBlock = Math.min(resolvedBlock, marks ? marks.length - 1 : 0);
-  const seekTime = (marks && marks[targetBlock]) ? Math.max(0, Number(marks[targetBlock].time || 0) / 1000) : 0;
-
-  const requestId = ++TTS_STATE.cloudRestartRequestId;
-  TTS_STATE.cloudRestartInFlight = true;
-  TTS_STATE.activeBlockIndex = targetBlock;
-  ttsHighlightBlock(targetBlock);
-
-  if (TTS_STATE.highlightRAF) {
-    try { cancelAnimationFrame(TTS_STATE.highlightRAF); } catch (_) {}
-    TTS_STATE.highlightRAF = null;
-  }
-  clearPendingCloudSeek();
-
-  ttsDiagPush('window-promotion-apply', {
-    sessionId, key, targetBlock, seekTime,
-    pendingSkipBlock: _pendingSkip,
-    charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
-    charsFullPage: TTS_CLOUD_WINDOW.charsFullPage,
-    charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
-    ttsCloudMode: 'full-page',
-  });
-
-  try {
-    audio.pause();
-    if (TTS_STATE.cloudRestartRequestId !== requestId || TTS_STATE.activeSessionId !== sessionId) return;
-
-    audio.src = result.url;
-
-    // Use addEventListener (not oncanplay=) to avoid clobbering the applyPending
-    // handler wired in ttsSpeakQueue. Both can fire; applyPending is a no-op when
-    // no pending seek exists.
-    audio.addEventListener('canplay', function onReady() {
-      audio.removeEventListener('canplay', onReady);
-      if (TTS_STATE.cloudRestartRequestId !== requestId || TTS_STATE.activeSessionId !== sessionId) {
-        TTS_STATE.cloudRestartInFlight = false;
-        return;
-      }
-      audio.currentTime = seekTime;
-      try { audio.defaultPlaybackRate = Number(TTS_STATE.rate || 1); audio.playbackRate = Number(TTS_STATE.rate || 1); } catch (_) {}
-      audio.play().then(() => {
-        if (TTS_STATE.cloudRestartRequestId !== requestId || TTS_STATE.activeSessionId !== sessionId) {
-          TTS_STATE.cloudRestartInFlight = false;
-          return;
-        }
-        TTS_STATE.cloudRestartInFlight = false;
-        TTS_CLOUD_WINDOW.promotionApplied = true;
-        // Disarm the window coalescing machinery now that full-page audio is live.
-        // pendingSkipBlock and pendingSkipSettling were consumed by the apply path,
-        // but a skip that arrived during the brief cloudRestartInFlight window above
-        // could have re-set them. Clear here so post-promotion skips go through the
-        // normal timed-seek path unobstructed.
-        TTS_CLOUD_WINDOW.pendingSkipSettling = false;
-        TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
-        markTtsFullPageReady(key, { sessionId, source: 'promotion-apply', marksCount: _resultMarkCount });
-        const _applyLastMark = result.sentenceMarks[_resultMarkCount - 1] || null;
-        ttsDiagPush('window-full-page-coverage', {
-          sessionId, key,
-          source: 'promotion-apply',
-          marksCount: _resultMarkCount,
-          pageTextLength: TTS_CLOUD_WINDOW.pageText.length,
-          lastMarkEnd: _applyLastMark ? Number(_applyLastMark.end || 0) : 0,
-        });
-        ttsStartHighlightLoop(audio);
-        ttsDiagPush('window-promotion-applied', {
-          sessionId, key, targetBlock, seekTime,
-          audioCurrentTimeMs: audio.currentTime * 1000,
-          ttsCloudMode: 'full-page',
-        });
-        if (_pendingSkip >= 0) {
-          ttsDiagPush('window-skip-applied-after-promotion', { sessionId, key, targetBlock, pendingSkipBlock: _pendingSkip });
-        }
-      }).catch(err => {
-        TTS_STATE.cloudRestartInFlight = false;
-        ttsDiagPush('window-promotion-play-failed', { sessionId, key, error: String(err?.message || err) });
-      });
-    }, { once: true });
-
-  } catch (err) {
-    TTS_STATE.cloudRestartInFlight = false;
-    ttsDiagPush('window-promotion-apply-failed', { sessionId, key, error: String(err?.message || err) });
-  }
+  TTS_DEBUG.lastCloudResponse = { ok: true, status: res.status, provider: data?.provider || null, cacheHit: !!data?.cacheHit, debug: data?.debug || null };
+  ttsDiagPush('cloud-response', TTS_DEBUG.lastCloudResponse);
+  return { url: data.url, sentenceMarks: Array.isArray(data.sentenceMarks) ? data.sentenceMarks : null };
 }
 
 async function ttsSpeakQueue(key, parts) {
@@ -3463,12 +1470,12 @@ async function ttsSpeakQueue(key, parts) {
 
   const before = ttsBlockSnapshot();
 
-  // Case: same key, currently PAUSED → stop/deactivate (not resume).
-  // Bottom-bar Play/Resume remains the resume owner for the paused session.
-  if (TTS_STATE.activeKey === key && (TTS_STATE.browserPaused || (!isCloudRestartTransitionActive() && (TTS_STATE.audio && TTS_STATE.audio.paused)))) {
-    ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'toggle-stop-paused-same-key' });
-    ttsStop();
-    ttsDiagPush('speak-action', { action: 'stopped-paused-session', key, before, after: ttsBlockSnapshot() });
+  // Case: same key, currently PAUSED → resume (not stop, not restart).
+  // This handles "Play → Pause → Read page same page" correctly.
+  if (TTS_STATE.activeKey === key && (TTS_STATE.browserPaused || (TTS_STATE.audio && TTS_STATE.audio.paused))) {
+    ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'resume-paused-same-key' });
+    ttsResume();
+    ttsDiagPush('speak-action', { action: 'resumed', key, before, after: ttsBlockSnapshot() });
     return;
   }
 
@@ -3488,8 +1495,8 @@ async function ttsSpeakQueue(key, parts) {
     ttsDiagPush('speak-request', TTS_DEBUG.lastPlayRequest);
   }
 
-  // Free tier, or explicit browser voice selection regardless of cloud capability.
-  if (!routeInfo.cloudCapable || routeInfo.requestedPath === 'browser-selected') {
+  // Free tier → browser.
+  if (!routeInfo.cloudCapable) {
     browserSpeakQueue(key, parts);
     ttsDiagPush('speak-action', { action: 'started', route: 'browser', key, before, after: ttsBlockSnapshot() });
     return;
@@ -3503,117 +1510,39 @@ async function ttsSpeakQueue(key, parts) {
   if (!queue.length) return;
 
   const sessionId = ++TTS_STATE.activeSessionId;
-  clearTtsBackendCapabilityState();
-  clearTtsCloudWindow();
-  clearPendingCloudSeek();
-  clearCloudRestartTransition();
   TTS_STATE.activeKey = key;
   TTS_STATE.lastPageKey = key;
-  TTS_STATE.activeSessionSkipCount = 0;
   TTS_STATE.activeBlockIndex = -1;
   TTS_STATE.pausedBlockIndex = -1;
   TTS_STATE.pausedPageKey = null;
   ttsSetButtonActive(key, true);
   ttsSetHintButton(key, true);
 
-  // ── Block-window synthesis setup ──────────────────────────────────────────
-  // For full-page reads (queue.length === 1) where sentence marks are used and
-  // the page contains more than 2 sentences: synthesise only the first 2
-  // sentences (chunk A) initially. The highlight loop triggers a non-blocking
-  // full-page fetch when block 1 is reached. See _ttsWindowTriggerPromotion.
-  const pageText = queue[0];
-  const wantMarksForPage = optsForKeySentenceMarks(key);
-  let useWindowMode = false;
-  let chunkAText = pageText;
-
-  if (wantMarksForPage && queue.length === 1) {
-    const sentences = ttsWindowSplitSentences(pageText);
-    const pageAlreadyPromoted = hasTtsFullPageReady(key);
-    // Use window mode when: page has 3+ sentences AND the full page is long
-    // enough for windowing to save meaningful Azure chars. Once this tab has
-    // already validated full-page marks for the page, replay goes direct to the
-    // full-page cache instead of re-entering chunk-A and exposing the same seam.
-    if (sentences.length > 2 && pageText.length >= TTS_WINDOW_SMALL_PAGE_CHARS && !pageAlreadyPromoted) {
-      useWindowMode = true;
-      chunkAText = sentences.slice(0, 2).join('');
-      TTS_CLOUD_WINDOW.active = true;
-      TTS_CLOUD_WINDOW.mode = 'block-window';
-      TTS_CLOUD_WINDOW.sessionId = sessionId;
-      TTS_CLOUD_WINDOW.pageKey = key;
-      TTS_CLOUD_WINDOW.pageText = pageText;
-      TTS_CLOUD_WINDOW.chunkASentenceCount = 2;
-      TTS_CLOUD_WINDOW.charsPhase1 = chunkAText.length;
-      TTS_CLOUD_WINDOW.charsFullPage = pageText.length;
-      TTS_CLOUD_WINDOW.charsSessionTotal = chunkAText.length;
-      ttsDiagPush('window-init', {
-        sessionId, key,
-        sentences: sentences.length,
-        charsPhase1: chunkAText.length,
-        charsFullPage: pageText.length,
-        ttsCloudMode: 'block-window',
-      });
-    } else if (sentences.length > 2) {
-      // Full page is short, or this page already proved full-page marks in this
-      // tab. Synthesise full page directly.
-      ttsDiagPush(pageAlreadyPromoted ? 'window-bypassed-promoted-page' : 'window-skipped-short-page', {
-        sessionId, key,
-        sentences: sentences.length,
-        pageLength: pageText.length,
-        smallPageThreshold: TTS_WINDOW_SMALL_PAGE_CHARS,
-        priorFullPageReady: pageAlreadyPromoted,
-        ttsCloudMode: 'full-page',
-      });
-    }
-  }
   try {
-    // Pre-flight usage check (runs once before any cloud request).
-    // Pass 3: server verdict gates the action; client counter is display-only.
-    if (wantMarksForPage) {
-      if (window.rcUsage && typeof window.rcUsage.check === 'function') {
-        try {
-          const verdict = await window.rcUsage.check('tts');
-          if (!verdict.allowed) {
-            try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
-            ttsSetButtonActive(key, false);
-            ttsSetHintButton(key, false);
-            clearTtsCloudWindow();
-            return;
-          }
-        } catch (_) {} // server unreachable: proceed (safe degraded behavior)
-      }
-      try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
-    }
-
     for (let i = 0; i < queue.length; i++) {
-      const isFirstItem = (i === 0);
-      const wantMarks = isFirstItem && wantMarksForPage;
-      // Window mode: synthesise chunk A (sentences 0+1) for the first request.
-      const textToSynth = (isFirstItem && useWindowMode) ? chunkAText : queue[i];
-      const requestMode = (isFirstItem && useWindowMode) ? 'block-window' : 'full-page';
-
-      const tts = await cloudFetchWithRetry(textToSynth, { sentenceMarks: wantMarks, requestMode }, { maxAttempts: 3, sessionId, getSessionId: () => TTS_STATE.activeSessionId });
-      if (!tts || TTS_STATE.activeSessionId !== sessionId) return;
-      applyCloudCapabilityForRuntime({ key, sessionId, capability: tts.capability, sentenceMarks: tts.sentenceMarks });
+      const wantMarks = (i === 0 && optsForKeySentenceMarks(key));
+      // Pre-flight usage check before the first cloud TTS request.
+      // Pass 3: server verdict gates the action; client counter is display-only.
+      if (i === 0 && optsForKeySentenceMarks(key)) {
+        if (window.rcUsage && typeof window.rcUsage.check === 'function') {
+          try {
+            const verdict = await window.rcUsage.check('tts');
+            if (!verdict.allowed) {
+              try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
+              ttsSetButtonActive(key, false);
+              ttsSetHintButton(key, false);
+              return;
+            }
+          } catch (_) {} // server unreachable: proceed (safe degraded behavior)
+        }
+        try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
+      }
+      const tts = await cloudFetchUrl(queue[i], { sentenceMarks: wantMarks });
+      if (TTS_STATE.activeSessionId !== sessionId) return;
       const url = tts.url;
       if (wantMarks) {
-        // For window mode: pass the full pageText as rawText so sentence spans are
-        // placed at their correct positions within the full page HTML. Chunk A's
-        // byte offsets are relative to the start of the page text (sentences 0+1
-        // occupy the same byte positions in both chunkAText and pageText).
-        const highlightText = (isFirstItem && useWindowMode) ? pageText : queue[i];
         if (tts.sentenceMarks && tts.sentenceMarks.length) {
-          ttsMaybePrepareSentenceHighlight(key, highlightText, tts.sentenceMarks);
-          if (!useWindowMode && tts.sentenceMarks.length > getTtsChunkWindowLimit()) {
-            markTtsFullPageReady(key, { sessionId, source: 'direct-full-page', marksCount: tts.sentenceMarks.length });
-            const lastMark = tts.sentenceMarks[tts.sentenceMarks.length - 1] || null;
-            ttsDiagPush('window-full-page-coverage', {
-              sessionId, key,
-              source: 'direct-full-page',
-              marksCount: tts.sentenceMarks.length,
-              pageTextLength: highlightText.length,
-              lastMarkEnd: lastMark ? Number(lastMark.end || 0) : 0,
-            });
-          }
+          ttsMaybePrepareSentenceHighlight(key, queue[i], tts.sentenceMarks);
         } else {
           ttsPrepareEstimatedHighlight(key, queue[i], TTS_AUDIO_ELEMENT);
         }
@@ -3628,400 +1557,12 @@ async function ttsSpeakQueue(key, parts) {
         try { audio.volume = Math.max(0, Math.min(1, Number(TTS_STATE.volume ?? 1))); } catch (_) {}
         try { audio.defaultPlaybackRate = Number(TTS_STATE.rate || 1); audio.playbackRate = Number(TTS_STATE.rate || 1); } catch (_) {}
         ttsStartHighlightLoop(audio);
-        const applyPending = (reason) => { try { applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason); } catch (_) {} };
-        try { audio.onloadedmetadata = () => applyPending('loadedmetadata'); } catch (_) {}
-        try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
-        audio.onended = () => {
-          // In window mode this is only chunk-A ending unless the full-page
-          // promotion already swapped src. Keep chunk-A marks live until Case B
-          // either latches full-page marks or fails through normal cleanup;
-          // clearing here creates active/paused/no-marks stale state.
-          if (isFirstItem && useWindowMode && !TTS_CLOUD_WINDOW.promotionApplied) {
-            restoreNaturalWindowStateForHandoff(sessionId, key, pageText, chunkAText, 'chunk-a-onended');
-            ttsBeginNaturalWindowHandoff(sessionId, key, 'chunk-ended-natural');
-          } else {
-            ttsClearSentenceHighlight();
-          }
-          resolve();
-        };
+        audio.onended = () => { ttsClearSentenceHighlight(); resolve(); };
         audio.onerror = () => reject(new Error('Audio playback failed'));
-        audio.play().then(() => {
-          clearTtsStartupBanner();
-          applyPending('play-start');
-        }).catch(reject);
+        audio.play().catch(reject);
       });
 
       if (TTS_STATE.activeSessionId !== sessionId) return;
-
-      // ── Window post-chunk-A handoff ──────────────────────────────────────
-      // After chunk A's onended fires one of two situations applies:
-      //
-      //   A) _ttsWindowApplyPromotion swapped audio.src mid-playback:
-      //      The onended above actually fired for the FULL PAGE audio — the
-      //      whole page is done. promotionApplied === true signals this.
-      //
-      //   B) Chunk A ended before the full-page fetch resolved:
-      //      Await the in-flight promise, apply marks, seek past sentences 0+1,
-      //      and play the full-page audio to completion.
-      if (isFirstItem && useWindowMode) {
-        if (TTS_CLOUD_WINDOW.promotionApplied) {
-          // Case A: full page already played via mid-playback switch. Done.
-          ttsDiagPush('window-complete-via-promotion', {
-            sessionId, key,
-            charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
-            charsFullPage: TTS_CLOUD_WINDOW.charsFullPage,
-            charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
-            ttsCloudMode: 'full-page',
-          });
-          clearTtsCloudWindow();
-        } else {
-          // Case B: chunk A ended; promotion was triggered but not yet applied.
-          // If promotion was never triggered before the natural block-window end,
-          // restore the local window owner state and trigger full-page promotion
-          // here. Case B remains the only owner of the actual handoff.
-          if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.sessionId !== sessionId || TTS_CLOUD_WINDOW.pageKey !== key) {
-            restoreNaturalWindowStateForHandoff(sessionId, key, pageText, chunkAText, 'case-b-preflight');
-          }
-          if (!TTS_CLOUD_WINDOW.promotionTriggered || !TTS_CLOUD_WINDOW.promotionFetchPromise) {
-            ttsBeginNaturalWindowHandoff(sessionId, key, 'chunk-ended-natural-fallback');
-          }
-
-          ttsDiagPush('window-natural-handoff-await', {
-            sessionId, key,
-            userInitiated: false,
-            promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
-            promotionPending: !!TTS_CLOUD_WINDOW.promotionFetchPromise && !TTS_CLOUD_WINDOW.promotionResult,
-            promotionReady: !!TTS_CLOUD_WINDOW.promotionResult,
-            chosenHandoffBlock: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
-            staleWindowGuard: 'avoided-natural-continuation',
-          });
-
-          if (!TTS_CLOUD_WINDOW.promotionFetchPromise) {
-            if (TTS_STATE.activeSessionId !== sessionId || String(TTS_STATE.activeKey || '') !== String(key || '')) {
-              clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
-              return;
-            }
-            TTS_CLOUD_WINDOW.active = true;
-            TTS_CLOUD_WINDOW.mode = 'handoff-pending';
-            TTS_CLOUD_WINDOW.sessionId = sessionId;
-            TTS_CLOUD_WINDOW.pageKey = key;
-            TTS_CLOUD_WINDOW.pageText = pageText;
-            TTS_CLOUD_WINDOW.chunkASentenceCount = Math.max(2, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0) || 2);
-            TTS_CLOUD_WINDOW.charsPhase1 = String(chunkAText || '').length || TTS_CLOUD_WINDOW.charsPhase1;
-            TTS_CLOUD_WINDOW.charsFullPage = pageText.length;
-            TTS_CLOUD_WINDOW.charsSessionTotal = TTS_CLOUD_WINDOW.charsPhase1;
-            TTS_CLOUD_WINDOW.promotionTriggered = true;
-            TTS_CLOUD_WINDOW.engagementSignal = 'chunk-ended-natural-direct-fallback';
-            TTS_CLOUD_WINDOW.promotionFetchPromise = cloudFetchWithRetry(
-              pageText,
-              { sentenceMarks: true, requestMode: 'full-page' },
-              { maxAttempts: 3, sessionId, getSessionId: () => TTS_STATE.activeSessionId }
-            );
-            ttsDiagPush('window-natural-handoff-direct-fetch-fallback', {
-              sessionId, key,
-              userInitiated: false,
-              promotionTriggered: true,
-              promotionPending: true,
-              promotionReady: false,
-              chosenHandoffBlock: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
-              staleWindowGuard: 'avoided-natural-continuation',
-              charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
-              charsFullPage: TTS_CLOUD_WINDOW.charsFullPage,
-            });
-          }
-
-          const playWindowContinuationFrom = async (initialCursor, unavailableReason, unavailableContext = {}) => {
-            const pageSentences = ttsWindowSplitSentences(pageText);
-            const chunkSize = Math.max(1, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0) || 2);
-            let cursor = Math.max(chunkSize, Number(initialCursor || chunkSize));
-            const requestId = Number(TTS_STATE.cloudRestartRequestId || 0) + 1;
-            TTS_STATE.cloudRestartRequestId = requestId;
-            TTS_STATE.cloudRestartInFlight = true;
-            beginCloudRestartPendingState({ requestId, sessionId, key, targetBlock: cursor, reason: 'window-continuation' });
-            ttsDiagPush('window-continuation-start', {
-              sessionId, key, requestId, startBlock: cursor, chunkSize,
-              reason: unavailableReason, requestMode: 'block-window',
-              pageSentenceCount: pageSentences.length,
-              ...unavailableContext,
-            });
-
-            const isCurrentContinuation = () => (
-              Number(TTS_STATE.cloudRestartRequestId || 0) === requestId &&
-              Number(TTS_STATE.activeSessionId || 0) === Number(sessionId || 0) &&
-              String(TTS_STATE.activeKey || '') === String(key || '') &&
-              TTS_CLOUD_WINDOW.active &&
-              TTS_CLOUD_WINDOW.fullPageUnavailable === true &&
-              TTS_CLOUD_WINDOW.sessionId === sessionId &&
-              String(TTS_CLOUD_WINDOW.pageKey || '') === String(key || '')
-            );
-
-            const fetchContinuationChunk = (startBlock, source) => {
-              const chunkText = pageSentences.slice(startBlock, startBlock + chunkSize).join('');
-              if (!chunkText.trim()) return null;
-              ttsDiagPush(source === 'prefetch' ? 'window-continuation-prefetch-start' : 'window-continuation-fetch-start', {
-                sessionId, key, requestId, startBlock, chunkSize, requestMode: 'block-window',
-              });
-              return cloudFetchWithRetry(
-                chunkText,
-                { sentenceMarks: true, requestMode: 'block-window' },
-                { maxAttempts: 3, sessionId, getSessionId: () => TTS_STATE.activeSessionId }
-              ).then(tts => ({ startBlock, chunkText, tts, source }));
-            };
-
-            let prefetched = null;
-            const startPrefetch = (nextBlock) => {
-              if (nextBlock >= pageSentences.length || !isCurrentContinuation()) return;
-              const promise = fetchContinuationChunk(nextBlock, 'prefetch');
-              if (!promise) return;
-              prefetched = { startBlock: nextBlock, promise: promise.then(result => {
-                if (!isCurrentContinuation()) {
-                  ttsDiagPush('window-continuation-prefetch-discarded', { sessionId, key, requestId, startBlock: nextBlock, reason: 'stale-session' });
-                  return null;
-                }
-                ttsDiagPush('window-continuation-prefetch-ready', {
-                  sessionId, key, requestId, startBlock: nextBlock,
-                  returnedMarksCount: Array.isArray(result?.tts?.sentenceMarks) ? result.tts.sentenceMarks.length : 0,
-                  requestMode: 'block-window',
-                });
-                return result;
-              }) };
-            };
-
-            let current = await fetchContinuationChunk(cursor, 'direct');
-            while (current && current.startBlock < pageSentences.length) {
-              if (!isCurrentContinuation()) return false;
-
-              const queuedTarget = Number(TTS_CLOUD_RESTART_PENDING.queuedTargetBlock ?? -1);
-              const pendingTarget = Math.max(
-                Number.isFinite(Number(TTS_CLOUD_WINDOW.pendingSkipBlock)) ? Number(TTS_CLOUD_WINDOW.pendingSkipBlock) : -1,
-                Number.isFinite(queuedTarget) ? queuedTarget : -1
-              );
-              if (pendingTarget >= 0 && pendingTarget > current.startBlock) {
-                const boundedTarget = Math.min(Math.max(cursor, pendingTarget), pageSentences.length - 1);
-                ttsDiagPush('window-continuation-prefetch-discarded', { sessionId, key, requestId, startBlock: current.startBlock, reason: 'skip-mismatch', targetBlock: boundedTarget });
-                prefetched = null;
-                TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
-                TTS_CLOUD_WINDOW.pendingSkipSettling = false;
-                TTS_CLOUD_RESTART_PENDING.queuedTargetBlock = -1;
-                current = await fetchContinuationChunk(boundedTarget, 'direct');
-                continue;
-              }
-
-              const tts = current.tts;
-              if (!tts || !Array.isArray(tts.sentenceMarks) || !tts.sentenceMarks.length) {
-                throw new Error('window-continuation-missing-marks');
-              }
-              applyCloudCapabilityForRuntime({ key, sessionId, capability: tts.capability, sentenceMarks: tts.sentenceMarks });
-              if (!ttsPrepareWindowContinuationHighlight(key, pageText, current.startBlock, tts.sentenceMarks)) {
-                throw new Error('window-continuation-highlight-unavailable');
-              }
-
-              const nextBlock = Math.min(pageSentences.length, current.startBlock + Math.max(1, tts.sentenceMarks.length));
-              TTS_CLOUD_WINDOW.mode = 'continuing';
-              TTS_STATE.activeBlockIndex = current.startBlock;
-              try { ttsHighlightBlock(current.startBlock); } catch (_) {}
-              ttsDiagPush('window-continuation-chunk-ready', {
-                sessionId, key, requestId, startBlock: current.startBlock, nextBlock,
-                returnedMarksCount: tts.sentenceMarks.length, requestMode: 'block-window',
-                cacheHit: tts.capability?.cache?.audio?.status === 'hit',
-              });
-
-              startPrefetch(nextBlock);
-
-              await new Promise((resolve, reject) => {
-                const audio = TTS_AUDIO_ELEMENT;
-                try { audio.loop = false; audio.pause(); } catch (_) {}
-                audio.src = tts.url;
-                TTS_STATE.audio = audio;
-                try { audio.volume = Math.max(0, Math.min(1, Number(TTS_STATE.volume ?? 1))); } catch (_) {}
-                try { audio.defaultPlaybackRate = Number(TTS_STATE.rate || 1); audio.playbackRate = Number(TTS_STATE.rate || 1); } catch (_) {}
-                const applyPending = (reason) => { try { applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason); } catch (_) {} };
-                try { audio.onloadedmetadata = () => applyPending('loadedmetadata'); } catch (_) {}
-                try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
-                audio.onended = () => {
-                  if (nextBlock < pageSentences.length && isCurrentContinuation()) {
-                    TTS_STATE.cloudRestartInFlight = true;
-                    beginCloudRestartPendingState({ requestId, sessionId, key, targetBlock: nextBlock, reason: 'window-continuation' });
-                    ttsDiagPush('window-continuation-pending', { sessionId, key, requestId, nextBlock, requestMode: 'block-window' });
-                  } else {
-                    ttsClearSentenceHighlight();
-                  }
-                  resolve();
-                };
-                audio.onerror = () => reject(new Error('Audio playback failed'));
-                audio.play().then(() => {
-                  if (!isCurrentContinuation()) { resolve(); return; }
-                  clearTtsStartupBanner();
-                  applyPending('play-start');
-                  ttsStartHighlightLoop(audio);
-                  TTS_STATE.cloudRestartInFlight = false;
-                  clearCloudRestartPendingState(requestId, 'continuation-chunk-playing');
-                }).catch(reject);
-              });
-
-              if (!isCurrentContinuation()) return false;
-              cursor = nextBlock;
-              if (cursor >= pageSentences.length) break;
-              if (prefetched && prefetched.startBlock === cursor) {
-                current = await prefetched.promise;
-                prefetched = null;
-                if (!current) return false;
-              } else {
-                current = await fetchContinuationChunk(cursor, 'direct');
-              }
-            }
-
-            if (!isCurrentContinuation()) return false;
-            clearCloudRestartTransition({ invalidateRequest: false, unmute: true, reason: 'window-continuation-complete' });
-            ttsDiagPush('window-continuation-complete', { sessionId, key, requestId, finalBlock: cursor, requestMode: 'block-window' });
-            clearTtsCloudWindow();
-            return true;
-          };
-
-          let fullResult = null;
-          try {
-            fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
-          } catch (err) {
-            markTtsWindowFullPageUnavailable(sessionId, key, 'promotion-fetch-failed', { error: String(err?.message || err), phase: 'case-b-handoff' });
-            const continued = await playWindowContinuationFrom(Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0), 'promotion-fetch-failed', { error: String(err?.message || err) });
-            if (continued) continue;
-            throw err;
-          }
-          if (!fullResult || TTS_STATE.activeSessionId !== sessionId) {
-            clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
-            return;
-          }
-          TTS_CLOUD_WINDOW.promotionResult = fullResult;
-          TTS_CLOUD_WINDOW.mode = 'promoted';
-          TTS_CLOUD_WINDOW.charsSessionTotal = TTS_CLOUD_WINDOW.charsPhase1 + pageText.length;
-
-          ttsDiagPush('window-natural-handoff-ready', {
-            sessionId, key,
-            userInitiated: false,
-            promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
-            promotionPending: false,
-            promotionReady: true,
-            returnedMarksCount: Array.isArray(fullResult.sentenceMarks) ? fullResult.sentenceMarks.length : 0,
-            chosenHandoffBlock: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
-          });
-
-          // Validate fullResult.sentenceMarks BEFORE mutating runtime state.
-          // Applying stale Phase 1 marks (returned count <= chunkASentenceCount) would
-          // make them briefly live seek truth and corrupt skip boundary detection.
-          const _caseBMarkCount = fullResult.sentenceMarks ? fullResult.sentenceMarks.length : 0;
-          const _caseBChunkACount = TTS_CLOUD_WINDOW.chunkASentenceCount;
-          if (_caseBMarkCount <= _caseBChunkACount) {
-            ttsDiagPush('window-promotion-stale-phase1', {
-              sessionId, key,
-              returnedMarksCount: _caseBMarkCount,
-              chunkASentenceCount: _caseBChunkACount,
-              expectedMin: _caseBChunkACount + 1,
-              requestMode: 'full-page',
-              audioCacheStatus: fullResult.capability?.cache?.audio?.status || null,
-              marksCacheStatus: fullResult.capability?.cache?.marks?.status || null,
-              artifactHash: fullResult.capability?.artifact?.hash || null,
-              phase: 'case-b-handoff',
-              ttsCloudMode: 'stale-phase1-rejected',
-            });
-            markTtsWindowFullPageUnavailable(sessionId, key, 'stale-phase1-promotion-result', { returnedMarksCount: _caseBMarkCount, chunkASentenceCount: _caseBChunkACount, phase: 'case-b-handoff' });
-            const continued = await playWindowContinuationFrom(_caseBChunkACount, 'stale-phase1-promotion-result', { returnedMarksCount: _caseBMarkCount });
-            if (continued) continue;
-            clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
-            throw new Error('stale-phase1-promotion-result');
-          }
-          applyCloudCapabilityForRuntime({ key, sessionId, capability: fullResult.capability, sentenceMarks: fullResult.sentenceMarks });
-          if (fullResult.sentenceMarks && fullResult.sentenceMarks.length) {
-            ttsMaybePrepareSentenceHighlight(key, pageText, fullResult.sentenceMarks);
-          }
-
-          // Seek into the full-page audio past chunk A's sentences.
-          // If the user skipped forward while waiting for promotion, honour that
-          // intent by jumping to the requested block (pendingSkipBlock) instead of
-          // just the end of chunk A.
-          const fullMarks = TTS_STATE.highlightMarks;
-          const chunkAEnd = Math.min(TTS_CLOUD_WINDOW.chunkASentenceCount, fullMarks ? fullMarks.length - 1 : 0);
-          const _handoffPendingSkip = (Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) && TTS_CLOUD_WINDOW.pendingSkipBlock >= 0)
-            ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1;
-          TTS_CLOUD_WINDOW.pendingSkipBlock = -1; // consume
-          TTS_CLOUD_WINDOW.pendingSkipSettling = false;
-          // Mark full-page marks/audio as the active seek/skip truth (Case B equivalent
-          // of the promotionApplied = true set in _ttsWindowApplyPromotion for Case A).
-          // Without this, all three window-skip guards would see promotionApplied === false
-          // and incorrectly defer/coalesce skips — including attempts to skip past the last
-          // block (target >= blockCount), which would set pendingSkipSettling = true and
-          // lock out every subsequent forward skip for the rest of the session.
-          TTS_CLOUD_WINDOW.promotionApplied = true;
-          markTtsFullPageReady(key, { sessionId, source: 'case-b-handoff', marksCount: _caseBMarkCount });
-          const _caseBLastMark = fullResult.sentenceMarks[_caseBMarkCount - 1] || null;
-          ttsDiagPush('window-full-page-coverage', {
-            sessionId, key,
-            source: 'case-b-handoff',
-            marksCount: _caseBMarkCount,
-            pageTextLength: pageText.length,
-            lastMarkEnd: _caseBLastMark ? Number(_caseBLastMark.end || 0) : 0,
-          });
-          const startBlock = Math.min(
-            _handoffPendingSkip >= 0 ? Math.max(chunkAEnd, _handoffPendingSkip) : chunkAEnd,
-            fullMarks ? fullMarks.length - 1 : 0
-          );
-          TTS_STATE.activeBlockIndex = startBlock;
-          try { ttsHighlightBlock(startBlock); } catch (_) {}
-          queuePendingCloudSeek(key, sessionId, startBlock, 0);
-
-          ttsDiagPush('window-handoff-after-chunk-a', {
-            sessionId, key, startBlock, chunkAEnd,
-            pendingSkipBlock: _handoffPendingSkip,
-            userInitiated: _handoffPendingSkip >= 0,
-            passiveHandoff: _handoffPendingSkip < 0,
-            promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
-            promotionPending: false,
-            promotionReady: true,
-            staleWindowGuard: _handoffPendingSkip < 0 ? 'avoided-natural-continuation' : 'not-applicable-user-initiated',
-            seekTimeMs: (fullMarks && fullMarks[startBlock]) ? fullMarks[startBlock].time : null,
-            charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
-            charsFullPage: pageText.length,
-            charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
-            ttsCloudMode: 'full-page',
-          });
-          ttsDiagPush('window-promotion-applied', {
-            sessionId, key, startBlock,
-            path: 'case-b-handoff',
-            ttsCloudMode: 'full-page',
-          });
-          if (_handoffPendingSkip >= 0) {
-            ttsDiagPush('window-skip-applied-after-promotion', { sessionId, key, targetBlock: startBlock, pendingSkipBlock: _handoffPendingSkip, handoff: true });
-          }
-
-          if (TTS_STATE.activeSessionId !== sessionId) return;
-
-          // Play full-page audio from startBlock onward.
-          await new Promise((resolve, reject) => {
-            const audio = TTS_AUDIO_ELEMENT;
-            try { audio.loop = false; audio.pause(); } catch (_) {}
-            audio.src = fullResult.url;
-            TTS_STATE.audio = audio;
-            try { audio.volume = Math.max(0, Math.min(1, Number(TTS_STATE.volume ?? 1))); } catch (_) {}
-            try { audio.defaultPlaybackRate = Number(TTS_STATE.rate || 1); audio.playbackRate = Number(TTS_STATE.rate || 1); } catch (_) {}
-            const applyPending = (reason) => { try { applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason); } catch (_) {} };
-            try { audio.onloadedmetadata = () => applyPending('loadedmetadata'); } catch (_) {}
-            try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
-            audio.onended = () => { ttsClearSentenceHighlight(); resolve(); };
-            audio.onerror = () => reject(new Error('Audio playback failed'));
-            audio.play().then(() => {
-              clearTtsStartupBanner();
-              applyPending('play-start');
-              ttsStartHighlightLoop(audio);
-              clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
-            }).catch(err => {
-              clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
-              reject(err);
-            });
-          });
-
-          if (TTS_STATE.activeSessionId !== sessionId) return;
-          clearTtsCloudWindow();
-        }
-      }
     }
 
     TTS_STATE.activeKey = null;
@@ -4030,36 +1571,19 @@ async function ttsSpeakQueue(key, parts) {
     if (optsForKeySentenceMarks(key)) {
       const _cp = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
       const pageIndex = _cp ? _cp.pageIndex : -1;
-      if (Number.isFinite(pageIndex) && pageIndex >= 0) { ttsKeepWarmForAutoplay(); ttsAutoplayScheduleNext({ pageIndex, key, reason: 'page-complete' }); }
+      if (Number.isFinite(pageIndex) && pageIndex >= 0) { ttsKeepWarmForAutoplay(); ttsAutoplayScheduleNext(pageIndex); }
     }
-    clearTtsStartupBanner();
     ttsDiagPush('speak-action', { action: 'completed', route: 'cloud', key, before, after: ttsBlockSnapshot() });
 
   } catch (err) {
-    clearTtsStartupBanner();
-    clearTtsCloudWindow();
     if (TTS_STATE.activeSessionId !== sessionId) return;
     if (err && (err.name === 'AbortError' || String(err).includes('aborted'))) return;
     const ri = getPreferredTtsRouteInfo();
-    const msg = String(err && err.message ? err.message : err);
-    const recoverable = isRecoverablePlaybackFailure(err);
-    TTS_STATE.playbackBlockedReason = msg;
-    TTS_DEBUG.lastError = { at: new Date().toISOString(), path: 'cloud', key, message: msg, recoverable };
-    ttsDiagPush('cloud-playback-failed', { key, message: msg, route: ri, recoverable });
+    TTS_STATE.playbackBlockedReason = String(err && err.message ? err.message : err);
+    TTS_DEBUG.lastError = { at: new Date().toISOString(), path: 'cloud', key, message: TTS_STATE.playbackBlockedReason };
+    ttsDiagPush('cloud-playback-failed', { key, message: TTS_STATE.playbackBlockedReason, route: ri });
     console.warn('Cloud TTS unavailable; keeping browser fallback disabled for predictable voice behavior:', err);
-    try {
-      const actions = window.rcInteraction && window.rcInteraction.actions
-        ? [window.rcInteraction.actions.retry(() => { try { if (typeof window.startFocusedPageTts === 'function') window.startFocusedPageTts(); } catch (_) {} })]
-        : [];
-      window.rcInteraction && window.rcInteraction.error('tts:start', 'Playback couldn\'t start.', { actions });
-    } catch (_) {}
     ttsStop();
-    if (recoverable) {
-      // Keep explicit cloud selection intact, but do not treat transient cloud
-      // transport/server failure as a lasting capability block. The user should
-      // be able to press Play again immediately after the failed session stops.
-      TTS_STATE.playbackBlockedReason = '';
-    }
     TTS_DEBUG.lastResolvedPath = ri.selected.explicitCloud ? 'cloud-failure-explicit' : 'cloud-failure';
     return;
   }
@@ -4069,12 +1593,10 @@ async function ttsSpeakQueue(key, parts) {
 //
 // Operates on TTS_STATE.activeBlockIndex. Not on vague currentTime offsets.
 // At page boundaries: next crosses to next page; prev restarts block 0.
-// Cloud skip entry must start from the landed block itself so audible entry
-// cannot trail behind the visible block after a skip.
+// Clipping protection: 60ms before target block start time on the cloud-audio path.
 // Browser path: no clip risk (each utterance starts from char 0 of sentence).
 
 function isRuntimePausedForContract() {
-  if (isCloudRestartTransitionActive()) return false;
   try {
     if (TTS_STATE.audio) return !!TTS_STATE.audio.paused;
   } catch (_) {}
@@ -4086,14 +1608,29 @@ function isRuntimePausedForContract() {
 }
 
 function ttsJumpPagePreserve(delta) {
-  return ttsRunPageHandoff({
-    key: String(TTS_STATE.activeKey || ''),
-    delta,
-    mode: 'paused',
-    targetBlockIndex: 0,
-    behavior: 'smooth',
-    reason: 'paused-page-preserve',
-  });
+  const key = String(TTS_STATE.activeKey || '');
+  const parsedKey = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
+  if (!parsedKey) return false;
+  const currentIndex = parsedKey.pageIndex;
+  const nextIndex = currentIndex + (delta < 0 ? -1 : 1);
+  if (!Number.isFinite(nextIndex) || nextIndex < 0) return false;
+  if (typeof pages === 'undefined' || !pages[nextIndex]) return false;
+
+  try { if (typeof window.focusReadingPage === 'function') window.focusReadingPage(nextIndex, { behavior: 'smooth' }); } catch (_) {}
+
+  // Advance reading target to next page (preserving source/chapter context).
+  if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: parsedKey.sourceType, bookId: parsedKey.bookId, chapterIndex: parsedKey.chapterIndex, pageIndex: nextIndex });
+  const nextKey = (typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${nextIndex}`;
+  const nextText = pages[nextIndex];
+
+  // If we're on cloud (active audio exists), prepare next page audio in paused mode.
+  if (TTS_STATE.audio) {
+    void ttsPreparePausedCloudPage(nextIndex);
+  } else {
+    // Browser path: prepare page highlights and resume hook without unpausing.
+    browserSpeakQueue(nextKey, [nextText], { startPaused: true, pausedBlockIndex: 0 });
+  }
+  return true;
 }
 
 async function ttsPreparePausedCloudPage(pageIndex) {
@@ -4106,9 +1643,6 @@ async function ttsPreparePausedCloudPage(pageIndex) {
   if (typeof pages === 'undefined' || !pages[pageIndex]) return false;
   const text = pages[pageIndex];
   const sessionId = ++TTS_STATE.activeSessionId;
-  clearTtsBackendCapabilityState();
-  clearPendingCloudSeek();
-  clearCloudRestartTransition();
 
   // Immediate state so UI reflects the navigation target.
   TTS_STATE.activeKey = key;
@@ -4142,7 +1676,6 @@ async function ttsPreparePausedCloudPage(pageIndex) {
   try {
     const tts = await cloudFetchUrl(text, { sentenceMarks: true });
     if (TTS_STATE.activeSessionId !== sessionId) return false;
-    applyCloudCapabilityForRuntime({ key, sessionId, capability: tts.capability, sentenceMarks: tts.sentenceMarks });
     const audio = TTS_AUDIO_ELEMENT;
     try { audio.loop = false; audio.pause(); } catch (_) {}
 
@@ -4163,122 +1696,7 @@ async function ttsPreparePausedCloudPage(pageIndex) {
   return true;
 }
 
-function ttsRestartCloudFromBlockStart(audio, key, sessionId, blockIdx, seekTime, reason = 'cloud-skip-restart') {
-  if (!audio) return false;
-  const target = Number.isFinite(Number(blockIdx)) ? Number(blockIdx) : -1;
-  if (target < 0) return false;
-  const requestId = Number(TTS_STATE.cloudRestartRequestId || 0) + 1;
-  const targetPreview = ttsGetBlockPreview(key, target);
-  TTS_STATE.cloudRestartRequestId = requestId;
-  TTS_STATE.cloudRestartInFlight = true;
-  beginCloudRestartPendingState({ requestId, sessionId, key, targetBlock: target, reason });
-  clearPendingCloudSeek();
-  try { audio.muted = true; } catch (_) {}
-  if (TTS_STATE.highlightRAF) { try { cancelAnimationFrame(TTS_STATE.highlightRAF); } catch (_) {} TTS_STATE.highlightRAF = null; }
-  TTS_STATE.activeBlockIndex = target;
-  try { ttsHighlightBlock(target); } catch (_) {}
-  ttsDiagPush('cloud-restart-request', {
-    key,
-    sessionId,
-    requestId,
-    targetBlock: target,
-    seekTime,
-    reason,
-    pageIndex: targetPreview?.pageIndex ?? -1,
-    excerpt: targetPreview?.excerpt || '',
-    rangeSource: targetPreview?.rangeSource || 'none',
-  });
-
-  const finalizeIfCurrent = (outcome, extra = {}) => {
-    if (Number(TTS_STATE.cloudRestartRequestId || 0) !== requestId) return false;
-    if (Number(TTS_STATE.activeSessionId || 0) !== Number(sessionId || 0)) return false;
-    if (String(TTS_STATE.activeKey || '') !== String(key || '')) return false;
-    if (outcome === 'applied') {
-      const queuedTarget = applyQueuedCloudRestartTargetIfNeeded(audio, requestId, key, sessionId);
-      const finishApplied = (seekSettled = false) => {
-        const elapsedMs = getCloudRestartPendingElapsedMs();
-        if (Number(TTS_STATE.cloudRestartRequestId || 0) !== requestId) return false;
-        if (Number(TTS_STATE.activeSessionId || 0) !== Number(sessionId || 0)) return false;
-        if (String(TTS_STATE.activeKey || '') !== String(key || '')) return false;
-        try { audio.muted = false; } catch (_) {}
-        TTS_STATE.cloudRestartInFlight = false;
-        TTS_STATE.pausedBlockIndex = -1;
-        TTS_STATE.pausedPageKey = null;
-        ttsStartHighlightLoop(audio);
-        ttsDiagPush('cloud-restart-applied', {
-          key, sessionId, requestId,
-          targetBlock: queuedTarget ? queuedTarget.targetBlock : target,
-          originalTargetBlock: target,
-          seekTime: queuedTarget ? queuedTarget.seekTime : seekTime,
-          originalSeekTime: seekTime,
-          reason,
-          elapsedMs,
-          queuedTargetApplied: !!queuedTarget,
-          queuedTargetSeekSettled: !!seekSettled,
-          audioCurrentTimeMsAtUnmute: audio.currentTime * 1000,
-          markProvenance: TTS_STATE.highlightMarksProvenance || 'unknown',
-          ...extra,
-        });
-        clearCloudRestartPendingState(requestId, 'applied');
-        return true;
-      };
-      if (queuedTarget && queuedTarget.waitForSeek) {
-        let settled = false;
-        const finishOnce = () => {
-          if (settled) return;
-          settled = true;
-          finishApplied(true);
-        };
-        try { audio.addEventListener('seeked', finishOnce, { once: true }); } catch (_) {}
-        setTimeout(finishOnce, 1500);
-        ttsDiagPush('cloud-restart-queued-target-waiting-seek', { key, sessionId, requestId, targetBlock: queuedTarget.targetBlock, seekTime: queuedTarget.seekTime });
-        return true;
-      }
-      finishApplied(false);
-      return true;
-    }
-    if (outcome === 'failed') {
-      const elapsedMs = getCloudRestartPendingElapsedMs();
-      try { audio.muted = false; } catch (_) {}
-      TTS_STATE.cloudRestartInFlight = false;
-      ttsDiagPush('cloud-restart-failed', { key, sessionId, requestId, targetBlock: target, seekTime, reason, elapsedMs, ...extra });
-      clearCloudRestartPendingState(requestId, 'failed');
-      return true;
-    }
-    return false;
-  };
-
-  try {
-    audio.pause();
-    if (Number(TTS_STATE.cloudRestartRequestId || 0) !== requestId || Number(TTS_STATE.activeSessionId || 0) !== Number(sessionId || 0) || String(TTS_STATE.activeKey || '') !== String(key || '')) {
-      ttsDiagPush('cloud-restart-suppressed', { key, sessionId, requestId, targetBlock: target, reason: 'superseded-after-pause', elapsedMs: getCloudRestartPendingElapsedMs() });
-      clearCloudRestartPendingState(requestId, 'suppressed-after-pause');
-      return false;
-    }
-    audio.currentTime = seekTime;
-    const playResult = audio.play();
-    if (playResult && typeof playResult.then === 'function') {
-      playResult.then(() => {
-        if (!finalizeIfCurrent('applied')) {
-          ttsDiagPush('cloud-restart-suppressed', { key, sessionId, requestId, targetBlock: target, reason: 'superseded-after-play', elapsedMs: getCloudRestartPendingElapsedMs() });
-          clearCloudRestartPendingState(requestId, 'suppressed-after-play');
-        }
-      }).catch((err) => {
-        finalizeIfCurrent('failed', { message: String(err?.message || err || 'unknown') });
-      });
-    } else {
-      finalizeIfCurrent('applied', { playResolution: 'sync' });
-    }
-    return true;
-  } catch (err) {
-    finalizeIfCurrent('failed', { message: String(err?.message || err || 'unknown') });
-    return false;
-  }
-}
-
 function ttsJumpSentence(delta) {
-  recordTtsUserSkip('block-skip');
-
   if (!TTS_STATE.activeKey) {
     ttsDiagPush('skip-block', { delta, resolved: 'no-active-key' });
     TTS_DEBUG.lastSkip = { resolved: 'no-active-key', delta };
@@ -4292,200 +1710,46 @@ function ttsJumpSentence(delta) {
   const marks = TTS_STATE.highlightMarks;
   const blockCount = marks ? marks.length : 0;
   const pausedForContract = isRuntimePausedForContract();
-  ttsDiagPush('skip-intent', {
-    delta,
-    key,
-    sourcePage,
-    activeBlockIndex: Number(TTS_STATE.activeBlockIndex ?? -1),
-    pausedBlockIndex: Number(TTS_STATE.pausedBlockIndex ?? -1),
-    highlightBlockIndex: Number(TTS_STATE.activeBlockIndex ?? -1),
-    audioCurrentTimeMs: TTS_STATE.audio ? TTS_STATE.audio.currentTime * 1000 : null,
-    activeBlockMarkTimeMs: (marks && Number.isFinite(TTS_STATE.activeBlockIndex) && TTS_STATE.activeBlockIndex >= 0 && marks[TTS_STATE.activeBlockIndex]) ? marks[TTS_STATE.activeBlockIndex].time : null,
-    markProvenance: TTS_STATE.highlightMarksProvenance || 'unknown',
-    hasAudio: !!TTS_STATE.audio,
-    hasBrowserSpeakFromBlock: !!TTS_STATE.browserSpeakFromBlock,
-    blockCount,
-    pausedForContract,
-    runtimePath: TTS_STATE.audio ? 'cloud-audio' : (TTS_STATE.browserSpeakFromBlock ? 'browser-speech' : 'none'),
-    cloudWindow: {
-      active: !!TTS_CLOUD_WINDOW.active,
-      mode: TTS_CLOUD_WINDOW.mode,
-      sessionId: TTS_CLOUD_WINDOW.sessionId,
-      promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
-      promotionApplied: !!TTS_CLOUD_WINDOW.promotionApplied,
-      chunkASentenceCount: TTS_CLOUD_WINDOW.chunkASentenceCount,
-      pendingSkipBlock: TTS_CLOUD_WINDOW.pendingSkipBlock,
-      pendingSkipSettling: !!TTS_CLOUD_WINDOW.pendingSkipSettling,
-    },
-  });
 
   // ── Cloud path ───────────────────────────────────────────────────────────────
   const audio = TTS_STATE.audio;
-
-  if (audio && isCloudRestartTransitionActive() && marks && blockCount > 0 && delta !== 0) {
-    let pendingTarget = sourceBlock + (delta < 0 ? -1 : 1);
-    if (pendingTarget < 0) pendingTarget = 0;
-    if (pendingTarget >= 0 && pendingTarget < blockCount) {
-      const queued = queueCloudRestartPendingTarget(pendingTarget, { delta, sourcePage, sourceBlock });
-      if (queued) {
-        const skipResult = {
-          at: new Date().toISOString(),
-          type: 'block',
-          delta,
-          sourcePage,
-          sourceBlock,
-          resolvedPage: sourcePage,
-          resolvedBlock: pendingTarget,
-          crossPage: false,
-          moved: true,
-          path: 'cloud-restart-pending-coalesced',
-          sessionId: TTS_STATE.activeSessionId,
-          requestId: TTS_CLOUD_RESTART_PENDING.requestId,
-        };
-        TTS_DEBUG.lastSkip = skipResult;
-        ttsDiagPush('skip-block', skipResult);
-        return true;
-      }
-    }
-  }
-
-  // Window seam guard: while a cloud seek or block-window → full-page promotion
-  // is unsettled, forward skip must not re-enter chunk-A seek/restart logic.
-  // Capture one same-page intent and coalesce rapid extra clicks until full-page
-  // marks/audio are ready.
-  //
-  // Guard exits (promotionApplied = true) when the full-page src-swap is fully
-  // settled and normal timed-seek can take over. All three window branches below
-  // are also gated on !promotionApplied for the same reason.
-  if (audio && delta > 0 && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied && (
-    TTS_STATE.cloudRestartInFlight ||
-    TTS_CLOUD_WINDOW.pendingSkipSettling ||
-    (TTS_CLOUD_WINDOW.promotionTriggered && !TTS_CLOUD_WINDOW.promotionApplied && TTS_CLOUD_WINDOW.mode !== 'promoted')
-  )) {
-    return ttsWindowRecordForwardSkipIntent('skip-forward-window-settling', { delta, key, sourcePage, sourceBlock });
-  }
-
-  // ── Window mode: forward skip with no marks ───────────────────────────────
-  // Chunk A has ended and the full-page handoff is in progress — marks are
-  // temporarily null while the promotion fetch or Case B await is in flight.
-  // Record the desired advance block so the handoff/apply path picks it up.
-  // Only applies pre-promotion; after promotionApplied the marks are the full
-  // page marks and a null-marks state would be a separate fault.
-  if (audio && (!marks || blockCount === 0) && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied && delta > 0) {
-    return ttsWindowRecordForwardSkipIntent('skip-forward-no-marks', { delta, key, sourcePage, sourceBlock });
-  }
-
-  if (audio && delta > 0 && marks && blockCount > 0 &&
-      TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied &&
-      !TTS_CLOUD_WINDOW.promotionTriggered) {
-    // A manual forward skip is stronger engagement than the elapsed-time gate.
-    // Start full-page promotion immediately, while still allowing the first
-    // in-window skip (0 → 1) to land normally.
-    try { _ttsWindowTriggerPromotion('skip-forward-window-preload'); } catch (_) {}
-  }
-
   if (audio && marks && blockCount > 0) {
     let target = sourceBlock + (delta < 0 ? -1 : 1);
 
     if (target < 0) target = 0; // prev at block 0 → restart block 0
 
-    if (target >= blockCount) {
-      if (TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied) {
-        // Forward skip past the chunk-A boundary is a high-engagement signal,
-        // but full-page marks may not be bound yet. Serialize it as one
-        // pending same-page intent so rapid clicks cannot repeatedly restart
-        // chunk-A audio or fall through to cross-page navigation.
-        return ttsWindowRecordForwardSkipIntent('skip-forward-engagement', { delta, key, sourcePage, sourceBlock });
-      }
-      // Stale-promotion guard: promotionApplied=true but blockCount still equals
-      // chunk-A count means the full-page marks never latched (the Phase 1 result
-      // was returned by the server for a full-page request and was rejected, leaving
-      // blockCount at chunkASentenceCount). Treat as unpromoted so the skip defers
-      // rather than falling through to cross-page-disabled.
-      if (TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.promotionApplied &&
-          blockCount <= TTS_CLOUD_WINDOW.chunkASentenceCount) {
-        ttsDiagPush('window-skip-stale-promotion-reroute', {
-          sessionId: TTS_STATE.activeSessionId, key,
-          sourcePage, sourceBlock, blockCount,
-          chunkASentenceCount: TTS_CLOUD_WINDOW.chunkASentenceCount,
-        });
-        return ttsWindowRecordForwardSkipIntent('skip-forward-stale-promotion', { delta, key, sourcePage, sourceBlock });
-      }
-      // Not in window mode — cross-page navigation disabled.
-      /* disabled cross-page path — kept for reference:
+    if (target >= blockCount) { // next at last block → cross to next page
       const moved = pausedForContract ? ttsJumpPagePreserve(1) : ttsJumpPage(1);
       const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage + 1, resolvedBlock: 0, crossPage: true, moved, path: pausedForContract ? 'cloud-cross-page-preserve' : 'cloud-cross-page', clippingProtection: false };
       TTS_DEBUG.lastSkip = skipResult;
       ttsDiagPush('skip-block', skipResult);
       return moved;
-      */
-      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolved: 'unavailable', crossPage: false, path: 'cross-page-disabled', sessionId: TTS_STATE.activeSessionId };
-      TTS_DEBUG.lastSkip = skipResult;
-      ttsDiagPush('skip-block', skipResult);
+    }
+
+    const CLIP_GUARD_MS = 60;
+    const rawTimeS = Number(marks[target].time || 0) / 1000;
+    const seekTime = Math.max(0, rawTimeS - CLIP_GUARD_MS / 1000);
+    try {
+      audio.currentTime = seekTime;
+      TTS_STATE.activeBlockIndex = target;
+      ttsHighlightBlock(target);
+      if (!pausedForContract) {
+        ttsStartHighlightLoop(audio);
+      } else {
+        // Skip while paused: reposition without unpausing.
+        TTS_STATE.pausedBlockIndex = target;
+        TTS_STATE.pausedPageKey = key;
+      }
+    } catch (_) {
+      TTS_DEBUG.lastSkip = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedBlock: target, moved: false, path: 'cloud-seek-failed' };
+      ttsDiagPush('skip-block', TTS_DEBUG.lastSkip);
       return false;
     }
 
-    const leadMs = 0;
-    const rawTimeS = Number(marks[target].time || 0) / 1000;
-    const seekTime = Math.max(0, rawTimeS - leadMs / 1000);
-    const mediaSeekReady = Number(audio.readyState || 0) >= 1;
-    const targetPreview = ttsGetBlockPreview(key, target);
-
-    ttsDiagPush('cloud-seek-request', {
-      key,
-      delta,
-      sourcePage,
-      sourceBlock,
-      targetBlock: target,
-      pausedForContract,
-      mediaSeekReady,
-      sessionId: TTS_STATE.activeSessionId,
-      pageIndex: targetPreview?.pageIndex ?? -1,
-      excerpt: targetPreview?.excerpt || '',
-      rangeSource: targetPreview?.rangeSource || 'none',
-      rangeStart: targetPreview?.start ?? -1,
-      rangeEnd: targetPreview?.end ?? -1,
-      seekTime,
-      rawTimeS,
-      blockTimeMs: Number(marks[target].time || 0),
-      markProvenance: TTS_STATE.highlightMarksProvenance || 'unknown',
-    });
-
-    TTS_STATE.activeBlockIndex = target;
-    ttsHighlightBlock(target);
-    if (pausedForContract) {
-      TTS_STATE.pausedBlockIndex = target;
-      TTS_STATE.pausedPageKey = key;
-    }
-
-    if (!mediaSeekReady) {
-      queuePendingCloudSeek(key, TTS_STATE.activeSessionId, target, leadMs);
-      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek-deferred-not-ready', clippingProtection: leadMs > 0, leadMs, sessionId: TTS_STATE.activeSessionId };
-      TTS_DEBUG.lastSkip = skipResult;
-      ttsDiagPush('skip-block', skipResult);
-      return true;
-    }
-
-    let moved = true;
-    try {
-      if (pausedForContract) {
-        audio.currentTime = seekTime;
-        clearPendingCloudSeek();
-      } else {
-        moved = ttsRestartCloudFromBlockStart(audio, key, TTS_STATE.activeSessionId, target, seekTime, 'cloud-skip-restart');
-      }
-    } catch (_) {
-      queuePendingCloudSeek(key, TTS_STATE.activeSessionId, target, leadMs);
-      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek-deferred-after-error', clippingProtection: leadMs > 0, leadMs, sessionId: TTS_STATE.activeSessionId };
-      TTS_DEBUG.lastSkip = skipResult;
-      ttsDiagPush('skip-block', skipResult);
-      return true;
-    }
-
-    const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved, path: pausedForContract ? 'cloud-seek-paused' : 'cloud-seek-restart-from-block-start', clippingProtection: leadMs > 0, leadMs, seekTime, blockTimeMs: Number(marks[target].time || 0), sessionId: TTS_STATE.activeSessionId };
+    const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: true, path: 'cloud-seek', clippingProtection: true, clipGuardMs: CLIP_GUARD_MS, seekTime, blockTimeMs: Number(marks[target].time || 0), sessionId: TTS_STATE.activeSessionId };
     TTS_DEBUG.lastSkip = skipResult;
     ttsDiagPush('skip-block', skipResult);
-    return moved;
+    return true;
   }
 
   // ── Browser path ─────────────────────────────────────────────────────────────
@@ -4497,18 +1761,11 @@ function ttsJumpSentence(delta) {
     if (target < 0) target = 0;
 
     if (target >= rangeCount) {
-      // Cross-page navigation disabled — same policy as cloud path.
-      /* disabled cross-page path — kept for reference:
       const moved = pausedForContract ? ttsJumpPagePreserve(1) : ttsJumpPage(1);
       const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage + 1, resolvedBlock: 0, crossPage: true, moved, path: pausedForContract ? 'browser-cross-page-preserve' : 'browser-cross-page', clippingProtection: false };
       TTS_DEBUG.lastSkip = skipResult;
       ttsDiagPush('skip-block', skipResult);
       return moved;
-      */
-      const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolved: 'unavailable', crossPage: false, path: 'cross-page-disabled', sessionId: TTS_STATE.activeSessionId };
-      TTS_DEBUG.lastSkip = skipResult;
-      ttsDiagPush('skip-block', skipResult);
-      return false;
     }
 
     if (pausedForContract) {
@@ -4518,9 +1775,7 @@ function ttsJumpSentence(delta) {
         markIntentionalBrowserCancel('skip-reposition-while-paused', { key, targetBlock: target });
         window.speechSynthesis.cancel();
       } catch (_) {}
-      clearPendingBrowserRestartTimer();
       TTS_STATE.browserPaused = true;
-      TTS_STATE.browserExpectedEntryBlockIndex = target;
       TTS_STATE.browserCurrentSentenceIndex = target;
       TTS_STATE.activeBlockIndex = target;
       TTS_STATE.pausedBlockIndex = target;
@@ -4531,22 +1786,6 @@ function ttsJumpSentence(delta) {
       ttsDiagPush('skip-block', skipResult);
       return true;
     } else {
-      const targetPreview = ttsGetBlockPreview(key, target);
-      ttsDiagPush('browser-skip-restart-request', {
-        key,
-        delta,
-        sourcePage,
-        sourceBlock,
-        targetBlock: target,
-        sessionId: TTS_STATE.activeSessionId,
-        pausedForContract,
-        highlightBlockIndex: TTS_STATE.activeBlockIndex,
-        pageIndex: targetPreview?.pageIndex ?? -1,
-        excerpt: targetPreview?.excerpt || '',
-        rangeSource: targetPreview?.rangeSource || 'none',
-        rangeStart: targetPreview?.start ?? -1,
-        rangeEnd: targetPreview?.end ?? -1,
-      });
       const ok = browserSpeakPageFromSentence(key, target);
       const skipResult = { at: new Date().toISOString(), type: 'block', delta, sourcePage, sourceBlock, resolvedPage: sourcePage, resolvedBlock: target, crossPage: false, moved: ok, path: 'browser-restart-from-block', clippingProtection: true, sessionId: TTS_STATE.activeSessionId };
       TTS_DEBUG.lastSkip = skipResult;
@@ -4562,33 +1801,28 @@ function ttsJumpSentence(delta) {
 }
 
 function ttsJumpPage(delta) {
-  recordTtsUserSkip('page-skip');
   // Skip contract: when paused, page navigation must preserve paused state.
   if (isRuntimePausedForContract()) {
     return ttsJumpPagePreserve(delta);
   }
 
-  const moved = ttsRunPageHandoff({
-    key: String(TTS_STATE.activeKey || ''),
-    delta,
-    mode: 'speak',
-    behavior: 'smooth',
-    reason: 'active-page-continue',
-  });
-  if (moved) {
-    ttsDiagPush('skip-page', {
-      at: new Date().toISOString(),
-      delta,
-      resolved: 'page-jump',
-      reason: 'active-page-continue',
-      activeKey: TTS_STATE.activeKey || null,
-    });
-  }
-  return moved;
+  const key = String(TTS_STATE.activeKey || '');
+  const _parsedJp = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
+  if (!_parsedJp) return false;
+  const currentIndex = _parsedJp.pageIndex;
+  const nextIndex = currentIndex + (delta < 0 ? -1 : 1);
+  if (!Number.isFinite(nextIndex) || nextIndex < 0) return false;
+  if (typeof pages === 'undefined' || !pages[nextIndex]) return false;
+  try { if (typeof window.focusReadingPage === 'function') window.focusReadingPage(nextIndex, { behavior: 'smooth' }); } catch (_) {}
+  // Advance reading target to next page before deriving key.
+  if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _parsedJp.sourceType, bookId: _parsedJp.bookId, chapterIndex: _parsedJp.chapterIndex, pageIndex: nextIndex });
+  ttsSpeakQueue((typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${nextIndex}`, [pages[nextIndex]]);
+  TTS_DEBUG.lastSkip = { at: new Date().toISOString(), type: 'page', delta, resolved: 'page-jump', sourcePageIndex: currentIndex, targetPageIndex: nextIndex, activeKey: TTS_STATE.activeKey || null };
+  ttsDiagPush('skip-page', TTS_DEBUG.lastSkip);
+  return true;
 }
 
 function ttsRestartPage(pageIndex, targetContext) {
-  invalidateAutoplayPresynth('restart-page', { abort: true });
   const idx = Number(pageIndex);
   if (!Number.isFinite(idx) || idx < 0) return false;
   if (typeof pages === 'undefined' || !pages[idx]) return false;
@@ -4605,7 +1839,7 @@ function ttsRestartPage(pageIndex, targetContext) {
 function restartLastSpokenPageTts() {
   const countdown = getCountdownStatus();
   if (countdown.active && Number.isFinite(countdown.pageIndex) && countdown.pageIndex >= 0) {
-    ttsAutoplayCancelCountdown('restart-last-spoken-page');
+    ttsAutoplayCancelCountdown();
     return ttsRestartPage(countdown.pageIndex);
   }
   // lastPageKey is set from key in ttsSpeakQueue — carries full source context.
@@ -4625,20 +1859,6 @@ function getTtsDiagnosticsSnapshot() {
     support: { browserTts: browserTtsSupported(), speechSynthesis: !!(typeof window !== 'undefined' && window.speechSynthesis), audioElement: !!TTS_AUDIO_ELEMENT },
     playback: getPlaybackStatus(),
     countdown: getCountdownStatus(),
-    cloudWindow: {
-      active: !!TTS_CLOUD_WINDOW.active,
-      mode: TTS_CLOUD_WINDOW.mode || 'idle',
-      sessionId: Number(TTS_CLOUD_WINDOW.sessionId || 0),
-      pageKey: TTS_CLOUD_WINDOW.pageKey || null,
-      chunkASentenceCount: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
-      promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
-      promotionApplied: !!TTS_CLOUD_WINDOW.promotionApplied,
-      pendingSkipBlock: Number(TTS_CLOUD_WINDOW.pendingSkipBlock ?? -1),
-      pendingSkipSettling: !!TTS_CLOUD_WINDOW.pendingSkipSettling,
-      charsPhase1: Number(TTS_CLOUD_WINDOW.charsPhase1 || 0),
-      charsFullPage: Number(TTS_CLOUD_WINDOW.charsFullPage || 0),
-      charsSessionTotal: Number(TTS_CLOUD_WINDOW.charsSessionTotal || 0),
-    },
     session: {
       id: TTS_STATE.activeSessionId,
       activeKey: TTS_STATE.activeKey || null,
@@ -4663,10 +1883,9 @@ function getTtsDiagnosticsSnapshot() {
     speed: { selected: Number(TTS_STATE.rate || 1), state: Number(TTS_STATE.rate || 1), audio: Number(TTS_AUDIO_ELEMENT.playbackRate || 1) },
     browserSpeech: browserTtsSupported() ? { speaking: !!window.speechSynthesis.speaking, paused: !!window.speechSynthesis.paused, pending: !!window.speechSynthesis.pending, voices: (window.speechSynthesis.getVoices() || []).length, currentSentenceIndex: Number(TTS_STATE.browserCurrentSentenceIndex || 0), currentCharIndex: Number(TTS_STATE.browserCurrentCharIndex || 0), sentenceCount: Number(TTS_STATE.browserSentenceCount || 0) } : null,
     audio: { present: !!TTS_AUDIO_ELEMENT, paused: !!TTS_AUDIO_ELEMENT.paused, currentTime: Number(TTS_AUDIO_ELEMENT.currentTime || 0), playbackRate: Number(TTS_AUDIO_ELEMENT.playbackRate || 1), src: TTS_AUDIO_ELEMENT.getAttribute('src') || null, loop: !!TTS_AUDIO_ELEMENT.loop },
-    highlight: { pageKey: TTS_STATE.highlightPageKey || null, spanCount: Array.isArray(TTS_STATE.highlightSpans) ? TTS_STATE.highlightSpans.length : 0, marksCount: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0, activeBlockIndex: TTS_STATE.activeBlockIndex, provenance: TTS_STATE.highlightMarksProvenance || 'none' },
-    capability: getTtsCapabilityStatus(),
+    highlight: { pageKey: TTS_STATE.highlightPageKey || null, spanCount: Array.isArray(TTS_STATE.highlightSpans) ? TTS_STATE.highlightSpans.length : 0, marksCount: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0, activeBlockIndex: TTS_STATE.activeBlockIndex },
     unlock: { unlocked: !!TTS_AUDIO_UNLOCKED },
-    last: { action: TTS_DEBUG.lastAction, error: TTS_DEBUG.lastError, skip: TTS_DEBUG.lastSkip, playRequest: TTS_DEBUG.lastPlayRequest, cloudRequest: TTS_DEBUG.lastCloudRequest, cloudResponse: TTS_DEBUG.lastCloudResponse, capability: TTS_DEBUG.lastCapability, pauseStrategy: TTS_DEBUG.lastPauseStrategy, routeDecision: TTS_DEBUG.lastRouteDecision, resolvedPath: TTS_DEBUG.lastResolvedPath },
+    last: { action: TTS_DEBUG.lastAction, error: TTS_DEBUG.lastError, skip: TTS_DEBUG.lastSkip, playRequest: TTS_DEBUG.lastPlayRequest, cloudRequest: TTS_DEBUG.lastCloudRequest, cloudResponse: TTS_DEBUG.lastCloudResponse, pauseStrategy: TTS_DEBUG.lastPauseStrategy, routeDecision: TTS_DEBUG.lastRouteDecision, resolvedPath: TTS_DEBUG.lastResolvedPath },
     recentEvents: TTS_DEBUG.recent.slice(-40),
   };
 }
@@ -4686,10 +1905,8 @@ try {
 window.getPlaybackStatus        = getPlaybackStatus;
 window.getPlaybackControlEligibility = getPlaybackControlEligibility;
 window.getAutoplayStatus        = getAutoplayStatus;
-window.applyAutoplayRuntimePreference = applyAutoplayRuntimePreference;
 window.getCountdownStatus       = getCountdownStatus;
 window.getTtsSupportStatus      = getTtsSupportStatus;
-window.getTtsCapabilityStatus   = getTtsCapabilityStatus;
 window.getTtsDiagnosticsSnapshot = getTtsDiagnosticsSnapshot;
 window.pauseOrResumeReading     = pauseOrResumeReading;
 window.toggleAutoplay           = toggleAutoplay;

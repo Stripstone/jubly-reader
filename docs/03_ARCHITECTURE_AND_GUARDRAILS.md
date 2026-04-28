@@ -177,24 +177,6 @@ Do not patch against older scaffold shapes unless project state is formally chan
 8. Do not let two layers own the same launch-critical truth.
 9. Do not introduce a bridge without defining the condition for its retirement.
 
-## Error handling standards
-
-### Backend — explicit logging required
-Every top-level `catch (err)` block in a server handler that returns a 5xx response must call `console.error("[handler-name]", err)` before returning. A swallowed error is invisible in Vercel logs and cannot be diagnosed in production.
-
-Correct pattern (match `content-book-import.js`):
-```js
-} catch (err) {
-  console.error("[handler-name]", err);
-  return json(res, 500, { error: "Server error", detail: String(err) });
-}
-```
-
-Silent catch blocks that discard errors in business-critical paths are a patch disqualifier. Noise-suppression `catch (_) {}` inside utility helpers is acceptable only where failure is genuinely non-fatal and the outer call path has its own error reporting.
-
-### Frontend — retry before surface
-User-facing "Try again" messages and failure toasts must not appear on the first failure of a network or cloud action. The runtime must attempt 2–3 automatic retries before surfacing an error to the user. Immediate error display for transient failures degrades trust and is premature. The retry attempts must be silent from the user's perspective. Only surface the error after retries are exhausted.
-
 ## Patch disqualifiers
 Reject a patch even if runtime behavior looks acceptable when any of the following are true:
 - launch-critical behavior is added to `index.html`, shell HTML, or shell presentation files as an owner rather than a thin presentation or bridge surface

@@ -1,56 +1,3 @@
-/* ── Early boot scrim / pre-runtime appearance settle ─────────────────────── */
-html, body { min-height: 100%; }
-html.app-light,
-html.app-light body { background: #ffffff; color: #1e293b; }
-html.app-dark,
-html.app-dark body { background: #0f172a; color: #e2e8f0; }
-body.boot-pending > :not(#boot-scrim) { visibility: hidden !important; }
-#boot-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 2147483647;
-  pointer-events: none;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-  opacity: 1;
-  transition: opacity 0.16s ease;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 0 16px 28px;
-  box-sizing: border-box;
-}
-#boot-scrim-copy {
-  max-width: 420px;
-  width: min(100%, 420px);
-  padding: 10px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(255, 255, 255, 0.82);
-  color: #475569;
-  font-size: 0.875rem;
-  font-weight: 500;
-  line-height: 1.4;
-  text-align: center;
-  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
-  opacity: 0;
-  transform: translateY(8px);
-  transition: opacity 180ms ease, transform 180ms ease;
-}
-#boot-scrim-copy.boot-scrim-copy--visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-html.app-dark #boot-scrim {
-  background: radial-gradient(circle at top, #1e293b 0%, #0f172a 68%);
-}
-html.app-dark #boot-scrim-copy {
-  background: rgba(15, 23, 42, 0.78);
-  color: #cbd5e1;
-  border-color: rgba(148, 163, 184, 0.16);
-  box-shadow: 0 18px 44px rgba(2, 6, 23, 0.36);
-}
-body:not(.boot-pending) #boot-scrim { opacity: 0; }
-
 /*
          * ── COLOR SYSTEM ────────────────────────────────────────────────────────
          *
@@ -76,7 +23,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             /* Brand constants */
             --jubly-purple:      #6344F5;
             --jubly-purple-deep: #4b32bc;
-            --jubly-light:       #EDE9FF;
+            --jubly-light:       #F8F7FF;
             --jubly-border:      #E2E8F0;
             --text-dark:         #1E293B;
             /* Decorative illustration colors — landing hero only */
@@ -157,15 +104,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         body.app-dark #shell-speed:hover,
         body.app-dark .reading-top-settings-btn:hover,
         body.app-dark .reading-top-exit:hover { background: #1e293b; border-color: #475569; color: #f8fafc; }
-        body.app-dark .rs-header { background:#111827; border-color:#1f2937; }
-        body.app-dark #devToolsPanel,
-        body.app-dark #diagPanel { color: #1e293b; }
-        body.app-dark #devToolsPanel input,
-        body.app-dark #devToolsPanel select,
-        body.app-dark #devToolsPanel textarea,
-        body.app-dark #diagPanel textarea { background: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; }
-        body.app-dark #devToolsPanel button,
-        body.app-dark #diagPanel button { color: #1e293b; }
 
         /* Utility classes for consistent brand/theme color usage */
         .text-brand      { color: var(--jubly-purple); }
@@ -210,9 +148,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         .import-file-input { display:none; }
         .import-hint { margin-top:12px; font-size:0.8rem; color:#64748b; }
         .import-status { margin-top:12px; font-size:0.82rem; font-weight:600; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:10px 12px; }
-        .import-status a { color:#4f46e5; text-decoration:underline; cursor:pointer; }
-        .import-status .link-button { background:none; border:none; padding:0; margin:0; font:inherit; font-weight:inherit; color:#4f46e5; text-decoration:underline; cursor:pointer; display:inline; vertical-align:baseline; }
-        .import-status .link-button:hover { color:#4338ca; }
         .import-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
         .import-picker { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(280px,0.9fr); gap:16px; }
         @media (max-width: 900px) { .import-picker { grid-template-columns:1fr; } }
@@ -366,34 +301,8 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             }
             #landing-footer span { white-space: nowrap; }
         }
-        /* ── Scrollbar visibility — reading mode only ──────────────────────────────
-         * Hide the document scrollbar on all non-reading surfaces (dashboard,
-         * landing, profile, etc.). Reading mode keeps its scrollbar for page
-         * navigation. color-scheme: light on html ensures the reading scrollbar
-         * renders in the normal white style that matches the light reading surface,
-         * rather than inheriting the dark app chrome.
-         * overscroll-behavior: none on body prevents the dark html background from
-         * bleeding through at the scroll boundary during the reading session. */
-        html:not(:has(body.reading-active))                    { scrollbar-width: none; -ms-overflow-style: none; }
-        html:not(:has(body.reading-active))::-webkit-scrollbar { display: none; width: 0; height: 0; }
-
-        html:has(body.reading-active) {
-            color-scheme: light;
-            background: var(--theme-accent-soft);
-        }
-        body.reading-active {
-            background: var(--theme-accent-soft);
-            overscroll-behavior: none;
-            scrollbar-color: #94a3b8 transparent;
-            min-height: 0;
-        }
-        /* Clear the global html,body min-height:100% floor during reading so short
-           chapters cannot produce a blank tail below the last page card. */
-        html:has(body.reading-active) { min-height: 0; }
-        body.reading-active #reading-mode { background: var(--theme-accent-soft); }
-
         /* ── Focus Mode reading UI ── */
-        #reading-mode { background: var(--theme-accent-soft); min-height: 100dvh; padding: 0; }
+        #reading-mode { background: var(--theme-accent-soft); min-height: 100vh; padding: 0; }
         /* Reading bar layout — see consolidated system at end of file */
         /* Reading content wrapper — unconstrained on desktop, centred column on tablet/mobile */
         .reading-content { position: relative; padding: 80px 0 96px; }
@@ -415,25 +324,13 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
             /* Desktop (≥1025px): full natural width, unconstrained */
             max-width: 900px; margin: 0 auto; padding: 0 2rem;
         }
-        #reading-mode .next-chapter-surface {
-            max-width: 900px;
-            margin: 14px auto 34px;
-            padding: 0 2rem;
-            display: flex;
-            justify-content: flex-end;
-        }
-        #reading-mode .next-chapter-btn { 
-          min-height: 36px;
-        }
         @media (max-width: 1024px) {
             /* Tablet: constrained, centred */
-            #reading-mode #pages,
-            #reading-mode .next-chapter-surface { max-width: 720px; padding: 0 1.5rem; }
+            #reading-mode #pages { max-width: 720px; padding: 0 1.5rem; }
         }
         @media (max-width: 768px) {
             /* Mobile: tight padding */
-            #reading-mode #pages,
-            #reading-mode .next-chapter-surface { max-width: 100%; padding: 0 1rem; }
+            #reading-mode #pages { max-width: 100%; padding: 0 1rem; }
         }
         #session-complete { max-width: 900px; margin: 0 auto; padding: 0 2rem; }
         .page-text { line-height: 1.75; font-size: 1rem; }
@@ -523,18 +420,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         }
         #reading-mode .top-btn:hover { background:var(--rm-btn-hover); transform:translateY(-1px); box-shadow:none; }
         #reading-mode .top-btn:active { transform:translateY(0); }
-        /* Chapter Next sits outside the white page card, so the translucent
-           top-btn background would visually blend darker over the purple
-           reading surface. Use the opaque white-card equivalent so it matches
-           the in-card page navigation buttons by color. */
-        #reading-mode .next-chapter-surface .top-btn {
-          background: color-mix(in srgb, var(--rm-accent) 22%, #fff);
-          color: var(--rm-accent);
-        }
-
-        #reading-mode .next-chapter-surface .top-btn:hover {
-          background: color-mix(in srgb, var(--rm-accent) 30%, #fff);
-        }
         #reading-mode .top-btn.tts-active { background:var(--rm-btn-hover); box-shadow:0 0 0 2px var(--rm-accent); }
         #reading-mode .hint-btn:disabled { opacity:0.35; cursor:not-allowed; transform:none; }
         #reading-mode .page-actions { display:flex; justify-content:flex-end; gap:8px; margin:6px 0 4px; }
@@ -721,46 +606,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
   justify-content: flex-end;
 }
 
-.shell-playback-indicator {
-  position: fixed;
-  left: 50%;
-  bottom: 60px;
-  transform: translateX(-50%);
-  z-index: 31;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: max-content;
-  min-height: 24px;
-  max-width: min(360px, calc(100vw - 32px));
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fde68a;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
-  font-size: 0.72rem;
-  font-weight: 800;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none;
-}
-
-.shell-playback-indicator[hidden] {
-  display: none;
-}
-
-@media (max-width: 640px) {
-  .shell-playback-indicator {
-    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
-    max-width: calc(100vw - 24px);
-    font-size: 0.66rem;
-    padding: 5px 8px;
-  }
-}
-
 /* Top fixed controls */
 .reading-top-settings-btn,
 .reading-top-exit {
@@ -883,8 +728,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
   display: none;
   align-items: center;
   justify-content: center;
-  padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) max(1rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
-  overflow: auto;
+  padding: 1rem;
   background: rgba(15, 23, 42, 0.46);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -899,22 +743,20 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
 .reading-settings-card {
   width: min(560px, calc(100vw - 2rem));
   max-width: 100%;
-  max-height: min(88dvh, 820px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  max-height: min(88vh, 820px);
+  overflow-y: auto;
   border-radius: 20px;
 }
 
-.rs-header { display:flex; align-items:center; justify-content:space-between; flex:0 0 auto; padding:18px 20px 12px; border-bottom:1px solid #eef2f7; background:rgba(255,255,255,0.96); z-index:2; }
+.rs-header { display:flex; align-items:center; justify-content:space-between; padding:18px 20px 12px; border-bottom:1px solid #eef2f7; }
 .rs-title { font-size:0.72rem; font-weight:900; text-transform:uppercase; letter-spacing:0.08em; color:#94a3b8; }
 .rs-close-btn { background:#f1f5f9; border:none; border-radius:10px; width:30px; height:30px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#64748b; font-size:0.92rem; transition:background 0.15s, color 0.15s; }
 .rs-close-btn:hover { background:#e2e8f0; color:#334155; }
-.rs-tab-strip { display:flex; flex:0 0 auto; flex-direction:column; gap:6px; padding:14px 20px 0; }
+.rs-tab-strip { display:flex; flex-direction:column; gap:6px; padding:14px 20px 0; }
 .rs-tab { border:1px solid #e2e8f0; background:#fff; color:#64748b; border-radius:12px; padding:10px 14px; text-align:left; font-size:0.82rem; font-weight:800; cursor:pointer; transition:border-color 0.15s, background 0.15s, color 0.15s; }
 .rs-tab:hover { border-color:#cbd5e1; background:#f8fafc; }
 .rs-tab.active { border-color:rgba(99,68,245,0.22); background:var(--theme-accent-soft); color:var(--theme-accent); }
-.rs-panel { flex:1 1 auto; min-height:0; padding:18px 20px 20px; overflow-y:auto; }
+.rs-panel { padding:18px 20px 20px; }
 .rs-simple-row, .settings-mode-row, .explorer-panel-row { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .rs-simple-row { padding:8px 0 0; }
 .settings-mode-row { margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid #f1f5f9; }
@@ -974,10 +816,10 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
 @media (min-width: 760px) {
   .reading-settings-card {
     width: min(760px, calc(100vw - 2rem));
-    min-height: clamp(500px, 72dvh, 600px);
+    min-height: clamp(500px, 72vh, 600px);
     display: grid;
     grid-template-columns: 188px minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
     overflow: hidden;
   }
   .rs-header { grid-column: 1 / -1; }
@@ -995,22 +837,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
     padding: 22px 24px 24px;
     overflow-y: auto;
   }
-}
-
-@media (max-height: 560px) and (orientation: landscape) {
-  .reading-settings-modal {
-    align-items: stretch;
-    padding: max(8px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
-  }
-  .reading-settings-card {
-    width: min(760px, calc(100vw - 20px));
-    max-height: calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-    min-height: 0;
-  }
-  .rs-header { padding: 10px 14px 8px; }
-  .rs-tab-strip { padding: 10px 14px 0; gap: 5px; }
-  .rs-tab { padding: 8px 10px; font-size: 0.76rem; }
-  .rs-panel { padding: 12px 14px 14px; }
 }
 
 @media (max-width: 640px) {
@@ -1164,54 +990,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
   }
 }
 
-
-
-/* ── Intro-library CTA sizing and balance ─────────────────── */
-#library-public-sample .section-card > div > div:last-child {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: 12px;
-}
-
-#library-public-sample .section-card > div > div:last-child > button {
-  flex: 0 0 10rem;
-  width: 10rem;
-  min-width: 10rem;
-  min-height: 4.375rem;
-  padding: 0.75rem 1rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  line-height: 1.2;
-  white-space: normal;
-}
-
-#library-public-sample .section-card > div > div:last-child > button:last-child {
-  border-color: #c7d2fe;
-  color: #4338ca;
-  background: #ffffff;
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-}
-
-#library-public-sample .section-card > div > div:last-child > button:last-child:hover {
-  background: #eef2ff;
-}
-
-@media (max-width: 640px) {
-  #library-public-sample .section-card > div > div:last-child {
-    flex-direction: column;
-  }
-
-  #library-public-sample .section-card > div > div:last-child > button {
-    flex: 1 1 auto;
-    width: 100%;
-    min-width: 0;
-    min-height: 3.5rem;
-  }
-}
-
 /* ── Library/import surface cleanup ─────────────────────────── */
 .library-toolbar {
   margin-left: auto;
@@ -1279,134 +1057,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
   display: block;
 }
 
-#dashboard[data-library-state="pending"] #library-toolbar {
-  opacity: 1;
-}
-
-.library-pending-card {
-  border: 1px solid #e2e8f0;
-  padding: 22px 24px;
-}
-
-.library-pending-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.library-pending-label {
-  margin: 0 0 6px;
-  font-size: 0.72rem;
-  font-weight: 900;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #64748b;
-}
-
-.library-pending-title {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 800;
-  color: #0f172a;
-}
-
-.library-pending-copy {
-  margin: 8px 0 0;
-  max-width: 40rem;
-  font-size: 0.9rem;
-  line-height: 1.55;
-  color: #64748b;
-}
-
-.library-pending-list {
-  margin-top: 18px;
-  border: 1px solid #e2e8f0;
-  border-radius: 18px;
-  overflow: hidden;
-  background: #fff;
-}
-
-.library-pending-row {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 92px 108px;
-  align-items: center;
-  gap: 14px;
-  padding: 16px 18px;
-  border-bottom: 1px solid #f1f5f9;
-}
-
-.library-pending-row:last-child {
-  border-bottom: 0;
-}
-
-.library-pending-icon,
-.library-pending-line,
-.library-pending-pill,
-.library-pending-time {
-  display: block;
-  background: linear-gradient(90deg, #e2e8f0 25%, #f8fafc 50%, #e2e8f0 75%);
-  background-size: 200% 100%;
-  animation: libraryPendingPulse 1.4s ease-in-out infinite;
-}
-
-.library-pending-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 14px;
-}
-
-.library-pending-lines {
-  min-width: 0;
-}
-
-.library-pending-line {
-  border-radius: 999px;
-}
-
-.library-pending-line-title {
-  width: min(280px, 72%);
-  height: 13px;
-}
-
-.library-pending-line-meta {
-  width: min(180px, 48%);
-  height: 10px;
-  margin-top: 10px;
-}
-
-.library-pending-pill {
-  width: 74px;
-  height: 24px;
-  border-radius: 999px;
-}
-
-.library-pending-time {
-  width: 88px;
-  height: 12px;
-  border-radius: 999px;
-}
-
-@keyframes libraryPendingPulse {
-  0% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-@media (max-width: 760px) {
-  .library-pending-card {
-    padding: 18px;
-  }
-
-  .library-pending-row {
-    grid-template-columns: 34px minmax(0, 1fr);
-  }
-
-  .library-pending-pill,
-  .library-pending-time {
-    display: none;
-  }
-}
-
 /* Auth hydration gate: avoid flashing signed-out landing/profile truth before
    Supabase session restore resolves on page load. */
 body.auth-hydrating nav,
@@ -1421,27 +1071,24 @@ body.auth-hydrating #profile-page {
 .import-source-tabs {
   display: inline-flex;
   gap: 8px;
+  padding: 6px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
   margin-bottom: 14px;
 }
 .import-source-tab {
-  border: 2px solid #e2e8f0;
-  background: #f8fafc;
+  border: 0;
+  background: transparent;
   color: #64748b;
   font-weight: 800;
   font-size: 0.82rem;
-  padding: 8px 16px;
+  padding: 9px 14px;
   border-radius: 12px;
-  cursor: pointer;
-  transition: border-color .15s, background .15s, color .15s;
-}
-.import-source-tab:not(.active):hover {
-  border-color: #cbd5e1;
-  background: #f1f5f9;
-  color: #334155;
+  transition: background .2s ease, color .2s ease;
 }
 .import-source-tab.active {
-  border-color: var(--jubly-purple);
-  background: rgba(124,58,237,0.08);
+  background: rgba(124,58,237,0.12);
   color: var(--jubly-purple);
 }
 .import-text-label {
@@ -1618,72 +1265,7 @@ body.auth-hydrating #profile-page {
   }
 }
 
-/* =============================================================================
-   READING INTRO HOLD
-   Universal cover shown at the start of every reading session, for all themes
-   (Basic/Default and all Explorer variants — Plain, Texture, Wallpaper).
-   Uses only var(--rm-page-bg) — the Plain/Default base color for the active
-   theme. Texture and Wallpaper load behind it and never become the first phase.
-
-   Owned by: startReadingFromPreview() in js/library.js
-   Sits at z-index 20 — above reading content, below the fixed bars (z-index 30).
-   Does NOT use ::before or ::after. Does NOT compete with themeExplorer.css.
-
-   States (JS-driven class toggles on #reading-intro-hold):
-     .intro-hold-active         — hold is visible, covering the reading surface
-     .intro-hold-active
-     + .intro-hold-message-visible — message shown after 1000 ms if still loading
-     .intro-hold-fading         — opacity transitions to 0, then classes removed
-   ============================================================================= */
-#reading-intro-hold {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  background: #1f2329;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  opacity: 1;
-  transition: opacity 0.3s ease;
-}
-
-#reading-intro-hold.intro-hold-active {
-  display: flex;
-}
-
-#reading-intro-hold.intro-hold-fading {
-  opacity: 0;
-}
-
-/* Message — appears on the hold after 1000 ms via JS if cards aren't ready yet.
-   Uses the same neutral text style as the former ::after message it replaces. */
-.reading-intro-message {
-  font-size: 15px;
-  color: rgba(255, 255, 255, 0.68);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-#reading-intro-hold.intro-hold-message-visible .reading-intro-message {
-  opacity: 0.65;
-}
-
-
-/* =============================================================================
-   RESTORE-PENDING — page card guard (defense in depth)
-   Keeps #pages hidden while startReadingFromPreview() is resolving, preventing
-   stale or partially-rendered cards from flashing under the intro hold.
-   The visible pending surface is now owned by #reading-intro-hold above.
-
-   html overflow:hidden locks document scroll for the entire restore phase so
-   wheel/touch events cannot move the document while cards are being appended
-   and applyPendingReadingRestore() is running. Scroll is restored the moment
-   reading-restore-pending is removed. The post-reveal re-anchor in
-   startReadingFromPreview() (Patch B) compensates for scrollIntoView() being
-   a no-op while overflow:hidden is active.
-   ============================================================================= */
-html:has(#reading-mode.reading-restore-pending) { overflow: hidden; }
+/* Restore-pending overlay: hide pages until restore position is known and applied */
 #pages {
   transition: opacity 0.14s ease;
 }
@@ -1692,725 +1274,17 @@ html:has(#reading-mode.reading-restore-pending) { overflow: hidden; }
   opacity: 0;
   transition: none; /* suppress transition while hidden; runs on reveal */
 }
-
-/* ── Interaction banner ──────────────────────────────────────────────────────
- * Shared bottom-of-viewport pending / success / error surface.
- * Shell presents — does not own auth, billing, or runtime truth.
- * Shell injects #rc-interaction-banner and drives data-sev.
- * ─────────────────────────────────────────────────────────────────────────── */
-
-#rc-interaction-banner {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 9000;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 20px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  line-height: 1.4;
-  /* Hidden by default — slides up when .rc-banner--visible is added */
-  transform: translateY(100%);
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-              background-color 160ms ease,
-              border-color 160ms ease,
-              color 160ms ease;
-  pointer-events: none;
-}
-
-#rc-interaction-banner.rc-banner--visible {
-  transform: translateY(0);
-  pointer-events: auto;
-}
-
-/* During reading, lift the banner above the playback bar so it never covers controls. */
-body.reading-active #rc-interaction-banner {
-  bottom: 52px;
-}
-
-/* Pending — slate, muted, no urgency */
-#rc-interaction-banner[data-sev="pending"] {
-  background: #f1f5f9;
-  color: #475569;
-  border-top: 1px solid #e2e8f0;
-}
-
-/* Success — brief green, auto-dismisses */
-#rc-interaction-banner[data-sev="success"] {
-  background: #f0fdf4;
-  color: #166534;
-  border-top: 1px solid #bbf7d0;
-}
-
-/* Recoverable error — amber, stays until dismissed or retried */
-#rc-interaction-banner[data-sev="error"] {
-  background: #fffbeb;
-  color: #92400e;
-  border-top: 1px solid #fde68a;
-}
-
-/* Blocking error — stronger, no dismiss, user must act */
-#rc-interaction-banner[data-sev="blocking"] {
-  background: #fef2f2;
-  color: #991b1b;
-  border-top: 1px solid #fecaca;
-}
-
-.rc-banner__message {
-  flex: 1;
-  min-width: 0;
-}
-
-.rc-banner__actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.rc-banner__action-btn {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  padding: 4px 12px;
-  border-radius: 6px;
-  border: 1px solid currentColor;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  opacity: 0.85;
-  transition: opacity 120ms;
-  white-space: nowrap;
-}
-.rc-banner__action-btn:hover { opacity: 1; }
-
-.rc-banner__close {
-  font-size: 1.125rem;
-  line-height: 1;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: none;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  opacity: 0.45;
-  flex-shrink: 0;
-  transition: opacity 120ms;
-}
-.rc-banner__close:hover { opacity: 0.85; }
-
-
-/* Pricing modal — size/scroll containment only. Opener/plan truth remains JS-owned. */
-#pricing-modal > .pricing-modal-card {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  max-height: 92dvh;
-}
-
-.pricing-modal-header {
-  flex: 0 0 auto;
-  padding: 2rem 2rem 2rem;
-}
-
-.pricing-modal-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0 2rem 2rem;
-}
-
-@media (max-width: 640px) {
-  #pricing-modal {
-    padding: 0.75rem;
-    align-items: center;
-  }
-  #pricing-modal > .pricing-modal-card {
-    width: min(100%, 390px);
-    max-height: min(78dvh, 620px);
-  }
-}
-
-/* Group A: pricing modal should first appear only after settled labels are ready. */
-#pricing-modal.pricing-modal-settling .pricing-card {
-  opacity: 0.78;
-}
-#pricing-modal.pricing-modal-settling .pricing-card button {
-  visibility: hidden;
-}
-
-/* ── Public onboarding quiz — shell-owned staged surface ─────────────── */
-.public-onboarding {
-  --jubly-purple: #6344f5;
-  --jubly-purple-deep: #4b32bc;
-  --jubly-light: #f4f1ff;
-  --text-dark: #1e293b;
-  --text-soft: #64748b;
-  --text-muted: #94a3b8;
-  --border: #e2e8f0;
-  --border-purple: rgba(99, 68, 245, 0.2);
-  --surface: #ffffff;
-  --surface-warm: #FCFCFF;
-  --shadow: 0 24px 64px rgba(15, 23, 42, 0.12);
-  --font-serif: Georgia, "Times New Roman", serif;
-  min-height: 100svh;
-  align-items: stretch;
-  background: #ffffff;
-}
-
-.public-onboarding-shell {
-  width: min(100%, 1120px);
-  min-height: 100svh;
-  margin: 0 auto;
-  padding: clamp(28px, 5vw, 64px) 24px;
-  display: grid;
-  grid-template-columns: minmax(260px, 0.78fr) minmax(360px, 1fr);
-  align-items: center;
-  gap: clamp(28px, 5vw, 72px);
-}
-
-.public-onboarding-intro {
-  max-width: 420px;
-}
-
-.public-onboarding-kicker,
-.public-onboarding-pill {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  background: var(--jubly-light);
-  color: var(--jubly-purple-deep);
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.public-onboarding-kicker {
-  gap: 8px;
-  padding: 8px 12px;
-}
-
-.public-onboarding-pill {
-  padding: 8px 12px;
-  font-size: 11px;
-}
-
-.public-onboarding-intro h2 {
-  margin: 22px 0 0;
-  font-size: clamp(38px, 5.4vw, 62px);
-  line-height: 1.02;
-  font-weight: 900;
-  letter-spacing: -0.06em;
-  color: var(--text-dark);
-}
-
-.public-onboarding-intro p {
-  margin: 18px 0 0;
-  color: var(--text-soft);
-  font-size: clamp(16px, 1.4vw, 18px);
-  line-height: 1.65;
-}
-
-.public-onboarding-progress {
-  margin-top: 28px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.public-onboarding-dot {
-  width: 36px;
-  height: 7px;
-  border-radius: 999px;
-  background: #e5e7eb;
-  transition: background 160ms ease, width 160ms ease;
-}
-
-.public-onboarding-dot.active {
-  width: 52px;
-  background: var(--jubly-purple);
-}
-
-.public-onboarding-card {
-  width: min(100%, 620px);
-  border: 1px solid var(--border);
-  border-radius: 30px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-  display: flex;
-  align-items: stretch;
-}
-
-.public-onboarding-pane {
-  display: none;
-  width: 100%;
-  padding: clamp(24px, 4vw, 36px);
-}
-
-.public-onboarding-pane.active {
-  display: flex;
-  flex-direction: column;
-  animation: publicOnboardingPaneIn 220ms ease-out both;
-}
-
-@keyframes publicOnboardingPaneIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.public-onboarding-topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.public-onboarding-mark {
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
-  background: var(--jubly-purple);
-  color: #ffffff;
-  font-weight: 900;
-  box-shadow: 0 8px 18px rgba(99, 68, 245, 0.18);
-}
-
-.public-onboarding-title {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: clamp(32px, 5vw, 44px);
-  line-height: 1.08;
-  letter-spacing: -0.035em;
-  font-weight: 600;
-  color: var(--text-dark);
-}
-
-.public-onboarding-copy {
-  margin: 14px 0 0;
-  color: var(--text-soft);
-  font-size: 16px;
-  line-height: 1.58;
-}
-
-.public-onboarding-options {
-  display: grid;
-  gap: 12px;
-  margin-top: 26px;
-}
-
-.public-onboarding-option {
-  display: grid;
-  grid-template-columns: 46px 1fr 20px;
-  align-items: center;
-  gap: 13px;
-  width: 100%;
-  min-height: 78px;
-  padding: 13px 14px;
-  border: 1.5px solid var(--border-purple);
-  border-radius: 18px;
-  background: var(--surface-warm);
-  color: var(--text-dark);
-  text-align: left;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
-  position: relative;
-  z-index: 1;
-}
-
-.public-onboarding-option:hover,
-.public-onboarding-chip:hover {
-  border-color: rgba(99, 68, 245, 0.42);
-  transform: translateY(-1px);
-}
-
-.public-onboarding-option.selected,
-.public-onboarding-chip.selected {
-  border-color: var(--jubly-purple);
-  background: var(--jubly-light);
-}
-
-.public-onboarding-option-icon {
-  width: 46px;
-  height: 46px;
-  border-radius: 15px;
-  display: grid;
-  place-items: center;
-  background: rgba(99, 68, 245, 0.08);
-  color: var(--jubly-purple-deep);
-  font-size: 20px;
-  font-weight: 900;
-}
-
-.public-onboarding-option.selected .public-onboarding-option-icon {
-  background: var(--jubly-purple);
-  color: #ffffff;
-}
-
-.public-onboarding-option-title {
-  display: block;
-  font-weight: 850;
-  letter-spacing: -0.015em;
-  font-size: 15.5px;
-}
-
-.public-onboarding-option-sub {
-  display: block;
-  margin-top: 4px;
-  color: var(--text-soft);
-  font-size: 13px;
-  line-height: 1.35;
-}
-
-.public-onboarding-check {
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  border: 1.5px solid rgba(99, 68, 245, 0.28);
-  position: relative;
-}
-
-.public-onboarding-option.selected .public-onboarding-check,
-.public-onboarding-chip.selected .public-onboarding-check {
-  border-color: var(--jubly-purple);
-  background: var(--jubly-purple);
-}
-
-.public-onboarding-option.selected .public-onboarding-check::after,
-.public-onboarding-chip.selected .public-onboarding-check::after {
-  content: "";
+/* Overlay text only when genuinely returning to a saved place (data-restore-kind="returning").
+   Fresh opens are silent — pages are hidden during render but no text is shown,
+   so the experience feels like a clean appearance rather than a loading state. */
+#reading-mode.reading-restore-pending[data-restore-kind="returning"] .reading-content::after {
+  content: 'Returning to your place\2026';
   position: absolute;
-  left: 6px;
-  top: 3px;
-  width: 5px;
-  height: 9px;
-  border: solid #ffffff;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-
-.public-onboarding-actions {
-  margin-top: 24px;
-  padding-top: 0;
-}
-
-.public-onboarding-primary {
-  width: 100%;
-  border: 0;
-  border-radius: 18px;
-  padding: 16px 22px;
-  background: #6344f5;
-  color: #ffffff;
-  font-weight: 950;
-  font-size: 15px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  cursor: pointer;
-  box-shadow: 0 7px 0 #4b32bc;
-  transition: transform 140ms ease, box-shadow 140ms ease;
-}
-
-.public-onboarding-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 0 #4b32bc;
-}
-
-.public-onboarding-primary:active {
-  transform: translateY(5px);
-  box-shadow: 0 2px 0 #4b32bc;
-}
-
-.public-onboarding-chips {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 26px;
-}
-
-.public-onboarding-chip {
-  border: 1.5px solid var(--border-purple);
-  border-radius: 18px;
-  background: var(--surface-warm);
-  padding: 12px;
-  cursor: pointer;
-  text-align: center;
-  color: var(--text-soft);
-  min-width: 0;
-  -webkit-tap-highlight-color: transparent;
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
-}
-
-.public-onboarding-chip.selected {
-  color: var(--jubly-purple-deep);
-}
-
-.public-onboarding-theme-card {
-  height: 58px;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(30, 41, 59, 0.1);
-  margin-bottom: 9px;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: 13px;
-}
-
-.public-onboarding-theme-default { background: #ffffff; color: #1e293b; }
-.public-onboarding-theme-green { background: #f0fdf4; color: #166534; }
-.public-onboarding-theme-purple { background: #f4f1ff; color: var(--jubly-purple); }
-
-.public-onboarding-pace {
-  margin-top: 16px;
-  padding: 15px;
-  border-radius: 18px;
-  background: var(--surface-warm);
-  border: 1.5px solid var(--border-purple);
-}
-
-.public-onboarding-pace-head,
-.public-onboarding-pace-labels {
+  inset: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.public-onboarding-pace-head {
-  margin-bottom: 12px;
-  color: var(--text-soft);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.public-onboarding-pace-value {
-  font-family: var(--font-serif);
-  color: var(--jubly-purple-deep);
-  font-style: italic;
-  font-weight: 600;
-}
-
-.public-onboarding-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  border-radius: 999px;
-  background: linear-gradient(
-    to right,
-    var(--jubly-purple) 0%,
-    var(--jubly-purple) var(--fill, 22.2%),
-    rgba(99, 68, 245, 0.16) var(--fill, 22.2%),
-    rgba(99, 68, 245, 0.16) 100%
-  );
-  outline: none;
-  cursor: pointer;
-}
-
-.public-onboarding-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--surface);
-  border: 2px solid var(--jubly-purple);
-  cursor: pointer;
-}
-
-.public-onboarding-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--surface);
-  border: 2px solid var(--jubly-purple);
-  cursor: pointer;
-}
-
-.public-onboarding-pace-labels {
-  margin-top: 10px;
-  color: var(--text-muted);
-  font-size: 10.5px;
-  font-weight: 750;
-}
-
-.public-onboarding-note {
-  margin: 30px 0 0;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.public-onboarding-interstitial {
-  width: 100%;
-  min-height: 440px;
-  display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  text-align: center;
-  border-radius: 26px;
-  background: #ffffff;
-  padding: 34px 24px;
+  font-size: 15px;
+  opacity: 0.6;
+  pointer-events: none;
 }
-
-.public-onboarding-glow {
-  width: 68px;
-  height: 68px;
-  margin-bottom: 24px;
-  filter: drop-shadow(0 14px 26px rgba(99, 68, 245, 0.2));
-  animation: publicOnboardingPulse 2.1s ease-in-out infinite;
-}
-
-.public-onboarding-interstitial h2 {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: clamp(28px, 5vw, 40px);
-  line-height: 1.12;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  color: var(--text-dark);
-}
-
-.public-onboarding-interstitial p {
-  max-width: 340px;
-  margin: 14px auto 0;
-  color: var(--text-soft);
-  font-size: 16px;
-  line-height: 1.58;
-}
-
-.public-onboarding-dots span {
-  animation: publicOnboardingDot 1.3s infinite;
-  opacity: 0.28;
-}
-
-.public-onboarding-dots span:nth-child(2) { animation-delay: 0.18s; }
-.public-onboarding-dots span:nth-child(3) { animation-delay: 0.36s; }
-
-@keyframes publicOnboardingPulse {
-  0%, 100% { transform: translateY(0) scale(1); opacity: 0.94; }
-  50% { transform: translateY(-5px) scale(1.04); opacity: 1; }
-}
-
-@keyframes publicOnboardingDot {
-  0%, 100% { opacity: 0.28; }
-  50% { opacity: 1; }
-}
-
-@media (max-width: 900px) {
-  .public-onboarding-shell {
-    display: flex;
-    min-height: 100svh;
-    padding: 16px;
-    align-items: stretch;
-    justify-content: center;
-  }
-
-  .public-onboarding-intro {
-    display: none;
-  }
-
-  .public-onboarding-card {
-    width: 100%;
-    min-height: calc(100svh - 32px);
-    border-radius: 20px;
-    box-shadow: none;
-  }
-
-  .public-onboarding-pane {
-    min-height: 100%;
-    padding: 24px;
-  }
-}
-
-@media (max-width: 640px) {
-  .public-onboarding-shell {
-    padding: 10px;
-  }
-
-  .public-onboarding-card {
-    min-height: calc(100svh - 20px);
-    border-radius: 18px;
-  }
-
-  .public-onboarding-pane {
-    padding: 22px 20px;
-  }
-
-  .public-onboarding-topline {
-    margin-bottom: 18px;
-  }
-
-  .public-onboarding-mark {
-    width: 32px;
-    height: 32px;
-  }
-
-  .public-onboarding-pill {
-    font-size: 10px;
-    padding: 8px 11px;
-  }
-
-  .public-onboarding-title {
-    font-size: clamp(29px, 8.8vw, 38px);
-  }
-
-  .public-onboarding-copy {
-    font-size: 15px;
-  }
-
-  .public-onboarding-options {
-    gap: 10px;
-    margin-top: 22px;
-  }
-
-  .public-onboarding-option {
-    min-height: 74px;
-    grid-template-columns: 42px 1fr 20px;
-    gap: 11px;
-    padding: 11px;
-  }
-
-  .public-onboarding-option-icon {
-    width: 42px;
-    height: 42px;
-  }
-
-  .public-onboarding-option-title { font-size: 14.5px; }
-  .public-onboarding-option-sub { font-size: 12px; }
-
-  .public-onboarding-actions {
-    margin-top: 22px;
-  }
-
-  .public-onboarding-chips {
-    grid-template-columns: 1fr;
-  }
-
-  .public-onboarding-interstitial {
-    min-height: calc(100svh - 64px);
-  }
-}
-
-@media (max-width: 374px) {
-  .public-onboarding-pane {
-    padding: 20px 16px;
-  }
-
-  .public-onboarding-option {
-    grid-template-columns: 40px 1fr 18px;
-  }
-
-  .public-onboarding-option-icon {
-    width: 40px;
-    height: 40px;
-  }
-}
-

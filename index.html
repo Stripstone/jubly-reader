@@ -4,8 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>jubly | Focus-First Reading</title>
-    <script src="js/prepaint.js"></script>
-    <script src="js/shell.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Lora:wght@400;500&family=Crimson+Pro:wght@400;600;700&display=swap" rel="stylesheet">
     <!-- JSZip: required for EPUB import (app's import.js) -->
@@ -14,10 +12,22 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <link rel="stylesheet" href="css/shell.css">
     <link rel="stylesheet" href="css/themeExplorer.css">
-
+    <style>
+        body.boot-pending > :not(#boot-scrim) { visibility: hidden !important; }
+        #boot-scrim {
+            position: fixed;
+            inset: 0;
+            z-index: 2147483647;
+            pointer-events: none;
+            background: radial-gradient(circle at top, #1e293b 0%, #0f172a 68%);
+            opacity: 1;
+            transition: opacity 0.16s ease;
+        }
+        body:not(.boot-pending) #boot-scrim { opacity: 0; }
+    </style>
 </head>
 <body class="auth-hydrating boot-pending">
-<div id="boot-scrim" aria-hidden="true"><div id="boot-scrim-copy"></div></div>
+<div id="boot-scrim" aria-hidden="true"></div>
 
 <!-- ═══════════════════════════════════════════════════════════
      APP INFRASTRUCTURE — required by app JS, not part of shell UI
@@ -358,8 +368,8 @@
 <div id="app-hidden-controls" style="display:none; visibility:hidden; position:absolute; left:-9999px;" aria-hidden="true">
     <select id="importSource"><option value="book" selected>Book</option><option value="text">Text</option></select>
     <select id="tierSelect">
-        <option value="basic" selected>Basic</option>
-        <option value="pro">Pro</option>
+        <option value="free" selected>Basic</option>
+        <option value="paid">Pro</option>
         <option value="premium">Premium</option>
     </select>
     <div id="thesisRow"><textarea id="thesisInput" placeholder="Enter your research thesis…"></textarea></div>
@@ -447,7 +457,7 @@
             Turn dense reading into manageable pages, listen with high-quality AI voices, and pick up exactly where you left off.
         </p>
         <div class="max-w-xs mx-auto md:mx-0 flex flex-col gap-3">
-            <button onclick="startPublicOnboardingQuiz()" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Try it now</button>
+            <button onclick="login()" class="btn-jubly w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Try for Free</button>
             <button onclick="showSigninPane()" class="btn-ghost w-full px-10 py-4 rounded-xl font-bold text-lg uppercase tracking-wider">Log In</button>
         </div>
     </div>
@@ -461,168 +471,6 @@
         <span>Focus-First Design</span>
     </div>
 </div>
-
-<!-- PUBLIC ONBOARDING QUIZ -->
-<section id="public-onboarding" class="hidden-section public-onboarding" aria-labelledby="public-onboarding-title">
-    <div class="public-onboarding-shell">
-        <aside class="public-onboarding-intro" aria-label="Preview setup introduction">
-            <span class="public-onboarding-kicker">Preview setup</span>
-            <h2 id="public-onboarding-title">Make the first sample feel like yours.</h2>
-            <p>This midway quiz keeps the landing style and adapts into a single content surface across phone, tablet, and desktop.</p>
-            <div class="public-onboarding-progress" aria-hidden="true">
-                <span class="public-onboarding-dot active" data-onboarding-progress="1"></span>
-                <span class="public-onboarding-dot" data-onboarding-progress="2"></span>
-                <span class="public-onboarding-dot" data-onboarding-progress="3"></span>
-            </div>
-        </aside>
-
-        <article class="public-onboarding-card" id="public-onboarding-card" aria-label="Jubly preview setup">
-            <section class="public-onboarding-pane active" data-onboarding-pane="step-1" data-onboarding-step="1" aria-label="Step 1">
-                <div class="public-onboarding-topline">
-                    <span class="public-onboarding-mark" aria-hidden="true">J</span>
-                    <span class="public-onboarding-pill">Setup · 1 of 3</span>
-                </div>
-                <h2 class="public-onboarding-title">What should Jubly<br>help you with?</h2>
-                <p class="public-onboarding-copy">Pick what fits today. You can change it anytime.</p>
-
-                <div class="public-onboarding-options" role="radiogroup" aria-label="Reading goal" data-onboarding-group="goal">
-                    <button class="public-onboarding-option selected" type="button" role="radio" aria-checked="true" data-onboarding-value="finish">
-                        <span class="public-onboarding-option-icon" aria-hidden="true">📚</span>
-                        <span><span class="public-onboarding-option-title">Finish books faster</span><span class="public-onboarding-option-sub">I start more than I finish</span></span>
-                        <span class="public-onboarding-check" aria-hidden="true"></span>
-                    </button>
-                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="focus">
-                        <span class="public-onboarding-option-icon" aria-hidden="true">🎯</span>
-                        <span><span class="public-onboarding-option-title">Stay focused</span><span class="public-onboarding-option-sub">My mind wanders mid-page</span></span>
-                        <span class="public-onboarding-check" aria-hidden="true"></span>
-                    </button>
-                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="dense">
-                        <span class="public-onboarding-option-icon" aria-hidden="true">🧠</span>
-                        <span><span class="public-onboarding-option-title">Make dense reading easier</span><span class="public-onboarding-option-sub">Textbooks, papers, long-form</span></span>
-                        <span class="public-onboarding-check" aria-hidden="true"></span>
-                    </button>
-                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="listen">
-                        <span class="public-onboarding-option-icon" aria-hidden="true">🎧</span>
-                        <span><span class="public-onboarding-option-title">Listen while I move</span><span class="public-onboarding-option-sub">Commute, walk, chores</span></span>
-                        <span class="public-onboarding-check" aria-hidden="true"></span>
-                    </button>
-                </div>
-
-                <div class="public-onboarding-actions">
-                    <button class="public-onboarding-primary" type="button" data-onboarding-next="1">Continue</button>
-                </div>
-            </section>
-
-            <section class="public-onboarding-pane" data-onboarding-pane="interstitial-1" aria-live="polite">
-                <div class="public-onboarding-interstitial">
-                    <svg class="public-onboarding-glow" viewBox="0 0 68 68" aria-hidden="true">
-                        <defs>
-                            <radialGradient id="publicOnboardingGlowA" cx="50%" cy="45%" r="70%">
-                                <stop offset="0" stop-color="#ede9fe"></stop>
-                                <stop offset="0.58" stop-color="#a78bfa"></stop>
-                                <stop offset="1" stop-color="#6344F5"></stop>
-                            </radialGradient>
-                        </defs>
-                        <circle cx="34" cy="34" r="32" fill="url(#publicOnboardingGlowA)"></circle>
-                    </svg>
-                    <h2><em>That’s exactly what Jubly is built for.</em></h2>
-                    <p>Good. We’ll shape the sample around that.</p>
-                </div>
-            </section>
-
-            <section class="public-onboarding-pane" data-onboarding-pane="step-2" data-onboarding-step="2" aria-label="Step 2">
-                <div class="public-onboarding-topline">
-                    <span class="public-onboarding-mark" aria-hidden="true">J</span>
-                    <span class="public-onboarding-pill">Setup · 2 of 3</span>
-                </div>
-                <h2 class="public-onboarding-title">Pick a voice<br>to read along.</h2>
-                <p class="public-onboarding-copy">Choose the voice that feels easiest to stay with.</p>
-
-                <div class="public-onboarding-options" role="radiogroup" aria-label="Voice style" data-onboarding-group="voice">
-                    <button class="public-onboarding-option selected" type="button" role="radio" aria-checked="true" data-onboarding-value="mara">
-                        <span class="public-onboarding-option-icon" aria-hidden="true">▮▮</span>
-                        <span><span class="public-onboarding-option-title">Mara</span><span class="public-onboarding-option-sub">Warm &amp; unhurried</span></span>
-                        <span class="public-onboarding-check" aria-hidden="true"></span>
-                    </button>
-                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="ansel">
-                        <span class="public-onboarding-option-icon" aria-hidden="true">▶</span>
-                        <span><span class="public-onboarding-option-title">Ansel</span><span class="public-onboarding-option-sub">Clear &amp; steady</span></span>
-                        <span class="public-onboarding-check" aria-hidden="true"></span>
-                    </button>
-                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="iris">
-                        <span class="public-onboarding-option-icon" aria-hidden="true">▶</span>
-                        <span><span class="public-onboarding-option-title">Iris</span><span class="public-onboarding-option-sub">Soft &amp; intimate</span></span>
-                        <span class="public-onboarding-check" aria-hidden="true"></span>
-                    </button>
-                    <button class="public-onboarding-option" type="button" role="radio" aria-checked="false" data-onboarding-value="brook">
-                        <span class="public-onboarding-option-icon" aria-hidden="true">▶</span>
-                        <span><span class="public-onboarding-option-title">Brook</span><span class="public-onboarding-option-sub">Bright &amp; brisk</span></span>
-                        <span class="public-onboarding-check" aria-hidden="true"></span>
-                    </button>
-                </div>
-
-                <div class="public-onboarding-actions">
-                    <button class="public-onboarding-primary" type="button" data-onboarding-next="2">Continue</button>
-                </div>
-            </section>
-
-            <section class="public-onboarding-pane" data-onboarding-pane="step-3" data-onboarding-step="3" aria-label="Step 3">
-                <div class="public-onboarding-topline">
-                    <span class="public-onboarding-mark" aria-hidden="true">J</span>
-                    <span class="public-onboarding-pill">Setup · 3 of 3</span>
-                </div>
-                <h2 class="public-onboarding-title">How should Jubly<br>feel to read?</h2>
-                <p class="public-onboarding-copy">You can switch this anytime.</p>
-
-                <div class="public-onboarding-chips" role="radiogroup" aria-label="Reading theme" data-onboarding-group="theme">
-                    <button class="public-onboarding-chip selected" type="button" role="radio" aria-checked="true" data-onboarding-value="default">
-                        <span class="public-onboarding-theme-card public-onboarding-theme-default">Aa</span>
-                        <span>Default</span>
-                    </button>
-                    <button class="public-onboarding-chip" type="button" role="radio" aria-checked="false" data-onboarding-value="green">
-                        <span class="public-onboarding-theme-card public-onboarding-theme-green">Aa</span>
-                        <span>Light Green</span>
-                    </button>
-                    <button class="public-onboarding-chip" type="button" role="radio" aria-checked="false" data-onboarding-value="purple">
-                        <span class="public-onboarding-theme-card public-onboarding-theme-purple">Aa</span>
-                        <span>Light Purple</span>
-                    </button>
-                </div>
-
-                <div class="public-onboarding-pace" aria-label="Reading speed">
-                    <div class="public-onboarding-pace-head">
-                        <span>Reading speed</span>
-                        <span class="public-onboarding-pace-value" id="public-onboarding-speed-value">1.0×</span>
-                    </div>
-                    <input class="public-onboarding-slider" id="public-onboarding-speed" type="range" min="0.5" max="2" step="0.25" value="1" aria-label="Reading speed">
-                    <div class="public-onboarding-pace-labels"><span>0.5×</span><span>2.0×</span></div>
-                </div>
-
-                <div class="public-onboarding-actions">
-                    <button class="public-onboarding-primary" type="button" data-onboarding-next="3">Start reading</button>
-                    <p class="public-onboarding-note">Your choices shape this sample on this device for now.</p>
-                </div>
-            </section>
-
-            <section class="public-onboarding-pane" data-onboarding-pane="interstitial-3" aria-live="polite">
-                <div class="public-onboarding-interstitial">
-                    <svg class="public-onboarding-glow" viewBox="0 0 68 68" aria-hidden="true">
-                        <defs>
-                            <radialGradient id="publicOnboardingGlowB" cx="50%" cy="45%" r="70%">
-                                <stop offset="0" stop-color="#ede9fe"></stop>
-                                <stop offset="0.58" stop-color="#a78bfa"></stop>
-                                <stop offset="1" stop-color="#6344F5"></stop>
-                            </radialGradient>
-                        </defs>
-                        <circle cx="34" cy="34" r="32" fill="url(#publicOnboardingGlowB)"></circle>
-                    </svg>
-                    <h2>Tuning your reading experience<span class="public-onboarding-dots"><span>.</span><span>.</span><span>.</span></span></h2>
-                    <p>Jubly is opening the real sample reading view.</p>
-                </div>
-            </section>
-        </article>
-    </div>
-</section>
 
 <!-- LOGIN PAGE -->
 <div id="login-page" class="hidden-section min-h-[88vh] flex items-center justify-center px-6 py-16">
@@ -664,9 +512,6 @@
                     onkeydown="if(event.key==='Enter') authFormSubmit()">
             </div>
             <button id="auth-submit-btn" onclick="authFormSubmit()" class="btn-jubly w-full py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider">Sign In</button>
-            <p id="auth-forgot-wrap" class="text-center text-xs mt-3">
-                <button type="button" onclick="showForgotPasswordPane()" class="font-bold text-indigo-600 hover:underline">Forgot password?</button>
-            </p>
         </div>
         <p class="text-center text-sm text-slate-500 mt-6">
             <span id="auth-toggle-label">New here?</span>
@@ -694,58 +539,16 @@
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-5">
                 <div>
                     <p class="text-xs font-black uppercase tracking-widest text-indigo-600 mb-2">Sample Book</p>
-                    <h3 class="text-2xl font-extrabold text-slate-900">Try Jubly Reader with the sample</h3>
-                    <p id="library-public-sample-copy" class="text-sm text-slate-500 mt-2 max-w-2xl">Create an account to import books, save your place, and build your own library.</p>
-                    <p id="library-public-sample-subcopy" class="text-xs text-slate-400 mt-2 max-w-2xl">Start free, keep your place, and come back anytime.</p>
+                    <h3 class="text-2xl font-extrabold text-slate-900">Try Reading Training now</h3>
+                    <p class="text-sm text-slate-500 mt-2 max-w-2xl">Start with the built-in sample before creating an account. Sign in only when you want ownership, saved state, and your personal library.</p>
                 </div>
                 <div class="flex flex-col sm:flex-row gap-3">
-                    <button type="button" onclick="startPublicSampleReading()" class="btn-jubly px-5 py-3 rounded-xl font-bold text-sm sm:min-w-[11rem]">Open sample reading</button>
-                    <button type="button" onclick="openPricingForSignup()" class="px-5 py-3 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition sm:min-w-[11rem]">Get Started</button>
+                    <button type="button" onclick="openSampleBookPreview()" class="btn-jubly px-6 py-3 rounded-xl font-bold text-sm">Open sample book</button>
+                    <button type="button" onclick="showSignupPane(true)" class="px-5 py-3 rounded-xl font-bold text-sm border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 transition">Create account</button>
                 </div>
             </div>
         </div>
     </section>
-
-    <div id="library-pending" class="hidden-section" aria-live="polite" aria-busy="true">
-        <div class="glass-card shadow-sm library-pending-card">
-            <div class="library-pending-head">
-                <div>
-                    <p class="library-pending-label">Loading Library</p>
-                    <h3 class="library-pending-title">Checking this device for your books</h3>
-                    <p class="library-pending-copy">The Library area stays in a neutral pending state until the local library runtime can truthfully resolve books or empty/import guidance.</p>
-                </div>
-            </div>
-            <div class="library-pending-list" aria-hidden="true">
-                <div class="library-pending-row">
-                    <div class="library-pending-icon"></div>
-                    <div class="library-pending-lines">
-                        <span class="library-pending-line library-pending-line-title"></span>
-                        <span class="library-pending-line library-pending-line-meta"></span>
-                    </div>
-                    <span class="library-pending-pill"></span>
-                    <span class="library-pending-time"></span>
-                </div>
-                <div class="library-pending-row">
-                    <div class="library-pending-icon"></div>
-                    <div class="library-pending-lines">
-                        <span class="library-pending-line library-pending-line-title"></span>
-                        <span class="library-pending-line library-pending-line-meta"></span>
-                    </div>
-                    <span class="library-pending-pill"></span>
-                    <span class="library-pending-time"></span>
-                </div>
-                <div class="library-pending-row">
-                    <div class="library-pending-icon"></div>
-                    <div class="library-pending-lines">
-                        <span class="library-pending-line library-pending-line-title"></span>
-                        <span class="library-pending-line library-pending-line-meta"></span>
-                    </div>
-                    <span class="library-pending-pill"></span>
-                    <span class="library-pending-time"></span>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- POPULATED STATE — rows injected by refreshLibrary() after import -->
     <div id="library-populated" class="hidden-section">
@@ -1026,7 +829,7 @@
             <span id="reading-tier-pill" class="tier-pill">Basic</span>
         </div>
         <div class="reading-top-actions">
-            <button type="button" onclick="goToPostReadingSurface()" class="reading-top-exit">Exit ✕</button>
+            <button type="button" onclick="showSection('dashboard')" class="reading-top-exit">Exit ✕</button>
         </div>
     </div>
 
@@ -1036,33 +839,16 @@
         <!-- #pages — app's render() (library.js) writes .page card elements here -->
         <div id="pages"></div>
 
-        <!-- Chapter handoff — runtime/library owns chapter truth; this forwards intent only. -->
-        <div id="next-chapter-surface" class="next-chapter-surface hidden-section">
-            <button id="next-chapter-btn" type="button" class="top-btn next-btn next-chapter-btn">▶ Next Chapter</button>
-        </div>
-
         <!-- END-OF-SESSION SIGNAL (shown by showSessionComplete() when last page done) -->
         <div id="session-complete" class="hidden-section mt-12 mb-4">
             <div class="glass-card p-8 text-center" style="border-color: var(--theme-accent); border-width: 2px;">
                 <div class="text-3xl mb-3">✓</div>
                 <h3 class="font-extrabold text-lg text-slate-800 mb-1">Session complete</h3>
                 <p id="session-stats" class="text-sm text-slate-400 mb-6">You read <strong id="stat-pages">—</strong> pages · <strong id="stat-minutes">—</strong> min</p>
-                <button onclick="goToPostReadingSurface()" class="btn-theme px-8 py-3 rounded-xl font-bold text-sm">Back to Library →</button>
+                <button onclick="showSection('dashboard')" class="btn-theme px-8 py-3 rounded-xl font-bold text-sm">Back to Library →</button>
             </div>
         </div>
     </div>
-
-    <!-- READING INTRO HOLD
-         Universal cover shown at the start of every reading session.
-         Uses only the Plain/Default base color — Texture and Wallpaper load behind it.
-         Owned entirely by startReadingFromPreview() in js/library.js.
-         Never competes with ::before or ::after on .reading-content. -->
-    <div id="reading-intro-hold" aria-hidden="true">
-        <p id="reading-intro-message" class="reading-intro-message"></p>
-    </div>
-
-    <!-- Playback/support status — shell presents runtime getter truth only. -->
-    <div id="shell-playback-indicator" class="shell-playback-indicator" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 
     <!-- BOTTOM PLAYBACK BAR: moment controls — always visible -->
     <div class="reading-bottom-bar">
@@ -1085,6 +871,8 @@
             </button>
             <button id="shell-next-btn" onclick="handleTtsStep(1)" class="pb-icon-btn pb-step-btn" title="Next skip" disabled aria-disabled="true"><span class="pb-step-glyph" aria-hidden="true">↻</span><span class="sr-only">Next skip</span></button>
         </div>
+        <!-- Visible playback blocked/error state — hidden when playback is healthy -->
+        <div id="shell-tts-blocked-msg" role="status" aria-live="polite" style="display:none;font-size:0.72rem;color:#b45309;padding:2px 8px;border-radius:6px;background:#fef3c7;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
         <!-- Page progress — plain text counter, no dots -->
         <div class="reading-bottom-actions flex-shrink-0">
             <span class="page-progress" id="shell-page-progress">Page 1 / 1</span>
@@ -1111,15 +899,14 @@
 
 <!-- PRICING MODAL -->
 <div id="pricing-modal" class="hidden-section fixed inset-0 bg-slate-900/70 modal-overlay flex items-center justify-center z-[100] p-6">
-    <div class="bg-white w-full max-w-2xl rounded-3xl relative shadow-2xl pricing-modal-card">
-        <div class="pricing-modal-header text-center">
-            <button onclick="closeModal('pricing-modal')" class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition">✕</button>
+    <div class="bg-white w-full max-w-2xl rounded-3xl p-8 relative shadow-2xl">
+        <button onclick="closeModal('pricing-modal')" class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 transition">✕</button>
+        <div class="text-center mb-8">
             <h2 class="text-3xl font-extrabold text-slate-900">Simple Pricing</h2>
-            <p id="pricing-subcopy" class="text-slate-400 mt-1 text-sm">Start free, keep your place, and come back anytime.</p>
-            <div id="pricing-message" class="hidden-section mt-3 text-sm font-semibold"></div>
+            <p class="text-slate-400 mt-1 text-sm">Choose a plan, create your account, then enter the app.</p>
+        <div id="pricing-message" class="hidden-section mt-3 text-sm font-semibold"></div>
         </div>
-        <div class="pricing-modal-body">
-            <div class="flex gap-4 flex-col md:flex-row">
+        <div class="flex gap-4 flex-col md:flex-row">
             <div class="pricing-card">
                 <p class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Basic</p>
                 <p class="text-4xl font-extrabold text-slate-900 mb-0.5">Free</p>
@@ -1129,7 +916,7 @@
                     <li class="flex items-center gap-2"><span class="text-emerald-500 font-bold">✓</span> Standard AI voices</li>
                     <li class="flex items-center gap-2"><span class="text-slate-300">✕</span> <span class="text-slate-400">RSS feed</span></li>
                 </ul>
-                <button id="pricing-free-btn" type="button" onclick="continueWithFree()" class="w-full border-2 border-slate-200 rounded-xl py-2.5 font-bold text-sm text-slate-600 hover:bg-slate-50 transition">Continue for free</button>
+                <button id="pricing-free-btn" type="button" onclick="continueWithFree()" class="w-full border-2 border-slate-200 rounded-xl py-2.5 font-bold text-sm text-slate-600 hover:bg-slate-50 transition">Free</button>
             </div>
             <div class="pricing-card featured">
                 <div class="flex justify-between items-center mb-3">
@@ -1156,7 +943,6 @@
                 </ul>
                 <button id="pricing-premium-btn" type="button" onclick="startCheckout('premium')" class="w-full border-2 border-indigo-200 text-indigo-600 rounded-xl py-2.5 font-bold text-sm hover:bg-indigo-50 transition">Upgrade to Premium</button>
             </div>
-        </div>
         </div>
     </div>
 </div>
@@ -1210,6 +996,7 @@
     </div>
 </div>
 
+<script src="js/shell.js"></script>
 <!-- Pass 4: auth core and durable sync seam. Load after shell.js, before app.js. -->
 <script src="js/auth.js"></script>
 <script src="js/sync.js"></script>
@@ -1219,10 +1006,11 @@
 
 <!-- ── App scripts ──────────────────────────────────────────────
      Load order matches original index.html exactly.
-     config.js loads before app.js.
+     config.js and embedded_books.js load before app.js.
      audio.js and embers.js are separate from the app.js sequential loader.
 ──────────────────────────────────────────────────────────────── -->
 <script src="js/config.js"></script>
+<script src="assets/books/embedded_books.js" onerror="console.warn('[jubly] Embedded books not found — library will load from IndexedDB only')"></script>
 <script src="js/audio.js"></script>
 <script src="js/embers.js"></script>
 <script src="js/music.js"></script>

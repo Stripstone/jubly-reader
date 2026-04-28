@@ -258,7 +258,6 @@ export default async function handler(req, res) {
     }
     return json(res, 200, out);
   } catch (err) {
-    console.error("[ai-evaluate]", err);
     return json(res, 500, { error: "Server error", detail: String(err) });
   }
 }

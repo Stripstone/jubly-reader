@@ -59,7 +59,6 @@ export default async function handler(req, res) {
 
     return json(res, 200, { summary });
   } catch (err) {
-    console.error("[ai-summary]", err);
     return json(res, 500, { error: "Server error", detail: String(err) });
   }
 }

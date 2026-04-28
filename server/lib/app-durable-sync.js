@@ -128,21 +128,13 @@ function sanitizeSettingsRow(row = null) {
   return sanitized;
 }
 
-function normalizeVoiceId(value) {
-  if (!value || typeof value !== 'string') return null;
-  const v = value.trim();
-  if (!v || v.length > 128) return null;
-  if (/[\x00-\x1f\x7f]/.test(v)) return null;
-  return v;
-}
-
 function canonicalizeSettingsRow(existing = {}, patch = {}) {
   const current = sanitizeSettingsRow(existing) || {};
   const next = {
     user_id: String(current.user_id || patch.user_id || '').trim(),
     theme_id: toText(patch.theme_id, toText(current.theme_id, 'default')),
     font_id: toText(patch.font_id, toText(current.font_id, 'Lora')),
-    tts_voice_id: normalizeVoiceId(patch.tts_voice_id != null ? patch.tts_voice_id : current.tts_voice_id),
+    tts_voice_id: toText(patch.tts_voice_id, toText(current.tts_voice_id, null)),
     tts_volume: Number.isFinite(Number(patch.tts_volume)) ? Number(patch.tts_volume) : (Number.isFinite(Number(current.tts_volume)) ? Number(current.tts_volume) : 0.50),
     autoplay_enabled: patch.autoplay_enabled == null ? toBool(current.autoplay_enabled, false) : toBool(patch.autoplay_enabled, false),
     music_enabled: patch.music_enabled == null ? toBool(current.music_enabled, true) : toBool(patch.music_enabled, true),
@@ -543,7 +535,7 @@ async function setLibraryItemStatus(userId, storageRef, nextStatus, options = {}
 function summarizeUsage(usageRow, usageDailyLimit) {
   if (usageDailyLimit == null) {
     return {
-      authoritative: false,
+      authoritative: true,
       row: usageRow || null,
       used_units: usageRow ? Math.max(0, toInt(usageRow.used_units, 0)) : 0,
       used_api_calls: usageRow ? Math.max(0, toInt(usageRow.used_api_calls, 0)) : 0,

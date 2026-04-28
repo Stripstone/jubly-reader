@@ -2,15 +2,6 @@
 // File: state.js
 // Note: This is still global-script architecture (no bundler/modules required).
 
-function _trailPush(tag, data) {
-  try {
-    if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
-    window.__rcEventTrail.push({ t: new Date().toISOString(), tag, ...data });
-    if (window.__rcEventTrail.length > 40) window.__rcEventTrail.shift();
-    if (typeof window.updateDiagnostics === 'function') window.updateDiagnostics();
-  } catch (_) {}
-}
-
 // ===================================
   // READING COMPREHENSION APP
   // ===================================
@@ -49,12 +40,10 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   let appMode = 'reading';   // default mode
   let thesisText = ''; // research mode input — coming soon
 
-  // Current resolved runtime tier: 'basic', 'pro', 'premium'.
-  // Legacy aliases like 'free' / 'paid' are normalized at the policy seam.
-  let appTier = 'basic';
+  // Current subscription tier: 'free', 'paid', 'premium'
+  // During prototype: controls feature access in UI but does not enforce usage limits.
+  let appTier = 'free';
   let runtimePolicy = null;
-  let runtimePolicyResolved = false;
-  let publicRuntimeReset = { at: null, reason: 'boot-default' };
 
   // ---- Token Tracking ----
   // Session token counter. Counts consumption per category for diagnostic purposes.
@@ -77,7 +66,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
 
   const SAFE_FALLBACK_POLICY = Object.freeze({
     version: 1,
-    tier: 'basic',
+    tier: 'free',
     simulationAllowed: false,
     usageDailyLimit: 100,
     importSlotLimit: 2,
@@ -98,22 +87,20 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   });
 
 
-  function normalizeAppTier(value, fallback = 'basic') {
+  function normalizeAppTier(value) {
     const tier = String(value || '').trim().toLowerCase();
-    if (tier === 'free') return 'basic';
-    if (tier === 'paid') return 'pro';
-    return ['basic', 'pro', 'premium'].includes(tier) ? tier : fallback;
+    return ['free', 'paid', 'premium'].includes(tier) ? tier : 'free';
   }
 
   function getFallbackRuntimePolicy(tierInput) {
-    // PASS3: Fallback is always the minimum safe basic-tier policy.
+    // PASS3: Fallback is always the minimum safe free-tier policy.
     // tierInput is accepted for callers that pass a hint, but it NEVER elevates
-    // features above basic-tier when the server is unreachable.
+    // features above free-tier when the server is unreachable.
     // simulationAllowed is never granted from client-side host inference:
     //   - it was previously set from canSimulateTierOnCurrentHost(), which let the
     //     client grant itself simulation capability when the server was down.
     //   - now it is always false; simulation capability comes from the server only.
-    const tier = normalizeAppTier(tierInput, 'basic');
+    const tier = normalizeAppTier(tierInput);
     return {
       version: SAFE_FALLBACK_POLICY.version,
       tier,
@@ -158,7 +145,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
       // resolutionMode: consumed from server meta (passed in via applyResolvedRuntimePolicy).
       // 'production'    — server default tier, client request ignored.
       // 'simulation'    — preview/local only, client ?tier= honored.
-      // 'client-fallback' — server unreachable, safe basic-tier only.
+      // 'client-fallback' — server unreachable, safe free-tier only.
       resolutionMode: typeof source.resolutionMode === 'string' ? source.resolutionMode : (fallback.resolutionMode || 'client-fallback'),
       usageDailyLimit: Number.isFinite(usageDailyLimit) && usageDailyLimit > 0
         ? usageDailyLimit
@@ -186,12 +173,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   function getRuntimePolicy() {
     if (runtimePolicy && typeof runtimePolicy === 'object') return runtimePolicy;
     runtimePolicy = getFallbackRuntimePolicy(appTier);
-    runtimePolicyResolved = false;
     return runtimePolicy;
-  }
-
-  function isRuntimePolicyResolved() {
-    return !!runtimePolicyResolved;
   }
 
   function getRuntimeUsageAllowance() {
@@ -231,73 +213,17 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     return !!getRuntimePolicy()?.features?.cloudVoices;
   }
 
-  function hasRuntimeAuthContext() {
-    try {
-      const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
-      const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function'
-        ? String(window.rcAuth.getAccessToken() || '').trim()
-        : '';
-      return signedIn && !!token;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function isNonPublicRuntimePolicy(policy) {
-    const normalized = normalizeRuntimePolicy(policy, policy && policy.tier ? policy.tier : 'basic');
-    return normalized.tier !== 'basic' ||
-      !!normalized.features?.cloudVoices ||
-      !!normalized.features?.themes?.explorer;
-  }
-
-  function applyResolvedRuntimePolicy(policyLike, tierHint, options = {}) {
+  function applyResolvedRuntimePolicy(policyLike, tierHint) {
     runtimePolicy = normalizeRuntimePolicy(policyLike, tierHint);
-    runtimePolicyResolved = !!options.resolved;
     appTier = runtimePolicy.tier;
     try { tokenReset(); } catch (_) {}
+    try { if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') window.rcTheme.enforceAccess(); } catch (_) {}
     try {
-      if (window.rcTheme && typeof window.rcTheme.enforceAccess === 'function') {
-        window.rcTheme.enforceAccess({
-          persist: options.publicReset !== true,
-          reason: String(options.reason || '')
-        });
-      }
-    } catch (_) {}
-    try {
-      const detail = {
-        policy: runtimePolicy,
-        resolved: runtimePolicyResolved,
-        reason: String(options.reason || ''),
-        publicReset: !!options.publicReset
-      };
+      const detail = { policy: runtimePolicy };
       document.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
       window.dispatchEvent(new CustomEvent('rc:runtime-policy-changed', { detail }));
     } catch (_) {}
     return runtimePolicy;
-  }
-
-  function resetRuntimePolicyToPublic(reason = 'public-reset') {
-    const resetReason = String(reason || 'public-reset');
-    publicRuntimeReset = { at: new Date().toISOString(), reason: resetReason };
-    _trailPush('runtime-policy-public-reset', { reason: resetReason });
-    return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', {
-      resolved: false,
-      publicReset: true,
-      reason: resetReason,
-    });
-  }
-
-  function getRuntimePolicyReport() {
-    const policy = getRuntimePolicy();
-    return {
-      tier: normalizeAppTier(policy?.tier || 'basic'),
-      resolved: isRuntimePolicyResolved(),
-      resolutionMode: String(policy?.resolutionMode || ''),
-      cloudAllowed: !!policy?.features?.cloudVoices,
-      explorerAllowed: !!policy?.features?.themes?.explorer,
-      customMusicAllowed: !!policy?.features?.themes?.customMusic,
-      publicReset: Object.assign({}, publicRuntimeReset || { at: null, reason: null }),
-    };
   }
 
   async function refreshRuntimePolicy(requestedTier) {
@@ -320,25 +246,16 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
         ? { ...payload.policy, resolutionMode: payload?.meta?.resolutionMode }
         : payload;
       const resolvedTierHint = payload?.meta?.effectiveTier || tier;
-      const normalizedPolicy = normalizeRuntimePolicy(policyWithMeta, resolvedTierHint);
-      if (!hasRuntimeAuthContext() && isNonPublicRuntimePolicy(normalizedPolicy)) {
-        _trailPush('policy-response-blocked-public', {
-          requestedTier: tier,
-          responseTier: normalizedPolicy.tier,
-          reason: 'auth-context-gone'
-        });
-        return resetRuntimePolicyToPublic('runtime-policy-response-auth-absent');
-      }
-      return applyResolvedRuntimePolicy(normalizedPolicy, normalizedPolicy.tier, { resolved: true });
-    } catch (err) {
-      // Server unreachable. If we already hold a confirmed non-basic policy (from a
-      // prior successful fetch or durable-sync cache projection), preserve it — a
-      // transient network failure must not strip access the user legitimately holds.
-      // Only fall back to safe-basic when there is no confirmed policy in place.
-      _trailPush('policy-fetch-failed', { tier: runtimePolicy && runtimePolicy.tier, reason: String(err?.message || err || 'unknown') });
-      if (!hasRuntimeAuthContext()) return resetRuntimePolicyToPublic('runtime-policy-fetch-failed-auth-absent');
-      if (runtimePolicy && runtimePolicy.tier && runtimePolicy.tier !== 'basic') return runtimePolicy;
-      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('basic'), 'basic', { resolved: false });
+      return applyResolvedRuntimePolicy(policyWithMeta, resolvedTierHint);
+    } catch (_) {
+      // Server unreachable. Apply minimum safe free-tier fallback only.
+      // PASS3: Do not preserve the requested tier (even on localhost) when the
+      // server is down. The previous path used canSimulateTierOnCurrentHost() to
+      // grant the requested tier in fallback — that made the client a second policy
+      // engine when the server failed. Now the fallback is always safe-free.
+      // When the server becomes reachable, the next refreshForTier call will fetch
+      // the correct server-resolved policy.
+      return applyResolvedRuntimePolicy(getFallbackRuntimePolicy('free'), 'free');
     }
   }
 
@@ -350,19 +267,12 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     spent: { tts: 0, evaluate: 0, anchors: 0, research: 0 },
   };
 
-  function normalizeUsageValue(value) {
-    if (value == null || value === '') return null;
-    const num = Number(value);
-    return Number.isFinite(num) ? Math.max(0, num) : null;
-  }
-
   function tokenSpend(category) {
     const cost = TOKEN_COSTS[category] || 0;
     if (!cost) return;
     sessionTokens.spent[category] = (sessionTokens.spent[category] || 0) + cost;
-    const remaining = normalizeUsageValue(sessionTokens.remaining);
-    if (!sessionTokens.authoritative && remaining != null) {
-      sessionTokens.remaining = Math.max(0, remaining - cost);
+    if (!sessionTokens.authoritative && Number.isFinite(Number(sessionTokens.remaining))) {
+      sessionTokens.remaining = Math.max(0, Number(sessionTokens.remaining) - cost);
     }
   }
 
@@ -848,7 +758,7 @@ const RC_PROFILE_PREFS_KEY = 'rc_profile_prefs';
 
 let appTheme = 'default';
 let appThemeSettings = {};
-let appAppearance = getBootAppliedAppearanceMode();
+let appAppearance = 'light';
 let appearanceAppliedOnce = false;
 let appearancePaintSignalSeq = 0;
 let diagnosticsPrefs = { enabled: false, mode: 'off' };
@@ -1163,9 +1073,9 @@ function getRuntimeTier() {
   // refreshForTier (ui.js owns #tierSelect → syncTierPolicy → refreshForTier),
   // which fetches from the server and sets runtimePolicy directly.
   try {
-    return normalizeAppTier(runtimePolicy?.tier || 'basic');
+    return normalizeAppTier(runtimePolicy?.tier || 'free');
   } catch (_) {
-    return 'basic';
+    return 'free';
   }
 }
 
@@ -1243,7 +1153,6 @@ function applyThemeSettings() {
 }
 
 function persistThemeState() {
-  _trailPush('persist-theme', { theme_id: appTheme });
   return saveThemePrefs({
     theme_id: appTheme,
     theme_settings: Object.assign({}, appThemeSettings || {}),
@@ -1308,66 +1217,6 @@ function syncThemeShellState() {
   syncAppearanceButtons();
 }
 
-function getMutableAppearanceFirstPaintReport() {
-  try {
-    if (!window.__rcAppearanceFirstPaint || typeof window.__rcAppearanceFirstPaint !== 'object') {
-      window.__rcAppearanceFirstPaint = {
-        appearancePrePaintApplied: false,
-        modeAtFirstPaint: 'light',
-        modeAfterRuntime: null,
-        changedAfterPaint: false,
-        shellFirstAppearanceWriter: false,
-        firstWriter: 'state.js-fallback',
-        source: 'runtime-fallback'
-      };
-    }
-    return window.__rcAppearanceFirstPaint;
-  } catch (_) {
-    return {
-      appearancePrePaintApplied: false,
-      modeAtFirstPaint: 'light',
-      modeAfterRuntime: null,
-      changedAfterPaint: false,
-      shellFirstAppearanceWriter: false,
-      firstWriter: 'state.js-fallback',
-      source: 'runtime-fallback'
-    };
-  }
-}
-
-function getAppearanceFirstPaintReport() {
-  const report = getMutableAppearanceFirstPaintReport();
-  return Object.assign({}, report, {
-    modeAfterRuntime: appAppearance,
-    changedAfterPaint: normalizeAppearanceMode(report.modeAtFirstPaint) !== normalizeAppearanceMode(appAppearance),
-    shellFirstAppearanceWriter: false
-  });
-}
-
-function getBootAppliedAppearanceMode() {
-  try {
-    const report = window.__rcAppearanceFirstPaint;
-    const reported = report && typeof report === 'object' ? report.modeAtFirstPaint : null;
-    if (reported === 'dark' || reported === 'light') return normalizeAppearanceMode(reported);
-  } catch (_) {}
-  try {
-    const rootMode = document.documentElement && document.documentElement.getAttribute('data-app-appearance');
-    if (rootMode === 'dark' || rootMode === 'light') return normalizeAppearanceMode(rootMode);
-  } catch (_) {}
-  return 'light';
-}
-
-function updateAppearanceFirstPaintReport() {
-  const report = getMutableAppearanceFirstPaintReport();
-  try {
-    report.modeAfterRuntime = appAppearance;
-    report.changedAfterPaint = normalizeAppearanceMode(report.modeAtFirstPaint) !== normalizeAppearanceMode(appAppearance);
-    report.shellFirstAppearanceWriter = false;
-    report.runtimeAdoptedAtMs = (window.performance && typeof window.performance.now === 'function') ? window.performance.now() : null;
-  } catch (_) {}
-  return getAppearanceFirstPaintReport();
-}
-
 function loadTheme() {
   const stored = loadThemePrefs() || {};
   const storedDiagPrefs = loadDiagnosticsPrefs() || {};
@@ -1378,14 +1227,8 @@ function loadTheme() {
   if (typeof stored.diagnostics_mode === 'string') themeDiagPrefs.mode = stored.diagnostics_mode;
   diagnosticsPrefs = Object.assign({ enabled: false, mode: 'off' }, storedDiagPrefs, themeDiagPrefs);
   if (!canUseTheme(appTheme)) {
-    // Theme access can be policy-gated. On cold boot, runtime policy may still be
-    // unresolved when we first read persisted prefs. Display the safe default, but
-    // do not overwrite the saved durable theme until a resolved runtime policy has
-    // actually confirmed the theme is disallowed.
-    const hasResolvedRuntimePolicy = isRuntimePolicyResolved();
-    _trailPush('load-theme-forced-default', { storedTheme: appTheme, hasResolvedRuntimePolicy, policyTier: runtimePolicy && runtimePolicy.tier });
     appTheme = 'default';
-    if (hasResolvedRuntimePolicy) persistThemeState();
+    persistThemeState();
   }
   applyThemeClass(appTheme);
   applyThemeSettings();
@@ -1402,7 +1245,6 @@ function applyAppearance() {
     document.documentElement.setAttribute('data-app-appearance', appAppearance);
     document.documentElement.setAttribute('data-appearance-ready', 'true');
     document.documentElement.setAttribute('data-appearance-painted', 'false');
-    document.documentElement.style.colorScheme = appAppearance;
   } catch (_) {}
   document.body.classList.remove('app-light', 'app-dark');
   document.body.classList.add(modeClass);
@@ -1412,7 +1254,6 @@ function applyAppearance() {
     document.body.setAttribute('data-appearance-painted', 'false');
   } catch (_) {}
   appearanceAppliedOnce = true;
-  updateAppearanceFirstPaintReport();
   syncAppearanceButtons();
   try { document.dispatchEvent(new CustomEvent('rc:appearance-applied', { detail: { appearance: appAppearance } })); } catch (_) {}
   const dispatchPainted = () => {
@@ -1471,19 +1312,9 @@ function setAppearance(mode) {
   return applyAppearance();
 }
 
-function loadAppearance(opts = {}) {
-  if (opts.fromLocal === true) {
-    appAppearance = readAppearanceModeFromLocal();
-  } else if (opts.fromBoot === false) {
-    appAppearance = 'light';
-  } else {
-    appAppearance = getBootAppliedAppearanceMode();
-  }
+function loadAppearance() {
+  appAppearance = readAppearanceModeFromLocal();
   return applyAppearance();
-}
-
-function restorePersistedAppearance() {
-  return loadAppearance({ fromLocal: true });
 }
 
 function getDiagnosticsPreference() {
@@ -1497,28 +1328,9 @@ function setDiagnosticsPreference(partial) {
   return getDiagnosticsPreference();
 }
 
-function enforceThemeAccess(options = {}) {
-  const canUse = canUseTheme(appTheme);
-  const persist = options && options.persist === false ? false : true;
-  _trailPush('enforce-theme-access', {
-    appTheme,
-    canUse,
-    persist,
-    reason: String(options && options.reason || ''),
-    policyTier: runtimePolicy && runtimePolicy.tier,
-    policyResolved: isRuntimePolicyResolved()
-  });
-  if (canUse) return true;
-  if (persist) {
-    setThemeRuntime('default');
-    return false;
-  }
-  // Public reset must remove gated Explorer/theme visuals without persisting
-  // default over the user's signed-in theme preference.
-  appTheme = 'default';
-  applyThemeClass(appTheme);
-  applyThemeSettings();
-  syncThemeShellState();
+function enforceThemeAccess() {
+  if (canUseTheme(appTheme)) return true;
+  setThemeRuntime('default');
   return false;
 }
 
@@ -1573,16 +1385,12 @@ window.rcAppearance = {
   get: () => appAppearance,
   set: setAppearance,
   load: loadAppearance,
-  restorePersisted: restorePersistedAppearance,
   apply: applyAppearance,
   hasApplied: () => appearanceAppliedOnce,
   syncButtons: syncAppearanceButtons,
-  getFirstPaintReport: getAppearanceFirstPaintReport,
   // Transitional alias for current shell button handlers.
   save: setAppearance
 };
-
-window.getAppearanceFirstPaintReport = getAppearanceFirstPaintReport;
 
 window.rcDiagnosticsPrefs = {
   get: getDiagnosticsPreference,
@@ -1616,9 +1424,7 @@ window.rcPolicy = {
   canUseMode,
   canUseAiEvaluate,
   canUseAnchors,
-  canUseCloudVoices,
-  resetToPublic: resetRuntimePolicyToPublic,
-  getReport: getRuntimePolicyReport
+  canUseCloudVoices
 };
 
 // PASS3: Interim server-owned usage capacity API.
@@ -1723,24 +1529,20 @@ window.rcUsage = {
     try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: sessionTokens.source || 'client' } })); } catch (_) {}
   },
   getSnapshot: function rcUsageGetSnapshot() {
-    const remaining = normalizeUsageValue(sessionTokens?.remaining);
-    const allowance = normalizeUsageValue(sessionTokens?.allowance);
-    const hasValue = remaining != null || allowance != null;
     return {
-      remaining,
-      allowance,
-      authoritative: typeof sessionTokens?.authoritative === 'boolean' ? (!!sessionTokens.authoritative && hasValue) : hasValue,
+      remaining: Number.isFinite(Number(sessionTokens?.remaining)) ? Math.max(0, Number(sessionTokens.remaining)) : null,
+      allowance: Number.isFinite(Number(sessionTokens?.allowance)) ? Math.max(0, Number(sessionTokens.allowance)) : null,
+      authoritative: typeof sessionTokens?.authoritative === 'boolean' ? sessionTokens.authoritative : Number.isFinite(Number(sessionTokens?.remaining)),
       source: sessionTokens?.source || null,
       spent: { ...(sessionTokens?.spent || {}) },
     };
   },
   applySnapshot: function rcUsageApplySnapshot(snapshot) {
-    const remaining = normalizeUsageValue(snapshot?.remaining);
-    const allowance = normalizeUsageValue(snapshot?.limit != null ? snapshot.limit : snapshot?.allowance);
-    const hasValue = remaining != null || allowance != null;
-    sessionTokens.allowance = allowance;
-    sessionTokens.remaining = remaining;
-    sessionTokens.authoritative = typeof snapshot?.authoritative === 'boolean' ? (!!snapshot.authoritative && hasValue) : hasValue;
+    const remaining = Number(snapshot?.remaining);
+    const allowance = Number(snapshot?.limit ?? snapshot?.allowance);
+    sessionTokens.allowance = Number.isFinite(allowance) ? Math.max(0, allowance) : null;
+    sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
+    sessionTokens.authoritative = typeof snapshot?.authoritative === 'boolean' ? !!snapshot.authoritative : Number.isFinite(remaining);
     sessionTokens.source = snapshot?.source || 'server-sync';
     try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: sessionTokens.source } })); } catch (_) {}
     return this.getSnapshot();
@@ -1755,7 +1557,7 @@ window.rcEntitlements = {
   enforceThemeAccess
 };
 
-applyResolvedRuntimePolicy(getFallbackRuntimePolicy(appTier), appTier, { resolved: false });
-loadAppearance({ fromBoot: true });
+applyResolvedRuntimePolicy(getFallbackRuntimePolicy(appTier), appTier);
+loadAppearance();
 loadTheme();
 

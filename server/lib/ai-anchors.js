@@ -111,7 +111,6 @@ export default async function handler(req, res) {
 
     return json(res, 200, payload);
   } catch (e) {
-    console.error("[ai-anchors]", e);
     return json(res, 500, { error: "Server error", detail: String(e?.message ?? e) });
   }
 }

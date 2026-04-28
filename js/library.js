@@ -2,15 +2,6 @@
 // File: library.js
 // Note: This is still global-script architecture (no bundler/modules required).
 
-  function libraryTrailPush(tag, data) {
-    try {
-      if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
-      window.__rcEventTrail.push(Object.assign({ t: new Date().toISOString(), tag }, data || {}));
-      if (window.__rcEventTrail.length > 40) window.__rcEventTrail.shift();
-      if (typeof updateDiagnostics === 'function') updateDiagnostics();
-    } catch (_) {}
-  }
-
   // LOCAL LIBRARY (IndexedDB)
   // ===================================
   const LOCAL_DB_NAME = 'rc_local_library_v1';
@@ -28,179 +19,6 @@
     return 0;
   }
 
-  function sampleVisibleReadingPageIndexForPlayback() {
-    try {
-      const pageEls = Array.from(document.querySelectorAll('#reading-mode #pages .page, #pages .page, .page'));
-      if (!pageEls.length) return -1;
-      const viewportTop = Math.max(0, typeof getReadingTopChromeOffset === 'function' ? getReadingTopChromeOffset() : 0);
-      const viewportBottom = Math.max(viewportTop + 1, Number(window.innerHeight || document.documentElement.clientHeight || 0) - (typeof getReadingBottomChromeOffset === 'function' ? getReadingBottomChromeOffset() : 0));
-      let bestIdx = -1;
-      let bestVisible = -1;
-      let bestDistance = Infinity;
-
-      for (let i = 0; i < pageEls.length; i += 1) {
-        const el = pageEls[i];
-        const rect = el.getBoundingClientRect();
-        if (!rect || rect.height <= 0) continue;
-        const visible = Math.max(0, Math.min(rect.bottom, viewportBottom) - Math.max(rect.top, viewportTop));
-        const distance = Math.abs(rect.top - viewportTop);
-        const rawIdx = parseInt(el.dataset?.pageIndex || String(i), 10);
-        const idx = Number.isFinite(rawIdx) ? rawIdx : i;
-        if (visible > bestVisible || (visible === bestVisible && distance < bestDistance)) {
-          bestVisible = visible;
-          bestDistance = distance;
-          bestIdx = idx;
-        }
-      }
-
-      if (bestIdx >= 0 && bestVisible > 0) return bestIdx;
-
-      // Fallback for unusual layouts: choose the card closest to the reading
-      // chrome, but do not use inferCurrentPageIndex() here because its
-      // near-bottom shortcut can intentionally return the final page. Bottom
-      // Play must sample the visible page, not the document-bottom sentinel.
-      bestIdx = -1;
-      bestDistance = Infinity;
-      for (let i = 0; i < pageEls.length; i += 1) {
-        const el = pageEls[i];
-        const rect = el.getBoundingClientRect();
-        if (!rect || rect.height <= 0) continue;
-        const distance = Math.abs(rect.top - viewportTop);
-        const rawIdx = parseInt(el.dataset?.pageIndex || String(i), 10);
-        const idx = Number.isFinite(rawIdx) ? rawIdx : i;
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          bestIdx = idx;
-        }
-      }
-      return bestIdx;
-    } catch (_) {
-      return -1;
-    }
-  }
-
-  // Runtime-owned reading viewport movement.
-  //
-  // Keep existing UX intent (smooth stays smooth, auto stays auto), but do not
-  // let page-card scrollIntoView choose an unclamped document position. The
-  // helper is movement-only: page truth remains owned by the explicit caller
-  // paths below (restore, Next/Previous, Read Page, Play, TTS handoff).
-  let __rcReadingViewportMoveUntil = 0;
-
-  function markReadingViewportMove(ms) {
-    const duration = Math.max(120, Number(ms) || 420);
-    __rcReadingViewportMoveUntil = Date.now() + duration;
-    try { window.__rcReadingViewportMoveUntil = __rcReadingViewportMoveUntil; } catch (_) {}
-  }
-
-  function isReadingViewportMoveActive() {
-    return Date.now() < __rcReadingViewportMoveUntil;
-  }
-
-  function getReadingDocumentScroller() {
-    return document.scrollingElement || document.documentElement || document.body;
-  }
-
-  function getReadingTopChromeOffset() {
-    try {
-      const bar = document.querySelector('#reading-mode .reading-top-bar, .reading-top-bar, #reading-top-bar');
-      const rect = bar ? bar.getBoundingClientRect() : null;
-      if (rect && rect.height > 0) return Math.ceil(rect.height + 8);
-    } catch (_) {}
-    return 8;
-  }
-
-  function getReadingBottomChromeOffset() {
-    try {
-      const bar = document.querySelector('#reading-mode .playback-bar, #reading-mode .reading-bottom-bar, .playback-bar, .reading-bottom-bar, #reading-bottom-bar');
-      const rect = bar ? bar.getBoundingClientRect() : null;
-      if (rect && rect.height > 0) return Math.ceil(rect.height + 16);
-    } catch (_) {}
-    return 96;
-  }
-
-  function getReadingContentMaxScrollTop(scroller) {
-    try {
-      const scrollTop = Number(window.scrollY || window.pageYOffset || scroller.scrollTop || 0);
-      const viewportHeight = Number(window.innerHeight || scroller.clientHeight || 0);
-      const pageEls = Array.from(document.querySelectorAll('#reading-mode #pages .page, #pages .page'));
-      if (!pageEls.length || !Number.isFinite(viewportHeight) || viewportHeight <= 0) return Infinity;
-
-      let contentBottom = 0;
-      for (const el of pageEls) {
-        const rect = el.getBoundingClientRect();
-        if (!rect || rect.height <= 0) continue;
-        contentBottom = Math.max(contentBottom, scrollTop + rect.bottom);
-      }
-
-      const nextSurface = document.querySelector('#reading-mode .next-chapter-surface');
-      if (nextSurface) {
-        const rect = nextSurface.getBoundingClientRect();
-        if (rect && rect.height > 0) contentBottom = Math.max(contentBottom, scrollTop + rect.bottom);
-      }
-
-      if (!contentBottom) return Infinity;
-      return Math.max(0, Math.ceil(contentBottom + getReadingBottomChromeOffset() - viewportHeight));
-    } catch (_) {
-      return Infinity;
-    }
-  }
-
-  function scrollReadingPageIntoView(target, options = {}) {
-    try {
-      const el = (target && typeof target.getBoundingClientRect === 'function')
-        ? target
-        : Array.from(document.querySelectorAll('.page'))[Number(target)];
-      if (!el) return { ok: false, reason: 'missing-target' };
-
-      const scroller = getReadingDocumentScroller();
-      if (!scroller) return { ok: false, reason: 'missing-scroller' };
-
-      const rect = el.getBoundingClientRect();
-      if (!rect || rect.height <= 0) return { ok: false, reason: 'hidden-target' };
-
-      const currentTop = Math.max(0, Number(window.scrollY || window.pageYOffset || scroller.scrollTop || 0));
-      const viewportHeight = Number(window.innerHeight || scroller.clientHeight || 0);
-      const rawMaxTop = Math.max(0, Number(scroller.scrollHeight || 0) - Math.max(0, viewportHeight));
-      const contentMaxTop = getReadingContentMaxScrollTop(scroller);
-      const maxTop = Math.min(rawMaxTop, Number.isFinite(contentMaxTop) ? contentMaxTop : rawMaxTop);
-      const desiredTop = Math.round(currentTop + rect.top - getReadingTopChromeOffset());
-      const targetTop = Math.max(0, Math.min(maxTop, desiredTop));
-
-      const requestedBehavior = String(options.behavior || 'smooth');
-      const behavior = requestedBehavior === 'smooth' ? 'smooth' : 'auto';
-      markReadingViewportMove(behavior === 'smooth' ? 700 : 240);
-
-      try {
-        window.scrollTo({ top: targetTop, behavior });
-      } catch (_) {
-        try { window.scrollTo(0, targetTop); } catch (_) {}
-      }
-
-      // Final clamp only corrects out-of-range settling; it should be a no-op in
-      // normal smooth movement, preserving the existing feel.
-      setTimeout(() => {
-        try {
-          const s = getReadingDocumentScroller();
-          const rawMax = Math.max(0, Number(s.scrollHeight || 0) - Number(window.innerHeight || s.clientHeight || 0));
-          const contentMax = getReadingContentMaxScrollTop(s);
-          const max = Math.min(rawMax, Number.isFinite(contentMax) ? contentMax : rawMax);
-          const now = Math.max(0, Number(window.scrollY || window.pageYOffset || s.scrollTop || 0));
-          if (now > max + 1) window.scrollTo({ top: max, behavior: 'auto' });
-        } catch (_) {}
-      }, behavior === 'smooth' ? 760 : 80);
-
-      return { ok: true, top: targetTop, maxTop, behavior };
-    } catch (_) {
-      return { ok: false, reason: 'exception' };
-    }
-  }
-
-  try {
-    window.__rcScrollReadingPageIntoView = scrollReadingPageIntoView;
-    window.__rcIsReadingViewportMoveActive = isReadingViewportMoveActive;
-  } catch (_) {}
-
   async function flushCurrentReadingProgress(reason) {
     try {
       if (!(window.rcSync && typeof window.rcSync.saveProgressNow === 'function')) return null;
@@ -208,7 +26,7 @@
       const bookId = String(ctx.bookId || '').trim();
       if (!bookId) return null;
       const chapterIndex = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
-      const pageIndex = Math.max(0, currentPageIndex);
+      const pageIndex = getFocusedOrInferredReadingPageIndex();
       return await window.rcSync.saveProgressNow(bookId, chapterIndex, pageIndex, { reason: String(reason || 'flush') });
     } catch (_) {
       return null;
@@ -234,7 +52,7 @@
       const pageEls = document.querySelectorAll('.page');
       const target = pageEls[idx];
       if (!target) return false;
-      scrollReadingPageIntoView(target, { behavior: 'auto', reason: 'restore-reading-position' });
+      target.scrollIntoView({ behavior: 'auto', block: 'start' });
       lastFocusedPageIndex = idx;
       try { currentPageIndex = idx; } catch (_) {}
       // Advance reading target to the restored page; preserve source context set by render().
@@ -242,11 +60,6 @@
         const _cur = window.__rcReadingTarget || {};
         if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _cur.sourceType || '', bookId: _cur.bookId || '', chapterIndex: _cur.chapterIndex != null ? _cur.chapterIndex : -1, pageIndex: idx });
       } catch (_) {}
-      // Store index for post-reveal re-anchor (Patch B). The CSS restore-pending
-      // guard (Patch A) locks document scroll while this runs, making the
-      // the first restore movement may be hidden. startReadingFromPreview() reapplies it
-      // after reading-restore-pending is removed and scroll is unlocked.
-      window.__rcLastRestoredPageIndex = idx;
       window.__rcPendingRestorePageIndex = -1;
       return true;
     } catch (_) {
@@ -367,72 +180,6 @@
     return task;
   }
 
-  function getRestoreCapacityAuthHeaders() {
-    try {
-      const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function'
-        ? window.rcAuth.getAccessToken()
-        : '';
-      return token ? { Authorization: `Bearer ${token}` } : {};
-    } catch (_) { return {}; }
-  }
-
-  async function getRestoreCapacitySnapshot() {
-    let books = [];
-    try { books = await localBooksGetAll(); } catch (_) { books = []; }
-    const count = Array.isArray(books) ? books.length : 0;
-    const limit = (window.rcPolicy && typeof window.rcPolicy.getImportSlotLimit === 'function')
-      ? window.rcPolicy.getImportSlotLimit()
-      : null;
-    const hasCapacity = (window.rcPolicy && typeof window.rcPolicy.hasImportCapacity === 'function')
-      ? window.rcPolicy.hasImportCapacity(count)
-      : true;
-    return { count, limit, hasCapacity };
-  }
-
-  async function guardRestoreCapacity() {
-    const snapshot = await getRestoreCapacitySnapshot();
-    // Restore consumes the same local library slot as Scan Contents/import, so it
-    // uses the same action-time capacity seam. Do not precheck when Trash opens.
-    let hasCapacity = snapshot.hasCapacity;
-    try {
-      const resp = await fetch(
-        (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=import-capacity') : '/api/app?kind=import-capacity'),
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getRestoreCapacityAuthHeaders() },
-          body: JSON.stringify({ count: snapshot.count }),
-          cache: 'no-store',
-        }
-      );
-      if (resp.ok) {
-        const data = await resp.json();
-        hasCapacity = !!(data.allowed ?? data.hasCapacity);
-        if (typeof data.limit !== 'undefined') snapshot.limit = data.limit;
-        if (typeof data.count !== 'undefined') snapshot.count = data.count;
-      }
-    } catch (_) {
-      // Match the importer bridge: if the server is unreachable, use the local
-      // snapshot as the temporary stability fallback rather than moving truth
-      // ownership into Trash.
-    }
-    return hasCapacity
-      ? { ok: true, snapshot }
-      : { ok: false, snapshot, message: 'Restoring failed. Your library is full.' };
-  }
-
-  function setButtonBusy(btn, busy, busyLabel) {
-    if (!btn) return;
-    if (busy) {
-      if (!btn.dataset.idleLabel) btn.dataset.idleLabel = btn.textContent || '';
-      btn.disabled = true;
-      if (busyLabel) btn.textContent = busyLabel;
-      return;
-    }
-    btn.textContent = btn.dataset.idleLabel || btn.textContent || '';
-    delete btn.dataset.idleLabel;
-    btn.disabled = false;
-  }
-
   function waitForNextPaint(count = 2) {
     const frames = Math.max(1, Number(count) || 1);
     return new Promise((resolve) => {
@@ -525,7 +272,6 @@
   window.__rcLocalBookPut = localBookPut;
   window.__rcLocalBooksGetAll = localBooksGetAll;
   window.__rcLocalDeletedBooksGetAll = localDeletedBooksGetAll;
-  libraryTrailPush('library-owner-available', { hasLocalBooksGetAll: typeof localBooksGetAll === 'function' });
 
   const _bookPreviewCache = new Map();
 
@@ -602,7 +348,7 @@
       if (!res.ok) throw new Error('fetch failed');
       raw = await res.text();
     } catch (_) {
-      return null;
+      try { if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[bookId] === 'string') raw = window.EMBED_BOOKS[bookId]; } catch (_) {}
     }
     if (!raw) return null;
     const record = { title: entry.title || titleFromBookId(bookId) || 'Untitled', markdown: raw, totalPages: countPagesFromMarkdown(raw) };
@@ -753,8 +499,21 @@
     if (!root) return [];
 
     const blocks = [];
-    const candidates = root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li');
-    candidates.forEach((el) => {
+    let lastMarker = null;
+    const nodes = root.querySelectorAll('[id],[name],h1,h2,h3,h4,h5,h6,p,li');
+    nodes.forEach((el) => {
+      try {
+        const rawMarker = el.getAttribute('id') || el.getAttribute('name') || '';
+        const markerMatch = String(rawMarker).match(/^page[_-]?(\d+)$/i);
+        if (markerMatch) {
+          const marker = `## Page ${Number(markerMatch[1])}`;
+          if (marker !== lastMarker) {
+            blocks.push(marker);
+            lastMarker = marker;
+          }
+        }
+      } catch (_) {}
+      if (!/^(H[1-6]|P|LI)$/i.test(el.tagName || '')) return;
       const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
       if (!txt) return;
       if (txt.length < 2) return;
@@ -1797,132 +1556,6 @@
       return currentBookRaw;
     }
 
-    let nextChapterTransitionInFlight = false;
-
-    function parseChapterIndexValue(raw) {
-      if (raw === null || raw === undefined) return null;
-      const text = String(raw).trim();
-      if (!text) return null;
-      if (!/^-?\d+$/.test(text)) return null;
-      const index = Number.parseInt(text, 10);
-      return Number.isInteger(index) ? index : null;
-    }
-
-    function isValidChapterIndex(index) {
-      return Number.isInteger(index)
-        && index >= 0
-        && Array.isArray(chapterList)
-        && index < chapterList.length;
-    }
-
-    function getActiveChapterIndexForNextSurface() {
-      if (Number.isInteger(currentChapterIndex) && isValidChapterIndex(currentChapterIndex)) return currentChapterIndex;
-      const selectedIndex = parseChapterIndexValue(chapterSelect ? chapterSelect.value : null);
-      return isValidChapterIndex(selectedIndex) ? selectedIndex : -1;
-    }
-
-    function setNextChapterSurfaceVisible(visible) {
-      const surface = document.getElementById('next-chapter-surface');
-      if (!surface) return;
-      surface.classList.toggle('hidden-section', !visible);
-      // Presentation reflection only; chapter/card truth remains in runtime state.
-      surface.style.display = visible ? 'flex' : 'none';
-      surface.setAttribute('aria-hidden', visible ? 'false' : 'true');
-    }
-
-    function settleNextChapterSurface() {
-      try { updateNextChapterSurface(); } catch (_) {}
-      // Reading entry/re-entry can reveal the surface immediately after the
-      // runtime-owned load/render path settles. Recheck on the next paint so the
-      // user navigation surface is not dependent on a later dropdown change.
-      try { requestAnimationFrame(() => { try { updateNextChapterSurface(); } catch (_) {} }); } catch (_) {}
-    }
-
-    async function selectChapterIndex(index, options = {}) {
-      const selectedIdx = Number.isInteger(index) ? index : parseChapterIndexValue(index);
-      if (!isValidChapterIndex(selectedIdx)) return false;
-
-      currentChapterIndex = selectedIdx;
-      if (chapterSelect && chapterSelect.value !== String(selectedIdx)) chapterSelect.value = String(selectedIdx);
-
-      const chapterPages = getSequentialChapterPages(selectedIdx);
-      populatePagesSelect(chapterPages);
-
-      // Chapter entry should always begin at page 1 of that chapter. Route
-      // through the existing restore-owned render path before rebuilding cards.
-      try { window.__rcPendingRestorePageIndex = 0; } catch (_) {}
-
-      // This is the single authoritative chapter card replacement path. Both
-      // the dropdown and Next Chapter button use it; no synthetic change event,
-      // alternate render path, or duplicate chapter truth is introduced.
-      const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
-      if (chapterText) {
-        await applySelectionToBulkInput(chapterText, {
-          append: false,
-          preservePendingRestore: true,
-          pageMeta: chapterPages
-        });
-      }
-
-      settleNextChapterSurface();
-      return true;
-    }
-
-    function updateNextChapterSurface() {
-      const surface = document.getElementById('next-chapter-surface');
-      const button = document.getElementById('next-chapter-btn');
-      if (!surface || !button) return;
-
-      const readingModeEl = document.getElementById('reading-mode');
-      const hasRenderedChapterPages = Array.isArray(pages) && pages.length > 0;
-      const chapterIndex = getActiveChapterIndexForNextSurface();
-      const hasNextChapter = !!readingModeEl
-        && hasRenderedChapterPages
-        && hasExplicitChapters
-        && Array.isArray(chapterList)
-        && chapterList.length > 1
-        && isValidChapterIndex(chapterIndex)
-        && chapterIndex < chapterList.length - 1;
-
-      setNextChapterSurfaceVisible(hasNextChapter);
-      if (!hasNextChapter) {
-        button.textContent = '▶ Next Chapter';
-        button.disabled = true;
-        button.setAttribute('aria-disabled', 'true');
-        button.removeAttribute('aria-label');
-        return;
-      }
-
-      const nextTitle = String(chapterList[chapterIndex + 1]?.title || `Chapter ${chapterIndex + 2}`).trim();
-      button.textContent = '▶ Next Chapter';
-      button.disabled = !!nextChapterTransitionInFlight;
-      button.setAttribute('aria-disabled', nextChapterTransitionInFlight ? 'true' : 'false');
-      button.setAttribute('aria-label', `Next chapter: ${nextTitle}`);
-    }
-
-    function installNextChapterBridge() {
-      const button = document.getElementById('next-chapter-btn');
-      if (!button || button.__jublyNextChapterBound) return;
-      button.__jublyNextChapterBound = true;
-      button.addEventListener('click', async () => {
-        if (nextChapterTransitionInFlight) return;
-        const chapterIndex = getActiveChapterIndexForNextSurface();
-        if (!hasExplicitChapters || !Array.isArray(chapterList) || !isValidChapterIndex(chapterIndex)) return;
-        const nextChapterIndex = chapterIndex + 1;
-        if (!isValidChapterIndex(nextChapterIndex) || nextChapterIndex <= chapterIndex) return;
-
-        nextChapterTransitionInFlight = true;
-        updateNextChapterSurface();
-        try { if (typeof ttsAutoplayCancelCountdown === 'function') ttsAutoplayCancelCountdown(); } catch (_) {}
-        try {
-          await selectChapterIndex(nextChapterIndex, { reason: 'next-chapter-button' });
-        } finally {
-          nextChapterTransitionInFlight = false;
-          settleNextChapterSurface();
-        }
-      });
-    }
-
     // Async so that loadBook can await full render + restore before resolving.
     // This closes the race where reading-restore-pending was removed before
     // render() and applyPendingReadingRestore() had actually run.
@@ -1942,7 +1575,6 @@
         // removes reading-restore-pending and reveals pages to the user.
         const allText = bookPages.map(p => p.text).filter(Boolean).join("\n---\n");
         if (allText) await applySelectionToBulkInput(allText, { append: false, preservePendingRestore: true, pageMeta: bookPages });
-        settleNextChapterSurface();
         return;
       }
 
@@ -1959,7 +1591,6 @@
       // Await render completion before resolving.
       const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
       if (chapterText) await applySelectionToBulkInput(chapterText, { append: false, preservePendingRestore: true, pageMeta: chapterPages });
-      settleNextChapterSurface();
     }
 
     async function loadManifest() {
@@ -1985,6 +1616,19 @@
           lastErr = e;
         }
       }
+      // Fallback for local file:// usage (fetch is often blocked). If an embedded manifest exists, use it.
+      try {
+        if (window.EMBED_MANIFEST && Array.isArray(window.EMBED_MANIFEST)) {
+          const data = window.EMBED_MANIFEST;
+          manifest = (Array.isArray(data) ? data : []).map((b) => {
+            const id = b.id || b.name || "";
+            const p = b.path || (id ? `assets/books/${id}.md` : "");
+            const title = b.title || titleFromBookId(id) || id || "Untitled";
+            return { id, title, path: p };
+          }).filter(b => b.id && b.path);
+          return;
+        }
+      } catch (_) {}
       throw lastErr || new Error("manifest fetch failed");
     }
 
@@ -2038,6 +1682,19 @@
 
         await refreshChapterAndPagesUI(options);
       } catch (e) {
+        // Fallback for local file:// usage: try embedded books
+        try {
+          if (window.EMBED_BOOKS && typeof window.EMBED_BOOKS[id] === "string") {
+            currentBookRaw = window.EMBED_BOOKS[id];
+            hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
+            if (hasExplicitChapters) {
+              chapterList = parseChaptersFromMarkdown(currentBookRaw);
+            }
+            await refreshChapterAndPagesUI(options);
+            return;
+          }
+        } catch (_) {}
+
         setSelectOptions(chapterSelect, [], "Failed to load book");
         setSelectOptions(pageStart, [], "Failed to load book");
         setSelectOptions(pageEnd, [], "Failed to load book");
@@ -2056,7 +1713,6 @@
     }
 
     // Events
-    installNextChapterBridge();
     sourceSel.addEventListener("change", setSourceUI);
     setSourceUI();
 
@@ -2071,9 +1727,24 @@
     });
 
     chapterSelect.addEventListener("change", () => {
-      const selectedIdx = parseChapterIndexValue(chapterSelect.value);
-      if (!isValidChapterIndex(selectedIdx)) return;
-      selectChapterIndex(selectedIdx, { reason: 'chapter-select' }).catch(() => {});
+      const idx = parseInt(chapterSelect.value || "", 10);
+      if (!Number.isFinite(idx)) return;
+
+      // Snapshot the selected index into a local const before any async boundary
+      // so a rapid second change cannot corrupt this handler's chapter resolution.
+      const selectedIdx = idx;
+      currentChapterIndex = selectedIdx;
+
+      const chapterPages = getSequentialChapterPages(selectedIdx);
+      populatePagesSelect(chapterPages);
+
+      // Immediately replace rendered page cards with the new chapter's content.
+      // Routing through applySelectionToBulkInput → addPages() → render() is the
+      // single authoritative card-replacement path. Calling it synchronously here
+      // closes the race window between chapter assignment and card DOM update —
+      // no Load button click required, no timing assumption.
+      const chapterText = chapterPages.map(p => p.text).filter(Boolean).join("\n---\n");
+      applySelectionToBulkInput(chapterText, { append: false, pageMeta: chapterPages });
     });
 
     // Keep end >= start
@@ -2481,15 +2152,6 @@
             const _ctx = getReadingTargetContext();
             if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: i });
           } catch (_) {}
-          // Read Page is an explicit activation just like Bottom Play. Persist
-          // the selected page immediately so quick Exit/re-enter does not depend
-          // on TTS speaking long enough for another progress path to run.
-          try {
-            const _t = window.__rcReadingTarget || {};
-            if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
-              window.rcSync.scheduleProgressSync(_t.bookId || '', _t.chapterIndex != null ? _t.chapterIndex : -1, i, { reason: 'read-page' });
-            }
-          } catch (_) {}
           ttsSpeakQueue(
             (typeof readingTargetToKey === 'function') ? readingTargetToKey(window.__rcReadingTarget) : `page-${i}`,
             [text]
@@ -2683,7 +2345,6 @@
 
     
     applyModeVisibility();
-    try { updateNextChapterSurface(); } catch (_) {}
     if (typeof applyTierAccess === 'function') applyTierAccess();
     try { applyPendingReadingRestore(); } catch (_) {}
     try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
@@ -2724,7 +2385,6 @@
     const verdictSection = document.getElementById('verdictSection');
     if (submitBtn) submitBtn.style.display = isReading ? 'none' : '';
     if (verdictSection) verdictSection.style.display = isReading ? 'none' : '';
-    try { updateNextChapterSurface(); } catch (_) {}
   }
 
   function startTimer(i, sand, timerDiv, wrapper, textarea) {
@@ -2842,21 +2502,6 @@
       try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
     }
 
-    function showDeletedServiceMessage(message) {
-      if (!deletedListEl) return;
-      const text = String(message || '').trim();
-      let el = deletedListEl.querySelector('[data-deleted-service-message="true"]');
-      if (!text) { if (el) el.remove(); return; }
-      if (!el) {
-        el = document.createElement('div');
-        el.className = 'import-status';
-        el.dataset.deletedServiceMessage = 'true';
-        const anchor = deletedListEl.firstElementChild ? deletedListEl.firstElementChild.nextSibling : null;
-        deletedListEl.insertBefore(el, anchor || deletedListEl.firstChild);
-      }
-      el.textContent = text;
-    }
-
     async function renderDeletedCount() {
       if (!deletedCountEl) return;
       let deleted = [];
@@ -2965,7 +2610,6 @@
       info.className = 'import-status';
       info.textContent = 'Deleted Files use this device storage until you permanently delete them. Restore puts the book back in Library.';
       deletedListEl.appendChild(info);
-      showDeletedServiceMessage('');
       if (!deleted.length) {
         const empty = document.createElement('div');
         empty.className = 'import-status';
@@ -2986,14 +2630,12 @@
 
 This removes them from Deleted Files and frees the device storage.`);
         if (!ok) return;
-        setButtonBusy(deleteAll, true, 'Deleting…');
         try {
           await permanentlyDeleteAllLocalBooks(deleted.map((entry) => entry.id));
           emitDeletedChanged();
           await renderDeletedCount();
           renderDeleted();
         } catch (_) {
-          setButtonBusy(deleteAll, false);
           alert('Delete all failed.');
         }
       });
@@ -3024,15 +2666,7 @@ This removes them from Deleted Files and frees the device storage.`);
           restore.type = 'button';
           restore.textContent = 'Restore';
           restore.addEventListener('click', async () => {
-            setButtonBusy(restore, true, 'Restoring…');
-            showDeletedServiceMessage('');
             try {
-              const guard = await guardRestoreCapacity();
-              if (!guard.ok) {
-                setButtonBusy(restore, false);
-                showDeletedServiceMessage(guard.message || 'Restoring failed. Your library is full.');
-                return;
-              }
               await restoreDeletedLocalBook(b.id);
               await refreshBookSelect();
               emitLibraryChanged();
@@ -3040,8 +2674,7 @@ This removes them from Deleted Files and frees the device storage.`);
               await renderDeletedCount();
               renderDeleted();
             } catch (_) {
-              setButtonBusy(restore, false);
-              showDeletedServiceMessage('Restore failed.');
+              alert('Restore failed.');
             }
           });
           const purge = document.createElement('button');
@@ -3102,15 +2735,14 @@ function _installScrollPageTracker() {
   if (window.__rcScrollPageTrackerInstalled) return;
   window.__rcScrollPageTrackerInstalled = true;
   var raf = 0;
+  var prevIdx = -1;
   var settleTimer = 0;
 
   function reconcileVisiblePage(reason) {
-    if (isReadingViewportMoveActive()) return;
     if (raf) return;
     raf = requestAnimationFrame(function () {
       raf = 0;
       try {
-        if (isReadingViewportMoveActive()) return;
         if (!Array.isArray(pages) || !pages.length) return;
         const pageEls = Array.from(document.querySelectorAll('.page'));
         if (!pageEls.length) return;
@@ -3135,12 +2767,17 @@ function _installScrollPageTracker() {
         }
         if (!bestEl || !Number.isFinite(bestIdx) || bestIdx < 0) return;
         if (bestEl.getBoundingClientRect().height <= 0) return;
-        const _pActive = (typeof window.getPlaybackStatus === 'function') && !!window.getPlaybackStatus().active;
-        const _cActive = (typeof window.getCountdownStatus === 'function') && !!window.getCountdownStatus().active;
-        if (!_pActive && !_cActive && !window.__rcReadingEntryRestoreSettling) {
-          lastFocusedPageIndex = bestIdx;
-        }
+        lastFocusedPageIndex = bestIdx;
+        try { currentPageIndex = bestIdx; } catch (_) {}
         updateReadingMetricsPage(bestIdx);
+        try {
+          const _ctx = window.getReadingTargetContext();
+          if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: _ctx.sourceType, bookId: _ctx.bookId, chapterIndex: _ctx.chapterIndex, pageIndex: bestIdx });
+        } catch (_) {}
+        if (bestIdx !== prevIdx) {
+          prevIdx = bestIdx;
+          try { queueCurrentReadingProgress(reason || 'scroll-tracker'); } catch (_) {}
+        }
       } catch (_) {}
     });
   }
@@ -3261,7 +2898,7 @@ window.focusReadingPage = function focusReadingPage(targetIndex, options = {}) {
   const activeClass = 'page-active';
   document.querySelectorAll('.' + activeClass).forEach((el) => el.classList.remove(activeClass));
   target.classList.add(activeClass);
-  scrollReadingPageIntoView(target, { behavior: options.behavior || 'smooth', reason: options.reason || 'focus-reading-page' });
+  target.scrollIntoView({ behavior: options.behavior || 'smooth', block: 'start' });
   lastFocusedPageIndex = idx;
   try { currentPageIndex = idx; } catch (_) {}
   updateReadingMetricsPage(idx);
@@ -3329,25 +2966,13 @@ window.startFocusedPageTts = function startFocusedPageTts() {
     try { if (typeof ttsDiagPush === 'function') ttsDiagPush('start-focused-blocked', { reason: 'no-reading-target', pageCount: Array.isArray(pages) ? pages.length : 0 }); } catch (_) {}
     return false;
   }
-  // Bottom Play is an explicit user action. Sample the page the user is actually
-  // viewing at press time, bypassing lastFocusedPageIndex because that value is
-  // allowed to be a volatile restore/runtime hint and may intentionally lag
-  // passive scroll during re-entry settling.
-  let sampledIdx = -1;
-  try { sampledIdx = Number(sampleVisibleReadingPageIndexForPlayback()); } catch (_) {}
-  if (!Number.isFinite(sampledIdx) || sampledIdx < 0) sampledIdx = getFocusedOrInferredReadingPageIndex();
-  const idx = Math.max(0, Math.min(Number(sampledIdx) || 0, (Array.isArray(pages) ? pages.length : 1) - 1));
+  const idx = Math.max(0, Math.min(Number((window.__rcReadingTarget || {}).pageIndex) || 0, (Array.isArray(pages) ? pages.length : 1) - 1));
   const text = (Array.isArray(pages) && pages[idx]) ? pages[idx] : '';
   if (!text) return false;
-  // Normalize the explicitly sampled page into runtime truth before deriving key.
+  // Normalize clamped index back into target before deriving key.
   if (typeof setReadingTarget === 'function') setReadingTarget({ sourceType: baseTarget.sourceType, bookId: baseTarget.bookId, chapterIndex: baseTarget.chapterIndex, pageIndex: idx });
   try { currentPageIndex = idx; } catch (_) {}
   lastFocusedPageIndex = idx;
-  try {
-    if (window.rcSync && typeof window.rcSync.scheduleProgressSync === 'function') {
-      window.rcSync.scheduleProgressSync(baseTarget.bookId || '', baseTarget.chapterIndex != null ? baseTarget.chapterIndex : -1, idx, { reason: 'bottom-play' });
-    }
-  } catch (_) {}
   try { if (window.TTS_STATE) window.TTS_STATE.playbackBlockedReason = ''; } catch (_) {}
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
   ttsSpeakQueue(
@@ -3366,37 +2991,13 @@ window.getCurrentReadingPageIndex = getFocusedOrInferredReadingPageIndex;
 window.startReadingFromPreview = async function startReadingFromPreview(bookId) {
   if (!bookId) return false;
 
-  // ── Intro hold ─────────────────────────────────────────────────────────────
-  // Activated synchronously before any await so the reading surface is covered
-  // from the very first frame. Texture and Wallpaper prepare behind it and
-  // never become the visible first phase. Released after cards are confirmed
-  // ready (after __rcLoadBook + waitForNextPaint). Message appears on the hold
-  // after 1000 ms if loading is still in progress.
-  const holdEl = document.getElementById('reading-intro-hold');
-  const holdMsgEl = document.getElementById('reading-intro-message');
-  let _holdMsgTimer = null;
-  try {
-    if (holdEl) {
-      holdEl.classList.remove('intro-hold-fading', 'intro-hold-message-visible');
-      holdEl.classList.add('intro-hold-active');
-    }
-  } catch (_) {}
-  // ───────────────────────────────────────────────────────────────────────────
-
   // MUST be synchronous — before any await — so reading mode never shows stale
-  // page content while network calls are in flight. Exit/re-enter does not reload
-  // the URL, so clear the stale volatile scroll hint and suppress scroll-tracker
-  // focus writes until restore has painted, matching cold-start behavior.
-  try { lastFocusedPageIndex = -1; } catch (_) {}
-  try { window.__rcReadingEntryRestoreSettling = true; } catch (_) {}
+  // page content while network calls are in flight.
   const pagesEl = document.getElementById('pages');
   const readingModeEl = document.getElementById('reading-mode');
   try {
     if (pagesEl) pagesEl.innerHTML = '';
-    if (readingModeEl) {
-      readingModeEl.classList.add('reading-restore-pending');
-      readingModeEl.setAttribute('data-restore-kind', 'opening');
-    }
+    if (readingModeEl) readingModeEl.classList.add('reading-restore-pending');
   } catch (_) {}
 
   // Fire-and-forget: the current reading target is safe in memory and will be
@@ -3428,22 +3029,13 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     }
   } catch (_) {}
 
-  // Compute restore truth. Keep a visible neutral pending surface while the
-  // runtime-owned load/restore path is unresolved so cold entry never presents
-  // a blank reading view. Returning restores get a more specific label.
+  // Compute restore truth. data-restore-kind is intentionally NOT set — with
+  // the blocking flush removed the render is near-instant, so the overlay text
+  // "Returning to your place…" would only flash for a frame. The hide/reveal
+  // is silent: pages stay invisible via reading-restore-pending until scrolled
+  // to the correct position, then fade in. No visible loading message needed.
   const hasRestore = !!(restore && Number.isFinite(Number(restore.pageIndex)) && Number(restore.pageIndex) > 0);
-  try {
-    if (readingModeEl) readingModeEl.setAttribute('data-restore-kind', hasRestore ? 'returning' : 'opening');
-  } catch (_) {}
-
-  // Start the 1000 ms message timer now that we know if this is a fresh open or
-  // a return. If cards are ready before 1000 ms the timer is cleared and the
-  // message never appears. If not, the message fades in on the existing hold.
-  try {
-    const msgText = hasRestore ? 'Returning to your place\u2026' : 'Preparing reading view\u2026';
-    if (holdMsgEl) holdMsgEl.textContent = msgText;
-    if (holdEl) _holdMsgTimer = setTimeout(() => holdEl.classList.add('intro-hold-message-visible'), 1000);
-  } catch (_) {}
+  try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
 
   // Await the runtime-owned book load path. This resolves only after render()
   // and applyPendingReadingRestore() have both completed, so #pages is already
@@ -3452,41 +3044,11 @@ window.startReadingFromPreview = async function startReadingFromPreview(bookId) 
     try { await window.__rcLoadBook(normalizedId, { restore }); } catch (_) {}
   }
   try { await waitForNextPaint(2); } catch (_) {}
-  try { window.__rcReadingEntryRestoreSettling = false; } catch (_) {}
 
-  // Cards are rendered and painted. Clear the message timer (fast load — message
-  // never needed), then release the hold and the page guard simultaneously so
-  // the reading surface and the hold cross-fade in a single motion.
-  if (_holdMsgTimer) { clearTimeout(_holdMsgTimer); _holdMsgTimer = null; }
-
-  // Fade out the hold. JS removes the active classes once the transition ends
-  // (with a 400 ms hard fallback in case transitionend does not fire).
-  try {
-    if (holdEl) {
-      holdEl.classList.remove('intro-hold-message-visible');
-      holdEl.classList.add('intro-hold-fading');
-      const releaseHold = () => holdEl.classList.remove('intro-hold-active', 'intro-hold-fading');
-      holdEl.addEventListener('transitionend', releaseHold, { once: true });
-      setTimeout(releaseHold, 400);
-    }
-  } catch (_) {}
-
-  // Remove restore-pending — triggers the #pages opacity fade-in (0.14 s),
-  // which runs simultaneously with the hold fade-out above.
+  // Remove pending state and clean up the restore-kind attribute.
+  // The opacity transition on #pages produces a smooth fade-in from this point.
   try { if (readingModeEl) readingModeEl.classList.remove('reading-restore-pending'); } catch (_) {}
   try { if (readingModeEl) readingModeEl.removeAttribute('data-restore-kind'); } catch (_) {}
-  // Patch B: Re-anchor scroll to the restored page now that reading-restore-pending
-  // is removed and the html overflow:hidden lock (Patch A) has lifted. The
-  // initial restore movement inside applyPendingReadingRestore() may be hidden while
-  // the lock was active, so this is the authoritative scroll for restore sessions.
-  try {
-    const _ri = Number(window.__rcLastRestoredPageIndex ?? -1);
-    if (Number.isFinite(_ri) && _ri >= 0) {
-      const _rEl = document.querySelectorAll('.page')[_ri];
-      if (_rEl) scrollReadingPageIntoView(_rEl, { behavior: 'auto', reason: 'post-restore-reanchor' });
-      window.__rcLastRestoredPageIndex = -1;
-    }
-  } catch (_) {}
   try { beginReadingMetricsSession(normalizedId, Array.isArray(pages) ? pages.length : 0); } catch (_) {}
   return true;
 };
@@ -3498,7 +3060,6 @@ window.exitReadingSession = function exitReadingSession() {
   try { if (typeof ttsStop === 'function') { ttsStop(); result.ttsStopped = true; } } catch (_) {}
   try { if (typeof ttsAutoplayCancelCountdown === 'function') { ttsAutoplayCancelCountdown(); result.countdownCleared = true; } } catch (_) {}
   try { const signal = document.getElementById('session-complete'); if (signal) signal.classList.add('hidden-section'); } catch (_) {}
-  try { const nextSurface = document.getElementById('next-chapter-surface'); const nextButton = document.getElementById('next-chapter-btn'); if (nextSurface) { nextSurface.classList.add('hidden-section'); nextSurface.style.display = 'none'; nextSurface.setAttribute('aria-hidden', 'true'); } if (nextButton) { nextButton.disabled = true; nextButton.setAttribute('aria-disabled', 'true'); } } catch (_) {}
   try { document.querySelectorAll('.page-active').forEach((el) => el.classList.remove('page-active')); } catch (_) {}
   try { const active = document.activeElement; if (active && typeof active.blur === 'function') active.blur(); } catch (_) {}
   try { if (window.music) { window.music.pause(); result.musicStopped = true; } } catch (_) {}

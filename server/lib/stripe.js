@@ -52,7 +52,7 @@ async function resolveConfiguredPlan(plan) {
     const price = await fetchStripePrice(configuredRef);
     value = {
       planId: normalized === 'paid' ? 'pro' : normalized,
-      tier: normalized === 'premium' ? 'premium' : 'pro',
+      tier: normalized === 'premium' ? 'premium' : 'paid',
       priceId: price?.id || configuredRef,
       configuredRef,
       price,
@@ -62,7 +62,7 @@ async function resolveConfiguredPlan(plan) {
     if (!resolved?.priceId) throw new Error(`No active recurring price found for product ${configuredRef}`);
     value = {
       planId: normalized === 'paid' ? 'pro' : normalized,
-      tier: normalized === 'premium' ? 'premium' : 'pro',
+      tier: normalized === 'premium' ? 'premium' : 'paid',
       priceId: resolved.priceId,
       configuredRef,
       price: resolved.price,
@@ -90,7 +90,7 @@ export async function derivePlanFromPriceId(priceIdRaw) {
     resolveConfiguredPlan('pro').catch(() => null),
     resolveConfiguredPlan('premium').catch(() => null),
   ]);
-  if (priceId === pro?.priceId) return { planId: 'pro', tier: 'pro', priceId };
+  if (priceId === pro?.priceId) return { planId: 'pro', tier: 'paid', priceId };
   if (priceId === premium?.priceId) return { planId: 'premium', tier: 'premium', priceId };
   return null;
 }
@@ -196,8 +196,7 @@ export function verifyStripeSignature(rawBody, signatureHeader, secret) {
 
 export function entitlementFromStripeStatus(statusRaw) {
   const status = String(statusRaw || '').trim().toLowerCase();
-  if (status === 'active') return 'active';
-  if (status === 'trialing') return 'trialing';
-  if (status === 'past_due') return 'past_due';
+  if (status === 'active' || status === 'trialing') return 'active';
+  if (status === 'canceled') return 'canceled';
   return 'inactive';
 }

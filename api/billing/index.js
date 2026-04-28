@@ -13,14 +13,13 @@ function getAction(req) {
 const HANDLERS = {
   checkout: () => import('../../server/lib/billing-checkout.js'),
   portal: () => import('../../server/lib/billing-portal.js'),
-  'trial-eligibility': () => import('../../server/lib/billing-trial-eligibility.js'),
 };
 
 export default async function handler(req, res) {
   const action = getAction(req);
   const loader = HANDLERS[action];
   if (!loader) {
-    return json(res, 400, { error: 'Unknown billing action.', expected: ['checkout','portal','trial-eligibility'] });
+    return json(res, 400, { error: 'Unknown billing action.', expected: ['checkout','portal'] });
   }
   const mod = await loader();
   return mod.default(req, res);
