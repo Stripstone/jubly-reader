@@ -42,6 +42,8 @@ function sha256Hex(s) {
 }
 
 const TTS_ARTIFACT_VERSION = "v3-s3-sidecar-sentence-marks-trailing-ranges";
+const TTS_FULL_PAGE_AUDIO_ARTIFACT_VERSION = "v4-azure-full-page-audio-runtime-estimated-marks";
+const TTS_FULL_PAGE_AUDIO_ARTIFACT_FLAVOR = "azure-full-page-audio-runtime-estimated-marks";
 const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-preserve-trailing-text-v1";
 
 function toSafePrefix(prefix) {
@@ -123,6 +125,22 @@ function hasCompleteAzureBookmarkOffsets(sentencePlan, bookmarkOffsets) {
   return !sentencePlan.length || sentencePlan.every((entry) => bookmarkOffsets.has(entry.bookmark));
 }
 
+function extractAzureSsmlBookmarkIds(ssml) {
+  const ids = [];
+  const re = /<bookmark\s+mark=["']([^"']+)["']\s*\/>/g;
+  let match;
+  while ((match = re.exec(String(ssml || ""))) !== null) ids.push(String(match[1] || ""));
+  return ids.filter(Boolean);
+}
+
+function firstOrNull(values) {
+  return Array.isArray(values) && values.length ? values[0] : null;
+}
+
+function lastOrNull(values) {
+  return Array.isArray(values) && values.length ? values[values.length - 1] : null;
+}
+
 async function waitForAzureBookmarkOffsets(sentencePlan, bookmarkOffsets) {
   if (hasCompleteAzureBookmarkOffsets(sentencePlan, bookmarkOffsets)) return;
 
@@ -139,41 +157,141 @@ function previewDiagnosticText(value, maxLength = 160) {
   return compact.length > maxLength ? `${compact.slice(0, maxLength)}…` : compact;
 }
 
-function buildAzureIncompleteBookmarkDiagnostic({ sentencePlan, bookmarkOffsets, text, voiceName, meta }) {
-  const plan = Array.isArray(sentencePlan) ? sentencePlan : [];
-  const offsets = bookmarkOffsets instanceof Map ? bookmarkOffsets : new Map();
-  const missing = plan.filter((entry) => !offsets.has(entry.bookmark));
-  const firstMissing = missing[0] || null;
+function buildAzureServerDiagnostics({
+  text,
+  sentencePlan,
+  ssml,
+  bookmarkOffsets,
+  voiceName,
+  meta,
+  sentenceMarks = null,
+  validationReason = "not-evaluated",
+}) {
+  const source = String(text || "");
+  const plan = Array.isArray(sentencePlan) ? sentencePlan : buildAzureSentencePlan(source);
+  const ssmlBookmarkIds = extractAzureSsmlBookmarkIds(ssml);
+  const hasAzureBookmarkObservation = bookmarkOffsets instanceof Map;
+  const reachedIds = hasAzureBookmarkObservation ? Array.from(bookmarkOffsets.keys()) : [];
+  const reachedSet = new Set(reachedIds);
+  const ssmlSet = new Set(ssmlBookmarkIds);
+  const missingFromSsml = plan.filter((entry) => !ssmlSet.has(entry.bookmark));
+  const missingFromReached = hasAzureBookmarkObservation
+    ? plan.filter((entry) => !reachedSet.has(entry.bookmark))
+    : [];
+  const firstMissing = firstOrNull(missingFromReached) || firstOrNull(missingFromSsml);
+  const returnedMarksCount = Array.isArray(sentenceMarks) ? sentenceMarks.length : reachedIds.length;
+  const expectedCount = plan.length;
+  const validationPassed = Array.isArray(sentenceMarks) && isValidAzureSentenceMarks(source, sentenceMarks);
+  const backendTextHash = sha256Hex(source);
+  const sidecarAvailable = !!meta?.sidecarAvailable;
+  const bookmarkReachedSource = hasAzureBookmarkObservation
+    ? "azure-synthesis"
+    : (meta?.bookmarkReachedSource || "not-invoked");
+  const serverMarksValidationReason = validationPassed ? "complete" : validationReason;
 
   return {
-    diagnosticVersion: "azure-bookmark-diagnostics-v1",
+    diagnosticVersion: "azure-full-page-promotion-server-diagnostics-v2",
+    backendTextHash,
+    backendTextPreview: previewDiagnosticText(source),
+    requestVoiceId: voiceName || meta?.requestVoiceId || null,
+    requestVoiceVariant: meta?.requestVoiceVariant || null,
+    requestSpeechMarks: meta?.requestSpeechMarks ?? null,
     requestMode: meta?.requestMode || null,
-    voiceId: voiceName || null,
+    provider: meta?.provider || "azure",
     artifactHash: meta?.artifactHash || null,
-    textLength: String(text || "").length,
+    artifactVersion: meta?.artifactVersion || TTS_ARTIFACT_VERSION,
+    sentenceSplitterVersion: meta?.sentenceSplitterVersion || TTS_SENTENCE_SPLITTER_VERSION,
+
     sentencePlanLength: plan.length,
-    bookmarkOffsetCount: offsets.size,
-    missingBookmarkCount: missing.length,
-    missingBookmarks: missing.slice(0, 12).map((entry) => entry.bookmark),
-    firstMissing: firstMissing ? {
-      index: firstMissing.index,
-      bookmark: firstMissing.bookmark,
-      startByte: firstMissing.startByte,
-      endByte: firstMissing.endByte,
-      excerpt: previewDiagnosticText(firstMissing.value),
-    } : null,
+    firstPlannedSentenceExcerpt: plan[0] ? previewDiagnosticText(plan[0].value) : null,
+    lastPlannedSentenceExcerpt: plan.length ? previewDiagnosticText(plan[plan.length - 1].value) : null,
+    firstPlannedStartByte: plan[0]?.startByte ?? null,
+    firstPlannedEndByte: plan[0]?.endByte ?? null,
+    lastPlannedStartByte: plan.length ? plan[plan.length - 1].startByte : null,
+    lastPlannedEndByte: plan.length ? plan[plan.length - 1].endByte : null,
+    firstMissingPlannedStartByte: firstMissing?.startByte ?? null,
+    firstMissingPlannedEndByte: firstMissing?.endByte ?? null,
+    firstMissingPlannedExcerpt: firstMissing ? previewDiagnosticText(firstMissing.value) : null,
+
+    plannedBookmarkCount: plan.length,
+    ssmlBookmarkCount: ssmlBookmarkIds.length,
+    firstBookmarkId: firstOrNull(ssmlBookmarkIds),
+    lastBookmarkId: lastOrNull(ssmlBookmarkIds),
+    missingSsmlBookmarkIds: missingFromSsml.slice(0, 24).map((entry) => entry.bookmark),
+    missingBookmarkIds: missingFromReached.slice(0, 24).map((entry) => entry.bookmark),
+
+    bookmarkReachedSource,
+    bookmarkReachedObserved: hasAzureBookmarkObservation,
+    bookmarkReachedCount: hasAzureBookmarkObservation ? reachedIds.length : null,
+    firstBookmarkReachedId: hasAzureBookmarkObservation ? firstOrNull(reachedIds) : null,
+    lastBookmarkReachedId: hasAzureBookmarkObservation ? lastOrNull(reachedIds) : null,
+    missingBookmarkCount: hasAzureBookmarkObservation ? missingFromReached.length : null,
+
+    audioCacheStatus: meta?.audioCacheStatus || null,
+    marksCacheStatus: meta?.marksCacheStatus || null,
+    audioArtifactHash: meta?.audioArtifactHash || null,
+    marksArtifactHash: meta?.marksArtifactHash || null,
+    sidecarIdentitySource: sidecarAvailable ? "expected-from-current-cache-key" : "none",
+    sidecarMetadataRead: false,
+    expectedSidecarTextHash: sidecarAvailable ? backendTextHash : null,
+    expectedSidecarSplitterVersion: sidecarAvailable ? (meta?.sentenceSplitterVersion || TTS_SENTENCE_SPLITTER_VERSION) : null,
+    expectedSidecarArtifactVersion: sidecarAvailable ? (meta?.artifactVersion || TTS_ARTIFACT_VERSION) : null,
+
+    serverReturnedMarksCount: returnedMarksCount,
+    serverExpectedSentencePlanLength: expectedCount,
+    serverMarksValidationPassed: !!validationPassed,
+    serverMarksValidationReason,
   };
 }
 
-function logAzureIncompleteBookmarkDiagnostic({ sentencePlan, bookmarkOffsets, text, voiceName, meta }) {
+function buildAzureFullPageAudioDiagnostics({ text, voiceName, meta }) {
+  const source = String(text || "");
+  const backendTextHash = sha256Hex(source);
+  return {
+    diagnosticVersion: "azure-full-page-audio-runtime-estimated-diagnostics-v1",
+    backendTextHash,
+    backendTextPreview: previewDiagnosticText(source),
+    requestVoiceId: voiceName || meta?.requestVoiceId || null,
+    requestVoiceVariant: meta?.requestVoiceVariant || null,
+    requestSpeechMarks: meta?.requestSpeechMarks ?? null,
+    requestMode: meta?.requestMode || "full-page",
+    provider: meta?.provider || "azure",
+    artifactHash: meta?.artifactHash || null,
+    artifactVersion: meta?.artifactVersion || TTS_FULL_PAGE_AUDIO_ARTIFACT_VERSION,
+    artifactFlavor: meta?.artifactFlavor || TTS_FULL_PAGE_AUDIO_ARTIFACT_FLAVOR,
+    sentenceSplitterVersion: meta?.sentenceSplitterVersion || TTS_SENTENCE_SPLITTER_VERSION,
+    synthesisPath: meta?.synthesisPath || "azure-full-page-audio",
+    bookmarkPathUsed: false,
+    bookmarkReachedObserved: false,
+    bookmarkReachedCount: null,
+    audioCacheStatus: meta?.audioCacheStatus || null,
+    marksCacheStatus: meta?.marksCacheStatus || "not-produced",
+    audioArtifactHash: meta?.audioArtifactHash || null,
+    marksArtifactHash: null,
+    sidecarIdentitySource: "none",
+    sidecarMetadataRead: false,
+    expectedSidecarTextHash: null,
+    expectedSidecarSplitterVersion: null,
+    expectedSidecarArtifactVersion: null,
+    serverReturnedMarksCount: 0,
+    serverExpectedSentencePlanLength: null,
+    serverMarksIncluded: false,
+    serverMarksValidationPassed: false,
+    serverMarksValidationReason: "runtime-estimated-approximate-marks-required",
+    providerPreciseMarks: false,
+    preciseSeek: false,
+    runtimeEstimatedMarksExpected: true,
+  };
+}
+function makeAzureBookmarkError(diagnostics) {
+  const err = new Error("Azure synthesis returned incomplete bookmark offsets");
+  err.ttsDiagnostics = diagnostics;
+  return err;
+}
+
+function logAzureServerDiagnostics(label, diagnostics) {
   try {
-    console.warn("[ai-tts] incomplete Azure bookmarks", JSON.stringify(buildAzureIncompleteBookmarkDiagnostic({
-      sentencePlan,
-      bookmarkOffsets,
-      text,
-      voiceName,
-      meta,
-    })));
+    console.warn(label, JSON.stringify(diagnostics));
   } catch (_) {}
 }
 
@@ -276,8 +394,9 @@ function resolvePollyDefaults(debug) {
   return { engine, envFemale, envMaleStd, envMaleNeural };
 }
 
-function buildCapabilityReason({ preciseSeekCapable, policy, wantSentenceMarks, marksAvailable }) {
+function buildCapabilityReason({ preciseSeekCapable, policy, wantSentenceMarks, marksAvailable, runtimeEstimatedMarks }) {
   if (preciseSeekCapable) return "timed-marks-sidecar-available";
+  if (runtimeEstimatedMarks) return "runtime-estimated-marks-not-provider-precise";
   if (policy?.provider === "azure") return "timed-marks-sidecar-unavailable";
   if (wantSentenceMarks) return marksAvailable ? "timed-marks-sidecar-available" : "timed-marks-requested-but-unavailable";
   return "timed-marks-not-requested";
@@ -294,20 +413,29 @@ function buildCapabilityPayload({
   audioCacheStatus,
   marksCacheStatus,
   marksProvenance,
+  requestMode,
+  artifactFlavor,
+  runtimeEstimatedMarks = false,
 }) {
   const marksIncludedInResponse = Array.isArray(sentenceMarks);
+  const providerPreciseMarks = !!preciseSeekCapable && marksProvenance !== "runtime-estimated";
   return {
     provider: policy?.provider || null,
+    requestMode: requestMode || null,
+    providerPreciseMarks,
     preciseSeek: {
       available: !!preciseSeekCapable,
-      reason: buildCapabilityReason({ preciseSeekCapable, policy, wantSentenceMarks, marksAvailable: marksIncludedInResponse }),
-      provenance: preciseSeekCapable ? marksProvenance : "none",
+      reason: buildCapabilityReason({ preciseSeekCapable, policy, wantSentenceMarks, marksAvailable: marksIncludedInResponse, runtimeEstimatedMarks }),
+      provenance: preciseSeekCapable ? marksProvenance : (runtimeEstimatedMarks ? "runtime-estimated" : "none"),
       includedInResponse: marksIncludedInResponse,
     },
     marks: {
       requested: !!wantSentenceMarks,
       includedInResponse: marksIncludedInResponse,
-      provenance: marksIncludedInResponse || preciseSeekCapable ? marksProvenance : "none",
+      provenance: marksIncludedInResponse || preciseSeekCapable ? marksProvenance : (runtimeEstimatedMarks ? "runtime-estimated" : "none"),
+      precision: preciseSeekCapable ? "precise" : (runtimeEstimatedMarks ? "approximate" : "none"),
+      providerPreciseMarks,
+      runtimeEstimated: !!runtimeEstimatedMarks,
       cacheStatus: marksCacheStatus,
     },
     cache: {
@@ -316,6 +444,7 @@ function buildCapabilityPayload({
     },
     artifact: {
       version: artifactVersion,
+      flavor: artifactFlavor || null,
       sentenceSplitterVersion,
       hash,
     },
@@ -388,9 +517,18 @@ async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
     await waitForAzureBookmarkOffsets(sentencePlan, bookmarkOffsets);
 
     if (!hasCompleteAzureBookmarkOffsets(sentencePlan, bookmarkOffsets)) {
-      logAzureIncompleteBookmarkDiagnostic({ sentencePlan, bookmarkOffsets, text, voiceName: voice, meta });
+      const diagnostics = buildAzureServerDiagnostics({
+        text,
+        sentencePlan,
+        ssml,
+        bookmarkOffsets,
+        voiceName: voice,
+        meta,
+        validationReason: "azure-incomplete-bookmark-offsets",
+      });
+      logAzureServerDiagnostics("[ai-tts] incomplete Azure bookmarks", diagnostics);
       // Do not cache partial Azure bookmark data as precise S3 sidecar truth.
-      throw new Error("Azure synthesis returned incomplete bookmark offsets");
+      throw makeAzureBookmarkError(diagnostics);
     }
 
     const sentenceMarks = sentencePlan.map((entry) => ({
@@ -400,12 +538,68 @@ async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
       value: entry.value,
     }));
 
-    return { audioBuf, sentenceMarks };
+    const diagnostics = buildAzureServerDiagnostics({
+      text,
+      sentencePlan,
+      ssml,
+      bookmarkOffsets,
+      voiceName: voice,
+      meta,
+      sentenceMarks,
+      validationReason: "complete",
+    });
+
+    return { audioBuf, sentenceMarks, diagnostics };
   } finally {
     try { synthesizer?.close(); } catch (_) {}
   }
 }
 
+function buildAzureFullPageSsml(text, voiceName) {
+  const voice = voiceName || "en-US-AriaNeural";
+  return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voice}"><prosody rate="0.95">${escapeXml(text)}</prosody></voice></speak>`;
+}
+
+async function azureSynthesizeFullPageAudio(text, voiceName, meta = {}) {
+  const key = requiredEnv("AZURE_SPEECH_KEY");
+  const region = requiredEnv("AZURE_SPEECH_REGION");
+  if (!key || !region) throw new Error("AZURE_SPEECH_KEY or AZURE_SPEECH_REGION not set");
+
+  const voice = voiceName || "en-US-AriaNeural";
+  const endpoint = `https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Ocp-Apim-Subscription-Key": key,
+      "Content-Type": "application/ssml+xml",
+      "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
+      "User-Agent": "JublyReader/1.0",
+    },
+    body: buildAzureFullPageSsml(text, voice),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`Azure TTS error ${response.status}: ${detail}`);
+  }
+
+  const audioBuf = Buffer.from(await response.arrayBuffer());
+  const diagnostics = buildAzureFullPageAudioDiagnostics({
+    text,
+    voiceName: voice,
+    meta: {
+      ...meta,
+      requestMode: "full-page",
+      artifactVersion: meta?.artifactVersion || TTS_FULL_PAGE_AUDIO_ARTIFACT_VERSION,
+      artifactFlavor: meta?.artifactFlavor || TTS_FULL_PAGE_AUDIO_ARTIFACT_FLAVOR,
+      marksCacheStatus: "not-produced",
+      synthesisPath: "azure-full-page-audio",
+      audioArtifactHash: null,
+    },
+  });
+
+  return { audioBuf, diagnostics };
+}
 async function synthesizeCloudAudio({ awsRegion, text, policy }) {
   const cmd = new SynthesizeSpeechCommand({
     OutputFormat: "mp3",
@@ -502,9 +696,15 @@ export default async function handler(req, res) {
     const policy = resolveCloudPolicy(body, debug);
 
     const prefix = toSafePrefix(requiredEnv("AWS_S3_PREFIX"));
-    const artifactVersion = TTS_ARTIFACT_VERSION;
+    const isAzureFullPageAudio = policy.provider === "azure" && requestMode === "full-page";
+    const artifactVersion = isAzureFullPageAudio ? TTS_FULL_PAGE_AUDIO_ARTIFACT_VERSION : TTS_ARTIFACT_VERSION;
+    const artifactFlavor = isAzureFullPageAudio
+      ? TTS_FULL_PAGE_AUDIO_ARTIFACT_FLAVOR
+      : (policy.provider === "azure" ? "azure-block-window-provider-bookmarks" : "polly-audio");
     const sentenceSplitterVersion = TTS_SENTENCE_SPLITTER_VERSION;
-    const identity = JSON.stringify({ artifactVersion, sentenceSplitterVersion, provider: policy.provider, voiceId: policy.voiceId, text });
+    const identity = isAzureFullPageAudio
+      ? JSON.stringify({ artifactVersion, artifactFlavor, requestMode, provider: policy.provider, voiceId: policy.voiceId, marksMode: "runtime-estimated", text })
+      : JSON.stringify({ artifactVersion, sentenceSplitterVersion, provider: policy.provider, voiceId: policy.voiceId, text });
     const hash = sha256Hex(identity);
     const objectKey = `${prefix}${hash}.mp3`;
     const marksKey = `${prefix}${hash}.sentence.json`;
@@ -522,9 +722,9 @@ export default async function handler(req, res) {
     }
     const audioCacheHitInitial = cacheHit;
 
-    const shouldMaintainTimedMarks = policy.provider === "azure" || wantSentenceMarks;
+    const shouldMaintainTimedMarks = (policy.provider === "azure" && !isAzureFullPageAudio) || (policy.provider !== "azure" && wantSentenceMarks);
     let marksCacheHit = false;
-    if (!nocache) {
+    if (!nocache && shouldMaintainTimedMarks) {
       try {
         await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: marksKey }));
         marksCacheHit = true;
@@ -532,7 +732,7 @@ export default async function handler(req, res) {
         marksCacheHit = false;
       }
     }
-    if (policy.provider === "azure" && marksCacheHit) {
+    if (policy.provider === "azure" && !isAzureFullPageAudio && marksCacheHit) {
       const cachedAzureMarks = await readJsonS3Object(s3, bucket, marksKey, null);
       if (!isValidAzureSentenceMarks(text, cachedAzureMarks)) {
         await deleteS3ObjectQuietly(s3, bucket, marksKey);
@@ -542,27 +742,85 @@ export default async function handler(req, res) {
     const marksCacheHitInitial = marksCacheHit;
 
     let audioCacheStatus = nocache ? "bypass" : (audioCacheHitInitial ? "hit" : "miss");
-    let marksCacheStatus = nocache
-      ? (shouldMaintainTimedMarks ? "bypass" : "not-requested")
-      : (marksCacheHitInitial ? "hit" : (shouldMaintainTimedMarks ? "miss" : "not-requested"));
-    let marksProvenance = (shouldMaintainTimedMarks || marksCacheHitInitial) ? "s3-sidecar" : "none";
+    let marksCacheStatus = isAzureFullPageAudio
+      ? "not-produced"
+      : (nocache
+        ? (shouldMaintainTimedMarks ? "bypass" : "not-requested")
+        : (marksCacheHitInitial ? "hit" : (shouldMaintainTimedMarks ? "miss" : "not-requested")));
+    let marksProvenance = isAzureFullPageAudio
+      ? "runtime-estimated"
+      : ((shouldMaintainTimedMarks || marksCacheHitInitial) ? "s3-sidecar" : "none");
+    let ttsDiagnostics = null;
 
     if (policy.provider === "azure") {
-      if (!audioCacheHitInitial || !marksCacheHitInitial) {
+      if (isAzureFullPageAudio) {
+        if (!audioCacheHitInitial) {
+          const artifact = await azureSynthesizeFullPageAudio(text, policy.voiceId, {
+            requestVoiceId: policy.voiceId,
+            requestVoiceVariant: String(body?.voiceVariant ?? "").trim().toLowerCase() || null,
+            requestSpeechMarks: body?.speechMarks ?? null,
+            provider: policy.provider,
+            artifactHash: hash,
+            artifactVersion,
+            artifactFlavor,
+            sentenceSplitterVersion,
+            audioCacheStatus,
+            marksCacheStatus: "not-produced",
+            audioArtifactHash: null,
+            synthesisPath: "azure-full-page-audio",
+          });
+          ttsDiagnostics = artifact.diagnostics || null;
+          await s3.send(new PutObjectCommand({
+            Bucket: bucket,
+            Key: objectKey,
+            Body: artifact.audioBuf,
+            ContentType: "audio/mpeg",
+            CacheControl: "public, max-age=31536000, immutable",
+          }));
+          cacheHit = false;
+          marksCacheHit = false;
+          audioCacheStatus = "miss";
+          marksCacheStatus = "not-produced";
+          if (ttsDiagnostics) {
+            ttsDiagnostics.audioCacheStatus = audioCacheStatus;
+            ttsDiagnostics.audioArtifactHash = hash;
+          }
+        }
+      } else if (!audioCacheHitInitial || !marksCacheHitInitial) {
         let artifact;
         try {
           artifact = await azureSynthesizeArtifact(text, policy.voiceId, {
             requestMode,
+            requestVoiceId: policy.voiceId,
+            requestVoiceVariant: String(body?.voiceVariant ?? "").trim().toLowerCase() || null,
+            requestSpeechMarks: body?.speechMarks ?? null,
+            provider: policy.provider,
             artifactHash: hash,
+            artifactVersion,
+            sentenceSplitterVersion,
+            audioCacheStatus,
+            marksCacheStatus,
+            audioArtifactHash: audioCacheHitInitial ? hash : null,
+            marksArtifactHash: marksCacheHitInitial ? hash : null,
+            sidecarAvailable: marksCacheHitInitial,
           });
         } catch (err) {
           if (isIncompleteAzureBookmarkError(err)) {
             await deleteS3ObjectQuietly(s3, bucket, marksKey);
             marksCacheHit = false;
             marksCacheStatus = "miss";
+            if (err?.ttsDiagnostics) {
+              err.ttsDiagnostics.marksCacheStatus = marksCacheStatus;
+              err.ttsDiagnostics.marksArtifactHash = null;
+              err.ttsDiagnostics.sidecarIdentitySource = "none";
+              err.ttsDiagnostics.expectedSidecarTextHash = null;
+              err.ttsDiagnostics.expectedSidecarSplitterVersion = null;
+              err.ttsDiagnostics.expectedSidecarArtifactVersion = null;
+            }
           }
           throw err;
         }
+        ttsDiagnostics = artifact.diagnostics || null;
         await s3.send(new PutObjectCommand({
           Bucket: bucket,
           Key: objectKey,
@@ -581,6 +839,17 @@ export default async function handler(req, res) {
         marksCacheHit = true;
         audioCacheStatus = audioCacheHitInitial ? "refreshed" : "miss";
         marksCacheStatus = marksCacheHitInitial ? "hit" : "regenerated";
+        if (ttsDiagnostics) {
+          ttsDiagnostics.audioCacheStatus = audioCacheStatus;
+          ttsDiagnostics.marksCacheStatus = marksCacheStatus;
+          ttsDiagnostics.audioArtifactHash = hash;
+          ttsDiagnostics.marksArtifactHash = hash;
+          ttsDiagnostics.sidecarIdentitySource = "expected-from-current-cache-key";
+          ttsDiagnostics.sidecarMetadataRead = false;
+          ttsDiagnostics.expectedSidecarTextHash = ttsDiagnostics.backendTextHash;
+          ttsDiagnostics.expectedSidecarSplitterVersion = sentenceSplitterVersion;
+          ttsDiagnostics.expectedSidecarArtifactVersion = artifactVersion;
+        }
       }
     } else if (!audioCacheHitInitial) {
       const audioBuf = await synthesizeCloudAudio({ awsRegion, text, policy });
@@ -595,7 +864,7 @@ export default async function handler(req, res) {
     }
 
     let sentenceMarks = null;
-    if (wantSentenceMarks) {
+    if (wantSentenceMarks && !isAzureFullPageAudio) {
       sentenceMarks = await resolveSentenceMarks({
         awsRegion,
         bucket,
@@ -617,15 +886,69 @@ export default async function handler(req, res) {
       }
     }
 
+    if (policy.provider === "azure" && isAzureFullPageAudio && !ttsDiagnostics) {
+      ttsDiagnostics = buildAzureFullPageAudioDiagnostics({
+        text,
+        voiceName: policy.voiceId,
+        meta: {
+          requestMode,
+          requestVoiceId: policy.voiceId,
+          requestVoiceVariant: String(body?.voiceVariant ?? "").trim().toLowerCase() || null,
+          requestSpeechMarks: body?.speechMarks ?? null,
+          provider: policy.provider,
+          artifactHash: hash,
+          artifactVersion,
+          artifactFlavor,
+          sentenceSplitterVersion,
+          audioCacheStatus,
+          marksCacheStatus: "not-produced",
+          audioArtifactHash: cacheHit || audioCacheHitInitial ? hash : null,
+          synthesisPath: "azure-full-page-audio",
+        },
+      });
+    }
+
+    if (policy.provider === "azure" && !isAzureFullPageAudio && !ttsDiagnostics) {
+      const sentencePlan = buildAzureSentencePlan(text);
+      const serverMarksValid = Array.isArray(sentenceMarks) && isValidAzureSentenceMarks(text, sentenceMarks);
+      ttsDiagnostics = buildAzureServerDiagnostics({
+        text,
+        sentencePlan,
+        ssml: buildAzureSsml(text, policy.voiceId, sentencePlan),
+        bookmarkOffsets: null,
+        voiceName: policy.voiceId,
+        meta: {
+          requestMode,
+          requestVoiceId: policy.voiceId,
+          requestVoiceVariant: String(body?.voiceVariant ?? "").trim().toLowerCase() || null,
+          requestSpeechMarks: body?.speechMarks ?? null,
+          provider: policy.provider,
+          artifactHash: hash,
+          artifactVersion,
+          sentenceSplitterVersion,
+          audioCacheStatus,
+          marksCacheStatus,
+          audioArtifactHash: cacheHit || audioCacheHitInitial ? hash : null,
+          marksArtifactHash: marksCacheHit || marksCacheHitInitial ? hash : null,
+          sidecarAvailable: marksCacheHit || marksCacheHitInitial || serverMarksValid,
+          bookmarkReachedSource: (marksCacheHit || marksCacheHitInitial) ? "not-invoked-cache-sidecar" : "not-invoked-no-sidecar",
+        },
+        sentenceMarks,
+        validationReason: serverMarksValid ? "complete" : (wantSentenceMarks ? "marks-unavailable-or-invalid" : "marks-not-requested"),
+      });
+    }
+
     const url = await getSignedUrl(
       s3,
       new GetObjectCommand({ Bucket: bucket, Key: objectKey }),
       { expiresIn: 60 * 60 }
     );
 
-    const preciseSeekCapable = policy.provider === "azure"
-      ? !!marksCacheHit && (!wantSentenceMarks || Array.isArray(sentenceMarks))
-      : (!!marksCacheHitInitial || (Array.isArray(sentenceMarks) && sentenceMarks.length > 0));
+    const preciseSeekCapable = isAzureFullPageAudio
+      ? false
+      : (policy.provider === "azure"
+        ? !!marksCacheHit && (!wantSentenceMarks || Array.isArray(sentenceMarks))
+        : (!!marksCacheHitInitial || (Array.isArray(sentenceMarks) && sentenceMarks.length > 0)));
     const capability = buildCapabilityPayload({
       artifactVersion,
       sentenceSplitterVersion,
@@ -637,18 +960,25 @@ export default async function handler(req, res) {
       audioCacheStatus,
       marksCacheStatus,
       marksProvenance,
+      requestMode,
+      artifactFlavor,
+      runtimeEstimatedMarks: isAzureFullPageAudio && wantSentenceMarks,
     });
 
     const payload = {
       url,
       cacheHit,
       provider: policy.provider,
+      audioProvider: policy.provider,
       capability,
       cloudCharsRequested: text.length,
       cloudRequestMode: requestMode,
+      providerPreciseMarks: !!capability.providerPreciseMarks,
+      preciseSeek: !!capability.preciseSeek?.available,
       voiceId: policy.voiceId,
       route: policy.provider,
     };
+    if (ttsDiagnostics) payload.ttsDiagnostics = ttsDiagnostics;
     if (wantSentenceMarks && Array.isArray(sentenceMarks)) payload.sentenceMarks = sentenceMarks;
     if (debug) {
       payload.debug = {
@@ -666,6 +996,8 @@ export default async function handler(req, res) {
     return json(res, 200, payload);
   } catch (err) {
     console.error("[ai-tts]", err);
-    return json(res, 500, { error: "Server error", detail: String(err) });
+    const payload = { error: "Server error", detail: String(err) };
+    if (err?.ttsDiagnostics) payload.ttsDiagnostics = err.ttsDiagnostics;
+    return json(res, 500, payload);
   }
 }
