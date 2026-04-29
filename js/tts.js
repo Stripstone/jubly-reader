@@ -406,10 +406,10 @@ function getPromotionResultDiagnostics(result, runtimeRejectReason = '') {
     backendTextHash: diagnostics.backendTextHash || result?.ttsDiagnostics?.backendTextHash || null,
     returnedMarksCount: diagnostics.returnedMarksCount ?? (Array.isArray(result?.sentenceMarks) ? result.sentenceMarks.length : 0),
     runtimeEstimatedMarksCount: Number(result?.runtimeEstimatedMarks?.count || 0) || 0,
-    runtimeEstimatedMarksPrecision: result?.runtimeEstimatedMarks?.precision || result?.capability?.marks?.precision || null,
+    runtimeEstimatedMarksPrecision: result?.runtimeEstimatedMarks?.precision || null,
     providerPreciseMarks: !!result?.capability?.providerPreciseMarks,
     preciseSeek: !!result?.capability?.preciseSeek?.available,
-    phase2EstimatedMarksProof: result?.phase2EstimatedMarksProof || null,
+    phase2SidecarMarksProof: result?.phase2SidecarMarksProof || null,
     chunkASentenceCount: diagnostics.chunkASentenceCount ?? null,
     expectedMin: diagnostics.expectedMin ?? null,
     runtimeArtifactHash: diagnostics.runtimeArtifactHash || result?.capability?.artifact?.hash || null,
@@ -420,29 +420,44 @@ function getPromotionResultDiagnostics(result, runtimeRejectReason = '') {
   };
 }
 
-function buildPhase2EstimatedMarksProof(result) {
+function buildPhase2SidecarMarksProof(result) {
   const capability = result?.capability || null;
   const marks = capability?.marks || {};
   const artifact = capability?.artifact || {};
+  const diagnostics = result?.ttsDiagnostics || {};
   const requestMode = String(result?.cloudRequestMode || capability?.requestMode || '');
   const audioProvider = String(result?.audioProvider || result?.provider || capability?.provider || '');
   const providerPreciseMarks = !!(capability?.providerPreciseMarks || marks?.providerPreciseMarks || result?.providerPreciseMarks);
   const preciseSeekAvailable = !!(capability?.preciseSeek?.available || result?.preciseSeek);
+  const returnedMarksCount = Array.isArray(result?.sentenceMarks) ? result.sentenceMarks.length : 0;
+  const marksPrecision = String(marks?.precision || '');
+  const marksTimingSource = String(marks?.timingSource || diagnostics?.marksTimingSource || diagnostics?.sidecarTimingSource || '');
+  const marksArtifactHash = diagnostics?.marksArtifactHash || null;
+  const sidecarIdentitySource = String(diagnostics?.sidecarIdentitySource || '');
   const matches = requestMode === 'full-page'
     && audioProvider === 'azure'
-    && String(artifact?.flavor || '') === 'azure-full-page-audio-runtime-estimated-marks'
-    && marks?.runtimeEstimated === true
-    && String(marks?.precision || '') === 'approximate'
-    && marks?.includedInResponse === false
+    && String(artifact?.flavor || '') === 'azure-full-page-audio-s3-sidecar-marks'
+    && marks?.includedInResponse === true
+    && marks?.runtimeEstimated !== true
+    && String(marks?.provenance || '') === 's3-sidecar'
+    && marksPrecision === 'approximate'
+    && marksTimingSource === 'server-planner-estimated'
+    && returnedMarksCount > 0
+    && !!marksArtifactHash
+    && !!sidecarIdentitySource
+    && sidecarIdentitySource !== 'none'
     && providerPreciseMarks === false
     && preciseSeekAvailable === false;
   if (!matches) return null;
   return {
     audioProvider: 'azure',
     requestMode: 'full-page',
-    browserFallbackUsed: false,
-    marksSource: 'runtime-estimated',
-    marksPrecision: 'approximate',
+    marksSource: 's3-sidecar',
+    marksPrecision,
+    marksTimingSource,
+    marksIncludedInResponse: true,
+    marksArtifactHash,
+    sidecarIdentitySource,
     providerPreciseMarks: false,
     preciseSeek: false,
   };
@@ -671,6 +686,7 @@ function normalizeTtsCapability(raw) {
       precision: marks.precision == null ? 'none' : String(marks.precision || 'none'),
       providerPreciseMarks: !!marks.providerPreciseMarks,
       runtimeEstimated: !!marks.runtimeEstimated,
+      timingSource: marks.timingSource == null ? null : String(marks.timingSource || ''),
       cacheStatus: marks.cacheStatus == null ? null : String(marks.cacheStatus || ''),
     },
     cache: {
@@ -748,7 +764,7 @@ function applyCloudCapabilityForRuntime({ key, sessionId, capability, sentenceMa
     marksIncludedInResponse: !!normalized?.marks?.includedInResponse,
     returnedMarksCount,
     runtimeEstimatedMarksCount,
-    runtimeEstimatedMarksPrecision: runtimeEstimatedMarks?.precision || normalized?.marks?.precision || 'none',
+    runtimeEstimatedMarksPrecision: runtimeEstimatedMarksCount > 0 ? (runtimeEstimatedMarks?.precision || 'approximate') : 'none',
     marksProvenance: normalized?.marks?.provenance || 'none',
     audioCacheStatus: normalized?.cache?.audio?.status || null,
     marksCacheStatus: normalized?.cache?.marks?.status || null,
@@ -1661,7 +1677,7 @@ function ttsHighlightBlock(blockIdx) {
   } catch (_) {}
 }
 
-function ttsMaybePrepareSentenceHighlight(key, rawText, marks) {
+function ttsMaybePrepareSentenceHighlight(key, rawText, marks, meta = {}) {
   if (!optsForKeySentenceMarks(key) || !Array.isArray(marks) || !marks.length) return;
   const _parsed = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(key) : null;
   const pageIndex = _parsed ? _parsed.pageIndex : -1;
@@ -1694,8 +1710,8 @@ function ttsMaybePrepareSentenceHighlight(key, rawText, marks) {
   TTS_STATE.highlightOriginalHTML = textEl.innerHTML;
   TTS_STATE.highlightMarks = spansMeta;
   TTS_STATE.highlightEnds = spansMeta.map((r, i) => i + 1 < spansMeta.length ? spansMeta[i + 1].time : Infinity);
-  TTS_STATE.highlightMarksProvenance = 'timed';
-  TTS_STATE.highlightMarksPrecision = 'precise';
+  TTS_STATE.highlightMarksProvenance = meta?.provenance || 'timed';
+  TTS_STATE.highlightMarksPrecision = meta?.precision || 'precise';
   textEl.innerHTML = spansHtml.join('');
   TTS_STATE.highlightSpans = Array.from(textEl.querySelectorAll('.tts-sentence'));
   try { const h = pageEl.querySelector('.hint-btn'); if (h) h.disabled = true; } catch (_) {}
@@ -1752,8 +1768,8 @@ function ttsPrepareEstimatedHighlight(key, rawText, audio, meta = {}) {
     }
   }
   audio.addEventListener('timeupdate', onTimeUpdate);
-  const acceptedPhase2 = meta?.acceptedPhase2 === true;
-  const phase2EstimatedMarksProof = acceptedPhase2 && meta?.phase2EstimatedMarksProof ? meta.phase2EstimatedMarksProof : null;
+  const acceptedPhase2 = false;
+  const phase2SidecarMarksProof = null;
   const info = {
     created: true,
     count: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0,
@@ -1764,7 +1780,7 @@ function ttsPrepareEstimatedHighlight(key, rawText, audio, meta = {}) {
     requestMode: meta?.requestMode || null,
     provider: meta?.provider || null,
     acceptedPhase2,
-    phase2EstimatedMarksProof,
+    phase2SidecarMarksProof,
   };
   ttsDiagPush('runtime-estimated-marks-created', info);
   return info;
@@ -3239,13 +3255,15 @@ async function cloudFetchUrl(text, opts = {}) {
   }
   const capability = normalizeTtsCapability(data?.capability);
   const runtimeDiagnostics = await buildRuntimeCloudResponseDiagnostics(text, opts, data, '');
-  const phase2EstimatedMarksProof = buildPhase2EstimatedMarksProof({
+  const phase2SidecarMarksProof = buildPhase2SidecarMarksProof({
     capability,
     provider: data?.provider || null,
     audioProvider: data?.audioProvider || data?.provider || null,
     cloudRequestMode: data?.cloudRequestMode || (opts && opts.requestMode ? String(opts.requestMode) : ''),
     providerPreciseMarks: data?.providerPreciseMarks,
     preciseSeek: data?.preciseSeek,
+    sentenceMarks: Array.isArray(data?.sentenceMarks) ? data.sentenceMarks : null,
+    ttsDiagnostics: data?.ttsDiagnostics || null,
   });
   TTS_DEBUG.lastCloudResponse = {
     ok: true,
@@ -3257,7 +3275,7 @@ async function cloudFetchUrl(text, opts = {}) {
     debug: data?.debug || null,
     ttsDiagnostics: data?.ttsDiagnostics || null,
     runtimeDiagnostics,
-    phase2EstimatedMarksProof,
+    phase2SidecarMarksProof,
   };
   ttsDiagPush('cloud-response', {
     ok: true,
@@ -3274,8 +3292,8 @@ async function cloudFetchUrl(text, opts = {}) {
     providerPreciseMarks: !!capability?.providerPreciseMarks,
     marksPrecision: capability?.marks?.precision || 'none',
     runtimeEstimatedMarksExpected: !!capability?.marks?.runtimeEstimated,
-    phase2EstimatedMarksProof,
-    ...getPromotionResultDiagnostics({ sentenceMarks: data.sentenceMarks, capability, ttsDiagnostics: data?.ttsDiagnostics || null, runtimeDiagnostics, phase2EstimatedMarksProof }),
+    phase2SidecarMarksProof,
+    ...getPromotionResultDiagnostics({ sentenceMarks: data.sentenceMarks, capability, ttsDiagnostics: data?.ttsDiagnostics || null, runtimeDiagnostics, phase2SidecarMarksProof }),
   });
   return {
     url: data.url,
@@ -3284,7 +3302,7 @@ async function cloudFetchUrl(text, opts = {}) {
     provider: data?.provider || capability?.provider || null,
     audioProvider: data?.audioProvider || data?.provider || capability?.provider || null,
     cloudRequestMode: data?.cloudRequestMode || (opts && opts.requestMode ? String(opts.requestMode) : ''),
-    phase2EstimatedMarksProof,
+    phase2SidecarMarksProof,
     providerPreciseMarks: !!(data?.providerPreciseMarks || capability?.providerPreciseMarks),
     preciseSeek: !!(data?.preciseSeek || capability?.preciseSeek?.available),
     ttsDiagnostics: data?.ttsDiagnostics || null,
@@ -3314,25 +3332,8 @@ async function cloudFetchWithRetry(text, opts, { maxAttempts = 3, sessionId, get
   throw lastErr;
 }
 
-function ttsIsRuntimeEstimatedFullPageEligible(result) {
-  const capability = result?.capability || null;
-  const marks = capability?.marks || {};
-  const requestMode = String(result?.cloudRequestMode || capability?.requestMode || '');
-  const provider = String(result?.audioProvider || result?.provider || capability?.provider || '');
-  const artifactFlavor = String(capability?.artifact?.flavor || '');
-  const providerPreciseMarks = !!(capability?.providerPreciseMarks || marks?.providerPreciseMarks || result?.providerPreciseMarks);
-  const preciseSeekAvailable = !!(capability?.preciseSeek?.available || result?.preciseSeek);
-  const backendTextHash = result?.runtimeDiagnostics?.backendTextHash || result?.ttsDiagnostics?.backendTextHash || null;
-  const currentTextHash = result?.runtimeDiagnostics?.fullPageTextHash || null;
-  if (backendTextHash && currentTextHash && String(backendTextHash) !== String(currentTextHash)) return false;
-  return requestMode === 'full-page'
-    && provider === 'azure'
-    && artifactFlavor === 'azure-full-page-audio-runtime-estimated-marks'
-    && marks?.runtimeEstimated === true
-    && String(marks?.precision || '') === 'approximate'
-    && marks?.includedInResponse === false
-    && providerPreciseMarks === false
-    && preciseSeekAvailable === false;
+function ttsHasAcceptedFullPageSidecarMarks(result) {
+  return !!buildPhase2SidecarMarksProof(result);
 }
 
 function ttsGetEstimatedMarkCountForText(text) {
@@ -3340,8 +3341,7 @@ function ttsGetEstimatedMarkCountForText(text) {
 }
 
 function ttsGetPromotionUsableMarkCount(result, pageText) {
-  if (Array.isArray(result?.sentenceMarks) && result.sentenceMarks.length) return result.sentenceMarks.length;
-  if (ttsIsRuntimeEstimatedFullPageEligible(result)) return ttsGetEstimatedMarkCountForText(pageText);
+  if (ttsHasAcceptedFullPageSidecarMarks(result) && Array.isArray(result?.sentenceMarks)) return result.sentenceMarks.length;
   return 0;
 }
 
@@ -3349,33 +3349,18 @@ function ttsPreparePromotionHighlight({ key, sessionId, result, pageText, audio,
   if (TTS_STATE.activeSessionId !== sessionId) return null;
   if (String(TTS_STATE.activeKey || '') !== String(key || '')) return null;
 
-  if (Array.isArray(result?.sentenceMarks) && result.sentenceMarks.length) {
-    ttsMaybePrepareSentenceHighlight(key, pageText, result.sentenceMarks);
-    return {
-      source: 'provider',
-      count: result.sentenceMarks.length,
-      precision: 'precise',
-      providerPreciseMarks: true,
-      lastMark: result.sentenceMarks[result.sentenceMarks.length - 1] || null,
-    };
-  }
-
-  if (!ttsIsRuntimeEstimatedFullPageEligible(result)) return null;
-  const prepared = ttsPrepareEstimatedHighlight(key, pageText, audio || TTS_AUDIO_ELEMENT, {
-    source: source || 'promotion-seam',
-    requestMode: 'full-page',
-    provider: 'azure',
-    acceptedPhase2: true,
-    phase2EstimatedMarksProof: result?.phase2EstimatedMarksProof || null,
+  const sidecarProof = buildPhase2SidecarMarksProof(result);
+  if (!sidecarProof || !Array.isArray(result?.sentenceMarks) || !result.sentenceMarks.length) return null;
+  ttsMaybePrepareSentenceHighlight(key, pageText, result.sentenceMarks, {
+    provenance: 's3-sidecar',
+    precision: sidecarProof.marksPrecision || 'approximate',
   });
-  if (!prepared || !prepared.count) return null;
-  result.runtimeEstimatedMarks = prepared;
   return {
-    source: 'runtime-estimated',
-    count: prepared.count,
-    precision: 'approximate',
+    source: 's3-sidecar',
+    count: result.sentenceMarks.length,
+    precision: sidecarProof.marksPrecision || 'approximate',
     providerPreciseMarks: false,
-    lastMark: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks[TTS_STATE.highlightMarks.length - 1] || null : null,
+    lastMark: result.sentenceMarks[result.sentenceMarks.length - 1] || null,
   };
 }
 // ─── Cloud synthesis window — promotion functions ─────────────────────────────
@@ -3528,10 +3513,10 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
     return;
   }
 
-  // Apply full-page marks so highlight spans cover the whole page. This calls
-  // ttsClearSentenceHighlight() internally, which cancels the old RAF — we restart
-  // it below after the src swap settles. Runtime-estimated marks are explicitly
-  // approximate and never promoted as provider/precise marks.
+  // Apply returned S3 sidecar marks so highlight spans cover the whole page. This
+  // calls ttsClearSentenceHighlight() internally, which cancels the old RAF — we
+  // restart it below after the src swap settles. Runtime-only estimated marks are
+  // not accepted as Phase 2 promotion authority.
   const _preparedPromotionMarks = ttsPreparePromotionHighlight({
     key,
     sessionId,
