@@ -1256,6 +1256,14 @@ function queuePendingCloudSeek(key, sessionId, blockIdx, leadMs = 0) {
   TTS_STATE.pendingCloudSeekSessionId = Number(sessionId || 0) || 0;
   TTS_STATE.pendingCloudSeekBlockIndex = Number.isFinite(Number(blockIdx)) ? Number(blockIdx) : -1;
   TTS_STATE.pendingCloudSeekLeadMs = Number.isFinite(Number(leadMs)) ? Math.max(0, Number(leadMs)) : 0;
+  ttsDiagPush('cloud-seek-request', {
+    key: TTS_STATE.pendingCloudSeekKey,
+    sessionId: TTS_STATE.pendingCloudSeekSessionId,
+    targetBlock: TTS_STATE.pendingCloudSeekBlockIndex,
+    leadMs: TTS_STATE.pendingCloudSeekLeadMs,
+    pendingCloudSeek: true,
+    source: 'queuePendingCloudSeek',
+  });
 }
 
 function clearPendingCloudSeek() {
@@ -1338,7 +1346,7 @@ function applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason) {
       TTS_STATE.pausedPageKey = key;
     }
     clearPendingCloudSeek();
-    ttsDiagPush('cloud-seek-applied', { key, sessionId, blockIndex: target, seekTime, leadMs, reason: reason || 'media-ready' });
+    ttsDiagPush('cloud-seek-applied', { key, sessionId, blockIndex: target, targetBlock: target, seekTime, leadMs, reason: reason || 'media-ready' });
     return true;
   } catch (_) {
     return false;
@@ -4040,15 +4048,19 @@ async function ttsSpeakQueue(key, parts) {
           await new Promise((resolve, reject) => {
             const audio = TTS_AUDIO_ELEMENT;
             try { audio.loop = false; audio.pause(); } catch (_) {}
-            audio.src = fullResult.url;
             TTS_STATE.audio = audio;
             try { audio.volume = Math.max(0, Math.min(1, Number(TTS_STATE.volume ?? 1))); } catch (_) {}
             try { audio.defaultPlaybackRate = Number(TTS_STATE.rate || 1); audio.playbackRate = Number(TTS_STATE.rate || 1); } catch (_) {}
             const applyPending = (reason) => { try { applyPendingCloudSeekIfNeeded(audio, key, sessionId, reason); } catch (_) {} };
+            // Register pending-seek readiness handlers before assigning src. Cached
+            // full-page media can otherwise miss metadata/canplay and audibly begin
+            // at time 0 before the queued Case B seek is applied.
             try { audio.onloadedmetadata = () => applyPending('loadedmetadata'); } catch (_) {}
             try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
             audio.onended = () => { ttsClearSentenceHighlight(); resolve(); };
             audio.onerror = () => reject(new Error('Audio playback failed'));
+            audio.src = fullResult.url;
+            if (Number(audio.readyState || 0) >= 1) applyPending('ready-state-after-src');
             audio.play().then(() => {
               clearTtsStartupBanner();
               applyPending('play-start');
