@@ -44,6 +44,7 @@ body.theme-explorer.reading-active #reading-mode .reading-content {
   position: relative;
   isolation: isolate;
   overflow: hidden;
+  min-height: 100dvh;
   background: linear-gradient(180deg, rgba(235,231,222,0.97) 0%, rgba(223,221,216,0.98) 100%);
 }
 
