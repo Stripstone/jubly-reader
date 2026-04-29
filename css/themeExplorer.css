@@ -147,7 +147,9 @@ body.theme-explorer.reading-active #reading-mode .reading-content::after {
   filter: brightness(0.84);
 }
 
-/* Activates the wallpaper layer. */
+/* Activates the wallpaper layer. The content layer must cover the full dynamic
+   viewport so the wallpaper does not end above the bottom reading chrome. */
+body.theme-explorer.reading-active #reading-mode .reading-content.explorer-bg-wallpaper { min-height: 100dvh; }
 body.theme-explorer.reading-active #reading-mode .reading-content.explorer-bg-wallpaper::after { opacity: 0.95; }
 
 
