@@ -1256,13 +1256,30 @@ function queuePendingCloudSeek(key, sessionId, blockIdx, leadMs = 0) {
   TTS_STATE.pendingCloudSeekSessionId = Number(sessionId || 0) || 0;
   TTS_STATE.pendingCloudSeekBlockIndex = Number.isFinite(Number(blockIdx)) ? Number(blockIdx) : -1;
   TTS_STATE.pendingCloudSeekLeadMs = Number.isFinite(Number(leadMs)) ? Math.max(0, Number(leadMs)) : 0;
+
+  const targetBlock = TTS_STATE.pendingCloudSeekBlockIndex;
+  const marks = TTS_STATE.highlightMarks;
+  const targetMark = Array.isArray(marks) && targetBlock >= 0 && targetBlock < marks.length ? marks[targetBlock] : null;
+  const rawBlockTimeMs = targetMark ? Number(targetMark.time || 0) : NaN;
+  const blockTimeMs = Number.isFinite(rawBlockTimeMs) ? rawBlockTimeMs : null;
+  const seekTime = Number.isFinite(blockTimeMs) ? Math.max(0, (blockTimeMs / 1000) - (TTS_STATE.pendingCloudSeekLeadMs / 1000)) : null;
+  let targetPreview = null;
+  try { targetPreview = ttsGetBlockPreview(TTS_STATE.pendingCloudSeekKey, targetBlock); } catch (_) { targetPreview = null; }
+
   ttsDiagPush('cloud-seek-request', {
     key: TTS_STATE.pendingCloudSeekKey,
     sessionId: TTS_STATE.pendingCloudSeekSessionId,
-    targetBlock: TTS_STATE.pendingCloudSeekBlockIndex,
+    targetBlock,
     leadMs: TTS_STATE.pendingCloudSeekLeadMs,
     pendingCloudSeek: true,
     source: 'queuePendingCloudSeek',
+    excerpt: targetPreview?.excerpt || '',
+    rangeSource: targetPreview?.rangeSource || 'none',
+    rangeStart: targetPreview?.start ?? -1,
+    rangeEnd: targetPreview?.end ?? -1,
+    seekTime,
+    blockTimeMs,
+    markProvenance: TTS_STATE.highlightMarksProvenance || 'unknown',
   });
 }
 
@@ -4359,6 +4376,39 @@ function ttsJumpSentence(delta) {
     hasAudio: !!TTS_STATE.audio,
     hasBrowserSpeakFromBlock: !!TTS_STATE.browserSpeakFromBlock,
     blockCount,
+    intendedTargetBlock: (() => {
+      try {
+        const nDelta = Number(delta || 0);
+        const nSource = Number(sourceBlock);
+        if (!Number.isFinite(nDelta) || nDelta === 0 || !Number.isFinite(nSource)) return -1;
+        const isForward = nDelta > 0;
+        const windowWouldDefer = isForward && !!TTS_STATE.audio && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionApplied && (
+          TTS_STATE.cloudRestartInFlight ||
+          TTS_CLOUD_WINDOW.pendingSkipSettling ||
+          (TTS_CLOUD_WINDOW.promotionTriggered && !TTS_CLOUD_WINDOW.promotionApplied && TTS_CLOUD_WINDOW.mode !== 'promoted') ||
+          (!marks || blockCount === 0) ||
+          (marks && blockCount > 0 && (nSource + 1) >= blockCount)
+        );
+        const stalePromotionWouldDefer = isForward && !!TTS_STATE.audio && TTS_CLOUD_WINDOW.active &&
+          TTS_CLOUD_WINDOW.promotionApplied && marks && blockCount > 0 &&
+          blockCount <= TTS_CLOUD_WINDOW.chunkASentenceCount && (nSource + 1) >= blockCount;
+        if (windowWouldDefer || stalePromotionWouldDefer) {
+          const minFullPageBlock = Math.max(0, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0));
+          const desiredBlock = Math.max(nSource + 1, minFullPageBlock);
+          const existing = Number.isFinite(Number(TTS_CLOUD_WINDOW.pendingSkipBlock))
+            ? Number(TTS_CLOUD_WINDOW.pendingSkipBlock) : -1;
+          return Math.max(existing, desiredBlock);
+        }
+        if (TTS_STATE.audio && marks && blockCount > 0) {
+          let target = nSource + (nDelta < 0 ? -1 : 1);
+          if (target < 0) target = 0;
+          if (target >= 0 && target < blockCount) return target;
+        }
+        return -1;
+      } catch (_) {
+        return -1;
+      }
+    })(),
     pausedForContract,
     runtimePath: TTS_STATE.audio ? 'cloud-audio' : (TTS_STATE.browserSpeakFromBlock ? 'browser-speech' : 'none'),
     cloudWindow: {
