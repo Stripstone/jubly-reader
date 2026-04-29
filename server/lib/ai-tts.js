@@ -41,9 +41,8 @@ function sha256Hex(s) {
   return crypto.createHash("sha256").update(String(s || ""), "utf8").digest("hex");
 }
 
-const TTS_ARTIFACT_VERSION = "v4-s3-sidecar-sentence-marks-trailing-sentinel";
-const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-preserve-trailing-text-v1";
-const AZURE_TRAILING_SENTINEL_BOOKMARK = "__jubly_tts_end";
+const TTS_ARTIFACT_VERSION = "v4-s3-sidecar-sentence-marks-protected-planning";
+const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-protect-email-domain-abbrev-v2";
 
 function toSafePrefix(prefix) {
   let p = String(prefix || "").trim();
@@ -92,18 +91,32 @@ function escapeXml(str) {
 
 function splitIntoSentenceRanges(text) {
   const source = String(text || "");
-  const sentenceRegex = /[^.!?]*[.!?]+["']?\s*/g;
+  if (!source) return [{ start: 0, end: 0 }];
+
+  const protectedPunctuation = buildAzureSentenceProtectedPunctuationMask(source);
   const ranges = [];
-  let match;
-  let lastEnd = 0;
-  while ((match = sentenceRegex.exec(source)) !== null) {
-    const end = match.index + match[0].length;
-    ranges.push({ start: match.index, end });
-    lastEnd = end;
+  let start = 0;
+  let index = 0;
+
+  while (index < source.length) {
+    const ch = source[index];
+    const isBoundary = (ch === "." || ch === "!" || ch === "?") && !protectedPunctuation[index];
+    if (!isBoundary) {
+      index += 1;
+      continue;
+    }
+
+    let end = index + 1;
+    while (end < source.length && /["')\]}]/.test(source[end])) end += 1;
+    while (end < source.length && /\s/.test(source[end])) end += 1;
+    ranges.push({ start, end });
+    start = end;
+    index = end;
   }
+
   // Preserve trailing visible text even when the page ends without terminal
   // punctuation. Form rows and labels may be final readable content.
-  if (lastEnd < source.length) ranges.push({ start: lastEnd, end: source.length });
+  if (start < source.length) ranges.push({ start, end: source.length });
   if (!ranges.length) ranges.push({ start: 0, end: source.length });
   return ranges.filter((range) => range.end > range.start);
 }
@@ -114,6 +127,42 @@ function jsIndexToUtf8ByteOffset(str, jsIndex) {
 
 function bookmarkAudioOffsetMs(audioOffsetTicks) {
   return Math.max(0, Number((Number(audioOffsetTicks || 0) + 5000) / 10000) || 0);
+}
+
+function markProtectedSentencePunctuation(mask, source, regex) {
+  regex.lastIndex = 0;
+  let match;
+  while ((match = regex.exec(source)) !== null) {
+    const value = String(match[0] || "");
+    if (!value) {
+      regex.lastIndex += 1;
+      continue;
+    }
+    const start = match.index;
+    for (let i = start; i < start + value.length; i += 1) {
+      const ch = source[i];
+      if (ch === "." || ch === "!" || ch === "?") mask[i] = true;
+    }
+  }
+}
+
+function buildAzureSentenceProtectedPunctuationMask(source) {
+  const text = String(source || "");
+  const mask = new Array(text.length).fill(false);
+  const protectedPatterns = [
+    /https?:\/\/\S+/gi,
+    /www\.\S+/gi,
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+    /\b(?:[A-Z0-9-]+\.)+[A-Z]{2,}\b/gi,
+    /\b\d+(?:\.\d+)+\b/g,
+    /\b[ap]\.m\./gi,
+    /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Mt|vs|etc)\./g,
+    /\b(?:e\.g|i\.e)\./gi,
+    /\b(?:U\.S|U\.K)\./g,
+    /\b(?:[A-Z]\.){2,}/g,
+  ];
+  protectedPatterns.forEach((pattern) => markProtectedSentencePunctuation(mask, text, pattern));
+  return mask;
 }
 
 function delay(ms) {
@@ -168,20 +217,11 @@ function buildAzureServerDiagnostics({
 }) {
   const source = String(text || "");
   const plan = Array.isArray(sentencePlan) ? sentencePlan : buildAzureSentencePlan(source);
-  const ssmlBookmarkIdsAll = extractAzureSsmlBookmarkIds(ssml);
-  const ssmlTrailingSentinelPresent = ssmlBookmarkIdsAll.includes(AZURE_TRAILING_SENTINEL_BOOKMARK);
-  const ssmlBookmarkIds = ssmlBookmarkIdsAll.filter((id) => id !== AZURE_TRAILING_SENTINEL_BOOKMARK);
+  const ssmlBookmarkIds = extractAzureSsmlBookmarkIds(ssml);
   const hasAzureBookmarkObservation = bookmarkOffsets instanceof Map;
-  // bookmarkOffsets intentionally excludes the trailing sentinel so real sentence
-  // mark counts and missing-mark diagnostics stay operationally clean.
-  const reachedIds = hasAzureBookmarkObservation
-    ? Array.from(bookmarkOffsets.keys()).filter((id) => id !== AZURE_TRAILING_SENTINEL_BOOKMARK)
-    : [];
+  const reachedIds = hasAzureBookmarkObservation ? Array.from(bookmarkOffsets.keys()) : [];
   const reachedSet = new Set(reachedIds);
   const ssmlSet = new Set(ssmlBookmarkIds);
-  const trailingSentinelReached = hasAzureBookmarkObservation
-    ? meta?.trailingSentinelReached === true
-    : null;
   const missingFromSsml = plan.filter((entry) => !ssmlSet.has(entry.bookmark));
   const missingFromReached = hasAzureBookmarkObservation
     ? plan.filter((entry) => !reachedSet.has(entry.bookmark))
@@ -223,20 +263,14 @@ function buildAzureServerDiagnostics({
 
     plannedBookmarkCount: plan.length,
     ssmlBookmarkCount: ssmlBookmarkIds.length,
-    plannedSentenceBookmarkCount: plan.length,
-    ssmlSentenceBookmarkCount: ssmlBookmarkIds.length,
-    ssmlTrailingSentinelPresent,
     firstBookmarkId: firstOrNull(ssmlBookmarkIds),
     lastBookmarkId: lastOrNull(ssmlBookmarkIds),
     missingSsmlBookmarkIds: missingFromSsml.slice(0, 24).map((entry) => entry.bookmark),
     missingBookmarkIds: missingFromReached.slice(0, 24).map((entry) => entry.bookmark),
-    missingSentenceBookmarkIds: missingFromReached.slice(0, 24).map((entry) => entry.bookmark),
 
     bookmarkReachedSource,
     bookmarkReachedObserved: hasAzureBookmarkObservation,
     bookmarkReachedCount: hasAzureBookmarkObservation ? reachedIds.length : null,
-    bookmarkReachedSentenceCount: hasAzureBookmarkObservation ? reachedIds.length : null,
-    trailingSentinelReached,
     firstBookmarkReachedId: hasAzureBookmarkObservation ? firstOrNull(reachedIds) : null,
     lastBookmarkReachedId: hasAzureBookmarkObservation ? lastOrNull(reachedIds) : null,
     missingBookmarkCount: hasAzureBookmarkObservation ? missingFromReached.length : null,
@@ -304,16 +338,10 @@ function buildAzureSsmlSentence(entry) {
 
 function buildAzureSsml(text, voiceName, sentencePlan) {
   const source = String(text || "");
-  const hasSentencePlan = Array.isArray(sentencePlan) && sentencePlan.length;
-  const body = hasSentencePlan
+  const body = Array.isArray(sentencePlan) && sentencePlan.length
     ? sentencePlan.map((entry) => buildAzureSsmlSentence(entry)).join("")
     : escapeXml(source);
-  // Azure can fail to emit the terminal real bookmark on some full-page shapes.
-  // Add a non-sentence trailing sentinel so real sentence marks are not terminal.
-  const trailingSentinel = hasSentencePlan
-    ? `<bookmark mark="${AZURE_TRAILING_SENTINEL_BOOKMARK}"/>`
-    : "";
-  return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voiceName}"><prosody rate="0.95">${body}${trailingSentinel}</prosody></voice></speak>`;
+  return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voiceName}"><prosody rate="0.95">${body}</prosody></voice></speak>`;
 }
 function isIncompleteAzureBookmarkError(err) {
   return String(err?.message || err || "").includes("Azure synthesis returned incomplete bookmark offsets");
@@ -462,18 +490,12 @@ async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
   speechConfig.speechSynthesisOutputFormat = speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3;
 
   const bookmarkOffsets = new Map();
-  let trailingSentinelReached = false;
   let synthesizer = null;
   try {
     synthesizer = new speechsdk.SpeechSynthesizer(speechConfig, null);
     synthesizer.bookmarkReached = (_sender, event) => {
       const mark = String(event?.text || "");
-      if (!mark) return;
-      if (mark === AZURE_TRAILING_SENTINEL_BOOKMARK) {
-        trailingSentinelReached = true;
-        return;
-      }
-      bookmarkOffsets.set(mark, bookmarkAudioOffsetMs(event?.audioOffset));
+      if (mark) bookmarkOffsets.set(mark, bookmarkAudioOffsetMs(event?.audioOffset));
     };
 
     const result = await new Promise((resolve, reject) => {
@@ -499,7 +521,7 @@ async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
         ssml,
         bookmarkOffsets,
         voiceName: voice,
-        meta: { ...meta, trailingSentinelReached },
+        meta,
         validationReason: "azure-incomplete-bookmark-offsets",
       });
       logAzureServerDiagnostics("[ai-tts] incomplete Azure bookmarks", diagnostics);
@@ -520,7 +542,7 @@ async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
       ssml,
       bookmarkOffsets,
       voiceName: voice,
-      meta: { ...meta, trailingSentinelReached },
+      meta,
       sentenceMarks,
       validationReason: "complete",
     });
