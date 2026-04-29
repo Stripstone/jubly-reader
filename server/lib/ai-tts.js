@@ -42,11 +42,11 @@ function sha256Hex(s) {
 }
 
 const TTS_ARTIFACT_VERSION = "v3-s3-sidecar-sentence-marks-trailing-ranges";
-const TTS_FULL_PAGE_AUDIO_ARTIFACT_VERSION = "v6-azure-full-page-audio-s3-sidecar-planner-estimated";
+const TTS_FULL_PAGE_AUDIO_ARTIFACT_VERSION = "v7-azure-full-page-audio-s3-sidecar-weighted-pauses";
 const TTS_FULL_PAGE_AUDIO_ARTIFACT_FLAVOR = "azure-full-page-audio-s3-sidecar-marks";
-const TTS_FULL_PAGE_SIDECAR_MARKS_MODE = "s3-sidecar-server-planner-estimated";
+const TTS_FULL_PAGE_SIDECAR_MARKS_MODE = "s3-sidecar-server-planner-weighted-pauses";
 const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-preserve-trailing-text-v1";
-const TTS_FULL_PAGE_SIDECAR_TIMING_SOURCE = "server-planner-estimated";
+const TTS_FULL_PAGE_SIDECAR_TIMING_SOURCE = "server-planner-weighted-pauses-v2";
 
 function toSafePrefix(prefix) {
   let p = String(prefix || "").trim();
@@ -379,16 +379,66 @@ function estimateAzureFullPageAudioDurationMs(audioByteLength, text) {
   return Math.max(1000, Math.round((Math.max(1, words) / 155) * 60 * 1000));
 }
 
+function countRegexMatches(value, regex) {
+  return (String(value || "").match(regex) || []).length;
+}
+
+function estimateAzureSentenceTimingWeights(entry, index, totalEntries) {
+  const raw = String(entry?.value || "");
+  const trimmed = raw.trim();
+  const wordCount = countRegexMatches(trimmed, /[\p{L}\p{N}]+(?:['’\u2019-][\p{L}\p{N}]+)*/gu);
+  const alnumCount = countRegexMatches(trimmed, /[\p{L}\p{N}]/gu);
+  const digitRunCount = countRegexMatches(trimmed, /\d+(?:[.,:/-]\d+)*/g);
+  const acronymCount = countRegexMatches(trimmed, /\b[A-Z]{2,}(?:\.[A-Z]+)*\b/g);
+  const commaPauseCount = countRegexMatches(trimmed, /[,;:]/g);
+  const lineBreakCount = countRegexMatches(raw, /\n+/g);
+  const decorativeRunCount = countRegexMatches(trimmed, /[\*#_~`|\\/@\^=+<>\[\]{}•·○●◦▪▫■□]{2,}/gu);
+  const hasTerminalPunctuation = /[.!?]["'’”\)\]\}]*\s*$/.test(trimmed);
+  const hasSoftTerminal = /[,;:]["'’”\)\]\}]*\s*$/.test(trimmed);
+  const headerLike = wordCount > 0
+    && wordCount <= 7
+    && (/^[^a-z]*[A-Z][^a-z]*$/.test(trimmed) || /^[^:]{1,32}:\s+/.test(trimmed));
+
+  // Full-page Azure sidecar timing has no provider boundary marks. Weighting by
+  // spoken tokens plus natural pause cues keeps the approximation server-owned
+  // while avoiding the old raw-character split that placed later marks too early.
+  const speechWeight = Math.max(
+    0.85,
+    0.7
+      + (wordCount * 1.15)
+      + (alnumCount * 0.018)
+      + (digitRunCount * 0.65)
+      + (acronymCount * 0.45)
+      + (decorativeRunCount * 0.25)
+      + (headerLike ? 0.75 : 0)
+  );
+
+  const postPauseWeight = index >= totalEntries - 1
+    ? 0
+    : Math.max(
+      0.22,
+      (hasTerminalPunctuation ? 0.95 : 0)
+        + (hasSoftTerminal ? 0.55 : 0)
+        + (commaPauseCount * 0.18)
+        + (lineBreakCount * 0.45)
+        + (headerLike ? 0.45 : 0)
+    );
+
+  return { speechWeight, postPauseWeight };
+}
+
 function buildAzureFullPageSidecarMarks(text, { audioByteLength = null } = {}) {
   const source = String(text || "");
   const sentencePlan = buildAzureSentencePlan(source);
   const durationMs = estimateAzureFullPageAudioDurationMs(audioByteLength, source);
-  const weights = sentencePlan.map((entry) => Math.max(1, String(entry.value || "").trim().length));
-  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  const timingUnits = sentencePlan.map((entry, index) => estimateAzureSentenceTimingWeights(entry, index, sentencePlan.length));
+  const totalWeight = timingUnits.reduce((sum, unit) => sum + unit.speechWeight + unit.postPauseWeight, 0) || 1;
+  const conservativeBoundaryBiasMs = Math.min(280, Math.max(80, Math.round(durationMs * 0.006)));
   let elapsedMs = 0;
   const sentenceMarks = sentencePlan.map((entry, index) => {
-    const time = Math.max(0, Math.round(elapsedMs));
-    elapsedMs += (weights[index] / totalWeight) * durationMs;
+    const rawTime = index === 0 ? 0 : elapsedMs + conservativeBoundaryBiasMs;
+    const time = Math.max(0, Math.min(durationMs - 1, Math.round(rawTime)));
+    elapsedMs += ((timingUnits[index].speechWeight + timingUnits[index].postPauseWeight) / totalWeight) * durationMs;
     return {
       time,
       start: entry.startByte,
