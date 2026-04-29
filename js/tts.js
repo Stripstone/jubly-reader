@@ -3538,8 +3538,8 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
   TTS_CLOUD_WINDOW.pendingSkipBlock = -1; // consume
   TTS_CLOUD_WINDOW.pendingSkipSettling = false;
   const resolvedBlock = _pendingSkip >= 0 ? Math.max(currentBlock, _pendingSkip) : currentBlock;
-  const targetBlock = Math.min(resolvedBlock, marks ? marks.length - 1 : 0);
-  const seekTime = (marks && marks[targetBlock]) ? Math.max(0, Number(marks[targetBlock].time || 0) / 1000) : 0;
+  let targetBlock = Math.min(resolvedBlock, marks ? marks.length - 1 : 0);
+  let seekTime = (marks && marks[targetBlock]) ? Math.max(0, Number(marks[targetBlock].time || 0) / 1000) : 0;
 
   const requestId = ++TTS_STATE.cloudRestartRequestId;
   TTS_STATE.cloudRestartInFlight = true;
@@ -3583,13 +3583,26 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
           TTS_STATE.cloudRestartInFlight = false;
           return;
         }
+        // A skip can arrive after full-page marks are attached but before the
+        // promotion src-swap settles. ttsJumpSentence records that intent on the
+        // existing pendingSkipBlock guard; consume it here instead of clearing it.
+        const _settlePendingSkip = (Number.isFinite(TTS_CLOUD_WINDOW.pendingSkipBlock) && TTS_CLOUD_WINDOW.pendingSkipBlock >= 0)
+          ? TTS_CLOUD_WINDOW.pendingSkipBlock : -1;
+        if (_settlePendingSkip >= 0) {
+          const _settleTarget = Math.min(Math.max(targetBlock, _settlePendingSkip), marks ? marks.length - 1 : targetBlock);
+          if (Number.isFinite(_settleTarget) && _settleTarget >= 0 && marks && marks[_settleTarget]) {
+            targetBlock = _settleTarget;
+            seekTime = Math.max(0, Number(marks[targetBlock].time || 0) / 1000);
+            try { audio.currentTime = seekTime; } catch (_) { queuePendingCloudSeek(key, sessionId, targetBlock, 0); }
+            TTS_STATE.activeBlockIndex = targetBlock;
+            try { ttsHighlightBlock(targetBlock); } catch (_) {}
+          }
+        }
         TTS_STATE.cloudRestartInFlight = false;
         TTS_CLOUD_WINDOW.promotionApplied = true;
         // Disarm the window coalescing machinery now that full-page audio is live.
         // pendingSkipBlock and pendingSkipSettling were consumed by the apply path,
-        // but a skip that arrived during the brief cloudRestartInFlight window above
-        // could have re-set them. Clear here so post-promotion skips go through the
-        // normal timed-seek path unobstructed.
+        // or by the late-settle consumption above.
         TTS_CLOUD_WINDOW.pendingSkipSettling = false;
         TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
         markTtsFullPageReady(key, { sessionId, source: 'promotion-apply', marksCount: _resultMarkCount });
@@ -3607,8 +3620,13 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
           audioCurrentTimeMs: audio.currentTime * 1000,
           ttsCloudMode: 'full-page',
         });
-        if (_pendingSkip >= 0) {
-          ttsDiagPush('window-skip-applied-after-promotion', { sessionId, key, targetBlock, pendingSkipBlock: _pendingSkip });
+        if (_pendingSkip >= 0 || _settlePendingSkip >= 0) {
+          ttsDiagPush('window-skip-applied-after-promotion', {
+            sessionId, key, targetBlock,
+            pendingSkipBlock: _pendingSkip,
+            settlePendingSkipBlock: _settlePendingSkip,
+            seekTime,
+          });
         }
       }).catch(err => {
         TTS_STATE.cloudRestartInFlight = false;
