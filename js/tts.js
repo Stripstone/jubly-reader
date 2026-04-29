@@ -338,82 +338,6 @@ function getTtsCloudMarkCount() {
   return Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0;
 }
 
-async function ttsDiagnosticSha256(value) {
-  try {
-    const cryptoApi = (typeof globalThis !== 'undefined' && globalThis.crypto) || (typeof window !== 'undefined' && window.crypto);
-    if (!cryptoApi || !cryptoApi.subtle || typeof TextEncoder === 'undefined') return null;
-    const bytes = new TextEncoder().encode(String(value || ''));
-    const digest = await cryptoApi.subtle.digest('SHA-256', bytes);
-    return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  } catch (_) {
-    return null;
-  }
-}
-
-function getTtsDiagnosticWindowTexts(requestText, requestMode) {
-  const mode = String(requestMode || '');
-  const fullPageText = (mode === 'full-page' && TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.pageText)
-    ? String(TTS_CLOUD_WINDOW.pageText || '')
-    : (mode === 'full-page' ? String(requestText || '') : '');
-  let chunkAText = '';
-  if (TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.pageText) {
-    const sentenceCount = Math.max(0, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0) || 0);
-    if (sentenceCount > 0) {
-      try { chunkAText = ttsWindowSplitSentences(String(TTS_CLOUD_WINDOW.pageText || '')).slice(0, sentenceCount).join(''); } catch (_) {}
-    }
-    if (!chunkAText && Number(TTS_CLOUD_WINDOW.charsPhase1 || 0) > 0) {
-      chunkAText = String(TTS_CLOUD_WINDOW.pageText || '').slice(0, Number(TTS_CLOUD_WINDOW.charsPhase1 || 0));
-    }
-  }
-  if (!chunkAText && mode === 'block-window') chunkAText = String(requestText || '');
-  return { chunkAText, fullPageText };
-}
-
-async function buildRuntimeCloudResponseDiagnostics(text, opts = {}, data = null, runtimeRejectReason = '') {
-  const requestMode = opts && opts.requestMode ? String(opts.requestMode) : '';
-  const requestText = String(text || '');
-  const serverTtsDiagnostics = data && data.ttsDiagnostics ? data.ttsDiagnostics : null;
-  const capability = data && data.capability ? data.capability : null;
-  const { chunkAText, fullPageText } = getTtsDiagnosticWindowTexts(requestText, requestMode);
-  const chunkASentenceCount = Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0) || 0;
-  return {
-    chunkATextLength: chunkAText ? chunkAText.length : null,
-    fullPageTextLength: fullPageText ? fullPageText.length : null,
-    chunkATextHash: chunkAText ? await ttsDiagnosticSha256(chunkAText) : null,
-    fullPageTextHash: fullPageText ? await ttsDiagnosticSha256(fullPageText) : null,
-    promotionRequestMode: requestMode || null,
-    backendTextHash: serverTtsDiagnostics?.backendTextHash || null,
-    returnedMarksCount: Array.isArray(data?.sentenceMarks) ? data.sentenceMarks.length : 0,
-    chunkASentenceCount: chunkASentenceCount || null,
-    expectedMin: chunkASentenceCount ? chunkASentenceCount + 1 : null,
-    runtimeArtifactHash: capability?.artifact?.hash || null,
-    runtimeMarksCacheStatus: capability?.cache?.marks?.status || null,
-    runtimeAudioCacheStatus: capability?.cache?.audio?.status || null,
-    runtimeRejectReason: runtimeRejectReason || null,
-    serverTtsDiagnostics,
-  };
-}
-
-function getPromotionResultDiagnostics(result, runtimeRejectReason = '') {
-  const diagnostics = result?.runtimeDiagnostics || {};
-  return {
-    chunkATextLength: diagnostics.chunkATextLength ?? null,
-    fullPageTextLength: diagnostics.fullPageTextLength ?? null,
-    chunkATextHash: diagnostics.chunkATextHash || null,
-    fullPageTextHash: diagnostics.fullPageTextHash || null,
-    promotionRequestMode: diagnostics.promotionRequestMode || null,
-    backendTextHash: diagnostics.backendTextHash || result?.ttsDiagnostics?.backendTextHash || null,
-    returnedMarksCount: diagnostics.returnedMarksCount ?? (Array.isArray(result?.sentenceMarks) ? result.sentenceMarks.length : 0),
-    chunkASentenceCount: diagnostics.chunkASentenceCount ?? null,
-    expectedMin: diagnostics.expectedMin ?? null,
-    runtimeArtifactHash: diagnostics.runtimeArtifactHash || result?.capability?.artifact?.hash || null,
-    runtimeMarksCacheStatus: diagnostics.runtimeMarksCacheStatus || result?.capability?.cache?.marks?.status || null,
-    runtimeAudioCacheStatus: diagnostics.runtimeAudioCacheStatus || result?.capability?.cache?.audio?.status || null,
-    runtimeRejectReason: runtimeRejectReason || diagnostics.runtimeRejectReason || null,
-    serverTtsDiagnostics: diagnostics.serverTtsDiagnostics || result?.ttsDiagnostics || null,
-  };
-}
-
 function getTtsChunkWindowLimit() {
   const windowCount = Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0);
   return Math.max(2, Number.isFinite(windowCount) ? windowCount : 0);
@@ -3116,14 +3040,12 @@ function pauseOrResumeReading() {
 async function cloudFetchUrl(text, opts = {}) {
   const controller = new AbortController();
   TTS_STATE.abort = controller;
-  const requestText = String(text || '');
-  const requestTextHash = await ttsDiagnosticSha256(requestText);
   const payload = { text };
   const selectedVoicePref = getSelectedVoicePreference();
   if (selectedVoicePref.explicitCloud && selectedVoicePref.requestedCloudVoiceId) payload.voiceId = selectedVoicePref.requestedCloudVoiceId;
   if (opts && opts.sentenceMarks) payload.speechMarks = 'sentence';
   if (opts && opts.requestMode) payload.requestMode = String(opts.requestMode);
-  TTS_DEBUG.lastCloudRequest = { chars: requestText.length, textHash: requestTextHash, sentenceMarks: !!(opts && opts.sentenceMarks), requestMode: opts && opts.requestMode ? String(opts.requestMode) : '', selectedVoice: selectedVoicePref.stored, selectedVoiceType: selectedVoicePref.type, requestedVoiceId: selectedVoicePref.requestedCloudVoiceId, variant: TTS_STATE.voiceVariant || 'female' };
+  TTS_DEBUG.lastCloudRequest = { chars: String(text || '').length, sentenceMarks: !!(opts && opts.sentenceMarks), requestMode: opts && opts.requestMode ? String(opts.requestMode) : '', selectedVoice: selectedVoicePref.stored, selectedVoiceType: selectedVoicePref.type, requestedVoiceId: selectedVoicePref.requestedCloudVoiceId, variant: TTS_STATE.voiceVariant || 'female' };
   try { const qs = new URLSearchParams(window.location.search); if (qs.get('debug') === '1') payload.debug = '1'; } catch (_) {}
   try { if (String(TTS_STATE.voiceVariant || '').toLowerCase() === 'male') payload.voiceVariant = 'male'; } catch (_) {}
   try { const saved = getStoredSelectedVoice(); if (saved.startsWith('cloud:')) payload.voiceId = saved.slice('cloud:'.length); } catch (_) {}
@@ -3136,17 +3058,12 @@ async function cloudFetchUrl(text, opts = {}) {
   let data = null, rawText = '';
   try { rawText = await res.text(); data = rawText ? JSON.parse(rawText) : null; } catch (_) {}
   if (!res.ok || !data?.url) {
-    const runtimeDiagnostics = await buildRuntimeCloudResponseDiagnostics(text, opts, data, 'response-error');
-    TTS_DEBUG.lastCloudResponse = { ok: false, status: res.status, payload: data || null, rawText: rawText || '', ttsDiagnostics: data?.ttsDiagnostics || null, runtimeDiagnostics };
+    TTS_DEBUG.lastCloudResponse = { ok: false, status: res.status, payload: data || null, rawText: rawText || '' };
     const detail = data?.detail || data?.message || rawText || '';
     const msg = data?.error ? `${data.error}${detail ? `: ${detail}` : ''}` : `TTS request failed (${res.status})${detail ? `: ${detail}` : ''}`;
-    const err = new Error(msg);
-    err.ttsDiagnostics = data?.ttsDiagnostics || null;
-    err.runtimeDiagnostics = runtimeDiagnostics;
-    throw err;
+    throw new Error(msg);
   }
   const capability = normalizeTtsCapability(data?.capability);
-  const runtimeDiagnostics = await buildRuntimeCloudResponseDiagnostics(text, opts, data, '');
   TTS_DEBUG.lastCloudResponse = {
     ok: true,
     status: res.status,
@@ -3154,8 +3071,6 @@ async function cloudFetchUrl(text, opts = {}) {
     cacheHit: !!data?.cacheHit,
     capability,
     debug: data?.debug || null,
-    ttsDiagnostics: data?.ttsDiagnostics || null,
-    runtimeDiagnostics,
   };
   ttsDiagPush('cloud-response', {
     ok: true,
@@ -3168,9 +3083,8 @@ async function cloudFetchUrl(text, opts = {}) {
     marksIncludedInResponse: !!capability?.marks?.includedInResponse,
     marksProvenance: capability?.marks?.provenance || 'none',
     artifactVersion: capability?.artifact?.version || null,
-    ...getPromotionResultDiagnostics({ sentenceMarks: data.sentenceMarks, capability, ttsDiagnostics: data?.ttsDiagnostics || null, runtimeDiagnostics }),
   });
-  return { url: data.url, sentenceMarks: Array.isArray(data.sentenceMarks) ? data.sentenceMarks : null, capability, ttsDiagnostics: data?.ttsDiagnostics || null, runtimeDiagnostics };
+  return { url: data.url, sentenceMarks: Array.isArray(data.sentenceMarks) ? data.sentenceMarks : null, capability };
 }
 
 function clearTtsStartupBanner() {
@@ -3254,7 +3168,6 @@ function _ttsWindowTriggerPromotion(signal) {
         audioCacheStatus: result.capability?.cache?.audio?.status || null,
         marksCacheStatus: result.capability?.cache?.marks?.status || null,
         artifactHash: result.capability?.artifact?.hash || null,
-        ...getPromotionResultDiagnostics(result, 'stale-phase1-rejected'),
         phase: 'promotion-fetch',
         ttsCloudMode: 'stale-phase1-rejected',
       });
@@ -3277,7 +3190,6 @@ function _ttsWindowTriggerPromotion(signal) {
       charsPhase1: TTS_CLOUD_WINDOW.charsPhase1,
       charsFullPage: pageText.length,
       charsSessionTotal: TTS_CLOUD_WINDOW.charsSessionTotal,
-      ...getPromotionResultDiagnostics(result),
       ttsCloudMode: 'full-page',
       engagementSignal: signal,
     });
@@ -3308,7 +3220,6 @@ function _ttsWindowTriggerPromotion(signal) {
       sessionId,
       key,
       error: String(err?.message || err),
-      ...getPromotionResultDiagnostics(err, 'promotion-fetch-failed'),
     });
     // Promotion failed. chunk A will still play to its natural end.
     // The post-loop handoff will re-await the promise and re-throw, which
@@ -3337,7 +3248,6 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
       returnedMarksCount: _resultMarkCount,
       chunkASentenceCount: _chunkASentCount,
       expectedMin: _chunkASentCount + 1,
-      ...getPromotionResultDiagnostics(result, 'stale-phase1-rejected'),
       phase: 'apply-promotion',
       ttsCloudMode: 'stale-phase1-rejected',
     });
@@ -3739,7 +3649,6 @@ async function ttsSpeakQueue(key, parts) {
             promotionReady: true,
             returnedMarksCount: Array.isArray(fullResult.sentenceMarks) ? fullResult.sentenceMarks.length : 0,
             chosenHandoffBlock: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
-            ...getPromotionResultDiagnostics(fullResult),
           });
 
           // Validate fullResult.sentenceMarks BEFORE mutating runtime state.
@@ -3757,7 +3666,6 @@ async function ttsSpeakQueue(key, parts) {
               audioCacheStatus: fullResult.capability?.cache?.audio?.status || null,
               marksCacheStatus: fullResult.capability?.cache?.marks?.status || null,
               artifactHash: fullResult.capability?.artifact?.hash || null,
-              ...getPromotionResultDiagnostics(fullResult, 'stale-phase1-rejected'),
               phase: 'case-b-handoff',
               ttsCloudMode: 'stale-phase1-rejected',
             });
