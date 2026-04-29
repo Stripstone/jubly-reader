@@ -42,11 +42,13 @@ function sha256Hex(s) {
 }
 
 const TTS_ARTIFACT_VERSION = "v3-s3-sidecar-sentence-marks-trailing-ranges";
-const TTS_FULL_PAGE_AUDIO_ARTIFACT_VERSION = "v6-azure-full-page-audio-s3-sidecar-planner-estimated";
+const TTS_FULL_PAGE_AUDIO_ARTIFACT_VERSION = "v8-azure-full-page-audio-s3-sidecar-planner-estimated";
 const TTS_FULL_PAGE_AUDIO_ARTIFACT_FLAVOR = "azure-full-page-audio-s3-sidecar-marks";
 const TTS_FULL_PAGE_SIDECAR_MARKS_MODE = "s3-sidecar-server-planner-estimated";
 const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-preserve-trailing-text-v1";
 const TTS_FULL_PAGE_SIDECAR_TIMING_SOURCE = "server-planner-estimated";
+const TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM = "server-planner-weighted-pauses-v2";
+const TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM_VERSION = "v2";
 
 function toSafePrefix(prefix) {
   let p = String(prefix || "").trim();
@@ -285,6 +287,8 @@ function buildAzureFullPageAudioDiagnostics({ text, voiceName, meta }) {
     marksProvenance: sidecarAvailable ? "s3-sidecar" : "none",
     marksTimingSource: sidecarAvailable ? (meta?.marksTimingSource || TTS_FULL_PAGE_SIDECAR_TIMING_SOURCE) : "none",
     sidecarTimingSource: sidecarAvailable ? (meta?.sidecarTimingSource || TTS_FULL_PAGE_SIDECAR_TIMING_SOURCE) : "none",
+    sidecarTimingAlgorithm: sidecarAvailable ? (meta?.sidecarTimingAlgorithm || TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM) : "none",
+    sidecarTimingAlgorithmVersion: sidecarAvailable ? (meta?.sidecarTimingAlgorithmVersion || TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM_VERSION) : "none",
     providerPreciseMarks: false,
     preciseSeek: false,
     runtimeEstimatedMarksExpected: false,
@@ -379,16 +383,70 @@ function estimateAzureFullPageAudioDurationMs(audioByteLength, text) {
   return Math.max(1000, Math.round((Math.max(1, words) / 155) * 60 * 1000));
 }
 
+function countRegexMatches(value, regex) {
+  return (String(value || "").match(regex) || []).length;
+}
+
+function estimateAzureSentenceTimingWeights(entry, index, totalEntries) {
+  const value = String(entry?.value || "").trim();
+  const words = value.match(/[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*/g) || [];
+  const wordCount = words.length;
+  const alnumCount = countRegexMatches(value, /[A-Za-z0-9]/g);
+  const digitRunCount = countRegexMatches(value, /\b\d+(?::\d+|[.,]\d+)?\b/g);
+  const acronymCount = countRegexMatches(value, /\b(?:[A-Z]\.){2,}|\b[A-Z]{2,}\b/g);
+  const commaPauseCount = countRegexMatches(value, /[,;:]/g);
+  const lineBreakCount = countRegexMatches(value, /\n+/g);
+  const decorativeRunCount = countRegexMatches(value, /(?:[-*_~=]{3,}|[•◆◇▪▫●○]{1,})/g);
+  const terminalPause = /[.!?][\]')}"]*$/.test(value) ? 1 : 0;
+  const softTerminalPause = /[:;][\]')}"]*$/.test(value) ? 1 : 0;
+  const headerLike = /^(?:from|to|cc|bcc|sent|date|subject|re):\b/i.test(value) ? 1 : 0;
+
+  // Full-page Azure sidecar timing has no provider boundary marks. Weighting
+  // by spoken tokens plus natural pause cues keeps the approximation
+  // server-owned while preserving the runtime-facing timing-source contract.
+  const speechWeight = Math.max(
+    0.6,
+    0.7
+      + (wordCount * 1.0)
+      + (alnumCount * 0.025)
+      + (digitRunCount * 0.6)
+      + (acronymCount * 0.35)
+      + (decorativeRunCount * 0.3)
+      + (headerLike ? 0.45 : 0)
+  );
+
+  const isLast = index >= totalEntries - 1;
+  const postPauseWeight = isLast
+    ? 0
+    : Math.max(
+      0.22,
+      (terminalPause * 0.95)
+        + (softTerminalPause * 0.55)
+        + (Math.min(3, commaPauseCount) * 0.18)
+        + (Math.min(2, lineBreakCount) * 0.45)
+        + (headerLike ? 0.35 : 0)
+    );
+
+  return { speechWeight, postPauseWeight };
+}
+
 function buildAzureFullPageSidecarMarks(text, { audioByteLength = null } = {}) {
   const source = String(text || "");
   const sentencePlan = buildAzureSentencePlan(source);
   const durationMs = estimateAzureFullPageAudioDurationMs(audioByteLength, source);
-  const weights = sentencePlan.map((entry) => Math.max(1, String(entry.value || "").trim().length));
-  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  const timingUnits = sentencePlan.map((entry, index) => (
+    estimateAzureSentenceTimingWeights(entry, index, sentencePlan.length)
+  ));
+  const totalWeight = timingUnits.reduce(
+    (sum, unit) => sum + unit.speechWeight + unit.postPauseWeight,
+    0
+  ) || 1;
+  const conservativeBoundaryBiasMs = Math.min(280, Math.max(80, Math.round(durationMs * 0.006)));
   let elapsedMs = 0;
   const sentenceMarks = sentencePlan.map((entry, index) => {
-    const time = Math.max(0, Math.round(elapsedMs));
-    elapsedMs += (weights[index] / totalWeight) * durationMs;
+    const boundaryMs = index === 0 ? 0 : elapsedMs + conservativeBoundaryBiasMs;
+    const time = Math.max(0, Math.min(durationMs - 1, Math.round(boundaryMs)));
+    elapsedMs += ((timingUnits[index].speechWeight + timingUnits[index].postPauseWeight) / totalWeight) * durationMs;
     return {
       time,
       start: entry.startByte,
@@ -400,6 +458,8 @@ function buildAzureFullPageSidecarMarks(text, { audioByteLength = null } = {}) {
     sentenceMarks,
     durationMs,
     timingSource: TTS_FULL_PAGE_SIDECAR_TIMING_SOURCE,
+    timingAlgorithm: TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM,
+    timingAlgorithmVersion: TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM_VERSION,
   };
 }
 
@@ -756,7 +816,7 @@ export default async function handler(req, res) {
       : (policy.provider === "azure" ? "azure-block-window-provider-bookmarks" : "polly-audio");
     const sentenceSplitterVersion = TTS_SENTENCE_SPLITTER_VERSION;
     const identity = isAzureFullPageAudio
-      ? JSON.stringify({ artifactVersion, artifactFlavor, sentenceSplitterVersion, requestMode, provider: policy.provider, voiceId: policy.voiceId, marksMode: TTS_FULL_PAGE_SIDECAR_MARKS_MODE, marksTimingSource: TTS_FULL_PAGE_SIDECAR_TIMING_SOURCE, text })
+      ? JSON.stringify({ artifactVersion, artifactFlavor, sentenceSplitterVersion, requestMode, provider: policy.provider, voiceId: policy.voiceId, marksMode: TTS_FULL_PAGE_SIDECAR_MARKS_MODE, marksTimingSource: TTS_FULL_PAGE_SIDECAR_TIMING_SOURCE, sidecarTimingAlgorithm: TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM, sidecarTimingAlgorithmVersion: TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM_VERSION, text })
       : JSON.stringify({ artifactVersion, sentenceSplitterVersion, provider: policy.provider, voiceId: policy.voiceId, text });
     const hash = sha256Hex(identity);
     const objectKey = `${prefix}${hash}.mp3`;
@@ -815,6 +875,8 @@ export default async function handler(req, res) {
             artifactVersion,
             artifactFlavor,
             marksMode: TTS_FULL_PAGE_SIDECAR_MARKS_MODE,
+            sidecarTimingAlgorithm: TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM,
+            sidecarTimingAlgorithmVersion: TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM_VERSION,
             sentenceSplitterVersion,
             audioCacheStatus,
             marksCacheStatus,
@@ -979,6 +1041,8 @@ export default async function handler(req, res) {
         serverMarksValidationReason: serverMarksValid ? "s3-sidecar-marks-returned" : (wantSentenceMarks ? "s3-sidecar-marks-unavailable" : "marks-not-requested"),
         marksTimingSource: serverMarksValid ? TTS_FULL_PAGE_SIDECAR_TIMING_SOURCE : "none",
         sidecarTimingSource: serverMarksValid ? TTS_FULL_PAGE_SIDECAR_TIMING_SOURCE : "none",
+        sidecarTimingAlgorithm: serverMarksValid ? TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM : "none",
+        sidecarTimingAlgorithmVersion: serverMarksValid ? TTS_FULL_PAGE_SIDECAR_TIMING_ALGORITHM_VERSION : "none",
         synthesisPath: "azure-full-page-audio",
       };
       const fullPageDiagnostics = buildAzureFullPageAudioDiagnostics({
