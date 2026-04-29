@@ -590,71 +590,17 @@ function ttsWindowRecordForwardSkipIntent(reason, context = {}) {
   return true;
 }
 
-function ttsMarkProtectedSentencePunctuation(mask, source, regex) {
-  regex.lastIndex = 0;
-  let match;
-  while ((match = regex.exec(source)) !== null) {
-    const value = String(match[0] || '');
-    if (!value) {
-      regex.lastIndex += 1;
-      continue;
-    }
-    const start = match.index;
-    for (let i = start; i < start + value.length; i += 1) {
-      const ch = source[i];
-      if (ch === '.' || ch === '!' || ch === '?') mask[i] = true;
-    }
-  }
-}
-
-function ttsBuildProtectedSentencePunctuationMask(source) {
-  const text = String(source || '');
-  const mask = new Array(text.length).fill(false);
-  const protectedPatterns = [
-    /https?:\/\/\S+/gi,
-    /www\.\S+/gi,
-    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
-    /\b(?:[A-Z0-9-]+\.)+[A-Z]{2,}\b/gi,
-    /\b\d+(?:\.\d+)+\b/g,
-    /\b[ap]\.m\./gi,
-    /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Mt|vs|etc)\./g,
-    /\b(?:e\.g|i\.e)\./gi,
-    /\b(?:U\.S|U\.K)\./g,
-    /\b(?:[A-Z]\.){2,}/g,
-  ];
-  protectedPatterns.forEach((pattern) => ttsMarkProtectedSentencePunctuation(mask, text, pattern));
-  return mask;
-}
-
 function ttsWindowSplitSentences(text) {
   const src = String(text || '');
-  if (!src) return [];
-
-  // Keep Phase 1 window boundaries aligned with server/lib/ai-tts.js sentence
-  // planning. Promotion assumes chunkASentenceCount maps to the same leading
-  // blocks in the later full-page mark set.
-  const protectedPunctuation = ttsBuildProtectedSentencePunctuationMask(src);
+  const regex = /[^.!?]*[.!?]+["']?\s*/g;
   const results = [];
-  let start = 0;
-  let index = 0;
-
-  while (index < src.length) {
-    const ch = src[index];
-    const isBoundary = (ch === '.' || ch === '!' || ch === '?') && !protectedPunctuation[index];
-    if (!isBoundary) {
-      index += 1;
-      continue;
-    }
-
-    let end = index + 1;
-    while (end < src.length && /["')\]}]/.test(src[end])) end += 1;
-    while (end < src.length && /\s/.test(src[end])) end += 1;
-    results.push(src.slice(start, end));
-    start = end;
-    index = end;
+  let lastEnd = 0;
+  let match;
+  while ((match = regex.exec(src)) !== null) {
+    results.push(src.slice(match.index, match.index + match[0].length));
+    lastEnd = match.index + match[0].length;
   }
-
-  if (start < src.length) results.push(src.slice(start));
+  if (lastEnd < src.length) results.push(src.slice(lastEnd));
   return results.filter(s => s.trim().length > 0);
 }
 
