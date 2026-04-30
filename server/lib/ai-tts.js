@@ -43,6 +43,12 @@ function sha256Hex(s) {
 
 const TTS_ARTIFACT_VERSION = "v3-s3-sidecar-sentence-marks-trailing-ranges";
 const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-preserve-trailing-text-v1";
+const TTS_BOOKMARK_MARKS_TIMING_SOURCE = "azure-bookmark-reached";
+const TTS_WB_MARKS_TIMING_SOURCE = "azure-word-boundary";
+const TTS_BOOKMARK_MARKS_KEY_SUFFIX = ".sentence.json";
+// Separate S3 key suffix for wordBoundary-derived marks so bookmarkReached and
+// wordBoundary sidecars can never be confused or silently substituted.
+const TTS_WB_MARKS_KEY_SUFFIX = ".sentence-wb.json";
 
 function toSafePrefix(prefix) {
   let p = String(prefix || "").trim();
@@ -164,6 +170,15 @@ function buildAzureServerDiagnostics({
   meta,
   sentenceMarks = null,
   validationReason = "not-evaluated",
+  // wordBoundary fallback diagnostics — all optional
+  wordBoundaryRawCount = null,
+  wordBoundaryDedupedCount = null,
+  wordBoundaryBoundaryTypeDistribution = null,
+  wordBoundaryMappedMarkCount = null,
+  wordBoundaryFinalBlockCovered = null,
+  wordBoundaryAllBlocksCovered = null,
+  selectedTimingSource = null,
+  timingSourceRejectionReason = null,
 }) {
   const source = String(text || "");
   const plan = Array.isArray(sentencePlan) ? sentencePlan : buildAzureSentencePlan(source);
@@ -239,6 +254,16 @@ function buildAzureServerDiagnostics({
     serverExpectedSentencePlanLength: expectedCount,
     serverMarksValidationPassed: !!validationPassed,
     serverMarksValidationReason,
+
+    // wordBoundary fallback diagnostics
+    wordBoundaryRawCount,
+    wordBoundaryDedupedCount,
+    wordBoundaryBoundaryTypeDistribution,
+    wordBoundaryMappedMarkCount,
+    wordBoundaryFinalBlockCovered,
+    wordBoundaryAllBlocksCovered,
+    selectedTimingSource,
+    timingSourceRejectionReason,
   };
 }
 
@@ -293,6 +318,74 @@ function buildAzureSsml(text, voiceName, sentencePlan) {
     : escapeXml(source);
   return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voiceName}"><prosody rate="0.95">${body}</prosody></voice></speak>`;
 }
+
+// Compute the SSML character span for each sentencePlan entry using the exact
+// same construction path as buildAzureSsml / buildAzureSsmlSentence. The span
+// covers the full fragment emitted for that entry (bookmark tag + escaped body).
+// Used to map wordBoundary textOffset values to their planned sentence block.
+function buildAzureSsmlSentenceSpans(sentencePlan, voiceName) {
+  const header = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voiceName}"><prosody rate="0.95">`;
+  const spans = [];
+  let offset = header.length;
+  for (const entry of sentencePlan) {
+    const fragment = buildAzureSsmlSentence(entry);
+    spans.push({
+      planIndex: entry.index,
+      bookmark: entry.bookmark,
+      ssmlStart: offset,
+      ssmlEnd: offset + fragment.length,
+    });
+    offset += fragment.length;
+  }
+  return spans;
+}
+
+// Map collected wordBoundary events to the sentencePlan using SSML-span ranges.
+// For each planned block, the earliest event whose textOffset falls inside that
+// block's SSML span becomes the block's provider timing mark.
+// Returns a sentenceMarks array in the same shape as bookmarkReached marks,
+// or null if any planned block has no provider event or times are not monotonic.
+function mapWordBoundaryToSentencePlan(sentencePlan, rawEvents, ssmlSpans) {
+  if (!rawEvents.length || !sentencePlan.length || !ssmlSpans.length) return null;
+  if (ssmlSpans.length !== sentencePlan.length) return null;
+
+  // Dedupe on the event identity tuple that matters for timing.
+  const seen = new Set();
+  const events = [];
+  for (const ev of rawEvents) {
+    const k = `${ev.audioOffset}:${ev.textOffset}:${ev.wordLength}:${ev.boundaryType}`;
+    if (!seen.has(k)) { seen.add(k); events.push(ev); }
+  }
+  events.sort((a, b) => a.audioOffset - b.audioOffset);
+
+  const marks = [];
+  let prevTime = -1;
+  for (let i = 0; i < sentencePlan.length; i++) {
+    const entry = sentencePlan[i];
+    const span = ssmlSpans[i];
+    // Find the earliest wordBoundary event whose textOffset falls within this
+    // block's SSML span. This is the exact span emitted by buildAzureSsmlSentence
+    // for this entry — no loose search, no cross-block ambiguity.
+    let earliest = null;
+    for (const ev of events) {
+      if (ev.textOffset >= span.ssmlStart && ev.textOffset < span.ssmlEnd) {
+        if (!earliest || ev.audioOffset < earliest.audioOffset) earliest = ev;
+      }
+    }
+    if (!earliest) return null; // no provider event for this block → reject
+    const timeMs = earliest.audioOffsetMs;
+    if (!Number.isFinite(timeMs) || timeMs < 0 || timeMs < prevTime) return null;
+    prevTime = timeMs;
+    marks.push({
+      time: timeMs,
+      start: entry.startByte,
+      end: entry.endByte,
+      value: entry.value,
+    });
+  }
+  return marks.length === sentencePlan.length ? marks : null;
+}
+
 function isIncompleteAzureBookmarkError(err) {
   return String(err?.message || err || "").includes("Azure synthesis returned incomplete bookmark offsets");
 }
@@ -371,8 +464,13 @@ function buildCapabilityPayload({
   audioCacheStatus,
   marksCacheStatus,
   marksProvenance,
+  marksTimingSource = null,
 }) {
   const marksIncludedInResponse = Array.isArray(sentenceMarks);
+  // Include provider-level timing labels only when coverage is complete.
+  // These are informational for tracing; runtime does not key off them.
+  const providerPreciseMarks = preciseSeekCapable && marksTimingSource !== null ? true : undefined;
+  const marksPrecision = preciseSeekCapable && marksTimingSource !== null ? "provider-timed" : undefined;
   return {
     provider: policy?.provider || null,
     preciseSeek: {
@@ -386,6 +484,9 @@ function buildCapabilityPayload({
       includedInResponse: marksIncludedInResponse,
       provenance: marksIncludedInResponse || preciseSeekCapable ? marksProvenance : "none",
       cacheStatus: marksCacheStatus,
+      ...(marksTimingSource !== null ? { timingSource: marksTimingSource } : {}),
+      ...(marksPrecision !== undefined ? { precision: marksPrecision } : {}),
+      ...(providerPreciseMarks !== undefined ? { providerPreciseMarks } : {}),
     },
     cache: {
       audio: { status: audioCacheStatus },
@@ -428,6 +529,12 @@ function resolveCloudPolicy(body, debug) {
 // Azure Speech SDK synthesis with bookmark-driven sentence marks.
 // Audio and marks are cached as paired S3 artifacts so cache-hit sessions keep
 // precise sentence timing instead of falling back to client-estimated marks.
+//
+// Mark source priority:
+//   1. bookmarkReached — if all planned bookmarks arrive, use those marks.
+//   2. wordBoundary    — if bookmarkReached is incomplete, attempt SSML-span
+//                        mapping of wordBoundary events as provider timing.
+//   3. Reject Phase 2  — if neither source yields complete, monotonic coverage.
 async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
   const key = requiredEnv("AZURE_SPEECH_KEY");
   const region = requiredEnv("AZURE_SPEECH_REGION");
@@ -440,12 +547,31 @@ async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
   speechConfig.speechSynthesisOutputFormat = speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3;
 
   const bookmarkOffsets = new Map();
+  const wordBoundaryRaw = []; // all captured events, deduped later in mapper
   let synthesizer = null;
   try {
     synthesizer = new speechsdk.SpeechSynthesizer(speechConfig, null);
+
+    // Primary: bookmarkReached (existing behavior, unchanged)
     synthesizer.bookmarkReached = (_sender, event) => {
       const mark = String(event?.text || "");
       if (mark) bookmarkOffsets.set(mark, bookmarkAudioOffsetMs(event?.audioOffset));
+    };
+
+    // Fallback: wordBoundary — capture all events before synthesis completes.
+    // Subscribed before speakSsmlAsync so no events are missed.
+    synthesizer.wordBoundary = (_sender, event) => {
+      wordBoundaryRaw.push({
+        audioOffset: Number(event?.audioOffset ?? 0),
+        // Pre-convert to ms using the same formula as bookmarkAudioOffsetMs so
+        // the mapper never recomputes from raw ticks.
+        audioOffsetMs: bookmarkAudioOffsetMs(event?.audioOffset),
+        duration: Number(event?.duration ?? 0),
+        text: String(event?.text ?? ""),
+        textOffset: Number(event?.textOffset ?? 0),
+        wordLength: Number(event?.wordLength ?? 0),
+        boundaryType: String(event?.boundaryType ?? ""),
+      });
     };
 
     const result = await new Promise((resolve, reject) => {
@@ -464,7 +590,14 @@ async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
     const audioBuf = Buffer.from(result.audioData || []);
     await waitForAzureBookmarkOffsets(sentencePlan, bookmarkOffsets);
 
-    if (!hasCompleteAzureBookmarkOffsets(sentencePlan, bookmarkOffsets)) {
+    // ── Priority 1: bookmarkReached ─────────────────────────────────────────
+    if (hasCompleteAzureBookmarkOffsets(sentencePlan, bookmarkOffsets)) {
+      const sentenceMarks = sentencePlan.map((entry) => ({
+        time: bookmarkOffsets.get(entry.bookmark),
+        start: entry.startByte,
+        end: entry.endByte,
+        value: entry.value,
+      }));
       const diagnostics = buildAzureServerDiagnostics({
         text,
         sentencePlan,
@@ -472,19 +605,71 @@ async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
         bookmarkOffsets,
         voiceName: voice,
         meta,
-        validationReason: "azure-incomplete-bookmark-offsets",
+        sentenceMarks,
+        validationReason: "complete",
+        wordBoundaryRawCount: wordBoundaryRaw.length,
+        selectedTimingSource: TTS_BOOKMARK_MARKS_TIMING_SOURCE,
       });
-      logAzureServerDiagnostics("[ai-tts] incomplete Azure bookmarks", diagnostics);
-      // Do not cache partial Azure bookmark data as precise S3 sidecar truth.
-      throw makeAzureBookmarkError(diagnostics);
+      return { audioBuf, sentenceMarks, diagnostics, timingSource: TTS_BOOKMARK_MARKS_TIMING_SOURCE };
     }
 
-    const sentenceMarks = sentencePlan.map((entry) => ({
-      time: bookmarkOffsets.get(entry.bookmark),
-      start: entry.startByte,
-      end: entry.endByte,
-      value: entry.value,
-    }));
+    // ── Priority 2: wordBoundary fallback ───────────────────────────────────
+    // bookmarkReached is incomplete. Attempt to map wordBoundary events using
+    // SSML spans built from the exact same construction path as synthesis.
+    // This ensures textOffset alignment is unambiguous — each event is assigned
+    // to the entry whose emitted SSML fragment contains that textOffset.
+    const ssmlSpans = buildAzureSsmlSentenceSpans(sentencePlan, voice);
+
+    // Collect wordBoundary diagnostic data before attempting the mapping.
+    const wbDedupSeen = new Set();
+    const wbDeduped = [];
+    const wbTypeCounts = {};
+    for (const ev of wordBoundaryRaw) {
+      const k = `${ev.audioOffset}:${ev.textOffset}:${ev.wordLength}:${ev.boundaryType}`;
+      if (!wbDedupSeen.has(k)) {
+        wbDedupSeen.add(k);
+        wbDeduped.push(ev);
+      }
+      wbTypeCounts[ev.boundaryType] = (wbTypeCounts[ev.boundaryType] || 0) + 1;
+    }
+
+    // Check per-block coverage for diagnostics before the strict mapping pass.
+    const wbBlockCoverage = sentencePlan.map((entry, i) => {
+      const span = ssmlSpans[i];
+      return span ? wbDeduped.some((ev) => ev.textOffset >= span.ssmlStart && ev.textOffset < span.ssmlEnd) : false;
+    });
+    const wbAllBlocksCovered = wbBlockCoverage.every(Boolean);
+    const wbFinalBlockCovered = wbBlockCoverage.length ? wbBlockCoverage[wbBlockCoverage.length - 1] : false;
+
+    const wbMarks = mapWordBoundaryToSentencePlan(sentencePlan, wordBoundaryRaw, ssmlSpans);
+    const wbComplete = wbMarks !== null;
+
+    if (wbComplete) {
+      const diagnostics = buildAzureServerDiagnostics({
+        text,
+        sentencePlan,
+        ssml,
+        bookmarkOffsets,
+        voiceName: voice,
+        meta,
+        sentenceMarks: wbMarks,
+        validationReason: "complete",
+        wordBoundaryRawCount: wordBoundaryRaw.length,
+        wordBoundaryDedupedCount: wbDeduped.length,
+        wordBoundaryBoundaryTypeDistribution: wbTypeCounts,
+        wordBoundaryMappedMarkCount: wbMarks.length,
+        wordBoundaryFinalBlockCovered: wbFinalBlockCovered,
+        wordBoundaryAllBlocksCovered: wbAllBlocksCovered,
+        selectedTimingSource: TTS_WB_MARKS_TIMING_SOURCE,
+      });
+      return { audioBuf, sentenceMarks: wbMarks, diagnostics, timingSource: TTS_WB_MARKS_TIMING_SOURCE };
+    }
+
+    // ── Priority 3: reject ─────────────────────────────────────────────────
+    // Neither provider source yielded complete, monotonic coverage.
+    const rejectReason = wbAllBlocksCovered
+      ? "word-boundary-non-monotonic-or-invalid"
+      : `word-boundary-missing-blocks:${wbBlockCoverage.map((v, i) => (!v ? `s${i}` : "")).filter(Boolean).slice(0, 8).join(",")}`;
 
     const diagnostics = buildAzureServerDiagnostics({
       text,
@@ -493,11 +678,19 @@ async function azureSynthesizeArtifact(text, voiceName, meta = {}) {
       bookmarkOffsets,
       voiceName: voice,
       meta,
-      sentenceMarks,
-      validationReason: "complete",
+      validationReason: "azure-incomplete-provider-marks",
+      wordBoundaryRawCount: wordBoundaryRaw.length,
+      wordBoundaryDedupedCount: wbDeduped.length,
+      wordBoundaryBoundaryTypeDistribution: wbTypeCounts,
+      wordBoundaryMappedMarkCount: null,
+      wordBoundaryFinalBlockCovered: wbFinalBlockCovered,
+      wordBoundaryAllBlocksCovered: wbAllBlocksCovered,
+      selectedTimingSource: null,
+      timingSourceRejectionReason: rejectReason,
     });
-
-    return { audioBuf, sentenceMarks, diagnostics };
+    logAzureServerDiagnostics("[ai-tts] incomplete Azure provider marks (bookmark+wordBoundary)", diagnostics);
+    // Do not cache partial provider data as precise S3 sidecar truth.
+    throw makeAzureBookmarkError(diagnostics);
   } finally {
     try { synthesizer?.close(); } catch (_) {}
   }
@@ -604,7 +797,10 @@ export default async function handler(req, res) {
     const identity = JSON.stringify({ artifactVersion, sentenceSplitterVersion, provider: policy.provider, voiceId: policy.voiceId, text });
     const hash = sha256Hex(identity);
     const objectKey = `${prefix}${hash}.mp3`;
-    const marksKey = `${prefix}${hash}.sentence.json`;
+    const bookmarkMarksKey = `${prefix}${hash}${TTS_BOOKMARK_MARKS_KEY_SUFFIX}`;
+    const wordBoundaryMarksKey = `${prefix}${hash}${TTS_WB_MARKS_KEY_SUFFIX}`;
+    let marksKey = bookmarkMarksKey;
+    let marksTimingSource = null;
 
     const s3 = new S3Client({ region: awsRegion });
 
@@ -621,19 +817,34 @@ export default async function handler(req, res) {
 
     const shouldMaintainTimedMarks = policy.provider === "azure" || wantSentenceMarks;
     let marksCacheHit = false;
-    if (!nocache) {
-      try {
-        await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: marksKey }));
-        marksCacheHit = true;
-      } catch (_) {
-        marksCacheHit = false;
-      }
-    }
-    if (policy.provider === "azure" && marksCacheHit) {
-      const cachedAzureMarks = await readJsonS3Object(s3, bucket, marksKey, null);
-      if (!isValidAzureSentenceMarks(text, cachedAzureMarks)) {
-        await deleteS3ObjectQuietly(s3, bucket, marksKey);
-        marksCacheHit = false;
+    if (!nocache && shouldMaintainTimedMarks) {
+      if (policy.provider === "azure") {
+        const azureMarksCandidates = [
+          { key: bookmarkMarksKey, timingSource: TTS_BOOKMARK_MARKS_TIMING_SOURCE },
+          { key: wordBoundaryMarksKey, timingSource: TTS_WB_MARKS_TIMING_SOURCE },
+        ];
+        for (const candidate of azureMarksCandidates) {
+          try {
+            await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: candidate.key }));
+          } catch (_) {
+            continue;
+          }
+          const cachedAzureMarks = await readJsonS3Object(s3, bucket, candidate.key, null);
+          if (isValidAzureSentenceMarks(text, cachedAzureMarks)) {
+            marksKey = candidate.key;
+            marksTimingSource = candidate.timingSource;
+            marksCacheHit = true;
+            break;
+          }
+          await deleteS3ObjectQuietly(s3, bucket, candidate.key);
+        }
+      } else {
+        try {
+          await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: marksKey }));
+          marksCacheHit = true;
+        } catch (_) {
+          marksCacheHit = false;
+        }
       }
     }
     const marksCacheHitInitial = marksCacheHit;
@@ -666,8 +877,11 @@ export default async function handler(req, res) {
           });
         } catch (err) {
           if (isIncompleteAzureBookmarkError(err)) {
-            await deleteS3ObjectQuietly(s3, bucket, marksKey);
+            await deleteS3ObjectQuietly(s3, bucket, bookmarkMarksKey);
+            await deleteS3ObjectQuietly(s3, bucket, wordBoundaryMarksKey);
             marksCacheHit = false;
+            marksTimingSource = null;
+            marksKey = bookmarkMarksKey;
             marksCacheStatus = "miss";
             if (err?.ttsDiagnostics) {
               err.ttsDiagnostics.marksCacheStatus = marksCacheStatus;
@@ -681,6 +895,8 @@ export default async function handler(req, res) {
           throw err;
         }
         ttsDiagnostics = artifact.diagnostics || null;
+        marksTimingSource = artifact.timingSource || null;
+        marksKey = marksTimingSource === TTS_WB_MARKS_TIMING_SOURCE ? wordBoundaryMarksKey : bookmarkMarksKey;
         await s3.send(new PutObjectCommand({
           Bucket: bucket,
           Key: objectKey,
@@ -704,6 +920,8 @@ export default async function handler(req, res) {
           ttsDiagnostics.marksCacheStatus = marksCacheStatus;
           ttsDiagnostics.audioArtifactHash = hash;
           ttsDiagnostics.marksArtifactHash = hash;
+          ttsDiagnostics.selectedTimingSource = marksTimingSource;
+          ttsDiagnostics.marksTimingSource = marksTimingSource;
           ttsDiagnostics.sidecarIdentitySource = "expected-from-current-cache-key";
           ttsDiagnostics.sidecarMetadataRead = false;
           ttsDiagnostics.expectedSidecarTextHash = ttsDiagnostics.backendTextHash;
@@ -769,10 +987,12 @@ export default async function handler(req, res) {
           audioArtifactHash: cacheHit || audioCacheHitInitial ? hash : null,
           marksArtifactHash: marksCacheHit || marksCacheHitInitial ? hash : null,
           sidecarAvailable: marksCacheHit || marksCacheHitInitial || serverMarksValid,
+          marksTimingSource,
           bookmarkReachedSource: (marksCacheHit || marksCacheHitInitial) ? "not-invoked-cache-sidecar" : "not-invoked-no-sidecar",
         },
         sentenceMarks,
         validationReason: serverMarksValid ? "complete" : (wantSentenceMarks ? "marks-unavailable-or-invalid" : "marks-not-requested"),
+        selectedTimingSource: serverMarksValid ? marksTimingSource : null,
       });
     }
 
@@ -796,6 +1016,7 @@ export default async function handler(req, res) {
       audioCacheStatus,
       marksCacheStatus,
       marksProvenance,
+      marksTimingSource: preciseSeekCapable ? marksTimingSource : null,
     });
 
     const payload = {
@@ -815,6 +1036,8 @@ export default async function handler(req, res) {
         providerResolved: policy.provider,
         voiceId: policy.voiceId,
         objectKey,
+        marksKey,
+        marksTimingSource,
         textLength: text.length,
         cacheHit,
         sentenceMarksMode: policy.sentenceMarksMode,
