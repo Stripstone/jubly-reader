@@ -41,9 +41,8 @@ function sha256Hex(s) {
   return crypto.createHash("sha256").update(String(s || ""), "utf8").digest("hex");
 }
 
-const TTS_ARTIFACT_VERSION = "v4-s3-sidecar-sentence-marks-final-tail-break";
-const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-preserve-trailing-text-v1";
-const AZURE_FINAL_BOOKMARK_TAIL_SSML = '<break time="650ms"/>';
+const TTS_ARTIFACT_VERSION = "v4-s3-sidecar-sentence-marks-protected-planning";
+const TTS_SENTENCE_SPLITTER_VERSION = "sentence-splitter-protect-email-domain-abbrev-v2";
 
 function toSafePrefix(prefix) {
   let p = String(prefix || "").trim();
@@ -92,18 +91,32 @@ function escapeXml(str) {
 
 function splitIntoSentenceRanges(text) {
   const source = String(text || "");
-  const sentenceRegex = /[^.!?]*[.!?]+["']?\s*/g;
+  if (!source) return [{ start: 0, end: 0 }];
+
+  const protectedPunctuation = buildAzureSentenceProtectedPunctuationMask(source);
   const ranges = [];
-  let match;
-  let lastEnd = 0;
-  while ((match = sentenceRegex.exec(source)) !== null) {
-    const end = match.index + match[0].length;
-    ranges.push({ start: match.index, end });
-    lastEnd = end;
+  let start = 0;
+  let index = 0;
+
+  while (index < source.length) {
+    const ch = source[index];
+    const isBoundary = (ch === "." || ch === "!" || ch === "?") && !protectedPunctuation[index];
+    if (!isBoundary) {
+      index += 1;
+      continue;
+    }
+
+    let end = index + 1;
+    while (end < source.length && /["')\]}]/.test(source[end])) end += 1;
+    while (end < source.length && /\s/.test(source[end])) end += 1;
+    ranges.push({ start, end });
+    start = end;
+    index = end;
   }
+
   // Preserve trailing visible text even when the page ends without terminal
   // punctuation. Form rows and labels may be final readable content.
-  if (lastEnd < source.length) ranges.push({ start: lastEnd, end: source.length });
+  if (start < source.length) ranges.push({ start, end: source.length });
   if (!ranges.length) ranges.push({ start: 0, end: source.length });
   return ranges.filter((range) => range.end > range.start);
 }
@@ -114,6 +127,42 @@ function jsIndexToUtf8ByteOffset(str, jsIndex) {
 
 function bookmarkAudioOffsetMs(audioOffsetTicks) {
   return Math.max(0, Number((Number(audioOffsetTicks || 0) + 5000) / 10000) || 0);
+}
+
+function markProtectedSentencePunctuation(mask, source, regex) {
+  regex.lastIndex = 0;
+  let match;
+  while ((match = regex.exec(source)) !== null) {
+    const value = String(match[0] || "");
+    if (!value) {
+      regex.lastIndex += 1;
+      continue;
+    }
+    const start = match.index;
+    for (let i = start; i < start + value.length; i += 1) {
+      const ch = source[i];
+      if (ch === "." || ch === "!" || ch === "?") mask[i] = true;
+    }
+  }
+}
+
+function buildAzureSentenceProtectedPunctuationMask(source) {
+  const text = String(source || "");
+  const mask = new Array(text.length).fill(false);
+  const protectedPatterns = [
+    /https?:\/\/\S+/gi,
+    /www\.\S+/gi,
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
+    /\b(?:[A-Z0-9-]+\.)+[A-Z]{2,}\b/gi,
+    /\b\d+(?:\.\d+)+\b/g,
+    /\b[ap]\.m\./gi,
+    /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|Mt|vs|etc)\./g,
+    /\b(?:e\.g|i\.e)\./gi,
+    /\b(?:U\.S|U\.K)\./g,
+    /\b(?:[A-Z]\.){2,}/g,
+  ];
+  protectedPatterns.forEach((pattern) => markProtectedSentencePunctuation(mask, text, pattern));
+  return mask;
 }
 
 function delay(ms) {
@@ -289,15 +338,10 @@ function buildAzureSsmlSentence(entry) {
 
 function buildAzureSsml(text, voiceName, sentencePlan) {
   const source = String(text || "");
-  const hasSentencePlan = Array.isArray(sentencePlan) && sentencePlan.length;
-  const body = hasSentencePlan
+  const body = Array.isArray(sentencePlan) && sentencePlan.length
     ? sentencePlan.map((entry) => buildAzureSsmlSentence(entry)).join("")
     : escapeXml(source);
-  // Azure can drop the final bookmarkReached event when synthesis ends
-  // immediately after the last real sentence. Add non-runtime tail room after
-  // the final sentence without adding a sentence mark or movement unit.
-  const tail = hasSentencePlan ? AZURE_FINAL_BOOKMARK_TAIL_SSML : "";
-  return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voiceName}"><prosody rate="0.95">${body}${tail}</prosody></voice></speak>`;
+  return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="${voiceName}"><prosody rate="0.95">${body}</prosody></voice></speak>`;
 }
 function isIncompleteAzureBookmarkError(err) {
   return String(err?.message || err || "").includes("Azure synthesis returned incomplete bookmark offsets");
