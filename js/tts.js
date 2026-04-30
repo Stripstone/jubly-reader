@@ -603,6 +603,27 @@ function ttsWindowSplitSentences(text) {
   if (lastEnd < src.length) results.push(src.slice(lastEnd));
   return results.filter(s => s.trim().length > 0);
 }
+function ttsUtf8ByteLength(text) {
+  const value = String(text || '');
+  try { if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(value).length; } catch (_) {}
+  try { return unescape(encodeURIComponent(value)).length; } catch (_) { return value.length; }
+}
+
+function ttsShiftSentenceMarksByBytes(marks, byteOffset) {
+  const offset = Math.max(0, Number(byteOffset || 0) || 0);
+  if (!Array.isArray(marks) || !marks.length) return [];
+  return marks.map(mark => {
+    const start = Number(mark?.start);
+    const end = Number(mark?.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+    return {
+      ...mark,
+      start: start + offset,
+      end: end + offset,
+      time: Number(mark?.time) || 0,
+    };
+  }).filter(Boolean);
+}
 
 function ttsDiagPush(event, data = {}) {
   const entry = { seq: ++TTS_DEBUG.seq, at: new Date().toISOString(), event, data };
@@ -3195,6 +3216,117 @@ async function cloudFetchWithRetry(text, opts, { maxAttempts = 3, sessionId, get
   throw lastErr;
 }
 
+async function ttsContinueWindowPhase1AfterPromotionRejection({ key, sessionId, pageText, chunkAText, reason = '', error = null, result = null } = {}) {
+  if (TTS_STATE.activeSessionId !== sessionId || String(TTS_STATE.activeKey || '') !== String(key || '')) return false;
+  const fullText = String(pageText || '');
+  const sentences = ttsWindowSplitSentences(fullText);
+  const chunkCount = Math.max(0, Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0) || 0);
+  const pendingSkip = Number.isFinite(Number(TTS_CLOUD_WINDOW.pendingSkipBlock)) && Number(TTS_CLOUD_WINDOW.pendingSkipBlock) >= 0
+    ? Number(TTS_CLOUD_WINDOW.pendingSkipBlock) : -1;
+  const continuationStartSentence = pendingSkip >= 0 ? Math.max(chunkCount, pendingSkip) : chunkCount;
+  let prefixText = continuationStartSentence > 0 ? sentences.slice(0, continuationStartSentence).join('') : '';
+  if (!prefixText && chunkAText && continuationStartSentence <= chunkCount) prefixText = String(chunkAText || '');
+  if (!prefixText && Number(TTS_CLOUD_WINDOW.charsPhase1 || 0) > 0 && continuationStartSentence <= chunkCount) prefixText = fullText.slice(0, Number(TTS_CLOUD_WINDOW.charsPhase1 || 0));
+  const remainderText = fullText.slice(prefixText.length);
+  const remainderChars = remainderText.trim().length;
+
+  ttsDiagPush('window-promotion-rejected-nonfatal', {
+    sessionId,
+    key,
+    reason,
+    error: error ? String(error?.message || error) : null,
+    returnedMarksCount: Array.isArray(result?.sentenceMarks) ? result.sentenceMarks.length : 0,
+    chunkASentenceCount: chunkCount,
+    pendingSkipBlock: pendingSkip,
+    continuationStartSentence,
+    remainderChars,
+    ...getPromotionResultDiagnostics(result, reason || 'promotion-rejected'),
+  });
+
+  clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
+
+  if (!remainderChars) {
+    clearTtsCloudWindow();
+    return true;
+  }
+
+  const prefixByteLength = ttsUtf8ByteLength(prefixText);
+  TTS_CLOUD_WINDOW.pendingSkipBlock = -1;
+  TTS_CLOUD_WINDOW.pendingSkipSettling = false;
+  clearTtsCloudWindow();
+
+  let continuation = null;
+  try {
+    continuation = await cloudFetchWithRetry(
+      remainderText,
+      { sentenceMarks: true, requestMode: 'block-window' },
+      { maxAttempts: 3, sessionId, getSessionId: () => TTS_STATE.activeSessionId }
+    );
+  } catch (continuationErr) {
+    ttsDiagPush('window-promotion-rejected-phase1-continuation-failed', {
+      sessionId,
+      key,
+      reason,
+      error: String(continuationErr?.message || continuationErr),
+    });
+    ttsClearSentenceHighlight();
+    return false;
+  }
+
+  if (!continuation || TTS_STATE.activeSessionId !== sessionId || String(TTS_STATE.activeKey || '') !== String(key || '')) return false;
+
+  const continuationMarks = ttsShiftSentenceMarksByBytes(continuation.sentenceMarks, prefixByteLength);
+  applyCloudCapabilityForRuntime({ key, sessionId, capability: continuation.capability, sentenceMarks: continuationMarks });
+  if (continuationMarks.length) {
+    ttsMaybePrepareSentenceHighlight(key, fullText, continuationMarks);
+    TTS_STATE.activeBlockIndex = 0;
+    try { ttsHighlightBlock(0); } catch (_) {}
+  } else {
+    ttsClearSentenceHighlight();
+  }
+
+  ttsDiagPush('window-promotion-rejected-phase1-continuation', {
+    sessionId,
+    key,
+    reason,
+    requestMode: 'block-window',
+    remainderChars: remainderText.length,
+    prefixByteLength,
+    pendingSkipBlock: pendingSkip,
+    continuationStartSentence,
+    returnedMarksCount: Array.isArray(continuation.sentenceMarks) ? continuation.sentenceMarks.length : 0,
+    shiftedMarksCount: continuationMarks.length,
+    promotionApplied: !!TTS_CLOUD_WINDOW.promotionApplied,
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      const audio = TTS_AUDIO_ELEMENT;
+      try { audio.loop = false; audio.pause(); } catch (_) {}
+      TTS_STATE.audio = audio;
+      try { audio.volume = Math.max(0, Math.min(1, Number(TTS_STATE.volume ?? 1))); } catch (_) {}
+      try { audio.defaultPlaybackRate = Number(TTS_STATE.rate || 1); audio.playbackRate = Number(TTS_STATE.rate || 1); } catch (_) {}
+      audio.onended = () => { ttsClearSentenceHighlight(); resolve(); };
+      audio.onerror = () => reject(new Error('Audio playback failed'));
+      audio.src = continuation.url;
+      audio.play().then(() => {
+        clearTtsStartupBanner();
+        ttsStartHighlightLoop(audio);
+      }).catch(reject);
+    });
+  } catch (playErr) {
+    ttsDiagPush('window-promotion-rejected-phase1-continuation-play-failed', {
+      sessionId,
+      key,
+      error: String(playErr?.message || playErr),
+    });
+    ttsClearSentenceHighlight();
+    return false;
+  }
+
+  return TTS_STATE.activeSessionId === sessionId;
+}
+
 // ─── Cloud synthesis window — promotion functions ─────────────────────────────
 //
 // _ttsWindowTriggerPromotion: called from the highlight loop when activeBlockIndex
@@ -3310,9 +3442,8 @@ function _ttsWindowTriggerPromotion(signal) {
       error: String(err?.message || err),
       ...getPromotionResultDiagnostics(err, 'promotion-fetch-failed'),
     });
-    // Promotion failed. chunk A will still play to its natural end.
-    // The post-loop handoff will re-await the promise and re-throw, which
-    // propagates into the outer catch of ttsSpeakQueue.
+    // Promotion failed. chunk A will still play to its natural end; the
+    // Case B handoff contains the rejection and keeps Phase 1 page service alive.
   });
 }
 
@@ -3722,7 +3853,21 @@ async function ttsSpeakQueue(key, parts) {
             });
           }
 
-          const fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
+          let fullResult = null;
+          try {
+            fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
+          } catch (promotionErr) {
+            const continued = await ttsContinueWindowPhase1AfterPromotionRejection({
+              key, sessionId, pageText, chunkAText,
+              reason: 'promotion-fetch-rejected',
+              error: promotionErr,
+            });
+            if (continued) continue;
+            TTS_STATE.activeKey = null;
+            ttsSetButtonActive(key, false);
+            ttsSetHintButton(key, false);
+            return;
+          }
           if (!fullResult || TTS_STATE.activeSessionId !== sessionId) {
             clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
             return;
@@ -3761,8 +3906,16 @@ async function ttsSpeakQueue(key, parts) {
               phase: 'case-b-handoff',
               ttsCloudMode: 'stale-phase1-rejected',
             });
-            clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
-            throw new Error('stale-phase1-promotion-result');
+            const continued = await ttsContinueWindowPhase1AfterPromotionRejection({
+              key, sessionId, pageText, chunkAText,
+              reason: 'stale-phase1-promotion-result',
+              result: fullResult,
+            });
+            if (continued) continue;
+            TTS_STATE.activeKey = null;
+            ttsSetButtonActive(key, false);
+            ttsSetHintButton(key, false);
+            return;
           }
 
           applyCloudCapabilityForRuntime({ key, sessionId, capability: fullResult.capability, sentenceMarks: fullResult.sentenceMarks });
