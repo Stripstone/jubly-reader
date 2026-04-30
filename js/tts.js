@@ -530,70 +530,6 @@ function clearTtsCloudWindow() {
   TTS_CLOUD_WINDOW.pendingSkipSettling = false;
 }
 
-function settleRejectedWindowPromotionAsIdle({ sessionId, key, reason, error, result, returnedMarksCount, chunkASentenceCount } = {}) {
-  if (TTS_STATE.activeSessionId !== sessionId || String(TTS_STATE.activeKey || '') !== String(key || '')) return false;
-
-  const before = {
-    playback: getPlaybackStatus(),
-    session: ttsSessionSnapshot(),
-  };
-  const appliedBeforeClear = !!TTS_CLOUD_WINDOW.promotionApplied;
-  const activeRequestId = Number(TTS_STATE.cloudRestartRequestId || 0);
-  const marksCount = Number.isFinite(Number(returnedMarksCount))
-    ? Number(returnedMarksCount)
-    : (result && Array.isArray(result.sentenceMarks) ? result.sentenceMarks.length : 0);
-  const chunkCount = Number.isFinite(Number(chunkASentenceCount))
-    ? Number(chunkASentenceCount)
-    : Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0);
-
-  // Failed promotion is an optional-upgrade outcome, not a new playback owner.
-  // Leave the page idle/retryable so existing Play / Read page / restart seams own
-  // the next attempt. Do not synthesize additional audio or mark the page complete.
-  clearCloudRestartTransition({ invalidateRequest: false, unmute: true, reason: 'promotion-rejected-nonfatal' });
-  clearPendingCloudSeek();
-  try { if (TTS_STATE.audio) TTS_STATE.audio.pause(); } catch (_) {}
-  try { TTS_AUDIO_ELEMENT.removeAttribute('src'); TTS_AUDIO_ELEMENT.load(); } catch (_) {}
-  TTS_STATE.audio = null;
-  try { ttsClearSentenceHighlight(); } catch (_) {}
-  try { ttsSetButtonActive(key, false); } catch (_) {}
-  try { ttsSetHintButton(key, false); } catch (_) {}
-  TTS_STATE.activeKey = null;
-  TTS_STATE.activeBlockIndex = -1;
-  TTS_STATE.pausedBlockIndex = -1;
-  TTS_STATE.pausedPageKey = null;
-  TTS_STATE.browserSentenceRanges = null;
-  TTS_STATE.browserSpeakFromBlock = null;
-  TTS_STATE.browserPaused = false;
-  resetBrowserRestartOwnership();
-  TTS_STATE.browserIntentionalCancelUntil = 0;
-  TTS_STATE.browserIntentionalCancelReason = null;
-  TTS_STATE.browserIntentionalCancelMeta = null;
-  clearTtsCloudWindow();
-  clearTtsStartupBanner();
-
-  ttsDiagPush('window-promotion-rejected-nonfatal', {
-    sessionId,
-    key,
-    reason: String(reason || 'promotion-rejected'),
-    error: error ? String(error?.message || error) : null,
-    phase: 'case-b-handoff',
-    promotionApplied: false,
-    promotionAppliedBeforeClear: appliedBeforeClear,
-    returnedMarksCount: marksCount,
-    chunkASentenceCount: chunkCount,
-    cloudRestartRequestId: activeRequestId,
-    outcome: 'idle-retryable',
-    retryOwner: 'existing-play-read-page-restart-controls',
-    after: {
-      playback: getPlaybackStatus(),
-      session: ttsSessionSnapshot(),
-      controls: getPlaybackControlEligibility(),
-    },
-    before,
-  });
-  return true;
-}
-
 // Split page text into sentence strings preserving trailing whitespace.
 // Mirrors server-side splitIntoSentenceRanges but returns strings not ranges.
 function ttsWindowRecordForwardSkipIntent(reason, context = {}) {
@@ -3323,8 +3259,8 @@ function _ttsWindowTriggerPromotion(signal) {
         ttsCloudMode: 'stale-phase1-rejected',
       });
       // Leave the window state intact so the post-chunk-A handoff can see the
-      // rejected promotion and settle it as a nonfatal optional-upgrade failure
-      // without claiming Phase 2 success.
+      // rejected promotion and fail through the normal cleanup path instead of
+      // returning from ttsSpeakQueue with activeKey/audio but no live marks.
       return;
     }
 
@@ -3374,9 +3310,9 @@ function _ttsWindowTriggerPromotion(signal) {
       error: String(err?.message || err),
       ...getPromotionResultDiagnostics(err, 'promotion-fetch-failed'),
     });
-    // Promotion failed. chunk A will still play to its natural end; the
-    // post-loop handoff re-awaits this promise and settles the failed optional
-    // upgrade into the existing idle/retry seam.
+    // Promotion failed. chunk A will still play to its natural end.
+    // The post-loop handoff will re-await the promise and re-throw, which
+    // propagates into the outer catch of ttsSpeakQueue.
   });
 }
 
@@ -3786,20 +3722,7 @@ async function ttsSpeakQueue(key, parts) {
             });
           }
 
-          let fullResult = null;
-          try {
-            fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
-          } catch (err) {
-            settleRejectedWindowPromotionAsIdle({
-              sessionId,
-              key,
-              reason: 'promotion-fetch-rejected',
-              error: err,
-              returnedMarksCount: 0,
-              chunkASentenceCount: TTS_CLOUD_WINDOW.chunkASentenceCount,
-            });
-            return;
-          }
+          const fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
           if (!fullResult || TTS_STATE.activeSessionId !== sessionId) {
             clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
             return;
@@ -3838,15 +3761,8 @@ async function ttsSpeakQueue(key, parts) {
               phase: 'case-b-handoff',
               ttsCloudMode: 'stale-phase1-rejected',
             });
-            settleRejectedWindowPromotionAsIdle({
-              sessionId,
-              key,
-              reason: 'stale-phase1-promotion-result',
-              result: fullResult,
-              returnedMarksCount: _caseBMarkCount,
-              chunkASentenceCount: _caseBChunkACount,
-            });
-            return;
+            clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
+            throw new Error('stale-phase1-promotion-result');
           }
 
           applyCloudCapabilityForRuntime({ key, sessionId, capability: fullResult.capability, sentenceMarks: fullResult.sentenceMarks });
