@@ -4,7 +4,7 @@ This document protects runtime-tested Jubly Reader behavior from regression. It 
 
 Status: active protection ledger.
 
-Last major runtime evidence date: 2026-04-20.
+Last major runtime evidence date: 2026-04-30.
 
 
 > **Placement note:** This file is written to live at `docs/RUNTIME_PROTECTION_LEDGER.md`. Links below are relative to the `docs/` folder in the accepted target artifact.
@@ -88,7 +88,7 @@ Every future patch or acceptance handoff must include:
 
 ### Shell / presentation owner
 
-The shell may own presentation, routing display, modal display, public CTA surfaces, visual layout, and user-facing staged flow. For signed-in dashboard/library release, shell may own the release transaction: hold refresh/login behind boot/settlement, release direct final state when owner truth resolves quickly, or release neutral pending with readable duration and empty grace before final empty/import guidance. Shell still does not own library/import truth.
+The shell may own presentation, routing display, modal display, public CTA surfaces, visual layout, and user-facing staged flow.
 
 The shell must not own:
 
@@ -568,6 +568,78 @@ Previously observed failures that must not return:
 - highlight rollback during promotion,
 - alternating fail/pass same-page replay after promotion.
 
+### Azure provider-timed mark authority and vendor protection
+
+Runtime-confirmed behavior as of 2026-04-30:
+
+The forwarded/email-shaped Azure full-page case promoted successfully when `bookmarkReached` missed the final bookmark but Azure `wordBoundary` provider events covered the existing runtime block plan. Speech and highlight landed together. Warm-cache replay reused the stored sidecar marks.
+
+Protected evidence from the accepted run:
+
+- Azure `bookmarkReached` returned incomplete full-page bookmark offsets on the known failing page, including missing final bookmark `s20`.
+- Azure `wordBoundary` produced provider-timed coverage for all planned runtime blocks.
+- `selectedTimingSource = azure-word-boundary`.
+- returned marks matched the existing sentence/block plan length.
+- `serverMarksValidationPassed = true`.
+- `preciseSeek.available = true`.
+- `marks.includedInResponse = true`.
+- S3 sidecar cache hit reused the provider-derived marks on a warm replay.
+- runtime speech/highlight sync was user-confirmed clean.
+
+Accepted architecture:
+
+1. Azure remains the cloud TTS vendor for this path.
+2. The server owns provider timing capture and mark validation in `server/lib/ai-tts.js`.
+3. Runtime owns playback, promotion consumption, seek, skip, and highlight behavior in `js/tts.js`.
+4. S3 sidecar stores provider-derived timing marks; it is not an estimating authority.
+5. Full-page Phase 2 promotion succeeds only with full-page audio plus complete provider-timed marks for the existing runtime sentence/block plan.
+6. Runtime must receive one normal, runtime-compatible mark shape after the server selects the validated provider timing source.
+
+Valid Phase 2 timing-source priority:
+
+1. Azure `bookmarkReached` marks, if complete.
+2. Else Azure `wordBoundary`-derived marks, if complete and mapped to the existing sentence/block plan.
+3. Else reject Phase 2.
+
+Protected successful wordBoundary labels:
+
+- `marksProvenance = s3-sidecar`
+- `marksTimingSource = azure-word-boundary`
+- `marksPrecision = provider-timed`
+- `providerPreciseMarks = true`
+- `preciseSeek = true`
+
+These labels may be used only when provider-derived coverage is complete.
+
+Forbidden regressions:
+
+1. Do not replace Azure TTS or the accepted Azure provider-timed mark path without explicit architecture approval and equal or stronger runtime proof.
+2. Do not remove `wordBoundary` as the accepted fallback provider-timed mark source for incomplete `bookmarkReached` events.
+3. Do not convert S3 sidecar marks into server-planner-estimated, runtime-estimated, weighted-duration, or approximate timing while advertising successful Phase 2.
+4. Do not set `providerPreciseMarks=true`, `preciseSeek=true`, or `marksPrecision=provider-timed` unless every runtime block has validated provider-derived timing.
+5. Do not relax incomplete `bookmarkReached` validation to make missing bookmarks pass.
+6. Do not let runtime remap, invent, interpolate, or offset provider marks.
+7. Do not introduce a new playback owner, tail synthesis path, remaining-page request, or `phase1-continuation` path to work around provider timing.
+8. Do not collapse bookmark-derived and wordBoundary-derived sidecars into a cache identity that can confuse timing sources.
+9. Do not treat cached audio alone as Phase 2 success; audio and provider marks are separate truths.
+10. Do not use browser voices or alternate vendors as a silent substitute for signed-in Azure/cloud TTS.
+
+Required review gate for any future TTS vendor/mark change:
+
+A future patch that touches cloud TTS vendor selection, provider mark capture, S3 sidecar identity, Phase 2 mark validation, or runtime promotion must prove all of the following before acceptance:
+
+- the same forwarded/email-shaped page still gets complete provider-timed marks,
+- speech and highlight remain synchronized,
+- warm-cache replay reuses matching provider-derived sidecar marks,
+- no estimated marks are advertised as provider-timed,
+- runtime playback ownership remains in `js/tts.js`,
+- provider timing ownership remains in `server/lib/ai-tts.js`,
+- skip/highlight target selection is unchanged unless separately authorized.
+
+Known accepted caveat:
+
+Cold-cache first promotion may pause while Azure full-page synthesis, provider event capture, and S3 sidecar write complete. This is accepted as latency debt, not a mark-authority defect. Future work may address this through cold promotion prewarm or latency UX only; it must not reopen vendor replacement, estimated marks, bookmark coaxing, or runtime continuation.
+
 ### End-of-chapter protection
 
 Protected behavior:
@@ -815,11 +887,10 @@ Use this as a risk-adjusted checklist. Do not run the entire matrix for every ti
 ### Always-worth-checking basics
 
 1. Cold boot settles into the correct public/signed-in surface without obvious wrong-state flash.
-2. Signed-in refresh/login dashboard release never first-paints as importer-neutral/fake-empty; it releases direct final truth when quick, or neutral pending with readable duration before final state.
-3. Public sample reading opens without account wall.
-4. Exiting sample reading lands in expected public shell.
-5. Settings opens and closes normally.
-6. Signed-out/public mode does not show stale signed-in entitlement, appearance, Explorer, or cloud voice state.
+2. Public sample reading opens without account wall.
+3. Exiting sample reading lands in expected public shell.
+4. Settings opens and closes normally.
+5. Signed-out/public mode does not show stale signed-in entitlement, appearance, Explorer, or cloud voice state.
 
 ### Reading/TTS checks when runtime or TTS was touched
 
