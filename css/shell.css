@@ -2527,6 +2527,7 @@ body.reading-active #rc-interaction-banner {
 #annotations-widget .annotations-saved { display: none; margin-top: 12px; padding: 12px; border-radius: 16px; background: #fff3c4; border: 1px solid rgba(150,110,30,0.22); font-size: 13px; line-height: 1.45; color: #3f321c; }
 #annotations-widget .annotations-saved.active { display: block; }
 #annotations-widget .annotations-saved strong { display: block; margin-bottom: 4px; }
+#annotations-widget .annotations-source-meta { display: block; margin-top: 6px; color: var(--annotation-muted); font-size: 11px; font-style: normal; }
 #annotations-widget .annotations-float { position: fixed; right: 24px; bottom: 102px; display: flex; flex-direction: column; align-items: flex-end; pointer-events: auto; }
 #annotations-widget .annotations-panel { display: none; width: min(340px, calc(100vw - 32px)); max-height: min(460px, calc(100vh - 178px)); margin-bottom: 10px; padding: 12px; border: 1px solid rgba(15,23,42,0.12); border-radius: 18px; background: #fff; box-shadow: 0 18px 46px rgba(15,23,42,0.20); overflow: hidden; }
 #annotations-widget .annotations-panel.open { display: block; }
@@ -2570,10 +2571,6 @@ body.annotations-utility-active #jubly-support-widget .launcher-row { display: n
 
 
 /* Annotation jump emphasis reuses the existing TTS highlight color language. */
-#reading-mode .annotations-jump-emphasis {
-  animation: annotationsJumpHighlightFade 1600ms ease-out 1;
-  border-radius: 6px;
-}
 @keyframes annotationsJumpHighlightFade {
   0% { background-color: rgba(255,230,120,0); box-shadow: 0 0 0 0 rgba(255,230,120,0); }
   18% { background-color: rgba(255,230,120,0.56); box-shadow: 0 0 0 3px rgba(255,230,120,0.22); }

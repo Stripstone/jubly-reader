@@ -39,6 +39,21 @@
   function saveLocalAnnotations(rows) { try { localStorage.setItem(LOCAL_KEY, JSON.stringify(Array.isArray(rows) ? rows : [])); } catch (_) {} }
   function getSessionToken() { try { return window.rcAuth && typeof window.rcAuth.getAccessToken === 'function' ? window.rcAuth.getAccessToken() : ''; } catch (_) { return ''; } }
   function getReadingTarget() { try { return Object.assign({}, window.__rcReadingTarget || {}); } catch (_) { return {}; } }
+  function getReadingContext() {
+    const target = getReadingTarget();
+    try {
+      if (typeof window.getReadingTargetContext === 'function') {
+        return Object.assign({}, target, window.getReadingTargetContext() || {});
+      }
+    } catch (_) {}
+    return target;
+  }
+  function sameBook(row, ctx = getReadingContext()) {
+    if (!row) return false;
+    const activeBookId = String(ctx.bookId || '');
+    const activeSourceType = String(ctx.sourceType || '');
+    return !!activeBookId && String(row.book_id || '') === activeBookId && String(row.source_type || '') === activeSourceType;
+  }
   function getPlayback() { try { return typeof window.getPlaybackStatus === 'function' ? window.getPlaybackStatus() : null; } catch (_) { return null; } }
   function isTtsPaused() {
     const playback = getPlayback();
@@ -67,12 +82,12 @@
   }
   function getCurrentTarget() {
     const playback = getPlayback();
-    const reading = getReadingTarget();
+    const reading = getReadingContext();
     const span = findHighlightedSpan();
     const text = String((span && span.textContent) || '').replace(/\s+/g, ' ').trim();
     const pageIndex = Number.isFinite(Number(reading.pageIndex)) && Number(reading.pageIndex) >= 0 ? Number(reading.pageIndex) : 0;
     const blockIndex = Number.isFinite(Number(playback && playback.activeBlockIndex)) ? Number(playback.activeBlockIndex) : -1;
-    if (!playback || !playback.active || !text || blockIndex < 0) return null;
+    if (!playback || !playback.active || !text || blockIndex < 0 || !String(reading.bookId || '')) return null;
     return {
       bookId: String(reading.bookId || ''),
       sourceType: String(reading.sourceType || ''),
@@ -92,9 +107,16 @@
     if (!row) return '';
     return [row.book_id || '', row.source_type || '', row.chapter_index, row.page_index, row.block_index, row.text_hash || ''].join('|');
   }
-  function liveAnnotations() { return (state.annotations || []).filter((row) => row && !row.deleted_at); }
-  function annotationForTarget(target) { const key = annotationKeyFromTarget(target); return key ? liveAnnotations().find((row) => annotationKey(row) === key) || null : null; }
-  function previewFor(row) { return row && row.type === 'flashcard' ? (row.flashcard_front || row.highlighted_text || '') : (row && (row.note_text || row.highlighted_text || '')) || ''; }
+  function allLiveAnnotations() { return (state.annotations || []).filter((row) => row && !row.deleted_at); }
+  function liveAnnotations() { const ctx = getReadingContext(); return allLiveAnnotations().filter((row) => sameBook(row, ctx)); }
+  function annotationForTarget(target) { const key = annotationKeyFromTarget(target); return key ? allLiveAnnotations().find((row) => annotationKey(row) === key) || null : null; }
+  function trimPreview(value, limit = 42) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    return text.length > limit ? `${text.slice(0, Math.max(1, limit - 1))}…` : text;
+  }
+  function previewFor(row) { return row && row.type === 'flashcard' ? (row.flashcard_front || '') : (row && (row.note_text || '')) || ''; }
+  function sourcePreviewFor(row) { return trimPreview(row && row.highlighted_text, 36); }
 
   async function syncAnnotations(action, payload) {
     const token = await Promise.resolve(getSessionToken()).catch(() => '');
@@ -138,7 +160,8 @@
     if (row.type === 'flashcard') {
       const side = state.savedFlashSides[String(row.id)] === 'back' ? 'back' : 'front';
       const text = side === 'front' ? (row.flashcard_front || '') : (row.flashcard_back || '');
-      state.els.saved.innerHTML = `<div class="annotations-flash-preview" data-saved-flash><strong>${side === 'front' ? 'Front' : 'Back'}</strong><span>${escapeHtml(text)}</span></div><div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
+      const sourcePreview = sourcePreviewFor(row);
+      state.els.saved.innerHTML = `<div class="annotations-flash-preview" data-saved-flash><strong>${side === 'front' ? 'Front' : 'Back'}</strong><span>${escapeHtml(text)}</span></div><em class="annotations-source-meta">Chapter ${Number(row.chapter_index) + 1 || 1} · Page ${Number(row.page_index) + 1 || 1}${sourcePreview ? ` · “${escapeHtml(sourcePreview)}”` : ''}</em><div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
       const preview = state.els.saved.querySelector('[data-saved-flash]');
       preview.addEventListener('click', () => {
         const nextSide = state.savedFlashSides[String(row.id)] === 'back' ? 'front' : 'back';
@@ -147,7 +170,8 @@
         preview.querySelector('span').textContent = nextSide === 'front' ? (row.flashcard_front || '') : (row.flashcard_back || '');
       });
     } else {
-      state.els.saved.innerHTML = `<strong>Note</strong>${escapeHtml(row.note_text || '')}<div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
+      const sourcePreview = sourcePreviewFor(row);
+      state.els.saved.innerHTML = `<strong>Note</strong>${escapeHtml(row.note_text || '')}<em class="annotations-source-meta">Chapter ${Number(row.chapter_index) + 1 || 1} · Page ${Number(row.page_index) + 1 || 1}${sourcePreview ? ` · “${escapeHtml(sourcePreview)}”` : ''}</em><div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
     }
     state.els.saved.classList.add('active');
   }
@@ -157,12 +181,19 @@
     const flashList = state.els.flashcardsList;
     if (!notesList || !flashList) return;
     const rows = liveAnnotations();
+    const ctx = getReadingContext();
+    const activeChapter = Number.isFinite(Number(ctx.chapterIndex)) ? Number(ctx.chapterIndex) : -1;
     const renderRows = (type) => {
       const matching = rows.filter((row) => row.type === type);
-      if (!matching.length) return '<div class="annotations-empty">No saved items here yet.</div>';
+      if (!matching.length) return '<div class="annotations-empty">No saved items for this book yet.</div>';
       return matching.slice(0, 40).map((row) => {
-        const disabled = state.deletingId && String(state.deletingId) === String(row.id) ? ' disabled' : '';
-        return `<div class="annotations-widget-item" data-annotation-id="${escapeHtml(row.id)}"><button class="annotations-jump" type="button" data-annotation-jump${state.navigationPending ? ' disabled' : ''}><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong><span>${escapeHtml(previewFor(row))}</span><em>Chapter ${Number(row.chapter_index) + 1 || 1} · Page ${Number(row.page_index) + 1 || 1}</em></button><button class="annotations-delete" type="button" data-annotation-delete${disabled}>${disabled ? 'Deleting…' : 'Delete'}</button></div>`;
+        const deleting = state.deletingId && String(state.deletingId) === String(row.id);
+        const sameChapter = Number(row.chapter_index) === activeChapter;
+        const disabled = deleting || state.navigationPending || !sameChapter;
+        const sourcePreview = sourcePreviewFor(row);
+        const location = `Chapter ${Number(row.chapter_index) + 1 || 1} · Page ${Number(row.page_index) + 1 || 1}${sourcePreview ? ` · “${escapeHtml(sourcePreview)}”` : ''}`;
+        const jumpCopy = sameChapter ? location : `${location} · Open this chapter to view`;
+        return `<div class="annotations-widget-item" data-annotation-id="${escapeHtml(row.id)}"><button class="annotations-jump" type="button" data-annotation-jump${disabled ? ' disabled' : ''}><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong><span>${escapeHtml(previewFor(row))}</span><em>${jumpCopy}</em></button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div>`;
       }).join('');
     };
     notesList.innerHTML = renderRows('note');
@@ -265,20 +296,11 @@
     return page.querySelector('.page-text') || page;
   }
 
-  function emphasizeAnnotationTarget(row) {
-    const el = findAnnotationTargetElement(row);
-    if (!el) return false;
-    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
-    el.classList.remove('annotations-jump-emphasis');
-    // Restart the existing-highlight-colored fade when the same item is clicked twice.
-    void el.offsetWidth;
-    el.classList.add('annotations-jump-emphasis');
-    setTimeout(() => { try { el.classList.remove('annotations-jump-emphasis'); } catch (_) {} }, 1800);
-    return true;
-  }
-
   async function jumpToAnnotation(row) {
     if (!row || state.navigationPending) return;
+    const ctx = getReadingContext();
+    if (!sameBook(row, ctx)) { showToast('Open that book to view this annotation.'); return; }
+    if (Number(row.chapter_index) !== Number(ctx.chapterIndex)) { showToast(`Open Chapter ${Number(row.chapter_index) + 1 || 1} to view this annotation.`); return; }
     state.navigationPending = true;
     closeWidgetPanel();
     showToast('Going to saved location…');
@@ -291,7 +313,10 @@
         if (page) page.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
       await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 160)));
-      emphasizeAnnotationTarget(row);
+      const el = findAnnotationTargetElement(row);
+      if (el) {
+        try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+      }
     } catch (_) {
       showToast('Could not jump to saved location.');
     } finally {
