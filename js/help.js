@@ -92,7 +92,12 @@
   function setOpen(open) {
     if (!open && (!s.mounted || !document.getElementById(ID))) return true;
     if (!mount()) return false;
-    if (open) rememberOpenedIfSignedIn();
+    if (open) {
+      try {
+        if (window.rcAnnotations && typeof window.rcAnnotations.closeWidget === 'function') window.rcAnnotations.closeWidget();
+      } catch (_) {}
+      rememberOpenedIfSignedIn();
+    }
     s.els.root.classList.toggle('open', !!open);
     s.els.launch.setAttribute('aria-expanded', String(!!open));
     s.els.launch.setAttribute('aria-label', open ? 'Dismiss support widget' : 'Open support widget');

@@ -511,17 +511,35 @@ async function addSession(userId, patch = {}) {
   };
 }
 
+
+async function softDeleteAnnotationsForLibraryItem(userId, item, now = new Date()) {
+  if (!item || !userId) return;
+  const stamp = now.toISOString();
+  const payload = { deleted_at: stamp, updated_at: stamp };
+  const filters = [];
+  if (item.id) filters.push(`library_item_id=eq.${encodeURIComponent(item.id)}`);
+  if (item.storage_ref) filters.push(`book_id=eq.${encodeURIComponent(item.storage_ref)}`);
+  if (!filters.length) return;
+  await Promise.all(filters.map((filter) => supabaseRest(`/rest/v1/user_annotations?user_id=eq.${encodeURIComponent(userId)}&deleted_at=is.null&${filter}`, {
+    method: 'PATCH', asService: true, headers: { Prefer: 'return=minimal' }, body: payload,
+  }).catch(() => null)));
+}
+
 async function setLibraryItemStatus(userId, storageRef, nextStatus, options = {}) {
   const item = await findLibraryItemByStorageRef(userId, storageRef, { includeDeleted: true }).catch(() => null);
   if (!item) return null;
   const now = new Date();
   if (nextStatus === 'deleted') {
-    await deleteProgressForLibraryItem(item.id).catch(() => null);
+    await Promise.all([
+      deleteProgressForLibraryItem(item.id).catch(() => null),
+      softDeleteAnnotationsForLibraryItem(userId, item, now).catch(() => null),
+    ]);
   }
   if (nextStatus === 'purge') {
     await Promise.all([
       deleteProgressForLibraryItem(item.id).catch(() => null),
       deleteBookMetricsForLibraryItem(item.id).catch(() => null),
+      softDeleteAnnotationsForLibraryItem(userId, item, now).catch(() => null),
     ]);
     await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(item.id)}&user_id=eq.${encodeURIComponent(userId)}`, {
       method: 'DELETE', asService: true,
@@ -603,6 +621,95 @@ function summarizeSessionsFromDailyStats(rows = []) {
   return { rows: [], totalSessions, dailyMinutes, weeklyMinutes, sessionsCompleted, latest: null };
 }
 
+
+function normalizeAnnotationType(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return raw === 'flashcard' ? 'flashcard' : 'note';
+}
+
+function sanitizeAnnotationRow(row = null) {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id || null,
+    user_id: row.user_id || null,
+    library_item_id: row.library_item_id || null,
+    book_id: row.book_id || null,
+    source_type: row.source_type || null,
+    annotation_type: normalizeAnnotationType(row.annotation_type || row.type),
+    note_text: row.note_text || null,
+    flashcard_front: row.flashcard_front || null,
+    flashcard_back: row.flashcard_back || null,
+    chapter_index: toInt(row.chapter_index, -1),
+    page_index: toInt(row.page_index, 0),
+    page_key: row.page_key || null,
+    block_index: toInt(row.block_index, -1),
+    highlighted_text: row.highlighted_text || null,
+    text_hash: row.text_hash || null,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    deleted_at: row.deleted_at || null,
+    type: normalizeAnnotationType(row.annotation_type || row.type),
+  };
+}
+
+function canonicalizeAnnotationPayload(userId, payload = {}) {
+  const now = new Date().toISOString();
+  const type = normalizeAnnotationType(payload.annotation_type || payload.type);
+  const highlightedText = toText(payload.highlighted_text || payload.highlightedText, null);
+  return {
+    user_id: userId,
+    library_item_id: toText(payload.library_item_id || payload.libraryItemId, null),
+    book_id: toText(payload.book_id || payload.bookId, null),
+    source_type: toText(payload.source_type || payload.sourceType, null),
+    annotation_type: type,
+    note_text: type === 'note' ? toText(payload.note_text || payload.noteText, highlightedText) : toText(payload.note_text || payload.noteText, null),
+    flashcard_front: type === 'flashcard' ? toText(payload.flashcard_front || payload.flashcardFront, highlightedText) : toText(payload.flashcard_front || payload.flashcardFront, null),
+    flashcard_back: type === 'flashcard' ? toText(payload.flashcard_back || payload.flashcardBack, null) : toText(payload.flashcard_back || payload.flashcardBack, null),
+    chapter_index: toInt(payload.chapter_index ?? payload.chapterIndex, -1),
+    page_index: Math.max(0, toInt(payload.page_index ?? payload.pageIndex, 0)),
+    page_key: toText(payload.page_key || payload.pageKey, null),
+    block_index: Math.max(-1, toInt(payload.block_index ?? payload.blockIndex, -1)),
+    highlighted_text: highlightedText,
+    text_hash: toText(payload.text_hash || payload.textHash, null),
+    deleted_at: null,
+    updated_at: now,
+  };
+}
+
+async function getAnnotationRows(userId, { includeDeleted = false, limit = 200 } = {}) {
+  const filters = [`user_id=eq.${encodeURIComponent(userId)}`];
+  if (!includeDeleted) filters.push('deleted_at=is.null');
+  const data = await supabaseRest(`/rest/v1/user_annotations?${filters.join('&')}&select=*&order=updated_at.desc&limit=${Math.max(1, toInt(limit, 200))}`, {
+    method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
+  }).catch(() => null);
+  return Array.isArray(data) ? data.map(sanitizeAnnotationRow).filter(Boolean) : [];
+}
+
+async function upsertAnnotation(userId, payload = {}) {
+  const rowId = toText(payload.id, null);
+  const base = canonicalizeAnnotationPayload(userId, payload);
+  if (rowId && !String(rowId).startsWith('local-')) {
+    const data = await supabaseRest(`/rest/v1/user_annotations?id=eq.${encodeURIComponent(rowId)}&user_id=eq.${encodeURIComponent(userId)}&select=*`, {
+      method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: base,
+    });
+    if (Array.isArray(data) && data[0]) return sanitizeAnnotationRow(data[0]);
+  }
+  const data = await supabaseRest('/rest/v1/user_annotations', {
+    method: 'POST', asService: true, headers: { Prefer: 'return=representation' }, body: base,
+  });
+  return sanitizeAnnotationRow(Array.isArray(data) && data[0] ? data[0] : base);
+}
+
+async function deleteAnnotation(userId, annotationId) {
+  const id = toText(annotationId, null);
+  if (!id) throw new Error('annotation_id is required');
+  const payload = { deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  const data = await supabaseRest(`/rest/v1/user_annotations?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*`, {
+    method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: payload,
+  });
+  return sanitizeAnnotationRow(Array.isArray(data) && data[0] ? data[0] : { id, user_id: userId, ...payload });
+}
+
 async function buildSnapshot(req, user) {
   const resolved = await getResolvedRuntimePolicyForRequest(req).catch(() => null);
   const usageDailyLimit = resolved?.policy?.usageDailyLimit ?? null;
@@ -671,6 +778,10 @@ export default async function handler(req, res) {
       const row = await getRestoreRow(auth.user.id, bookId).catch(() => null);
       return json(res, 200, { ok: true, row });
     }
+    if (scope === 'annotations') {
+      const rows = await getAnnotationRows(auth.user.id, { includeDeleted: false, limit: toInt(getParam(req, 'limit'), 200) }).catch(() => []);
+      return json(res, 200, { ok: true, rows });
+    }
     const snapshot = await buildSnapshot(req, auth.user).catch(() => null);
     return json(res, 200, { ok: true, snapshot });
   }
@@ -692,6 +803,12 @@ export default async function handler(req, res) {
           break;
         case 'record_session':
           row = await addSession(auth.user.id, body?.payload || {});
+          break;
+        case 'save_annotation':
+          row = await upsertAnnotation(auth.user.id, body?.payload || {});
+          break;
+        case 'delete_annotation':
+          row = await deleteAnnotation(auth.user.id, body?.payload?.id || body?.payload?.annotation_id || body?.payload?.annotationId);
           break;
         case 'delete_library_item': {
           const storageRef = body?.payload?.storage_ref || body?.payload?.storageRef || body?.payload?.book_id || body?.payload?.bookId;
