@@ -126,7 +126,8 @@
     state.enabled = !!enabled;
     if (options.persist !== false) writePref(state.enabled);
     document.body.classList.toggle('annotations-widget-enabled', state.enabled);
-    if (!state.enabled) { state.open = false; state.activeEditor = ''; closeWidgetPanel(); }
+    document.body.classList.toggle('annotations-utility-active', state.enabled && isReadingVisible());
+    if (!state.enabled) { state.open = false; state.activeEditor = ''; closeWidgetPanel(); document.body.classList.remove('annotations-utility-active'); }
     render();
   }
 
@@ -168,6 +169,7 @@
   function render() {
     if (!state.mounted) return;
     const visible = !!state.enabled && isReadingVisible();
+    document.body.classList.toggle('annotations-utility-active', visible);
     state.els.root.hidden = !visible;
     document.body.classList.toggle('annotations-navigation-pending', !!state.navigationPending);
     const checkbox = document.getElementById('annotationsWidgetToggle');
@@ -195,15 +197,24 @@
   }
 
   async function deleteAnnotation(row) {
-    if (!row || !row.id) return;
+    if (!row || !row.id || state.deletingId) return;
     const id = String(row.id);
     state.deletingId = id;
-    state.annotations = (state.annotations || []).filter((item) => String(item.id) !== id);
-    saveLocalAnnotations(state.annotations);
     render();
-    try { if (!id.startsWith('local-')) await syncAnnotations('delete_annotation', { id }); showToast('Deleted.'); }
-    catch (_) { showToast('Deleted locally.'); }
-    finally { state.deletingId = ''; render(); }
+    try {
+      if (!id.startsWith('local-')) {
+        await syncAnnotations('delete_annotation', { id });
+      }
+      state.annotations = (state.annotations || []).filter((item) => String(item.id) !== id);
+      saveLocalAnnotations(state.annotations);
+      state.activeEditor = '';
+      showToast('Deleted.');
+    } catch (_) {
+      showToast('Delete failed. Try again.');
+    } finally {
+      state.deletingId = '';
+      render();
+    }
   }
 
   async function saveAnnotation(type) {
@@ -317,7 +328,7 @@
     state.els = {
       root, cardRoot: root.querySelector('[data-annotation-card]'), trigger: root.querySelector('[data-annotation-trigger]'), card: root.querySelector('[data-annotation-editor]'), actions: root.querySelector('[data-annotation-actions]'), noteEditor: root.querySelector('[data-note-editor]'), flashEditor: root.querySelector('[data-flash-editor]'), noteText: root.querySelector('[data-note-text]'), noteContext: root.querySelector('[data-note-context]'), flashFront: root.querySelector('[data-flash-front]'), flashBack: root.querySelector('[data-flash-back]'), flashPreview: root.querySelector('[data-flash-preview]'), flashPreviewText: root.querySelector('[data-flash-preview-text]'), saved: root.querySelector('[data-annotation-saved]'), panel: root.querySelector('[data-widget-panel]'), notesList: root.querySelector('[data-notes-list]'), flashcardsList: root.querySelector('[data-flashcards-list]'), utilityMenu: root.querySelector('[data-utility-menu]'), launcher: root.querySelector('[data-widget-toggle]'), toast: root.querySelector('[data-annotation-toast]'),
     };
-    root.querySelector('[data-annotation-trigger]').addEventListener('click', () => { if (!isTtsPaused() || state.navigationPending) return; state.open = !state.open; state.activeEditor = ''; render(); });
+    root.querySelector('[data-annotation-trigger]').addEventListener('click', () => { if (!state.enabled || !isTtsPaused() || state.navigationPending) return; state.open = !state.open; state.activeEditor = ''; render(); });
     root.querySelector('[data-annotation-note]').addEventListener('click', () => { state.activeEditor = 'note'; state.els.noteText.value = ''; render(); setTimeout(() => { try { state.els.noteText.focus(); } catch (_) {} }, 0); });
     root.querySelector('[data-annotation-flash]').addEventListener('click', () => { const target = state.target || getCurrentTarget(); state.flashPreviewSide = 'front'; state.els.flashFront.value = target ? target.highlightedText : ''; state.els.flashBack.value = ''; state.els.flashPreviewText.textContent = state.els.flashFront.value; state.activeEditor = 'flashcard'; render(); setTimeout(() => { try { state.els.flashBack.focus(); } catch (_) {} }, 0); });
     state.els.flashPreview.addEventListener('click', () => { state.flashPreviewSide = state.flashPreviewSide === 'front' ? 'back' : 'front'; state.els.flashPreview.querySelector('strong').textContent = state.flashPreviewSide === 'front' ? 'Front' : 'Back'; state.els.flashPreviewText.textContent = state.flashPreviewSide === 'front' ? state.els.flashFront.value : state.els.flashBack.value; });

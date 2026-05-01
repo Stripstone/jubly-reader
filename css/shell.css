@@ -2558,7 +2558,10 @@ body.reading-active #rc-interaction-banner {
 #annotations-widget .annotations-toast.show { display: block; }
 body.annotations-navigation-pending #annotations-widget .annotations-trigger,
 body.annotations-navigation-pending #annotations-widget .annotations-widget-button { opacity: .68; cursor: progress; }
-body.annotations-widget-enabled #jubly-support-widget .launcher-row { display: none; }
+body.annotations-navigation-pending #reading-mode #shell-prev-btn,
+body.annotations-navigation-pending #reading-mode #shell-next-btn,
+body.annotations-navigation-pending #reading-mode #next-chapter-btn { opacity: .68; pointer-events: none; cursor: progress; }
+body.annotations-utility-active #jubly-support-widget .launcher-row { display: none; }
 @media (max-width: 560px) {
   #annotations-widget .annotations-card { left: 12px; right: 12px; bottom: 74px; width: auto; transform: none; }
   #annotations-widget .annotations-float { right: 12px; bottom: 90px; }

@@ -92,7 +92,12 @@
   function setOpen(open) {
     if (!open && (!s.mounted || !document.getElementById(ID))) return true;
     if (!mount()) return false;
-    if (open) rememberOpenedIfSignedIn();
+    if (open) {
+      try {
+        if (window.rcAnnotations && typeof window.rcAnnotations.closeWidget === 'function') window.rcAnnotations.closeWidget();
+      } catch (_) {}
+      rememberOpenedIfSignedIn();
+    }
     s.els.root.classList.toggle('open', !!open);
     s.els.launch.setAttribute('aria-expanded', String(!!open));
     s.els.launch.setAttribute('aria-label', open ? 'Dismiss support widget' : 'Open support widget');
@@ -340,7 +345,13 @@
     }
   }
 
-  async function openRoot(root) { mount(); setOpen(true); if (root) { start(); chooseType(root); } return true; }
+  async function openRoot(root) {
+    try { if (window.rcAnnotations && typeof window.rcAnnotations.closeWidget === 'function') window.rcAnnotations.closeWidget(); } catch (_) {}
+    mount();
+    setOpen(true);
+    if (root) { start(); chooseType(root); }
+    return true;
+  }
   function shutdown() { forgetOpened(); const root = document.getElementById(ID); if (root) root.remove(); s.mounted = false; s.els = {}; }
 
   window.rcHelp = {
@@ -350,7 +361,12 @@
     openBugReport: () => openRoot(ROOTS.bug),
     close: () => setOpen(false),
     dismiss,
-    toggle: () => { mount(); return setOpen(!s.els.root.classList.contains('open')); },
+    toggle: () => {
+      mount();
+      const nextOpen = !s.els.root.classList.contains('open');
+      if (nextOpen) { try { if (window.rcAnnotations && typeof window.rcAnnotations.closeWidget === 'function') window.rcAnnotations.closeWidget(); } catch (_) {} }
+      return setOpen(nextOpen);
+    },
     shutdown,
   };
 
