@@ -405,7 +405,7 @@
         </div>
         <div id="nav-user-controls" class="hidden-section flex items-center gap-3">
             <div id="nav-usage-pill" class="hidden-section flex items-center gap-1 font-bold px-3 py-1 rounded-full text-sm text-accent bg-accent-soft">
-                <span>✨</span> <span id="nav-usage-pill-value">Usage</span>
+                <span aria-hidden="true">✨</span> <span id="nav-usage-pill-value">Usage</span><span id="nav-usage-pill-label" class="nav-usage-pill-label"></span>
             </div>
             <button id="nav-profile-trigger" type="button" class="flex items-center gap-2 rounded-full px-1.5 py-1 hover:bg-slate-100 transition" onclick="showSection('profile-page')">
                 <span id="nav-user-name" class="hidden-section text-xs font-semibold text-slate-600 max-w-[120px] truncate"></span>
@@ -803,7 +803,7 @@
             <div id="profile-auth-card" class="section-card shadow-sm">
                 <!-- Mobile only: nav shortcut (sidebar hidden on small screens) -->
                 <div class="flex gap-2 mb-3 sm:hidden">
-                    <button onclick="showSection('dashboard')" class="flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-lg transition">
+                    <button onclick="showSection('dashboard')" class="mobile-library-tab flex items-center gap-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-lg transition">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
                         Library
                     </button>
