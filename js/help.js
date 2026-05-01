@@ -6,14 +6,14 @@
   const STYLE_ID = 'jubly-support-widget-style';
   const ENDPOINT = '/api/app?kind=support-submit';
 
-  const TOPICS = {
-    Feedback: ['Intro / sample reading', 'Reading experience', 'Voice / playback', 'Library / saved progress', 'Design / layout', 'Plans / value', 'Other'],
-    'Bug report': ['Landing / onboarding', 'Sample reading', 'Reading view', 'TTS / playback', 'Library / saved progress', 'Account / billing', 'Other'],
-    Question: ['Getting started', 'Reading controls', 'Voices / playback', 'Library / saved progress', 'Subscription / plans', 'Account', 'Other']
-  };
-  const BUG_TYPES = ['Visual issue', 'Button didn’t work', 'Wrong screen or wrong state', 'Playback problem', 'Progress or page issue', 'Crash / freeze', 'Something else'];
+  const ROOTS = { question: 'Ask a question', bug: 'Report a problem', feedback: 'Leave feedback' };
+  const ROOT_CHOICES = [ROOTS.question, ROOTS.bug, ROOTS.feedback];
+  const FEEDBACK_CHOICES = ['Tell us about Jubly Reader', 'I have a suggestion'];
+  const QUESTION_CHOICES = ['I found a bug', 'I have a suggestion', 'Something else'];
+  const BUG_AREAS = ['Sign up or getting started', 'Reading screen', 'Read-aloud controls', 'Library and saved books', 'Account, plan, or billing', 'Something else'];
+  const BUG_TYPES = ['Something looked wrong', 'A button didn’t work', 'I saw the wrong screen', 'Audio had a problem', 'My progress was wrong', 'Settings didn’t apply', 'The app was slow', 'The app froze or crashed', 'Something else'];
 
-  const s = { mounted: false, path: [], transcript: [], unlocked: false, screenshot: null, els: {} };
+  const s = { mounted: false, path: [], transcript: [], unlocked: false, screenshot: null, placeholder: '', els: {} };
 
   function style() {
     if (document.getElementById(STYLE_ID)) return;
@@ -28,7 +28,7 @@
 #${ID} .chips{display:flex;flex-wrap:wrap;gap:8px;align-self:flex-start;max-width:92%;margin:2px 0 4px}#${ID} .chip{border:1px solid rgba(101,72,247,.28);background:#fff;color:var(--pd);border-radius:999px;padding:9px 13px;font-size:13px;font-weight:600;cursor:pointer}#${ID} .chip:hover,#${ID} .chip:focus-visible{background:var(--ps);outline:0}
 #${ID} .nav{padding:0 16px 14px;display:flex;gap:14px;background:linear-gradient(180deg,#f5f7fc 0%,#fff 100%);border-top:1px solid rgba(219,227,240,.75)}#${ID} .link{background:none;border:0;padding:0;font-size:12px;color:var(--m);text-decoration:underline;cursor:pointer}
 #${ID} .compose-shell{padding:14px 16px 16px;background:#fff;border-top:1px solid rgba(219,227,240,.9)}#${ID} .path{display:none;margin-bottom:10px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--pd)}#${ID} .compose{border:1px solid var(--l);border-radius:18px;background:#f7f8fb;padding:10px 12px;display:flex;flex-direction:column;gap:10px}#${ID} .compose.on{background:#fff}#${ID} textarea{width:100%;min-height:56px;max-height:140px;border:0;outline:0;resize:none;background:transparent;color:var(--t);font:inherit;line-height:1.45}#${ID} textarea:disabled{color:#8e98ad;cursor:not-allowed}#${ID} .actions{display:flex;align-items:center;justify-content:space-between;gap:10px}#${ID} .attach{display:none;border:0;background:none;color:var(--m);font-size:13px;font-weight:600;cursor:pointer;padding:0}#${ID} .file-note{font-size:11px;color:var(--m);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}#${ID} .send{border:0;border-radius:12px;padding:10px 16px;font-size:13px;font-weight:700;color:#fff;background:linear-gradient(180deg,#725cff 0%,var(--p) 100%);box-shadow:0 8px 18px rgba(101,72,247,.26);cursor:pointer;opacity:.45;pointer-events:none}#${ID} .send.on{opacity:1;pointer-events:auto}
-#${ID} .launcher-row{display:flex;align-items:center;gap:12px}#${ID} .label{padding:10px 16px;border-radius:16px;background:rgba(18,23,38,.92);color:#fff;font-size:14px;font-weight:600;box-shadow:0 6px 16px rgba(18,23,38,.08)}#${ID}.open .label{opacity:0;pointer-events:none}#${ID} .launch{width:64px;height:64px;border:0;border-radius:50%;background:linear-gradient(180deg,#735cff 0%,var(--p) 100%);color:#fff;cursor:pointer;box-shadow:0 18px 36px rgba(101,72,247,.34);display:grid;place-items:center}#${ID} .launch .x{display:none}#${ID}.open .launch .chat{display:none}#${ID}.open .launch .x{display:block}
+#${ID} .launcher-row{display:flex;align-items:center;gap:12px}#${ID} .label{padding:10px 16px;border-radius:16px;background:rgba(18,23,38,.92);color:#fff;font-size:14px;font-weight:600;box-shadow:0 6px 16px rgba(18,23,38,.08)}#${ID}.open .label{opacity:0;pointer-events:none}#${ID} .launch{width:64px;height:64px;border:0;border-radius:50%;background:linear-gradient(180deg,#735cff 0%,var(--p) 100%);color:#fff;cursor:pointer;box-shadow:0 18px 36px rgba(101,72,247,.34);display:grid;place-items:center}#${ID} .launch .min,#${ID} .launch .x{display:none}#${ID}.open .launch .chat{display:none}#${ID}.open .launch .min{display:block}
 @media(max-width:560px){#${ID}{right:12px;left:12px;bottom:12px;align-items:stretch}#${ID} .launcher-row{justify-content:flex-end}#${ID} .panel{width:100%;height:min(72vh,680px)}}`;
     document.head.appendChild(el);
   }
@@ -41,12 +41,12 @@
     root.id = ID;
     root.setAttribute('aria-label', 'Jubly support widget');
     root.innerHTML = `
-<div class="panel" role="dialog" aria-modal="false" aria-label="Message the Jubly Reader team"><header class="head"><button class="close" data-k="close" type="button" aria-label="Close support widget"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"></path></svg></button><div class="brand"><div class="mark" aria-hidden="true"><svg viewBox="0 0 28 28" width="24" height="24" fill="none"><rect x="5" y="7" width="5" height="14" rx="2.5" fill="white" opacity=".95"></rect><rect x="11.5" y="4" width="5" height="20" rx="2.5" fill="white"></rect><rect x="18" y="9" width="5" height="10" rx="2.5" fill="white" opacity=".85"></rect></svg></div><div><h2>Message the Jubly Reader team</h2><p>Share feedback, report a bug, or ask a question.</p></div></div></header><div class="log" data-k="log" aria-live="polite"></div><div class="nav"><button class="link" data-k="reset" type="button">Start over</button></div><div class="compose-shell"><div class="path" data-k="path"></div><div class="compose" data-k="compose"><textarea data-k="msg" placeholder="Choose a topic above to start" disabled></textarea><div class="actions"><button class="attach" data-k="attach" type="button">📎 Attach screenshot</button><span class="file-note" data-k="note"></span><button class="send" data-k="send" type="button">Send</button></div><input data-k="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></div></div></div><div class="launcher-row"><div class="label">Message us</div><button class="launch" data-k="launch" type="button" aria-label="Toggle support widget" aria-expanded="false"><svg class="chat" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M8.5 9.5h.01"></path><path d="M12 9.5h.01"></path><path d="M15.5 9.5h.01"></path></svg><svg class="x" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"></path></svg></button></div>`;
+<div class="panel" role="dialog" aria-modal="false" aria-label="Message the Jubly Reader team"><header class="head"><button class="close" data-k="close" type="button" aria-label="Dismiss support widget"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"></path></svg></button><div class="brand"><div class="mark" aria-hidden="true"><svg viewBox="0 0 28 28" width="24" height="24" fill="none"><rect x="5" y="7" width="5" height="14" rx="2.5" fill="white" opacity=".95"></rect><rect x="11.5" y="4" width="5" height="20" rx="2.5" fill="white"></rect><rect x="18" y="9" width="5" height="10" rx="2.5" fill="white" opacity=".85"></rect></svg></div><div><h2>Message the Jubly Reader team</h2><p>Ask a question, report a problem, or leave feedback.</p></div></div></header><div class="log" data-k="log" aria-live="polite"></div><div class="nav"><button class="link" data-k="reset" type="button">Start over</button></div><div class="compose-shell"><div class="path" data-k="path"></div><div class="compose" data-k="compose"><textarea data-k="msg" placeholder="Choose a topic above to start" disabled></textarea><div class="actions"><button class="attach" data-k="attach" type="button">📎 Attach screenshot</button><span class="file-note" data-k="note"></span><button class="send" data-k="send" type="button">Send</button></div><input data-k="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></div></div></div><div class="launcher-row"><div class="label">Message us</div><button class="launch" data-k="launch" type="button" aria-label="Open support widget" aria-expanded="false"><svg class="chat" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M8.5 9.5h.01"></path><path d="M12 9.5h.01"></path><path d="M15.5 9.5h.01"></path></svg><svg class="min" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button></div>`;
     document.body.appendChild(root);
     const q = (k) => root.querySelector(`[data-k="${k}"]`);
     s.els = { root, log: q('log'), path: q('path'), compose: q('compose'), msg: q('msg'), attach: q('attach'), send: q('send'), file: q('file'), note: q('note'), launch: q('launch') };
     q('launch').addEventListener('click', () => setOpen(!root.classList.contains('open')));
-    q('close').addEventListener('click', () => setOpen(false));
+    q('close').addEventListener('click', dismiss);
     q('reset').addEventListener('click', start);
     q('msg').addEventListener('input', refreshSend);
     q('send').addEventListener('click', send);
@@ -58,10 +58,17 @@
   }
 
   function setOpen(open) {
+    if (!open && (!s.mounted || !document.getElementById(ID))) return true;
     if (!mount()) return false;
     s.els.root.classList.toggle('open', !!open);
     s.els.launch.setAttribute('aria-expanded', String(!!open));
+    s.els.launch.setAttribute('aria-label', open ? 'Minimize support widget' : 'Open support widget');
     if (open && s.unlocked) setTimeout(() => { try { s.els.msg.focus(); } catch (_) {} }, 0);
+    return true;
+  }
+
+  function dismiss() {
+    shutdown();
     return true;
   }
 
@@ -94,12 +101,13 @@
     s.transcript = [];
     s.unlocked = false;
     s.screenshot = null;
+    s.placeholder = '';
     s.els.log.innerHTML = '';
     s.els.msg.value = '';
     s.els.note.textContent = '';
     lock();
-    bubble('Hi — what can we help with today?', 'a');
-    chips(['Feedback', 'Bug report', 'Question'], chooseType);
+    bubble('Hi, how can we help?', 'a');
+    chips(ROOT_CHOICES, chooseType);
   }
 
   function lock() {
@@ -116,11 +124,11 @@
   function unlock() {
     s.unlocked = true;
     s.els.msg.disabled = false;
-    s.els.msg.placeholder = s.path[0] === 'Bug report' ? 'What did you do, what did you expect, and what actually happened?' : 'Type your message here';
+    s.els.msg.placeholder = s.placeholder || (s.path[0] === ROOTS.bug ? 'What did you do, what did you expect, and what actually happened?' : 'Type your message here');
     s.els.compose.classList.add('on');
     s.els.path.style.display = 'block';
     s.els.path.textContent = s.path.join(' > ');
-    s.els.attach.style.display = s.path[0] === 'Bug report' ? 'inline-block' : 'none';
+    s.els.attach.style.display = s.path[0] === ROOTS.bug ? 'inline-block' : 'none';
     refreshSend();
     s.els.msg.focus();
   }
@@ -128,20 +136,78 @@
   function refreshSend() { s.els.send.classList.toggle('on', s.unlocked && s.els.msg.value.trim().length > 0); }
 
   function chooseType(type) {
-    s.path = [type];
-    bubble(type, 'u');
-    bubble(type === 'Bug report' ? 'Okay — where did it happen?' : type === 'Feedback' ? 'Got it. What area is this about?' : 'Sure — what’s your question about?', 'a');
-    chips(TOPICS[type], (area) => {
-      s.path = [type, area];
+    if (type === ROOTS.bug) return startBugFlow();
+    if (type === ROOTS.feedback) return startFeedbackFlow();
+    if (type === ROOTS.question) return startQuestionFlow();
+  }
+
+  function startBugFlow() {
+    s.placeholder = '';
+    s.path = [ROOTS.bug];
+    bubble(ROOTS.bug, 'u');
+    askBugArea();
+    lock();
+  }
+
+  function askBugArea() {
+    bubble('Where did it happen?', 'a');
+    chips(BUG_AREAS, (area) => {
+      s.path = [ROOTS.bug, area];
       bubble(area, 'u');
-      if (type === 'Bug report') {
-        bubble('What kind of problem was it?', 'a');
-        chips(BUG_TYPES, (bugType) => { s.path.push(bugType); bubble(bugType, 'u'); bubble('Please describe what happened. Diagnostics will be included automatically.', 'a'); unlock(); });
-      } else {
-        bubble(type === 'Feedback' ? 'Thanks — tell us what felt confusing, missing, or especially helpful.' : 'Got it — what are you trying to do?', 'a');
+      bubble('What kind of problem was it?', 'a');
+      chips(BUG_TYPES, (bugType) => {
+        s.path.push(bugType);
+        bubble(bugType, 'u');
+        bubble('Please describe what happened. Diagnostics will be included automatically.', 'a');
         unlock();
+      });
+      lock();
+    });
+  }
+
+  function startFeedbackFlow() {
+    s.placeholder = '';
+    s.path = [ROOTS.feedback];
+    bubble(ROOTS.feedback, 'u');
+    bubble('What kind of feedback do you have?', 'a');
+    chips(FEEDBACK_CHOICES, chooseFeedbackType);
+    lock();
+  }
+
+  function chooseFeedbackType(choice, alreadyBubbled) {
+    s.path = [ROOTS.feedback, choice];
+    if (!alreadyBubbled) bubble(choice, 'u');
+    if (choice === 'I have a suggestion') {
+      bubble('Make a suggestion for what we should improve. Our team will be notified of your suggestions.', 'a');
+      s.placeholder = 'What should we improve?';
+    } else {
+      bubble('Tell us about your experience with our product. If you’re enjoying Jubly Reader, leaving a review helps us a lot.', 'a');
+      s.placeholder = 'What do you like about Jubly Reader?';
+    }
+    unlock();
+  }
+
+  function startQuestionFlow() {
+    s.placeholder = '';
+    s.path = [ROOTS.question];
+    bubble(ROOTS.question, 'u');
+    bubble('What would you like help with?', 'a');
+    chips(QUESTION_CHOICES, (choice) => {
+      bubble(choice, 'u');
+      if (choice === 'I found a bug') {
+        s.path = [ROOTS.bug];
+        askBugArea();
+        lock();
+        return;
       }
-      if (type === 'Bug report') lock();
+      if (choice === 'I have a suggestion') {
+        chooseFeedbackType(choice, true);
+        return;
+      }
+      s.path = [ROOTS.question, choice];
+      bubble('What would you like help with?', 'a');
+      s.placeholder = 'Ask your question here';
+      unlock();
     });
     lock();
   }
@@ -192,7 +258,7 @@
 
   async function submit(text) {
     const a = auth();
-    const type = s.path[0] === 'Bug report' ? 'bug' : String(s.path[0] || 'Question').toLowerCase();
+    const type = s.path[0] === ROOTS.bug ? 'bug' : s.path[0] === ROOTS.feedback ? 'feedback' : 'question';
     const headers = { 'Content-Type': 'application/json' };
     if (a.token) headers.Authorization = `Bearer ${a.token}`;
     const payload = {
@@ -223,7 +289,7 @@
       await submit(text);
       bubble('Sent — diagnostics were included for the Jubly team.', 'st ok');
       bubble('Thanks. You can start another topic whenever you’re ready.', 'a');
-      s.path = []; s.screenshot = null; s.els.note.textContent = ''; lock(); chips(['Feedback', 'Bug report', 'Question'], chooseType);
+      s.path = []; s.placeholder = ''; s.screenshot = null; s.els.note.textContent = ''; lock(); chips(ROOT_CHOICES, chooseType);
     } catch (err) {
       bubble(String(err && err.message || 'Support message could not be sent.'), 'st');
       s.els.msg.disabled = false; s.els.msg.value = text; refreshSend();
@@ -238,13 +304,14 @@
   window.rcHelp = {
     syncIdentity: async () => true,
     openChat: () => openRoot(null),
-    openFeedback: () => openRoot('Feedback'),
-    openBugReport: () => openRoot('Bug report'),
+    openFeedback: () => openRoot(ROOTS.feedback),
+    openBugReport: () => openRoot(ROOTS.bug),
     close: () => setOpen(false),
+    dismiss,
     toggle: () => { mount(); return setOpen(!s.els.root.classList.contains('open')); },
     shutdown,
   };
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { mount(); }, { once: true });
-  else mount();
+  // Do not mount on page load. The launcher appears only after an explicit support entry point opens it,
+  // then persists in the SPA session until sign-out calls rcHelp.shutdown().
 })();
