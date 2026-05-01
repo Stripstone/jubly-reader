@@ -5,6 +5,7 @@
   const ID = 'jubly-support-widget';
   const STYLE_ID = 'jubly-support-widget-style';
   const ENDPOINT = '/api/app?kind=support-submit';
+  const STORAGE_KEY = 'jubly:support-widget-opened';
 
   const ROOTS = { question: 'Ask a question', bug: 'Report a problem', feedback: 'Leave feedback' };
   const ROOT_CHOICES = [ROOTS.question, ROOTS.bug, ROOTS.feedback];
@@ -14,6 +15,34 @@
   const BUG_TYPES = ['Something looked wrong', 'A button didn’t work', 'I saw the wrong screen', 'Audio had a problem', 'My progress was wrong', 'Settings didn’t apply', 'The app was slow', 'The app froze or crashed', 'Something else'];
 
   const s = { mounted: false, path: [], transcript: [], unlocked: false, screenshot: null, placeholder: '', els: {} };
+
+  function supportStorage() {
+    try { return window.sessionStorage || null; } catch (_) { return null; }
+  }
+
+  function supportWasOpened() {
+    const store = supportStorage();
+    return !!(store && store.getItem(STORAGE_KEY) === '1');
+  }
+
+  function isSignedIn() {
+    try { return !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()); } catch (_) { return false; }
+  }
+
+  function authReady() {
+    try { return !!(window.rcAuth && typeof window.rcAuth.isReady === 'function' && window.rcAuth.isReady()); } catch (_) { return false; }
+  }
+
+  function rememberOpenedIfSignedIn() {
+    if (!isSignedIn()) return;
+    const store = supportStorage();
+    try { if (store) store.setItem(STORAGE_KEY, '1'); } catch (_) {}
+  }
+
+  function forgetOpened() {
+    const store = supportStorage();
+    try { if (store) store.removeItem(STORAGE_KEY); } catch (_) {}
+  }
 
   function style() {
     if (document.getElementById(STYLE_ID)) return;
@@ -63,6 +92,7 @@
   function setOpen(open) {
     if (!open && (!s.mounted || !document.getElementById(ID))) return true;
     if (!mount()) return false;
+    if (open) rememberOpenedIfSignedIn();
     s.els.root.classList.toggle('open', !!open);
     s.els.launch.setAttribute('aria-expanded', String(!!open));
     s.els.launch.setAttribute('aria-label', open ? 'Dismiss support widget' : 'Open support widget');
@@ -72,6 +102,15 @@
 
   function dismiss() {
     shutdown();
+    return true;
+  }
+
+  function restorePersistedLauncher() {
+    if (s.mounted || !supportWasOpened()) return false;
+    if (!authReady()) return false;
+    if (!isSignedIn()) { forgetOpened(); return false; }
+    if (!mount()) return false;
+    setOpen(false);
     return true;
   }
 
@@ -302,7 +341,7 @@
   }
 
   async function openRoot(root) { mount(); setOpen(true); if (root) { start(); chooseType(root); } return true; }
-  function shutdown() { const root = document.getElementById(ID); if (root) root.remove(); s.mounted = false; s.els = {}; }
+  function shutdown() { forgetOpened(); const root = document.getElementById(ID); if (root) root.remove(); s.mounted = false; s.els = {}; }
 
   window.rcHelp = {
     syncIdentity: async () => true,
@@ -315,6 +354,24 @@
     shutdown,
   };
 
-  // Do not mount on page load. The launcher appears only after an explicit support entry point opens it,
-  // then persists in the SPA session until sign-out calls rcHelp.shutdown().
+  function installPersistedLauncherRestore() {
+    const onAuthChanged = (event) => {
+      const detail = event && event.detail ? event.detail : null;
+      if (detail && detail.ready && detail.signedIn) { restorePersistedLauncher(); return; }
+      if (detail && detail.ready && !detail.signedIn) shutdown();
+    };
+    try { document.addEventListener('rc:auth-changed', onAuthChanged); } catch (_) {}
+    try { window.addEventListener('rc:auth-changed', onAuthChanged); } catch (_) {}
+    const restore = () => { restorePersistedLauncher(); };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', restore, { once: true });
+    } else {
+      setTimeout(restore, 0);
+    }
+  }
+
+  installPersistedLauncherRestore();
+
+  // Do not mount by default on public load. After a signed-in user opens support once,
+  // a minimized launcher is restored across refresh until hard close or sign-out.
 })();
