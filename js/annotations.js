@@ -303,7 +303,6 @@
     if (Number(row.chapter_index) !== Number(ctx.chapterIndex)) { showToast(`Open Chapter ${Number(row.chapter_index) + 1 || 1} to view this annotation.`); return; }
     state.navigationPending = true;
     closeWidgetPanel();
-    showToast('Going to saved location…');
     render();
     try {
       if (typeof window.setReadingTarget === 'function') window.setReadingTarget({ sourceType: row.source_type || '', bookId: row.book_id || '', chapterIndex: row.chapter_index, pageIndex: row.page_index });
@@ -367,7 +366,7 @@
         <button class="annotations-trigger" type="button" data-annotation-trigger disabled><span class="annotations-plus">＋</span><span><strong>Annotate current highlight</strong><small data-annotation-sub>Pause TTS to save this sentence</small></span><span class="annotations-chev">⌄</span></button>
         <div class="annotations-editor-card" data-annotation-editor>
           <p class="annotations-hint">Choose what to save from the current highlighted passage.</p>
-          <div class="annotations-actions" data-annotation-actions><button type="button" class="annotations-primary" data-annotation-note>Save Note</button><button type="button" class="annotations-secondary" data-annotation-flash>Make Flashcard</button></div>
+          <div class="annotations-actions" data-annotation-actions><button type="button" class="annotations-primary" data-annotation-note>Make Note</button><button type="button" class="annotations-secondary" data-annotation-flash>Make Flashcard</button></div>
           <div class="annotations-form" data-note-editor><div class="annotations-context-label">Highlighted passage</div><div class="annotations-current" data-note-context></div><textarea data-note-text placeholder="Write your note…"></textarea><div class="annotations-row"><button type="button" data-save-note>Save note</button><button type="button" data-cancel>Cancel</button></div></div>
           <div class="annotations-form" data-flash-editor><div class="annotations-context-label">Flashcard preview</div><div class="annotations-flash-preview" data-flash-preview><strong>Front</strong><span data-flash-preview-text></span></div><input data-flash-front placeholder="Flashcard front" /><textarea data-flash-back placeholder="Flashcard back"></textarea><div class="annotations-row"><button type="button" data-save-flash>Save card</button><button type="button" data-cancel>Cancel</button></div></div>
           <div class="annotations-saved" data-annotation-saved></div>
@@ -378,7 +377,7 @@
         <div class="annotations-utility-menu" data-utility-menu><button type="button" data-open-notes><span>📝</span><strong>Notes</strong></button><button type="button" data-open-help><span>?</span><strong>Help</strong></button></div>
         <button type="button" class="annotations-widget-button" data-widget-toggle aria-label="Open utilities">📝</button>
       </div>
-      <div class="annotations-toast" data-annotation-toast>Jumped to the saved reading point.</div>`;
+      <div class="annotations-toast" data-annotation-toast></div>`;
     document.body.appendChild(root);
     state.els = {
       root, cardRoot: root.querySelector('[data-annotation-card]'), trigger: root.querySelector('[data-annotation-trigger]'), card: root.querySelector('[data-annotation-editor]'), actions: root.querySelector('[data-annotation-actions]'), noteEditor: root.querySelector('[data-note-editor]'), flashEditor: root.querySelector('[data-flash-editor]'), noteText: root.querySelector('[data-note-text]'), noteContext: root.querySelector('[data-note-context]'), flashFront: root.querySelector('[data-flash-front]'), flashBack: root.querySelector('[data-flash-back]'), flashPreview: root.querySelector('[data-flash-preview]'), flashPreviewText: root.querySelector('[data-flash-preview-text]'), saved: root.querySelector('[data-annotation-saved]'), panel: root.querySelector('[data-widget-panel]'), notesList: root.querySelector('[data-notes-list]'), flashcardsList: root.querySelector('[data-flashcards-list]'), utilityMenu: root.querySelector('[data-utility-menu]'), launcher: root.querySelector('[data-widget-toggle]'), toast: root.querySelector('[data-annotation-toast]'),
