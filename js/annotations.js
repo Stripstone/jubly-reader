@@ -1,0 +1,367 @@
+// js/annotations.js
+// Notes & Flashcards annotation layer.
+// UI forwards annotation and navigation intent only; reading/TTS runtime remains the source of page, highlight, and playback truth.
+(function () {
+  const PREF_KEY = 'jubly:annotations-widget-enabled';
+  const LOCAL_KEY = 'jubly:annotations-local-v2';
+  const SYNC_KIND = '/api/app?kind=durable-sync';
+
+  const state = {
+    mounted: false,
+    enabled: false,
+    open: false,
+    annotations: [],
+    activeEditor: '',
+    target: null,
+    navigationPending: false,
+    deletingId: '',
+    activeTab: 'notes',
+    flashPreviewSide: 'front',
+    els: {},
+  };
+
+  function readPref() { try { return localStorage.getItem(PREF_KEY) === '1'; } catch (_) { return false; } }
+  function writePref(enabled) { try { localStorage.setItem(PREF_KEY, enabled ? '1' : '0'); } catch (_) {} }
+  function uid() { try { if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID(); } catch (_) {} return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+  function escapeHtml(value) {
+    return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+  }
+  function textHash(text) {
+    const input = String(text || '');
+    let hash = 2166136261;
+    for (let i = 0; i < input.length; i += 1) { hash ^= input.charCodeAt(i); hash = Math.imul(hash, 16777619); }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+  }
+  function loadLocalAnnotations() {
+    try { const rows = JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]'); return Array.isArray(rows) ? rows.filter(Boolean) : []; } catch (_) { return []; }
+  }
+  function saveLocalAnnotations(rows) { try { localStorage.setItem(LOCAL_KEY, JSON.stringify(Array.isArray(rows) ? rows : [])); } catch (_) {} }
+  function getSessionToken() { try { return window.rcAuth && typeof window.rcAuth.getAccessToken === 'function' ? window.rcAuth.getAccessToken() : ''; } catch (_) { return ''; } }
+  function getReadingTarget() { try { return Object.assign({}, window.__rcReadingTarget || {}); } catch (_) { return {}; } }
+  function getPlayback() { try { return typeof window.getPlaybackStatus === 'function' ? window.getPlaybackStatus() : null; } catch (_) { return null; } }
+  function isTtsPaused() {
+    const playback = getPlayback();
+    return !!(playback && playback.active && playback.paused && !playback.cloudRestartInFlight);
+  }
+  function isReadingVisible() {
+    try {
+      const reading = document.getElementById('reading-mode');
+      if (!reading || reading.classList.contains('hidden-section')) return false;
+      const styles = getComputedStyle(reading);
+      return !styles || styles.display !== 'none';
+    } catch (_) { return false; }
+  }
+  function findHighlightedSpan() {
+    try {
+      const spans = Array.from(document.querySelectorAll('#reading-mode .tts-sentence'));
+      let best = null;
+      let bestAlpha = 0;
+      spans.forEach((span) => {
+        const raw = (getComputedStyle(span).getPropertyValue('--tts-alpha') || span.style.getPropertyValue('--tts-alpha') || '0');
+        const alpha = Number(raw);
+        if (Number.isFinite(alpha) && alpha > bestAlpha) { best = span; bestAlpha = alpha; }
+      });
+      return bestAlpha > 0.35 ? best : null;
+    } catch (_) { return null; }
+  }
+  function getCurrentTarget() {
+    const playback = getPlayback();
+    const reading = getReadingTarget();
+    const span = findHighlightedSpan();
+    const text = String((span && span.textContent) || '').replace(/\s+/g, ' ').trim();
+    const pageIndex = Number.isFinite(Number(reading.pageIndex)) && Number(reading.pageIndex) >= 0 ? Number(reading.pageIndex) : 0;
+    const blockIndex = Number.isFinite(Number(playback && playback.activeBlockIndex)) ? Number(playback.activeBlockIndex) : -1;
+    if (!playback || !playback.active || !text || blockIndex < 0) return null;
+    return {
+      bookId: String(reading.bookId || ''),
+      sourceType: String(reading.sourceType || ''),
+      chapterIndex: Number.isFinite(Number(reading.chapterIndex)) ? Number(reading.chapterIndex) : -1,
+      pageIndex,
+      pageKey: String(playback.key || ''),
+      blockIndex,
+      highlightedText: text,
+      textHash: textHash(text),
+    };
+  }
+  function annotationKeyFromTarget(target) {
+    if (!target) return '';
+    return [target.bookId || '', target.sourceType || '', target.chapterIndex, target.pageIndex, target.blockIndex, target.textHash || ''].join('|');
+  }
+  function annotationKey(row) {
+    if (!row) return '';
+    return [row.book_id || '', row.source_type || '', row.chapter_index, row.page_index, row.block_index, row.text_hash || ''].join('|');
+  }
+  function liveAnnotations() { return (state.annotations || []).filter((row) => row && !row.deleted_at); }
+  function annotationForTarget(target) { const key = annotationKeyFromTarget(target); return key ? liveAnnotations().find((row) => annotationKey(row) === key) || null : null; }
+  function previewFor(row) { return row && row.type === 'flashcard' ? (row.flashcard_front || row.highlighted_text || '') : (row && (row.note_text || row.highlighted_text || '')) || ''; }
+
+  async function syncAnnotations(action, payload) {
+    const token = await Promise.resolve(getSessionToken()).catch(() => '');
+    if (!token) return null;
+    const res = await fetch(SYNC_KIND, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ action, payload }) });
+    let data = null;
+    try { data = await res.json(); } catch (_) {}
+    if (!res.ok || !data || data.ok === false) throw new Error((data && (data.error || data.reason)) || 'Annotation sync failed.');
+    return data;
+  }
+  async function fetchRemoteAnnotations() {
+    const token = await Promise.resolve(getSessionToken()).catch(() => '');
+    if (!token) return null;
+    const res = await fetch(`${SYNC_KIND}&scope=annotations`, { headers: { Authorization: `Bearer ${token}` } });
+    let data = null;
+    try { data = await res.json(); } catch (_) {}
+    if (!res.ok || !data || data.ok === false) return null;
+    return Array.isArray(data.rows) ? data.rows : [];
+  }
+
+  function showToast(message) {
+    if (!state.els.toast) return;
+    state.els.toast.textContent = String(message || 'Done.');
+    state.els.toast.classList.add('show');
+    setTimeout(() => state.els.toast && state.els.toast.classList.remove('show'), 1800);
+  }
+  function helpIsAvailable() { return !!(window.rcHelp && typeof window.rcHelp.openChat === 'function'); }
+  function closeHelpPanel() { try { if (window.rcHelp && typeof window.rcHelp.close === 'function') window.rcHelp.close(); } catch (_) {} }
+  function setEnabled(enabled, options = {}) {
+    state.enabled = !!enabled;
+    if (options.persist !== false) writePref(state.enabled);
+    document.body.classList.toggle('annotations-widget-enabled', state.enabled);
+    if (!state.enabled) { state.open = false; state.activeEditor = ''; closeWidgetPanel(); }
+    render();
+  }
+
+  function renderSaved(row) {
+    if (!state.els.saved) return;
+    if (!row) { state.els.saved.classList.remove('active'); state.els.saved.innerHTML = ''; return; }
+    if (row.type === 'flashcard') {
+      state.els.saved.innerHTML = `<div class="annotations-flash-preview" data-saved-flash><strong>Front</strong><span>${escapeHtml(row.flashcard_front || row.highlighted_text || '')}</span></div><div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
+      const preview = state.els.saved.querySelector('[data-saved-flash]');
+      let side = 'front';
+      preview.addEventListener('click', () => {
+        side = side === 'front' ? 'back' : 'front';
+        preview.querySelector('strong').textContent = side === 'front' ? 'Front' : 'Back';
+        preview.querySelector('span').textContent = side === 'front' ? (row.flashcard_front || row.highlighted_text || '') : (row.flashcard_back || '');
+      });
+    } else {
+      state.els.saved.innerHTML = `<strong>Note</strong>${escapeHtml(row.note_text || '')}<div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
+    }
+    state.els.saved.classList.add('active');
+  }
+
+  function renderWidgetLists() {
+    const notesList = state.els.notesList;
+    const flashList = state.els.flashcardsList;
+    if (!notesList || !flashList) return;
+    const rows = liveAnnotations();
+    const renderRows = (type) => {
+      const matching = rows.filter((row) => row.type === type);
+      if (!matching.length) return '<div class="annotations-empty">No saved items here yet.</div>';
+      return matching.slice(0, 40).map((row) => {
+        const disabled = state.deletingId && String(state.deletingId) === String(row.id) ? ' disabled' : '';
+        return `<div class="annotations-widget-item" data-annotation-id="${escapeHtml(row.id)}"><button class="annotations-jump" type="button" data-annotation-jump${state.navigationPending ? ' disabled' : ''}><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong><span>${escapeHtml(previewFor(row))}</span><em>Chapter ${Number(row.chapter_index) + 1 || 1} · Page ${Number(row.page_index) + 1 || 1}</em></button><button class="annotations-delete" type="button" data-annotation-delete${disabled}>${disabled ? 'Deleting…' : 'Delete'}</button></div>`;
+      }).join('');
+    };
+    notesList.innerHTML = renderRows('note');
+    flashList.innerHTML = renderRows('flashcard');
+  }
+
+  function render() {
+    if (!state.mounted) return;
+    const visible = !!state.enabled && isReadingVisible();
+    state.els.root.hidden = !visible;
+    document.body.classList.toggle('annotations-navigation-pending', !!state.navigationPending);
+    const checkbox = document.getElementById('annotationsWidgetToggle');
+    if (checkbox && checkbox.checked !== state.enabled) checkbox.checked = state.enabled;
+    if (!visible) return;
+
+    const paused = isTtsPaused();
+    state.target = paused ? getCurrentTarget() : null;
+    const currentRow = annotationForTarget(state.target);
+    state.els.cardRoot.classList.toggle('visible', !!paused && !!state.target);
+    state.els.trigger.disabled = !paused || !state.target || state.navigationPending;
+    const sub = state.els.trigger.querySelector('[data-annotation-sub]');
+    if (sub) sub.textContent = paused ? (state.target ? 'Open tools for the highlighted sentence' : 'No highlighted sentence available') : 'Pause TTS to save this sentence';
+    state.els.card.classList.toggle('open', !!state.open && !!state.target);
+    state.els.actions.hidden = !!currentRow || !!state.activeEditor;
+    state.els.noteEditor.classList.toggle('active', state.activeEditor === 'note');
+    state.els.flashEditor.classList.toggle('active', state.activeEditor === 'flashcard');
+    if (state.els.noteContext) state.els.noteContext.textContent = `“${state.target ? state.target.highlightedText : ''}”`;
+    renderSaved(currentRow);
+    if (!currentRow && !state.activeEditor) renderSaved(null);
+    state.els.panel.classList.toggle('open', state.els.panel.classList.contains('open'));
+    state.els.utilityMenu.classList.toggle('multi', helpIsAvailable());
+    renderWidgetLists();
+    renderTabs();
+  }
+
+  async function deleteAnnotation(row) {
+    if (!row || !row.id) return;
+    const id = String(row.id);
+    state.deletingId = id;
+    state.annotations = (state.annotations || []).filter((item) => String(item.id) !== id);
+    saveLocalAnnotations(state.annotations);
+    render();
+    try { if (!id.startsWith('local-')) await syncAnnotations('delete_annotation', { id }); showToast('Deleted.'); }
+    catch (_) { showToast('Deleted locally.'); }
+    finally { state.deletingId = ''; render(); }
+  }
+
+  async function saveAnnotation(type) {
+    const target = state.target || getCurrentTarget();
+    if (!target) return;
+    if (annotationForTarget(target)) return;
+    const now = new Date().toISOString();
+    const noteText = String(state.els.noteText.value || '').trim();
+    const front = String(state.els.flashFront.value || '').trim();
+    const back = String(state.els.flashBack.value || '').trim();
+    const row = {
+      id: uid(), type, book_id: target.bookId, source_type: target.sourceType,
+      chapter_index: target.chapterIndex, page_index: target.pageIndex, page_key: target.pageKey,
+      block_index: target.blockIndex, highlighted_text: target.highlightedText, text_hash: target.textHash,
+      note_text: type === 'note' ? (noteText || target.highlightedText) : null,
+      flashcard_front: type === 'flashcard' ? (front || target.highlightedText) : null,
+      flashcard_back: type === 'flashcard' ? back : null,
+      created_at: now, updated_at: now, deleted_at: null,
+    };
+    state.annotations = [row].concat((state.annotations || []).filter((item) => annotationKey(item) !== annotationKey(row)));
+    saveLocalAnnotations(state.annotations);
+    state.activeEditor = '';
+    render();
+    try {
+      const synced = await syncAnnotations('save_annotation', row);
+      if (synced && synced.row && synced.row.id) {
+        state.annotations = state.annotations.map((item) => item.id === row.id ? Object.assign({}, row, synced.row) : item);
+        saveLocalAnnotations(state.annotations);
+        render();
+      }
+    } catch (_) {}
+  }
+
+  async function jumpToAnnotation(row) {
+    if (!row || state.navigationPending) return;
+    state.navigationPending = true;
+    closeWidgetPanel();
+    showToast('Going to saved location…');
+    render();
+    try {
+      if (typeof window.setReadingTarget === 'function') window.setReadingTarget({ sourceType: row.source_type || '', bookId: row.book_id || '', chapterIndex: row.chapter_index, pageIndex: row.page_index });
+      if (typeof window.focusReadingPage === 'function') window.focusReadingPage(Number(row.page_index) || 0, { behavior: 'smooth', reason: 'annotation-jump' });
+      else {
+        const page = document.querySelector(`#reading-mode .page[data-page-index="${Number(row.page_index) || 0}"]`);
+        if (page) page.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 120)));
+    } catch (_) {
+      showToast('Could not jump to saved location.');
+    } finally {
+      state.navigationPending = false;
+      render();
+    }
+  }
+
+  async function hydrateAnnotations() {
+    state.annotations = loadLocalAnnotations();
+    render();
+    const remote = await fetchRemoteAnnotations().catch(() => null);
+    if (Array.isArray(remote)) {
+      const locals = state.annotations.filter((row) => String(row.id || '').startsWith('local-'));
+      state.annotations = remote.concat(locals);
+      saveLocalAnnotations(state.annotations);
+      render();
+    }
+  }
+
+  function injectSettingsRow() {
+    const panel = document.getElementById('rs-panel-general');
+    if (!panel || document.getElementById('annotationsWidgetToggle')) return;
+    const row = document.createElement('div');
+    row.className = 'rs-simple-row annotations-setting-row';
+    row.innerHTML = `<div><p class="rs-row-title">Notes &amp; Flashcards Widget</p><p class="rs-row-sub">Show the annotation entrypoint and floating notes widget while reading.</p></div><label class="rs-toggle-row"><span class="text-slate-400">Show widget</span><input type="checkbox" id="annotationsWidgetToggle" style="accent-color:var(--theme-accent); width:15px; height:15px; cursor:pointer;"></label>`;
+    panel.appendChild(row);
+    const input = row.querySelector('#annotationsWidgetToggle');
+    input.checked = !!state.enabled;
+    input.addEventListener('change', () => setEnabled(!!input.checked));
+  }
+
+  function closeWidgetPanel() {
+    if (state.els.panel) state.els.panel.classList.remove('open');
+    if (state.els.utilityMenu) state.els.utilityMenu.classList.remove('open');
+    if (state.els.launcher) state.els.launcher.classList.remove('open');
+  }
+
+  function mount() {
+    if (state.mounted || !document.body) return;
+    injectSettingsRow();
+    const root = document.createElement('section');
+    root.id = 'annotations-widget';
+    root.className = 'annotations-widget';
+    root.hidden = true;
+    root.innerHTML = `
+      <div class="annotations-card" data-annotation-card>
+        <button class="annotations-trigger" type="button" data-annotation-trigger disabled><span class="annotations-plus">＋</span><span><strong>Annotate current highlight</strong><small data-annotation-sub>Pause TTS to save this sentence</small></span><span class="annotations-chev">⌄</span></button>
+        <div class="annotations-editor-card" data-annotation-editor>
+          <p class="annotations-hint">Choose what to save from the current highlighted passage.</p>
+          <div class="annotations-actions" data-annotation-actions><button type="button" class="annotations-primary" data-annotation-note>Save Note</button><button type="button" class="annotations-secondary" data-annotation-flash>Make Flashcard</button></div>
+          <div class="annotations-form" data-note-editor><div class="annotations-context-label">Highlighted passage</div><div class="annotations-current" data-note-context></div><textarea data-note-text placeholder="Write your note…"></textarea><div class="annotations-row"><button type="button" data-save-note>Save note</button><button type="button" data-cancel>Cancel</button></div></div>
+          <div class="annotations-form" data-flash-editor><div class="annotations-context-label">Flashcard preview</div><div class="annotations-flash-preview" data-flash-preview><strong>Front</strong><span data-flash-preview-text></span></div><input data-flash-front placeholder="Flashcard front" /><textarea data-flash-back placeholder="Flashcard back"></textarea><div class="annotations-row"><button type="button" data-save-flash>Save card</button><button type="button" data-cancel>Cancel</button></div></div>
+          <div class="annotations-saved" data-annotation-saved></div>
+        </div>
+      </div>
+      <div class="annotations-float">
+        <div class="annotations-panel" data-widget-panel><div class="annotations-panel-head"><strong>Notes &amp; Flashcards</strong><button type="button" data-widget-close aria-label="Close notes widget">✕</button></div><div class="annotations-tabs"><button type="button" data-tab="notes">Notes</button><button type="button" data-tab="flashcards">Flashcards</button></div><div class="annotations-list" data-notes-list></div><div class="annotations-list" data-flashcards-list></div></div>
+        <div class="annotations-utility-menu" data-utility-menu><button type="button" data-open-notes><span>📝</span><strong>Notes</strong></button><button type="button" data-open-help><span>?</span><strong>Help</strong></button></div>
+        <button type="button" class="annotations-widget-button" data-widget-toggle aria-label="Open utilities">📝</button>
+      </div>
+      <div class="annotations-toast" data-annotation-toast>Jumped to the saved reading point.</div>`;
+    document.body.appendChild(root);
+    state.els = {
+      root, cardRoot: root.querySelector('[data-annotation-card]'), trigger: root.querySelector('[data-annotation-trigger]'), card: root.querySelector('[data-annotation-editor]'), actions: root.querySelector('[data-annotation-actions]'), noteEditor: root.querySelector('[data-note-editor]'), flashEditor: root.querySelector('[data-flash-editor]'), noteText: root.querySelector('[data-note-text]'), noteContext: root.querySelector('[data-note-context]'), flashFront: root.querySelector('[data-flash-front]'), flashBack: root.querySelector('[data-flash-back]'), flashPreview: root.querySelector('[data-flash-preview]'), flashPreviewText: root.querySelector('[data-flash-preview-text]'), saved: root.querySelector('[data-annotation-saved]'), panel: root.querySelector('[data-widget-panel]'), notesList: root.querySelector('[data-notes-list]'), flashcardsList: root.querySelector('[data-flashcards-list]'), utilityMenu: root.querySelector('[data-utility-menu]'), launcher: root.querySelector('[data-widget-toggle]'), toast: root.querySelector('[data-annotation-toast]'),
+    };
+    root.querySelector('[data-annotation-trigger]').addEventListener('click', () => { if (!isTtsPaused() || state.navigationPending) return; state.open = !state.open; state.activeEditor = ''; render(); });
+    root.querySelector('[data-annotation-note]').addEventListener('click', () => { state.activeEditor = 'note'; state.els.noteText.value = ''; render(); setTimeout(() => { try { state.els.noteText.focus(); } catch (_) {} }, 0); });
+    root.querySelector('[data-annotation-flash]').addEventListener('click', () => { const target = state.target || getCurrentTarget(); state.flashPreviewSide = 'front'; state.els.flashFront.value = target ? target.highlightedText : ''; state.els.flashBack.value = ''; state.els.flashPreviewText.textContent = state.els.flashFront.value; state.activeEditor = 'flashcard'; render(); setTimeout(() => { try { state.els.flashBack.focus(); } catch (_) {} }, 0); });
+    state.els.flashPreview.addEventListener('click', () => { state.flashPreviewSide = state.flashPreviewSide === 'front' ? 'back' : 'front'; state.els.flashPreview.querySelector('strong').textContent = state.flashPreviewSide === 'front' ? 'Front' : 'Back'; state.els.flashPreviewText.textContent = state.flashPreviewSide === 'front' ? state.els.flashFront.value : state.els.flashBack.value; });
+    state.els.flashFront.addEventListener('input', () => { if (state.flashPreviewSide === 'front') state.els.flashPreviewText.textContent = state.els.flashFront.value; });
+    state.els.flashBack.addEventListener('input', () => { if (state.flashPreviewSide !== 'front') state.els.flashPreviewText.textContent = state.els.flashBack.value; });
+    root.querySelector('[data-save-note]').addEventListener('click', () => saveAnnotation('note'));
+    root.querySelector('[data-save-flash]').addEventListener('click', () => saveAnnotation('flashcard'));
+    root.querySelectorAll('[data-cancel]').forEach((btn) => btn.addEventListener('click', () => { state.activeEditor = ''; render(); }));
+    state.els.saved.addEventListener('click', (event) => { if (!event.target.closest('[data-delete-current]')) return; const row = annotationForTarget(state.target); deleteAnnotation(row); });
+    state.els.launcher.addEventListener('click', () => {
+      if (state.els.panel.classList.contains('open')) { closeWidgetPanel(); return; }
+      if (helpIsAvailable()) { state.els.utilityMenu.classList.toggle('open'); state.els.launcher.classList.toggle('open', state.els.utilityMenu.classList.contains('open')); return; }
+      closeHelpPanel(); state.els.panel.classList.toggle('open'); renderWidgetLists();
+    });
+    root.querySelector('[data-open-notes]').addEventListener('click', () => { closeHelpPanel(); state.els.utilityMenu.classList.remove('open'); state.els.panel.classList.add('open'); renderWidgetLists(); });
+    root.querySelector('[data-open-help]').addEventListener('click', () => { closeWidgetPanel(); try { window.rcHelp.openChat(); } catch (_) {} });
+    root.querySelector('[data-widget-close]').addEventListener('click', closeWidgetPanel);
+    root.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', () => { state.activeTab = btn.getAttribute('data-tab') === 'flashcards' ? 'flashcards' : 'notes'; renderTabs(); }));
+    root.querySelector('[data-widget-panel]').addEventListener('click', (event) => {
+      const deleteBtn = event.target.closest('[data-annotation-delete]');
+      const item = event.target.closest('[data-annotation-id]');
+      if (!item) return;
+      const row = liveAnnotations().find((entry) => String(entry.id) === String(item.getAttribute('data-annotation-id')));
+      if (deleteBtn) { deleteAnnotation(row); return; }
+      if (event.target.closest('[data-annotation-jump]')) jumpToAnnotation(row);
+    });
+    state.mounted = true;
+    state.enabled = readPref();
+    setEnabled(state.enabled, { persist: false });
+    hydrateAnnotations();
+    setInterval(render, 700);
+  }
+
+  function renderTabs() {
+    if (!state.els.root) return;
+    state.els.root.querySelectorAll('[data-tab]').forEach((btn) => btn.classList.toggle('active', btn.getAttribute('data-tab') === state.activeTab));
+    state.els.notesList.classList.toggle('active', state.activeTab === 'notes');
+    state.els.flashcardsList.classList.toggle('active', state.activeTab === 'flashcards');
+  }
+
+  document.addEventListener('DOMContentLoaded', mount);
+  document.addEventListener('rc:auth-changed', () => hydrateAnnotations());
+  document.addEventListener('rc:reading-opened', render);
+  document.addEventListener('rc:reading-closed', render);
+
+  window.rcAnnotations = { setEnabled, isEnabled: () => !!state.enabled, closeWidget: closeWidgetPanel, closePanel: closeWidgetPanel, refresh: render, list: () => liveAnnotations().slice() };
+})();
