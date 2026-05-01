@@ -2567,3 +2567,15 @@ body.annotations-utility-active #jubly-support-widget .launcher-row { display: n
   #annotations-widget .annotations-float { right: 12px; bottom: 90px; }
   #annotations-widget .annotations-widget-button { width: 52px; height: 52px; }
 }
+
+
+/* Annotation jump emphasis reuses the existing TTS highlight color language. */
+#reading-mode .annotations-jump-emphasis {
+  animation: annotationsJumpHighlightFade 1600ms ease-out 1;
+  border-radius: 6px;
+}
+@keyframes annotationsJumpHighlightFade {
+  0% { background-color: rgba(255,230,120,0); box-shadow: 0 0 0 0 rgba(255,230,120,0); }
+  18% { background-color: rgba(255,230,120,0.56); box-shadow: 0 0 0 3px rgba(255,230,120,0.22); }
+  100% { background-color: rgba(255,230,120,0); box-shadow: 0 0 0 0 rgba(255,230,120,0); }
+}

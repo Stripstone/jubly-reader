@@ -17,6 +17,7 @@
     deletingId: '',
     activeTab: 'notes',
     flashPreviewSide: 'front',
+    savedFlashSides: {},
     els: {},
   };
 
@@ -135,13 +136,15 @@
     if (!state.els.saved) return;
     if (!row) { state.els.saved.classList.remove('active'); state.els.saved.innerHTML = ''; return; }
     if (row.type === 'flashcard') {
-      state.els.saved.innerHTML = `<div class="annotations-flash-preview" data-saved-flash><strong>Front</strong><span>${escapeHtml(row.flashcard_front || row.highlighted_text || '')}</span></div><div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
+      const side = state.savedFlashSides[String(row.id)] === 'back' ? 'back' : 'front';
+      const text = side === 'front' ? (row.flashcard_front || '') : (row.flashcard_back || '');
+      state.els.saved.innerHTML = `<div class="annotations-flash-preview" data-saved-flash><strong>${side === 'front' ? 'Front' : 'Back'}</strong><span>${escapeHtml(text)}</span></div><div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
       const preview = state.els.saved.querySelector('[data-saved-flash]');
-      let side = 'front';
       preview.addEventListener('click', () => {
-        side = side === 'front' ? 'back' : 'front';
-        preview.querySelector('strong').textContent = side === 'front' ? 'Front' : 'Back';
-        preview.querySelector('span').textContent = side === 'front' ? (row.flashcard_front || row.highlighted_text || '') : (row.flashcard_back || '');
+        const nextSide = state.savedFlashSides[String(row.id)] === 'back' ? 'front' : 'back';
+        state.savedFlashSides[String(row.id)] = nextSide;
+        preview.querySelector('strong').textContent = nextSide === 'front' ? 'Front' : 'Back';
+        preview.querySelector('span').textContent = nextSide === 'front' ? (row.flashcard_front || '') : (row.flashcard_back || '');
       });
     } else {
       state.els.saved.innerHTML = `<strong>Note</strong>${escapeHtml(row.note_text || '')}<div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
@@ -229,8 +232,8 @@
       id: uid(), type, book_id: target.bookId, source_type: target.sourceType,
       chapter_index: target.chapterIndex, page_index: target.pageIndex, page_key: target.pageKey,
       block_index: target.blockIndex, highlighted_text: target.highlightedText, text_hash: target.textHash,
-      note_text: type === 'note' ? (noteText || target.highlightedText) : null,
-      flashcard_front: type === 'flashcard' ? (front || target.highlightedText) : null,
+      note_text: type === 'note' ? noteText : null,
+      flashcard_front: type === 'flashcard' ? front : null,
       flashcard_back: type === 'flashcard' ? back : null,
       created_at: now, updated_at: now, deleted_at: null,
     };
@@ -248,6 +251,32 @@
     } catch (_) {}
   }
 
+  function findAnnotationTargetElement(row) {
+    const pageIndex = Number(row && row.page_index);
+    const blockIndex = Number(row && row.block_index);
+    if (!Number.isFinite(pageIndex)) return null;
+    const pages = Array.from(document.querySelectorAll('#reading-mode .page'));
+    const page = pages[pageIndex] || document.querySelector(`#reading-mode .page[data-page-index="${pageIndex}"]`);
+    if (!page) return null;
+    if (Number.isFinite(blockIndex) && blockIndex >= 0) {
+      const sentence = page.querySelector(`.tts-sentence[data-tts-sent="${blockIndex}"]`);
+      if (sentence) return sentence;
+    }
+    return page.querySelector('.page-text') || page;
+  }
+
+  function emphasizeAnnotationTarget(row) {
+    const el = findAnnotationTargetElement(row);
+    if (!el) return false;
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+    el.classList.remove('annotations-jump-emphasis');
+    // Restart the existing-highlight-colored fade when the same item is clicked twice.
+    void el.offsetWidth;
+    el.classList.add('annotations-jump-emphasis');
+    setTimeout(() => { try { el.classList.remove('annotations-jump-emphasis'); } catch (_) {} }, 1800);
+    return true;
+  }
+
   async function jumpToAnnotation(row) {
     if (!row || state.navigationPending) return;
     state.navigationPending = true;
@@ -261,7 +290,8 @@
         const page = document.querySelector(`#reading-mode .page[data-page-index="${Number(row.page_index) || 0}"]`);
         if (page) page.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
-      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 120)));
+      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 160)));
+      emphasizeAnnotationTarget(row);
     } catch (_) {
       showToast('Could not jump to saved location.');
     } finally {
@@ -330,7 +360,7 @@
     };
     root.querySelector('[data-annotation-trigger]').addEventListener('click', () => { if (!state.enabled || !isTtsPaused() || state.navigationPending) return; state.open = !state.open; state.activeEditor = ''; render(); });
     root.querySelector('[data-annotation-note]').addEventListener('click', () => { state.activeEditor = 'note'; state.els.noteText.value = ''; render(); setTimeout(() => { try { state.els.noteText.focus(); } catch (_) {} }, 0); });
-    root.querySelector('[data-annotation-flash]').addEventListener('click', () => { const target = state.target || getCurrentTarget(); state.flashPreviewSide = 'front'; state.els.flashFront.value = target ? target.highlightedText : ''; state.els.flashBack.value = ''; state.els.flashPreviewText.textContent = state.els.flashFront.value; state.activeEditor = 'flashcard'; render(); setTimeout(() => { try { state.els.flashBack.focus(); } catch (_) {} }, 0); });
+    root.querySelector('[data-annotation-flash]').addEventListener('click', () => { state.flashPreviewSide = 'front'; state.els.flashFront.value = ''; state.els.flashBack.value = ''; state.els.flashPreview.querySelector('strong').textContent = 'Front'; state.els.flashPreviewText.textContent = ''; state.activeEditor = 'flashcard'; render(); setTimeout(() => { try { state.els.flashFront.focus(); } catch (_) {} }, 0); });
     state.els.flashPreview.addEventListener('click', () => { state.flashPreviewSide = state.flashPreviewSide === 'front' ? 'back' : 'front'; state.els.flashPreview.querySelector('strong').textContent = state.flashPreviewSide === 'front' ? 'Front' : 'Back'; state.els.flashPreviewText.textContent = state.flashPreviewSide === 'front' ? state.els.flashFront.value : state.els.flashBack.value; });
     state.els.flashFront.addEventListener('input', () => { if (state.flashPreviewSide === 'front') state.els.flashPreviewText.textContent = state.els.flashFront.value; });
     state.els.flashBack.addEventListener('input', () => { if (state.flashPreviewSide !== 'front') state.els.flashPreviewText.textContent = state.els.flashBack.value; });
