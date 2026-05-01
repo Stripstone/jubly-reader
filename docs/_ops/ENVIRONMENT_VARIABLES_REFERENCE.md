@@ -40,6 +40,16 @@ AZURE_SPEECH_KEY = *** # Azure Speech service API key
 AZURE_SPEECH_REGION = *** # Azure Speech service region
 
 # -----------------------------
+# SUPPORT MAILER
+# -----------------------------
+FROM_EMAIL = support@*** # Verified Mailgun sender used by the native support widget
+TO_EMAIL = tri*** # Owner inbox that receives support diagnostics
+MAILGUN_SMTP_SERVER = smtp.mailgun.org # Mailgun SMTP host
+MAILGUN_SMTP_PORT = 587 # Mailgun SMTP submission port
+MAILGUN_SMTP_LOGIN = *** # Mailgun SMTP login
+MAILGUN_SMTP_PASSWORD = *** # Mailgun SMTP password
+
+# -----------------------------
 # AI / MODEL / CONVERSION
 # -----------------------------
 GROQ_MODEL = *** # Default Groq model name or ID used for requests
