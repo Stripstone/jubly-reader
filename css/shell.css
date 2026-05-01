@@ -284,6 +284,45 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         /* Sidebar offset — pad the body left so content stays centered within remaining space */
         .with-sidebar { padding-left: 68px !important; }
         @media (max-width: 640px) { .with-sidebar { padding-left: 0 !important; } #app-sidebar { display: none !important; } }
+
+/* Mobile account chrome polish: keep the top bar compact and make profile nav actionable. */
+.nav-usage-pill-label { white-space: nowrap; }
+.mobile-library-tab {
+  width: 100%;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+.mobile-library-tab:hover { color: var(--jubly-purple); }
+
+@media (max-width: 640px) {
+  nav { padding-left: 1rem !important; padding-right: 1rem !important; }
+  nav .max-w-5xl { gap: 0.75rem; }
+  nav .text-2xl { font-size: 1.55rem; line-height: 1.9rem; }
+  #nav-user-controls { gap: 0.5rem; }
+  #nav-user-name { display: none !important; }
+  #nav-profile-trigger { padding-left: 0.125rem !important; padding-right: 0 !important; }
+  #nav-profile-trigger .w-10 { width: 2.25rem !important; height: 2.25rem !important; }
+  #nav-usage-pill {
+    gap: 0.25rem !important;
+    padding: 0.35rem 0.75rem !important;
+    min-width: 4.25rem;
+    justify-content: center;
+    font-size: 0.875rem !important;
+    line-height: 1rem;
+    background: #ede9fe !important;
+  }
+  #nav-usage-pill .nav-usage-pill-label { display: none; }
+  .mobile-library-tab {
+    min-height: 42px;
+    border-radius: 14px;
+    color: #4b32bc !important;
+    background: #f5f3ff !important;
+    border-color: rgba(99, 68, 245, 0.22);
+    font-size: 0.78rem !important;
+    letter-spacing: 0.01em;
+  }
+}
         /* Support footer is fixed to viewport bottom, clearing the sidebar */
         #supportFooter { position: fixed; bottom: 0; right: 0; z-index: 40; }
         @media (max-width: 640px) { #supportFooter { left: 0; } }

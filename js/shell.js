@@ -2844,17 +2844,20 @@ window.rcInteraction = (function () {
 
     function renderUsageSurface() {
         const valueEl = document.getElementById('nav-usage-pill-value');
+        const labelEl = document.getElementById('nav-usage-pill-label');
         if (!valueEl) return;
         const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
             ? window.rcUsage.getSnapshot()
             : { remaining: null, allowance: null, authoritative: false };
         const remaining = snapshot?.remaining != null ? Number(snapshot.remaining) : null;
         if (Number.isFinite(remaining)) {
-            valueEl.textContent = `${Math.max(0, remaining)} left today`;
+            valueEl.textContent = String(Math.max(0, remaining));
+            if (labelEl) labelEl.textContent = ' left today';
         } else {
             // authoritative: false means usage truth is still settling — do not
             // show a believable number. Show neutral pending copy instead.
             valueEl.textContent = snapshot?.authoritative === false ? 'Checking…' : 'Usage';
+            if (labelEl) labelEl.textContent = '';
         }
     }
 
