@@ -2651,3 +2651,7 @@ body.annotations-utility-active #jubly-support-widget .launcher-row { display: n
 
 /* Do not hide the native help launcher; hiding it caused stale support layers on minimize. */
 body.annotations-utility-active #jubly-support-widget .launcher-row { display: flex; }
+
+/* Notes/Flashcards: current inline delete is an immediate user action, not a disabled secondary. */
+#annotations-widget .annotations-row [data-edit-current] { background: rgba(15,23,42,0.08); color: var(--annotation-ink); }
+#annotations-widget .annotations-row [data-delete-current] { background: var(--annotation-ink); color: #fff; }

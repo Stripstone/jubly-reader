@@ -306,22 +306,43 @@
   }
 
   async function deleteAnnotation(row) {
-    if (!row || !row.id || state.deletingId) return;
+    if (!row || !row.id) return;
     const id = String(row.id);
-    state.deletingId = id;
+    const now = new Date().toISOString();
+    const tombstone = Object.assign({}, row, {
+      deleted_at: now,
+      updated_at: now,
+      sync_status: 'pending-delete',
+      local_status: 'pending-delete',
+      local_updated_at: now,
+    });
+
+    // User delete is local truth immediately. Keep a local tombstone so a later
+    // server hydrate cannot resurrect the row while the hard-delete is settling.
+    state.annotations = (state.annotations || []).map((item) => String(item.id) === id ? tombstone : item);
+    saveLocalAnnotations(state.annotations);
+    state.activeEditor = '';
+    state.editingWidgetId = '';
+    state.expandedWidgetId = String(state.expandedWidgetId || '') === id ? '' : state.expandedWidgetId;
+    state.sourcePromptId = String(state.sourcePromptId || '') === id ? '' : state.sourcePromptId;
+    showToast('Deleted.');
     render();
+
+    if (id.startsWith('local-')) return;
+
     try {
-      if (!id.startsWith('local-')) {
-        await syncAnnotations('delete_annotation', { id });
-      }
-      state.annotations = (state.annotations || []).filter((item) => String(item.id) !== id);
+      await syncAnnotations('delete_annotation', { id });
+      state.annotations = (state.annotations || []).map((item) => String(item.id) === id
+        ? Object.assign({}, item, { sync_status: 'deleted', local_status: 'deleted', local_updated_at: new Date().toISOString() })
+        : item);
       saveLocalAnnotations(state.annotations);
-      state.activeEditor = '';
-      showToast('Deleted.');
     } catch (_) {
-      showToast('Delete failed. Try again.');
+      state.annotations = (state.annotations || []).map((item) => String(item.id) === id
+        ? Object.assign({}, item, { sync_status: 'delete-failed', local_status: 'pending-delete', local_updated_at: new Date().toISOString() })
+        : item);
+      saveLocalAnnotations(state.annotations);
+      showToast('Deleted locally. Will retry when available.');
     } finally {
-      state.deletingId = '';
       render();
     }
   }
