@@ -2644,6 +2644,8 @@ body.annotations-utility-active #jubly-support-widget .launcher-row { display: n
   margin-top: 10px;
 }
 #annotations-widget .annotations-inline-editor.open { display: block; }
+#annotations-widget .annotations-widget-item.editing .annotations-item-actions { display: none; }
+#annotations-widget .annotations-source-unavailable[hidden] { display: none !important; }
 #annotations-widget .annotations-inline-editor input,
 #annotations-widget .annotations-inline-editor textarea { margin-top: 8px; }
 

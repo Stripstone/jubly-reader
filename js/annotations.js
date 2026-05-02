@@ -19,6 +19,8 @@
     flashPreviewSide: 'front',
     savedFlashSides: {},
     expandedWidgetId: '',
+    editingWidgetId: '',
+    sourcePromptId: '',
     els: {},
   };
 
@@ -252,17 +254,19 @@
       return matching.slice(0, 40).map((row) => {
         const deleting = state.deletingId && String(state.deletingId) === String(row.id);
         const sameChapter = Number(row.chapter_index) === activeChapter;
-        const sourceDisabled = deleting || state.navigationPending || !sameChapter;
+        const sourceDisabled = deleting || state.navigationPending;
         const location = locationMetaFor(row);
         const expanded = String(state.expandedWidgetId || '') === String(row.id);
-        const sourceCopy = sameChapter ? 'View source' : 'Unavailable';
-        const noteCopy = sameChapter ? '' : '<em class="annotations-source-unavailable">Open this chapter to view the source.</em>';
-        const detail = expanded
+        const editing = String(state.editingWidgetId || '') === String(row.id);
+        const side = state.savedFlashSides[String(row.id)] === 'back' ? 'back' : 'front';
+        const detail = expanded && !editing
           ? (type === 'flashcard'
-            ? `<div class="annotations-widget-detail"><strong>Front</strong><span>${escapeHtml(row.flashcard_front || '')}</span><strong>Back</strong><span>${escapeHtml(row.flashcard_back || '')}</span></div>`
+            ? `<div class="annotations-widget-detail"><div class="annotations-flash-preview" data-widget-flash><strong>${side === 'front' ? 'Front' : 'Back'}</strong><span>${escapeHtml(side === 'front' ? (row.flashcard_front || '') : (row.flashcard_back || ''))}</span></div></div>`
             : `<div class="annotations-widget-detail"><span>${escapeHtml(row.note_text || '')}</span></div>`)
           : '';
-        return `<div class="annotations-widget-item" data-annotation-id="${escapeHtml(row.id)}"><div class="annotations-item-main"><button class="annotations-item-view" type="button" data-annotation-view><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong><span>${escapeHtml(previewFor(row))}</span><em>${location}</em>${noteCopy}</button>${detail}<div class="annotations-inline-editor" data-inline-editor></div></div><div class="annotations-item-actions"><button class="annotations-source" type="button" data-annotation-jump${sourceDisabled ? ' disabled' : ''}>${sourceCopy}</button><button class="annotations-edit" type="button" data-annotation-edit>Edit</button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div></div>`;
+        const editorHtml = editing ? inlineEditorMarkup(row) : '';
+        const showSourcePrompt = String(state.sourcePromptId || '') === String(row.id);
+        return `<div class="annotations-widget-item${editing ? ' editing' : ''}" data-annotation-id="${escapeHtml(row.id)}"><div class="annotations-item-main"><button class="annotations-item-view" type="button" data-annotation-view><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong><span>${escapeHtml(previewFor(row))}</span><em>${location}</em></button><em class="annotations-source-unavailable" data-source-prompt${showSourcePrompt ? '' : ' hidden'}>Open this chapter to view the source.</em>${detail}<div class="annotations-inline-editor${editing ? ' open' : ''}" data-inline-editor>${editorHtml}</div></div><div class="annotations-item-actions"><button class="annotations-source" type="button" data-annotation-jump${sourceDisabled ? ' disabled' : ''}>Source</button><button class="annotations-edit" type="button" data-annotation-edit>Edit</button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div></div>`;
       }).join('');
     };
     notesList.innerHTML = renderRows('note');
@@ -292,7 +296,8 @@
     state.els.flashEditor.classList.toggle('active', state.activeEditor === 'flashcard');
     if (state.els.noteContext) state.els.noteContext.textContent = `“${state.target ? state.target.highlightedText : ''}”`;
     if (state.els.flashContext) state.els.flashContext.textContent = `“${state.target ? state.target.highlightedText : ''}”`;
-    renderSaved(currentRow);
+    if (state.activeEditor) renderSaved(null);
+    else renderSaved(currentRow);
     if (!currentRow && !state.activeEditor) renderSaved(null);
     state.els.panel.classList.toggle('open', state.els.panel.classList.contains('open'));
     state.els.utilityMenu.classList.toggle('multi', helpIsAvailable());
@@ -387,15 +392,19 @@
     return page.querySelector('.page-text') || page;
   }
 
-  function renderInlineEditor(item, row) {
-    const editor = item && item.querySelector('[data-inline-editor]');
-    if (!editor || !row) return;
+  function inlineEditorMarkup(row) {
+    if (!row) return '';
     if (row.type === 'flashcard') {
-      editor.innerHTML = `<input data-edit-front value="${escapeHtml(row.flashcard_front || '')}" /><textarea data-edit-back>${escapeHtml(row.flashcard_back || '')}</textarea><div class="annotations-row"><button type="button" data-save-edit>Save</button><button type="button" data-cancel-edit>Cancel</button></div>`;
-    } else {
-      editor.innerHTML = `<textarea data-edit-note>${escapeHtml(row.note_text || '')}</textarea><div class="annotations-row"><button type="button" data-save-edit>Save</button><button type="button" data-cancel-edit>Cancel</button></div>`;
+      return `<input data-edit-front value="${escapeHtml(row.flashcard_front || '')}" /><textarea data-edit-back>${escapeHtml(row.flashcard_back || '')}</textarea><div class="annotations-row"><button type="button" data-save-edit>Save</button><button type="button" data-cancel-edit>Cancel</button></div>`;
     }
-    editor.classList.add('open');
+    return `<textarea data-edit-note>${escapeHtml(row.note_text || '')}</textarea><div class="annotations-row"><button type="button" data-save-edit>Save</button><button type="button" data-cancel-edit>Cancel</button></div>`;
+  }
+
+  function renderInlineEditor(item, row) {
+    if (!item || !row) return;
+    state.editingWidgetId = String(row.id || '');
+    state.expandedWidgetId = String(row.id || '');
+    renderWidgetLists();
   }
 
   async function saveInlineEdit(item, row) {
@@ -409,6 +418,7 @@
     }
     state.annotations = (state.annotations || []).map((entry) => String(entry.id) === String(row.id) ? next : entry);
     saveLocalAnnotations(state.annotations);
+    state.editingWidgetId = '';
     render();
     try {
       const synced = await syncAnnotations('save_annotation', next);
@@ -535,16 +545,32 @@
       if (!item) return;
       const row = liveAnnotations().find((entry) => String(entry.id) === String(item.getAttribute('data-annotation-id')));
       if (deleteBtn) { deleteAnnotation(row); return; }
+      if (event.target.closest('[data-widget-flash]')) {
+        const nextSide = state.savedFlashSides[String(row.id)] === 'back' ? 'front' : 'back';
+        state.savedFlashSides[String(row.id)] = nextSide;
+        state.expandedWidgetId = String(row.id);
+        renderWidgetLists();
+        return;
+      }
       if (event.target.closest('[data-annotation-view]')) {
+        state.sourcePromptId = '';
         state.expandedWidgetId = String(state.expandedWidgetId || '') === String(row.id) ? '' : String(row.id);
         renderWidgetLists();
         return;
       }
-      if (event.target.closest('[data-annotation-edit]')) { renderInlineEditor(item, row); state.expandedWidgetId = String(row.id); return; }
+      if (event.target.closest('[data-annotation-edit]')) { state.sourcePromptId = ''; renderInlineEditor(item, row); return; }
       const saveEdit = event.target.closest('[data-save-edit]');
       if (saveEdit) { saveInlineEdit(item, row); return; }
-      if (event.target.closest('[data-cancel-edit]')) { renderWidgetLists(); return; }
-      if (event.target.closest('[data-annotation-jump]')) jumpToAnnotation(row);
+      if (event.target.closest('[data-cancel-edit]')) { state.editingWidgetId = ''; renderWidgetLists(); return; }
+      if (event.target.closest('[data-annotation-jump]')) {
+        const ctx = getReadingContext();
+        if (row && Number(row.chapter_index) !== Number(ctx.chapterIndex)) {
+          state.sourcePromptId = String(row.id || '');
+          renderWidgetLists();
+          return;
+        }
+        jumpToAnnotation(row);
+      }
     });
     state.mounted = true;
     state.enabled = readPref();
