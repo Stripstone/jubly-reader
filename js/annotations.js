@@ -212,12 +212,39 @@
   }
   function helpIsAvailable() { return !!(window.rcHelp && typeof window.rcHelp.openChat === 'function'); }
   function closeHelpPanel() { try { if (window.rcHelp && typeof window.rcHelp.close === 'function') window.rcHelp.close(); } catch (_) {} }
+  function utilityMode(visible = (!!state.enabled && isReadingVisible())) {
+    const notesAvailable = !!visible;
+    const helpAvailable = helpIsAvailable();
+    if (notesAvailable && helpAvailable) return 'shared';
+    if (notesAvailable) return 'notes-only';
+    if (helpAvailable) return 'help-only';
+    return 'none';
+  }
+  function applyUtilityMode(visible = (!!state.enabled && isReadingVisible())) {
+    const mode = utilityMode(visible);
+    try {
+      document.body.classList.toggle('annotations-shared-utility-active', mode === 'shared');
+      document.body.classList.toggle('annotations-notes-only-utility-active', mode === 'notes-only');
+    } catch (_) {}
+    if (state.els.root) state.els.root.setAttribute('data-utility-mode', mode);
+    if (state.els.utilityMenu) state.els.utilityMenu.classList.toggle('multi', mode === 'shared');
+    const helpChoice = state.els.root ? state.els.root.querySelector('[data-open-help]') : null;
+    const notesChoice = state.els.root ? state.els.root.querySelector('[data-open-notes]') : null;
+    if (helpChoice) helpChoice.hidden = mode !== 'shared';
+    if (notesChoice) notesChoice.hidden = mode !== 'shared';
+    if (state.els.launcher) {
+      state.els.launcher.textContent = mode === 'shared' ? '☰' : '📝';
+      state.els.launcher.setAttribute('aria-label', mode === 'shared' ? 'Open reading utilities' : 'Open notes and flashcards');
+    }
+    if (mode !== 'shared' && state.els.utilityMenu) state.els.utilityMenu.classList.remove('open');
+  }
   function setEnabled(enabled, options = {}) {
     state.enabled = !!enabled;
     if (options.persist !== false) writePref(state.enabled);
     document.body.classList.toggle('annotations-widget-enabled', state.enabled);
     document.body.classList.toggle('annotations-utility-active', state.enabled && isReadingVisible());
     if (!state.enabled) { state.open = false; state.activeEditor = ''; closeWidgetPanel(); document.body.classList.remove('annotations-utility-active'); }
+    applyUtilityMode(state.enabled && isReadingVisible());
     render();
   }
 
@@ -278,6 +305,7 @@
     const visible = !!state.enabled && isReadingVisible();
     document.body.classList.toggle('annotations-utility-active', visible);
     state.els.root.hidden = !visible;
+    applyUtilityMode(visible);
     document.body.classList.toggle('annotations-navigation-pending', !!state.navigationPending);
     const checkbox = document.getElementById('annotationsWidgetToggle');
     if (checkbox && checkbox.checked !== state.enabled) checkbox.checked = state.enabled;
@@ -300,7 +328,6 @@
     else renderSaved(currentRow);
     if (!currentRow && !state.activeEditor) renderSaved(null);
     state.els.panel.classList.toggle('open', state.els.panel.classList.contains('open'));
-    state.els.utilityMenu.classList.toggle('multi', helpIsAvailable());
     renderWidgetLists();
     renderTabs();
   }
@@ -501,6 +528,7 @@
     if (state.els.utilityMenu) state.els.utilityMenu.classList.remove('open');
     if (state.els.launcher) state.els.launcher.classList.remove('open');
     try { document.body.classList.remove('annotations-modal-open'); } catch (_) {}
+    applyUtilityMode(state.enabled && isReadingVisible());
   }
 
   function mount() {
@@ -546,11 +574,24 @@
       if (event.target.closest('[data-edit-current]')) { fillEditorFromAnnotation(row); render(); }
     });
     state.els.launcher.addEventListener('click', () => {
+      const mode = utilityMode(state.enabled && isReadingVisible());
       if (state.els.panel.classList.contains('open')) { closeWidgetPanel(); return; }
-      if (helpIsAvailable()) { state.els.utilityMenu.classList.toggle('open'); state.els.launcher.classList.toggle('open', state.els.utilityMenu.classList.contains('open')); return; }
-      closeHelpPanel(); state.els.panel.classList.toggle('open'); document.body.classList.toggle('annotations-modal-open', state.els.panel.classList.contains('open')); renderWidgetLists();
+      if (mode === 'shared') {
+        closeHelpPanel();
+        state.els.utilityMenu.classList.toggle('open');
+        state.els.launcher.classList.toggle('open', state.els.utilityMenu.classList.contains('open'));
+        return;
+      }
+      if (mode === 'notes-only') {
+        closeHelpPanel();
+        state.els.utilityMenu.classList.remove('open');
+        state.els.panel.classList.add('open');
+        state.els.launcher.classList.add('open');
+        document.body.classList.add('annotations-modal-open');
+        renderWidgetLists();
+      }
     });
-    root.querySelector('[data-open-notes]').addEventListener('click', () => { closeHelpPanel(); state.els.utilityMenu.classList.remove('open'); state.els.panel.classList.add('open'); document.body.classList.add('annotations-modal-open'); renderWidgetLists(); });
+    root.querySelector('[data-open-notes]').addEventListener('click', () => { closeHelpPanel(); state.els.utilityMenu.classList.remove('open'); state.els.panel.classList.add('open'); state.els.launcher.classList.add('open'); document.body.classList.add('annotations-modal-open'); renderWidgetLists(); });
     root.querySelector('[data-open-help]').addEventListener('click', () => { closeWidgetPanel(); try { window.rcHelp.openChat(); } catch (_) {} });
     root.querySelector('[data-widget-close]').addEventListener('click', closeWidgetPanel);
     root.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', () => { state.activeTab = btn.getAttribute('data-tab') === 'flashcards' ? 'flashcards' : 'notes'; renderTabs(); }));

@@ -2558,6 +2558,8 @@ body.reading-active #rc-interaction-banner {
 #annotations-widget .annotations-widget-item em { display: block; margin-top: 6px; color: var(--annotation-muted); font-size: 11px; font-style: normal; }
 #annotations-widget .annotations-utility-menu { display: none; gap: 8px; margin-bottom: 10px; flex-direction: column; align-items: flex-end; }
 #annotations-widget .annotations-utility-menu.open { display: flex; }
+#annotations-widget[data-utility-mode="notes-only"] .annotations-utility-menu { display: none !important; }
+#annotations-widget[data-utility-mode="shared"] .annotations-widget-button { background: #fff; color: var(--annotation-ink); }
 #annotations-widget .annotations-utility-menu button { min-width: 128px; min-height: 42px; border: 1px solid rgba(15,23,42,0.12); border-radius: 999px; background: #fff; box-shadow: 0 8px 20px rgba(15,23,42,0.12); display: grid; grid-template-columns: 28px 1fr; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer; color: var(--annotation-ink); text-align: left; }
 #annotations-widget .annotations-utility-menu span { width: 28px; height: 28px; border-radius: 999px; background: var(--annotation-accent-soft); color: var(--annotation-accent); display: grid; place-items: center; font-weight: 900; }
 #annotations-widget .annotations-utility-menu strong { font-size: 13px; }
@@ -2570,7 +2572,8 @@ body.annotations-navigation-pending #annotations-widget .annotations-widget-butt
 body.annotations-navigation-pending #reading-mode #shell-prev-btn,
 body.annotations-navigation-pending #reading-mode #shell-next-btn,
 body.annotations-navigation-pending #reading-mode #next-chapter-btn { opacity: .68; pointer-events: none; cursor: progress; }
-body.annotations-utility-active #jubly-support-widget .launcher-row { display: none; }
+body.annotations-shared-utility-active #jubly-support-widget .launcher-row { display: none; }
+body.annotations-shared-utility-active #jubly-support-widget:not(.open) { pointer-events: none; }
 @media (max-width: 560px) {
   #annotations-widget .annotations-card { left: 12px; right: 12px; bottom: 74px; width: auto; transform: none; }
   #annotations-widget .annotations-float { right: 12px; bottom: 90px; }
@@ -2649,8 +2652,9 @@ body.annotations-utility-active #jubly-support-widget .launcher-row { display: n
 #annotations-widget .annotations-inline-editor input,
 #annotations-widget .annotations-inline-editor textarea { margin-top: 8px; }
 
-/* Do not hide the native help launcher; hiding it caused stale support layers on minimize. */
-body.annotations-utility-active #jubly-support-widget .launcher-row { display: flex; }
+/* Shared utility mode hides only Help's native launcher while Notes owns the shared launcher. */
+body.annotations-shared-utility-active #jubly-support-widget .launcher-row { display: none; }
+body.annotations-shared-utility-active #jubly-support-widget.open .panel { pointer-events: auto; }
 
 /* Notes/Flashcards: current inline delete is an immediate user action, not a disabled secondary. */
 #annotations-widget .annotations-row [data-edit-current] { background: rgba(15,23,42,0.08); color: var(--annotation-ink); }
