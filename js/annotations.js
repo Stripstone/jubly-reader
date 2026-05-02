@@ -21,6 +21,7 @@
     expandedWidgetId: '',
     editingWidgetId: '',
     sourcePromptId: '',
+    activeWidgetFlashId: '',
     els: {},
   };
 
@@ -290,15 +291,16 @@
         const location = locationMetaFor(row);
         const expanded = String(state.expandedWidgetId || '') === String(row.id);
         const editing = String(state.editingWidgetId || '') === String(row.id);
+        const activeFlash = expanded && String(state.activeWidgetFlashId || '') === String(row.id);
         const side = state.savedFlashSides[String(row.id)] === 'back' ? 'back' : 'front';
-        const detail = expanded && !editing
-          ? (type === 'flashcard'
-            ? `<div class="annotations-widget-detail"><div class="annotations-flash-preview" data-widget-flash><strong>${side === 'front' ? 'Front' : 'Back'}</strong><span>${escapeHtml(side === 'front' ? (row.flashcard_front || '') : (row.flashcard_back || ''))}</span></div></div>`
-            : `<div class="annotations-widget-detail"><span>${escapeHtml(row.note_text || '')}</span></div>`)
-          : '';
+        const displayText = side === 'front' ? (row.flashcard_front || '') : (row.flashcard_back || '');
+        const previewCard = type === 'flashcard'
+          ? `<div class="annotations-flash-preview" data-widget-flash data-active="${activeFlash ? 'true' : 'false'}"><strong>${side === 'front' ? 'Front' : 'Back'}</strong><span>${escapeHtml(displayText)}</span></div>`
+          : `<button class="annotations-item-view" type="button" data-annotation-view><span>${escapeHtml(row.note_text || '')}</span></button>`;
+        const sourceText = expanded && !editing ? `<div class="annotations-modal-source-text" data-widget-source-text><div class="annotations-context-label">Highlighted passage</div>“${escapeHtml(row.highlighted_text || '')}”</div>` : '';
         const editorHtml = editing ? inlineEditorMarkup(row) : '';
         const showSourcePrompt = String(state.sourcePromptId || '') === String(row.id);
-        return `<div class="annotations-widget-item${editing ? ' editing' : ''}" data-annotation-id="${escapeHtml(row.id)}"><div class="annotations-item-main"><button class="annotations-item-view" type="button" data-annotation-view><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong><span>${escapeHtml(previewFor(row))}</span><em>${location}</em></button><em class="annotations-source-unavailable" data-source-prompt${showSourcePrompt ? '' : ' hidden'}>Open this chapter to view the source.</em>${detail}<div class="annotations-inline-editor${editing ? ' open' : ''}" data-inline-editor>${editorHtml}</div></div><div class="annotations-item-actions"><button class="annotations-source" type="button" data-annotation-jump${sourceDisabled ? ' disabled' : ''}>Source</button><button class="annotations-edit" type="button" data-annotation-edit>Edit</button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div></div>`;
+        return `<div class="annotations-widget-item${editing ? ' editing' : ''}${expanded ? ' expanded' : ''}" data-annotation-id="${escapeHtml(row.id)}"><div class="annotations-item-main"><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong>${sourceText}${previewCard}<em class="annotations-source-meta">${location}</em><em class="annotations-source-unavailable" data-source-prompt${showSourcePrompt ? '' : ' hidden'}>Open this chapter to view the source.</em><div class="annotations-inline-editor${editing ? ' open' : ''}" data-inline-editor>${editorHtml}</div></div><div class="annotations-item-actions"><button class="annotations-source" type="button" data-annotation-jump${sourceDisabled ? ' disabled' : ''}>Source</button><button class="annotations-edit" type="button" data-annotation-edit>Edit</button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div></div>`;
       }).join('');
     };
     notesList.innerHTML = renderRows('note');
@@ -606,16 +608,32 @@
       if (!item) return;
       const row = liveAnnotations().find((entry) => String(entry.id) === String(item.getAttribute('data-annotation-id')));
       if (deleteBtn) { deleteAnnotation(row); return; }
+      if (event.target.closest('[data-widget-source-text]')) {
+        state.expandedWidgetId = '';
+        if (row && row.type === 'flashcard') {
+          state.activeWidgetFlashId = '';
+          state.savedFlashSides[String(row.id)] = 'front';
+        }
+        renderWidgetLists();
+        return;
+      }
       if (event.target.closest('[data-widget-flash]')) {
-        const nextSide = state.savedFlashSides[String(row.id)] === 'back' ? 'front' : 'back';
-        state.savedFlashSides[String(row.id)] = nextSide;
-        state.expandedWidgetId = String(row.id);
+        state.sourcePromptId = '';
+        if (String(state.activeWidgetFlashId || '') !== String(row.id)) {
+          state.activeWidgetFlashId = String(row.id);
+          state.expandedWidgetId = String(row.id);
+          state.savedFlashSides[String(row.id)] = 'front';
+        } else {
+          const nextSide = state.savedFlashSides[String(row.id)] === 'back' ? 'front' : 'back';
+          state.savedFlashSides[String(row.id)] = nextSide;
+        }
         renderWidgetLists();
         return;
       }
       if (event.target.closest('[data-annotation-view]')) {
         state.sourcePromptId = '';
         state.expandedWidgetId = String(state.expandedWidgetId || '') === String(row.id) ? '' : String(row.id);
+        if (String(state.expandedWidgetId || '') !== String(row.id)) state.activeWidgetFlashId = '';
         renderWidgetLists();
         return;
       }

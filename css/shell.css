@@ -2543,10 +2543,18 @@ body.reading-active #rc-interaction-banner {
 #annotations-widget .annotations-widget-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: stretch; width: 100%; padding: 10px; border: 1px solid rgba(150,110,30,0.22); border-radius: 16px; background: #fff3c4; color: #3f321c; }
 #annotations-widget .annotations-jump { min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 
-#annotations-widget .annotations-item-view { min-width: 0; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+#annotations-widget .annotations-item-view { min-width: 0; width: 100%; padding: 12px; border: 1px solid rgba(15,23,42,0.14); border-radius: 14px; background: #fff; color: inherit; text-align: left; cursor: pointer; font-size: 13px; line-height: 1.4; opacity: .9; }
 #annotations-widget .annotations-source { min-height: 32px; border: 1px solid rgba(150,110,30,0.25); border-radius: 999px; background: rgba(255,255,255,0.68); color: #7c4a13; font-size: 11px; font-weight: 800; cursor: pointer; }
 #annotations-widget .annotations-source:disabled { opacity: .62; cursor: not-allowed; }
 #annotations-widget .annotations-source-unavailable { display: block; margin-top: 6px; color: var(--annotation-muted); font-size: 11px; font-style: normal; }
+
+#annotations-widget .annotations-modal-source-text { margin: 9px 0 8px; padding: 10px 12px; max-height: 110px; overflow: auto; border-radius: 14px; background: rgba(255,230,120,0.28); color: var(--annotation-ink); font-family: Lora, Georgia, serif; font-size: 14px; line-height: 1.45; cursor: pointer; }
+#annotations-widget .annotations-widget-item .annotations-flash-preview { opacity: .9; }
+#annotations-widget .annotations-widget-item .annotations-flash-preview[data-active="true"],
+#annotations-widget .annotations-widget-item.expanded .annotations-item-view { opacity: 1; box-shadow: 0 0 0 2px rgba(199,123,67,0.18); }
+#annotations-widget .annotations-widget-item .annotations-flash-preview strong { display: none; }
+#annotations-widget .annotations-widget-item .annotations-flash-preview[data-active="true"] strong { display: block; }
+
 #annotations-widget .annotations-widget-detail { margin-top: 10px; padding: 10px; border-radius: 12px; background: rgba(255,255,255,0.58); }
 #annotations-widget .annotations-widget-detail strong { margin-top: 8px; color: #7c4a13; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 #annotations-widget .annotations-widget-detail strong:first-child { margin-top: 0; }
@@ -2659,3 +2667,7 @@ body.annotations-shared-utility-active #jubly-support-widget.open .panel { point
 /* Notes/Flashcards: current inline delete is an immediate user action, not a disabled secondary. */
 #annotations-widget .annotations-row [data-edit-current] { background: rgba(15,23,42,0.08); color: var(--annotation-ink); }
 #annotations-widget .annotations-row [data-delete-current] { background: var(--annotation-ink); color: #fff; }
+
+/* Notes/Flashcards modal polish: inactive flashcards hide side labels until engaged. */
+#annotations-widget .annotations-widget-item .annotations-flash-preview strong { display: none; }
+#annotations-widget .annotations-widget-item .annotations-flash-preview[data-active="true"] strong { display: block; }
