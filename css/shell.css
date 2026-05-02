@@ -2542,6 +2542,14 @@ body.reading-active #rc-interaction-banner {
 #annotations-widget .annotations-empty { padding: 14px; color: var(--annotation-muted); font-size: 13px; line-height: 1.45; background: #f8fafc; border-radius: 14px; }
 #annotations-widget .annotations-widget-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: stretch; width: 100%; padding: 10px; border: 1px solid rgba(150,110,30,0.22); border-radius: 16px; background: #fff3c4; color: #3f321c; }
 #annotations-widget .annotations-jump { min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+
+#annotations-widget .annotations-item-view { min-width: 0; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+#annotations-widget .annotations-source { min-height: 32px; border: 1px solid rgba(150,110,30,0.25); border-radius: 999px; background: rgba(255,255,255,0.68); color: #7c4a13; font-size: 11px; font-weight: 800; cursor: pointer; }
+#annotations-widget .annotations-source:disabled { opacity: .62; cursor: not-allowed; }
+#annotations-widget .annotations-source-unavailable { display: block; margin-top: 6px; color: var(--annotation-muted); font-size: 11px; font-style: normal; }
+#annotations-widget .annotations-widget-detail { margin-top: 10px; padding: 10px; border-radius: 12px; background: rgba(255,255,255,0.58); }
+#annotations-widget .annotations-widget-detail strong { margin-top: 8px; color: #7c4a13; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+#annotations-widget .annotations-widget-detail strong:first-child { margin-top: 0; }
 #annotations-widget .annotations-jump:disabled { opacity: .62; cursor: progress; }
 #annotations-widget .annotations-delete { align-self: start; padding: 7px 9px; border: 1px solid rgba(150,110,30,0.25); border-radius: 999px; background: rgba(255,255,255,0.68); color: #7c4a13; font-size: 11px; font-weight: 800; cursor: pointer; }
 #annotations-widget .annotations-delete:disabled { opacity: .62; cursor: progress; }
@@ -2615,11 +2623,12 @@ body.annotations-utility-active #jubly-support-widget .launcher-row { display: n
 }
 #annotations-widget .annotations-item-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
   margin-top: 8px;
 }
 #annotations-widget .annotations-edit,
+#annotations-widget .annotations-source,
 #annotations-widget .annotations-delete {
   min-height: 32px;
   border: 1px solid rgba(150,110,30,0.25);

@@ -18,6 +18,7 @@
     activeTab: 'notes',
     flashPreviewSide: 'front',
     savedFlashSides: {},
+    expandedWidgetId: '',
     els: {},
   };
 
@@ -251,10 +252,17 @@
       return matching.slice(0, 40).map((row) => {
         const deleting = state.deletingId && String(state.deletingId) === String(row.id);
         const sameChapter = Number(row.chapter_index) === activeChapter;
-        const disabled = deleting || state.navigationPending || !sameChapter;
+        const sourceDisabled = deleting || state.navigationPending || !sameChapter;
         const location = locationMetaFor(row);
-        const jumpCopy = sameChapter ? location : `${location} · Open this chapter to view`;
-        return `<div class="annotations-widget-item" data-annotation-id="${escapeHtml(row.id)}"><div class="annotations-item-main"><button class="annotations-jump" type="button" data-annotation-jump${disabled ? ' disabled' : ''}><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong><span>${escapeHtml(previewFor(row))}</span><em>${jumpCopy}</em></button><div class="annotations-inline-editor" data-inline-editor></div></div><div class="annotations-item-actions"><button class="annotations-edit" type="button" data-annotation-edit>Edit</button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div></div>`;
+        const expanded = String(state.expandedWidgetId || '') === String(row.id);
+        const sourceCopy = sameChapter ? 'View source' : 'Unavailable';
+        const noteCopy = sameChapter ? '' : '<em class="annotations-source-unavailable">Open this chapter to view the source.</em>';
+        const detail = expanded
+          ? (type === 'flashcard'
+            ? `<div class="annotations-widget-detail"><strong>Front</strong><span>${escapeHtml(row.flashcard_front || '')}</span><strong>Back</strong><span>${escapeHtml(row.flashcard_back || '')}</span></div>`
+            : `<div class="annotations-widget-detail"><span>${escapeHtml(row.note_text || '')}</span></div>`)
+          : '';
+        return `<div class="annotations-widget-item" data-annotation-id="${escapeHtml(row.id)}"><div class="annotations-item-main"><button class="annotations-item-view" type="button" data-annotation-view><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong><span>${escapeHtml(previewFor(row))}</span><em>${location}</em>${noteCopy}</button>${detail}<div class="annotations-inline-editor" data-inline-editor></div></div><div class="annotations-item-actions"><button class="annotations-source" type="button" data-annotation-jump${sourceDisabled ? ' disabled' : ''}>${sourceCopy}</button><button class="annotations-edit" type="button" data-annotation-edit>Edit</button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div></div>`;
       }).join('');
     };
     notesList.innerHTML = renderRows('note');
@@ -527,7 +535,12 @@
       if (!item) return;
       const row = liveAnnotations().find((entry) => String(entry.id) === String(item.getAttribute('data-annotation-id')));
       if (deleteBtn) { deleteAnnotation(row); return; }
-      if (event.target.closest('[data-annotation-edit]')) { renderInlineEditor(item, row); return; }
+      if (event.target.closest('[data-annotation-view]')) {
+        state.expandedWidgetId = String(state.expandedWidgetId || '') === String(row.id) ? '' : String(row.id);
+        renderWidgetLists();
+        return;
+      }
+      if (event.target.closest('[data-annotation-edit]')) { renderInlineEditor(item, row); state.expandedWidgetId = String(row.id); return; }
       const saveEdit = event.target.closest('[data-save-edit]');
       if (saveEdit) { saveInlineEdit(item, row); return; }
       if (event.target.closest('[data-cancel-edit]')) { renderWidgetLists(); return; }
