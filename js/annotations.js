@@ -325,7 +325,6 @@
     state.editingWidgetId = '';
     state.expandedWidgetId = String(state.expandedWidgetId || '') === id ? '' : state.expandedWidgetId;
     state.sourcePromptId = String(state.sourcePromptId || '') === id ? '' : state.sourcePromptId;
-    showToast('Deleted.');
     render();
 
     if (id.startsWith('local-')) return;
@@ -341,7 +340,6 @@
         ? Object.assign({}, item, { sync_status: 'delete-failed', local_status: 'pending-delete', local_updated_at: new Date().toISOString() })
         : item);
       saveLocalAnnotations(state.annotations);
-      showToast('Deleted locally. Will retry when available.');
     } finally {
       render();
     }
@@ -461,15 +459,11 @@
     render();
     try {
       if (typeof window.setReadingTarget === 'function') window.setReadingTarget({ sourceType: row.source_type || '', bookId: row.book_id || '', chapterIndex: row.chapter_index, pageIndex: row.page_index });
-      if (typeof window.focusReadingPage === 'function') window.focusReadingPage(Number(row.page_index) || 0, { behavior: 'auto', reason: 'annotation-jump' });
+      const targetIndex = Number(row.page_index) || 0;
+      if (typeof window.focusReadingPage === 'function') window.focusReadingPage(targetIndex, { behavior: 'smooth', reason: 'annotation-jump' });
       else {
-        const page = document.querySelector(`#reading-mode .page[data-page-index="${Number(row.page_index) || 0}"]`);
-        if (page) page.scrollIntoView({ behavior: 'auto', block: 'center' });
-      }
-      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 160)));
-      const el = findAnnotationTargetElement(row);
-      if (el) {
-        try { el.scrollIntoView({ behavior: 'auto', block: 'center' }); } catch (_) {}
+        const page = document.querySelector(`#reading-mode .page[data-page-index="${targetIndex}"]`);
+        if (page) page.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     } catch (_) {
       showToast('Could not jump to saved location.');
