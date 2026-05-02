@@ -22,7 +22,6 @@
     editingWidgetId: '',
     sourcePromptId: '',
     activeWidgetFlashId: '',
-    annotationScope: null,
     els: {},
   };
 
@@ -187,51 +186,10 @@
     }
   }
 
-  function currentAnnotationScope() {
-    const ctx = getReadingContext();
-    return {
-      bookId: String(ctx.bookId || ''),
-      sourceType: String(ctx.sourceType || ''),
-    };
-  }
-  function sameScope(scope, ctx = currentAnnotationScope()) {
-    return !!(scope && scope.scope_token && scope.bookId && String(scope.bookId) === String(ctx.bookId || '') && String(scope.sourceType || '') === String(ctx.sourceType || ''));
-  }
-  async function getAnnotationScope(options = {}) {
-    const ctx = currentAnnotationScope();
-    if (!ctx.bookId) return null;
-    if (!options.force && sameScope(state.annotationScope, ctx)) return state.annotationScope;
-    const token = await Promise.resolve(getSessionToken()).catch(() => '');
-    if (!token) return null;
-    const params = new URLSearchParams({
-      scope: 'annotations-bootstrap',
-      book_id: ctx.bookId,
-      source_type: ctx.sourceType || '',
-    });
-    const res = await fetch(`${SYNC_KIND}&${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
-    let data = null;
-    try { data = await res.json(); } catch (_) {}
-    if (!res.ok || !data || data.ok === false || !data.scope_token) {
-      state.annotationScope = null;
-      return null;
-    }
-    state.annotationScope = {
-      bookId: ctx.bookId,
-      sourceType: ctx.sourceType || '',
-      scope_token: data.scope_token,
-      schema_version: data.schema_version || 1,
-      mutation_policy: data.mutation_policy || 'server-scoped-local-first',
-    };
-    return state.annotationScope;
-  }
-
   async function syncAnnotations(action, payload) {
     const token = await Promise.resolve(getSessionToken()).catch(() => '');
     if (!token) return null;
-    const scope = await getAnnotationScope().catch(() => null);
-    if (!scope || !scope.scope_token) throw new Error('Annotation scope unavailable.');
-    const scopedPayload = Object.assign({}, payload || {}, { scope_token: scope.scope_token });
-    const res = await fetch(SYNC_KIND, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ action, payload: scopedPayload }) });
+    const res = await fetch(SYNC_KIND, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ action, payload }) });
     let data = null;
     try { data = await res.json(); } catch (_) {}
     if (!res.ok || !data || data.ok === false) throw new Error((data && (data.error || data.reason)) || 'Annotation sync failed.');
@@ -240,15 +198,7 @@
   async function fetchRemoteAnnotations() {
     const token = await Promise.resolve(getSessionToken()).catch(() => '');
     if (!token) return null;
-    const scope = await getAnnotationScope().catch(() => null);
-    if (!scope || !scope.scope_token) return null;
-    const params = new URLSearchParams({
-      scope: 'annotations',
-      book_id: scope.bookId,
-      source_type: scope.sourceType || '',
-      scope_token: scope.scope_token,
-    });
-    const res = await fetch(`${SYNC_KIND}&${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`${SYNC_KIND}&scope=annotations`, { headers: { Authorization: `Bearer ${token}` } });
     let data = null;
     try { data = await res.json(); } catch (_) {}
     if (!res.ok || !data || data.ok === false) return null;
@@ -736,8 +686,8 @@
 
   document.addEventListener('DOMContentLoaded', mount);
   document.addEventListener('rc:auth-changed', () => hydrateAnnotations());
-  document.addEventListener('rc:reading-opened', () => { state.annotationScope = null; hydrateAnnotations(); render(); });
-  document.addEventListener('rc:reading-closed', () => { state.annotationScope = null; render(); });
+  document.addEventListener('rc:reading-opened', render);
+  document.addEventListener('rc:reading-closed', render);
 
   window.rcAnnotations = { setEnabled, isEnabled: () => !!state.enabled, closeWidget: closeWidgetPanel, closePanel: closeWidgetPanel, refresh: render, list: () => liveAnnotations().slice() };
 })();

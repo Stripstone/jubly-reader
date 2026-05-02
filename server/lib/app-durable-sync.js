@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { json, withCors, readJsonBody } from './http.js';
 import { getAllowedBrowserOrigins } from './origins.js';
 import { getResolvedRuntimePolicyForRequest } from './runtime-policy.js';
@@ -20,72 +19,6 @@ async function getAuthorizedUser(req) {
   const user = await getUserFromAccessToken(token).catch(() => null);
   if (!user || !user.id) return { ok: false, reason: 'invalid_auth' };
   return { ok: true, token, user };
-}
-
-const ANNOTATION_SCOPE_VERSION = 'ann-scope-v1';
-
-function getAnnotationScopeSecret() {
-  return String(process.env.ANNOTATION_SCOPE_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || 'jubly-annotation-scope-dev').trim();
-}
-
-function base64UrlEncode(value) {
-  return Buffer.from(String(value)).toString('base64url');
-}
-
-function base64UrlDecode(value) {
-  return Buffer.from(String(value || ''), 'base64url').toString('utf8');
-}
-
-function signAnnotationScopePayload(payloadJson) {
-  return crypto.createHmac('sha256', getAnnotationScopeSecret()).update(payloadJson).digest('base64url');
-}
-
-function issueAnnotationScopeToken(userId, scope = {}) {
-  const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    v: ANNOTATION_SCOPE_VERSION,
-    sub: String(userId || ''),
-    book_id: toText(scope.book_id || scope.bookId, null),
-    source_type: toText(scope.source_type || scope.sourceType, ''),
-    iat: now,
-    exp: now + (6 * 60 * 60),
-  };
-  if (!payload.sub || !payload.book_id) return '';
-  const payloadJson = JSON.stringify(payload);
-  return `${base64UrlEncode(payloadJson)}.${signAnnotationScopePayload(payloadJson)}`;
-}
-
-function verifyAnnotationScopeToken(userId, token, expected = {}) {
-  const raw = String(token || '').trim();
-  const parts = raw.split('.');
-  if (parts.length !== 2) return { ok: false, reason: 'missing_annotation_scope' };
-  let payload = null;
-  try {
-    const payloadJson = base64UrlDecode(parts[0]);
-    const expectedSig = signAnnotationScopePayload(payloadJson);
-    const actual = Buffer.from(parts[1]);
-    const wanted = Buffer.from(expectedSig);
-    if (actual.length !== wanted.length || !crypto.timingSafeEqual(actual, wanted)) return { ok: false, reason: 'invalid_annotation_scope' };
-    payload = JSON.parse(payloadJson);
-  } catch (_) {
-    return { ok: false, reason: 'invalid_annotation_scope' };
-  }
-  const now = Math.floor(Date.now() / 1000);
-  const expectedBook = toText(expected.book_id || expected.bookId, null);
-  const expectedSource = toText(expected.source_type || expected.sourceType, '');
-  if (!payload || payload.v !== ANNOTATION_SCOPE_VERSION) return { ok: false, reason: 'invalid_annotation_scope' };
-  if (String(payload.sub || '') !== String(userId || '')) return { ok: false, reason: 'annotation_scope_user_mismatch' };
-  if (Number(payload.exp || 0) < now) return { ok: false, reason: 'annotation_scope_expired' };
-  if (expectedBook && String(payload.book_id || '') !== expectedBook) return { ok: false, reason: 'annotation_scope_book_mismatch' };
-  if (expectedSource && String(payload.source_type || '') !== expectedSource) return { ok: false, reason: 'annotation_scope_source_mismatch' };
-  return { ok: true, payload };
-}
-
-function annotationScopeFromPayload(payload = {}) {
-  return {
-    book_id: toText(payload.book_id || payload.bookId, null),
-    source_type: toText(payload.source_type || payload.sourceType, ''),
-  };
 }
 
 function toText(value, fallback = null) {
@@ -743,16 +676,9 @@ function canonicalizeAnnotationPayload(userId, payload = {}) {
   };
 }
 
-async function getAnnotationRows(userId, { includeDeleted = false, limit = 200, bookId = '', sourceType = '', scopeToken = '' } = {}) {
-  const scopedBookId = toText(bookId, null);
-  const scopedSourceType = toText(sourceType, '');
-  if (!scopedBookId) throw new Error('annotation_book_scope_required');
-  const verified = verifyAnnotationScopeToken(userId, scopeToken, { book_id: scopedBookId, source_type: scopedSourceType });
-  if (!verified.ok) throw new Error(verified.reason);
+async function getAnnotationRows(userId, { includeDeleted = false, limit = 200 } = {}) {
   const filters = [`user_id=eq.${encodeURIComponent(userId)}`];
   if (!includeDeleted) filters.push('deleted_at=is.null');
-  if (scopedBookId) filters.push(`book_id=eq.${encodeURIComponent(scopedBookId)}`);
-  if (scopedBookId && scopedSourceType) filters.push(`source_type=eq.${encodeURIComponent(scopedSourceType)}`);
   const data = await supabaseRest(`/rest/v1/user_annotations?${filters.join('&')}&select=*&order=updated_at.desc&limit=${Math.max(1, toInt(limit, 200))}`, {
     method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
   }).catch(() => null);
@@ -762,9 +688,6 @@ async function getAnnotationRows(userId, { includeDeleted = false, limit = 200, 
 async function upsertAnnotation(userId, payload = {}) {
   const rowId = toText(payload.id, null);
   const base = canonicalizeAnnotationPayload(userId, payload);
-  if (!base.book_id) throw new Error('annotation_book_scope_required');
-  const verified = verifyAnnotationScopeToken(userId, payload.scope_token || payload.scopeToken, annotationScopeFromPayload(base));
-  if (!verified.ok) throw new Error(verified.reason);
   if (rowId && !String(rowId).startsWith('local-')) {
     const data = await supabaseRest(`/rest/v1/user_annotations?id=eq.${encodeURIComponent(rowId)}&user_id=eq.${encodeURIComponent(userId)}&select=*`, {
       method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: base,
@@ -777,21 +700,16 @@ async function upsertAnnotation(userId, payload = {}) {
   return sanitizeAnnotationRow(Array.isArray(data) && data[0] ? data[0] : base);
 }
 
-async function deleteAnnotation(userId, annotationId, payload = {}) {
+async function deleteAnnotation(userId, annotationId) {
   const id = toText(annotationId, null);
   if (!id) throw new Error('annotation_id is required');
   const existing = await supabaseRest(`/rest/v1/user_annotations?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*`, {
     method: 'GET', asService: true,
   }).catch(() => null);
-  const existingRow = Array.isArray(existing) && existing[0] ? sanitizeAnnotationRow(existing[0]) : null;
-  const scope = existingRow ? annotationScopeFromPayload(existingRow) : annotationScopeFromPayload(payload);
-  if (!scope.book_id) throw new Error('annotation_book_scope_required');
-  const verified = verifyAnnotationScopeToken(userId, payload.scope_token || payload.scopeToken, scope);
-  if (!verified.ok) throw new Error(verified.reason);
   await supabaseRest(`/rest/v1/user_annotations?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}`, {
     method: 'DELETE', asService: true,
   });
-  return existingRow || sanitizeAnnotationRow({ id, user_id: userId });
+  return sanitizeAnnotationRow(Array.isArray(existing) && existing[0] ? existing[0] : { id, user_id: userId });
 }
 
 async function buildSnapshot(req, user) {
@@ -862,26 +780,9 @@ export default async function handler(req, res) {
       const row = await getRestoreRow(auth.user.id, bookId).catch(() => null);
       return json(res, 200, { ok: true, row });
     }
-    if (scope === 'annotations-bootstrap') {
-      const bookId = getParam(req, 'book_id') || getParam(req, 'bookId');
-      const sourceType = getParam(req, 'source_type') || getParam(req, 'sourceType');
-      const token = issueAnnotationScopeToken(auth.user.id, { book_id: bookId, source_type: sourceType });
-      if (!token) return json(res, 400, { ok: false, reason: 'annotation_book_scope_required' });
-      return json(res, 200, { ok: true, feature: 'annotations', schema_version: 1, mutation_policy: 'server-scoped-local-first', scope_token: token, expires_in_seconds: 21600 });
-    }
     if (scope === 'annotations') {
-      try {
-        const rows = await getAnnotationRows(auth.user.id, {
-          includeDeleted: false,
-          limit: toInt(getParam(req, 'limit'), 200),
-          bookId: getParam(req, 'book_id') || getParam(req, 'bookId'),
-          sourceType: getParam(req, 'source_type') || getParam(req, 'sourceType'),
-          scopeToken: getParam(req, 'scope_token') || getParam(req, 'scopeToken'),
-        });
-        return json(res, 200, { ok: true, rows });
-      } catch (err) {
-        return json(res, 403, { ok: false, reason: err?.message || 'annotation_scope_failed' });
-      }
+      const rows = await getAnnotationRows(auth.user.id, { includeDeleted: false, limit: toInt(getParam(req, 'limit'), 200) }).catch(() => []);
+      return json(res, 200, { ok: true, rows });
     }
     const snapshot = await buildSnapshot(req, auth.user).catch(() => null);
     return json(res, 200, { ok: true, snapshot });
@@ -909,7 +810,7 @@ export default async function handler(req, res) {
           row = await upsertAnnotation(auth.user.id, body?.payload || {});
           break;
         case 'delete_annotation':
-          row = await deleteAnnotation(auth.user.id, body?.payload?.id || body?.payload?.annotation_id || body?.payload?.annotationId, body?.payload || {});
+          row = await deleteAnnotation(auth.user.id, body?.payload?.id || body?.payload?.annotation_id || body?.payload?.annotationId);
           break;
         case 'delete_library_item': {
           const storageRef = body?.payload?.storage_ref || body?.payload?.storageRef || body?.payload?.book_id || body?.payload?.bookId;

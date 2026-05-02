@@ -2671,3 +2671,161 @@ body.annotations-shared-utility-active #jubly-support-widget.open .panel { point
 /* Notes/Flashcards modal polish: inactive flashcards hide side labels until engaged. */
 #annotations-widget .annotations-widget-item .annotations-flash-preview strong { display: none; }
 #annotations-widget .annotations-widget-item .annotations-flash-preview[data-active="true"] strong { display: block; }
+
+/* Legal surfaces — shell presentation only; source documents live in /legal/*.html. */
+.legal-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.legal-link-row a,
+.support-footer-legal-links a,
+.auth-legal-copy a,
+.billing-legal-copy a,
+.legal-settings-list a {
+  color: var(--jubly-purple);
+  text-decoration: none;
+  font-weight: 800;
+}
+.legal-link-row a:hover,
+.support-footer-legal-links a:hover,
+.auth-legal-copy a:hover,
+.billing-legal-copy a:hover,
+.legal-settings-list a:hover {
+  text-decoration: underline;
+}
+.auth-legal-copy {
+  margin: 0.85rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: #94a3b8;
+  text-align: center;
+}
+.billing-legal-copy {
+  margin: 1.15rem auto 0;
+  max-width: 34rem;
+  font-size: 0.74rem;
+  line-height: 1.55;
+  color: #94a3b8;
+  text-align: center;
+}
+.legal-settings-list {
+  display: grid;
+  gap: 0.65rem;
+}
+.legal-settings-list a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+  background: #f8fafc;
+  color: #475569;
+}
+.legal-settings-list a::after {
+  content: "Open";
+  color: #94a3b8;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.legal-modal-overlay {
+  z-index: 220;
+}
+.legal-modal-card {
+  width: min(880px, 96vw);
+  height: min(86vh, 840px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 24px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 28px 72px rgba(15, 23, 42, 0.26);
+}
+.legal-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.15rem;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+}
+.legal-modal-header h2 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 900;
+  color: #1e293b;
+}
+.legal-modal-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.legal-modal-actions a {
+  color: var(--jubly-purple);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+.legal-modal-actions a:hover { text-decoration: underline; }
+#legal-modal-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+.support-footer-legal-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #cbd5e1;
+}
+body.app-dark .auth-legal-copy,
+body.app-dark .billing-legal-copy { color: #94a3b8; }
+body.app-dark .legal-settings-list a {
+  background: #0f172a;
+  border-color: #1f2937;
+  color: #cbd5e1;
+}
+body.app-dark .legal-modal-card,
+body.app-dark .legal-modal-header { background: #111827; border-color: #1f2937; }
+body.app-dark .legal-modal-header h2 { color: #e5e7eb; }
+body.app-dark #legal-modal-frame { background: #fff; }
+@media (max-width: 640px) {
+  #landing-footer .landing-footer-inner {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+  #landing-footer .landing-footer-proof {
+    gap: 0.35rem 1rem !important;
+    font-size: 0.58rem !important;
+    line-height: 1.25 !important;
+    flex-wrap: wrap;
+  }
+  .legal-link-row {
+    margin-top: 0.65rem;
+    font-size: 0.64rem;
+  }
+  .legal-modal-card {
+    width: 100%;
+    height: 92vh;
+    border-radius: 18px;
+  }
+  .legal-modal-header {
+    padding: 0.8rem 0.9rem;
+  }
+  .legal-modal-actions a { display: none; }
+}

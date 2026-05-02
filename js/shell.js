@@ -1062,6 +1062,53 @@ window.rcInteraction = (function () {
     }
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
+    function getLegalDocumentUrl(kind) {
+        const normalized = String(kind || '').trim().toLowerCase();
+        return normalized === 'privacy' ? '/legal/privacy.html' : '/legal/terms.html';
+    }
+
+    function getLegalDocumentTitle(kind) {
+        const normalized = String(kind || '').trim().toLowerCase();
+        return normalized === 'privacy' ? 'Privacy Policy' : 'Terms of Service';
+    }
+
+    function openLegalModal(kind) {
+        const modal = document.getElementById('legal-modal');
+        const frame = document.getElementById('legal-modal-frame');
+        const title = document.getElementById('legal-modal-title');
+        const openPage = document.getElementById('legal-modal-open-page');
+        const url = getLegalDocumentUrl(kind);
+        if (!modal) {
+            try { window.open(url, '_blank', 'noopener'); } catch (_) {}
+            return;
+        }
+        if (title) title.textContent = getLegalDocumentTitle(kind);
+        if (openPage) openPage.href = url;
+        if (frame && frame.getAttribute('src') !== url) frame.setAttribute('src', url);
+        modal.classList.remove('hidden-section');
+        modal.style.display = 'flex';
+    }
+
+    function closeLegalModal() {
+        const modal = document.getElementById('legal-modal');
+        if (!modal) return;
+        modal.classList.add('hidden-section');
+        modal.style.display = 'none';
+    }
+
+    function installLegalModalGuards() {
+        const modal = document.getElementById('legal-modal');
+        if (!modal || modal.__jublyLegalModalBound) return;
+        modal.__jublyLegalModalBound = true;
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) closeLegalModal();
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape') return;
+            if (!modal.classList.contains('hidden-section') && modal.style.display !== 'none') closeLegalModal();
+        });
+    }
+
     function installPricingModalClickAway() {
         const pricingModal = document.getElementById('pricing-modal');
         if (!pricingModal || pricingModal.__jublyPricingClickAwayBound) return;
@@ -1372,9 +1419,11 @@ window.rcInteraction = (function () {
         const errEl         = document.getElementById('auth-error');
         const okEl          = document.getElementById('auth-success');
         const pwInput       = document.getElementById('loginPassword');
+        const legalCopy     = document.getElementById('auth-legal-copy');
 
         if (errEl) errEl.classList.add('hidden-section');
         if (okEl) okEl.classList.add('hidden-section');
+        if (legalCopy) legalCopy.classList.toggle('hidden-section', !(_authMode === 'signin' || _authMode === 'signup'));
 
         if (_authMode === 'signup') {
             if (heading) heading.textContent = 'Create account';
@@ -1925,6 +1974,7 @@ window.rcInteraction = (function () {
     document.addEventListener('DOMContentLoaded', async () => {
         installOwnershipGuards();
         installPricingModalClickAway();
+        installLegalModalGuards();
         initPublicOnboardingSurface();
         try {
             document.body.classList.add('auth-hydrating');
