@@ -247,3 +247,21 @@ A build is acceptable only if all of the following are true:
 - restore lands on the correct page
 - footer never covers content
 - theme changes do not change reading layout or runtime reading truth
+
+
+## Notes & Flashcards annotation contract
+
+Full feature authority: [`notes_flashcards_runtime_ux_contract.md`](./notes_flashcards_runtime_ux_contract.md).
+
+Runtime requirements:
+- The feature is gated by `Reading View → Settings → General → Notes & Flashcards Widget`.
+- When off, Notes/Flashcards UI is absent and reading behaves as before.
+- When on, the floating utility is available, but the inline annotation entrypoint appears only while TTS is paused.
+- Annotation creation, revisit, Source, edit, and delete must not auto-pause, start playback, resume playback, or seek TTS.
+- A highlighted block may have only one active annotation: note or flashcard.
+- Inline and modal edit/delete must use the same local-first mutation model.
+- User actions win first, local cache wins next, and server hydrate fills gaps only when it does not erase newer local/user truth.
+- Source is reading navigation only. Same-chapter Source may perform one soft page-level scroll. Cross-chapter Source must stay in the modal and prompt the user to open the chapter unless an existing proven chapter-selector/runtime seam is used.
+- Modal note/flashcard review must expose highlighted source context when opened.
+- Modal flashcards are active-recall objects: inactive Front preview first, first click activates without flipping, later clicks flip Front/Back, collapse resets inactive Front.
+- The floating utility host must render standalone when only one utility is active and shared-launcher mode only when multiple utilities are active.

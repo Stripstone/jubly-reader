@@ -364,3 +364,46 @@ Treat it in this order:
 
 If the write succeeds and the returned snapshot is still wrong, debug server snapshot composition next.
 If the write fails, fix payload and schema contract before blaming hydration.
+
+
+## user_annotations
+
+Purpose: out-of-book user-created notes and flashcards anchored to reading location.
+
+Owner model:
+- Backend/Supabase owns durable annotation rows.
+- Reading runtime supplies active anchor truth only.
+- Client UI/cache owns immediate user-action projection and must reconcile with server durable truth without erasing newer local saves/edits/deletes.
+
+Important columns:
+- `id uuid primary key`
+- `user_id uuid not null`
+- `library_item_id uuid nullable`
+- `book_id text nullable`
+- `source_type text nullable`
+- `annotation_type text not null` (`note` or `flashcard`)
+- `note_text text nullable`
+- `flashcard_front text nullable`
+- `flashcard_back text nullable`
+- `chapter_index int4 not null`
+- `page_index int4 not null`
+- `page_key text nullable`
+- `block_index int4 not null`
+- `highlighted_text text nullable`
+- `text_hash text nullable`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+- `deleted_at timestamptz nullable`
+
+Current deletion behavior:
+- Product behavior uses hard delete from active annotations.
+- `deleted_at` may remain for future compatibility, but there is no user-visible annotation Trash/restore surface in this phase.
+
+Book independence:
+- Annotation reads/writes must scope by current book/library item identity.
+- Rows from one book must not hydrate into another book.
+- Empty book identity must not become a valid annotation target.
+
+Server canonicalization rule:
+- `highlighted_text` is source context only.
+- Do not auto-fill `note_text`, `flashcard_front`, or `flashcard_back` from highlighted text.

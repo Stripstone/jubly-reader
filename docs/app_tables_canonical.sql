@@ -382,3 +382,56 @@ grant execute on function public.consume_user_usage(uuid, bigint, integer, times
 grant execute on function public.purge_deleted_library_items(timestamptz, integer) to service_role;
 
 commit;
+
+
+-- Notes & Flashcards annotations
+-- Out-of-book user content anchored to reading location.
+create table if not exists public.user_annotations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  library_item_id uuid null,
+  book_id text null,
+  source_type text null,
+  annotation_type text not null check (annotation_type in ('note', 'flashcard')),
+  note_text text null,
+  flashcard_front text null,
+  flashcard_back text null,
+  chapter_index int4 not null,
+  page_index int4 not null,
+  page_key text null,
+  block_index int4 not null,
+  highlighted_text text null,
+  text_hash text null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz null
+);
+
+alter table public.user_annotations enable row level security;
+
+create policy if not exists user_annotations_select_own
+on public.user_annotations
+for select
+using (auth.uid() = user_id);
+
+create policy if not exists user_annotations_insert_own
+on public.user_annotations
+for insert
+with check (auth.uid() = user_id);
+
+create policy if not exists user_annotations_update_own
+on public.user_annotations
+for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy if not exists user_annotations_delete_own
+on public.user_annotations
+for delete
+using (auth.uid() = user_id);
+
+create index if not exists user_annotations_user_book_idx
+on public.user_annotations (user_id, book_id, library_item_id);
+
+create index if not exists user_annotations_anchor_idx
+on public.user_annotations (user_id, chapter_index, page_index, block_index);
