@@ -2576,3 +2576,67 @@ body.annotations-utility-active #jubly-support-widget .launcher-row { display: n
   18% { background-color: rgba(255,230,120,0.56); box-shadow: 0 0 0 3px rgba(255,230,120,0.22); }
   100% { background-color: rgba(255,230,120,0); box-shadow: 0 0 0 0 rgba(255,230,120,0); }
 }
+
+/* Notes & Flashcards modal refinement. */
+#annotations-widget .annotations-modal-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+}
+#annotations-widget .annotations-modal-backdrop.open { display: flex; }
+#annotations-widget .annotations-modal-backdrop .annotations-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(86vh, 660px);
+  margin: 0;
+  padding: 14px;
+  border: 1px solid rgba(15,23,42,0.12);
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 22px 70px rgba(15,23,42,0.24);
+  overflow: hidden;
+}
+#annotations-widget .annotations-modal-backdrop .annotations-list {
+  max-height: none;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+#annotations-widget .annotations-widget-item {
+  grid-template-columns: 1fr;
+}
+#annotations-widget .annotations-item-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+#annotations-widget .annotations-edit,
+#annotations-widget .annotations-delete {
+  min-height: 32px;
+  border: 1px solid rgba(150,110,30,0.25);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.68);
+  color: #7c4a13;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+#annotations-widget .annotations-inline-editor {
+  display: none;
+  margin-top: 10px;
+}
+#annotations-widget .annotations-inline-editor.open { display: block; }
+#annotations-widget .annotations-inline-editor input,
+#annotations-widget .annotations-inline-editor textarea { margin-top: 8px; }
+
+/* Do not hide the native help launcher; hiding it caused stale support layers on minimize. */
+body.annotations-utility-active #jubly-support-widget .launcher-row { display: flex; }

@@ -23,7 +23,10 @@
 
   function readPref() { try { return localStorage.getItem(PREF_KEY) === '1'; } catch (_) { return false; } }
   function writePref(enabled) { try { localStorage.setItem(PREF_KEY, enabled ? '1' : '0'); } catch (_) {} }
-  function uid() { try { if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID(); } catch (_) {} return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+  function uid() {
+    try { if (crypto && typeof crypto.randomUUID === 'function') return `local-${crypto.randomUUID()}`; } catch (_) {}
+    return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
   function escapeHtml(value) {
     return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
   }
@@ -107,6 +110,32 @@
     if (!row) return '';
     return [row.book_id || '', row.source_type || '', row.chapter_index, row.page_index, row.block_index, row.text_hash || ''].join('|');
   }
+  function normalizeRemoteAnnotation(row) {
+    return Object.assign({}, row || {}, { sync_status: 'synced', local_status: 'synced' });
+  }
+  function markPending(row) {
+    return Object.assign({}, row || {}, { sync_status: 'pending', local_status: 'pending', local_updated_at: new Date().toISOString() });
+  }
+  function markSynced(localRow, serverRow) {
+    return Object.assign({}, localRow || {}, serverRow || {}, { sync_status: 'synced', local_status: 'synced', local_updated_at: (serverRow && serverRow.updated_at) || (localRow && localRow.local_updated_at) || new Date().toISOString() });
+  }
+  function mergeRemoteAnnotations(remoteRows, localRows) {
+    const locals = Array.isArray(localRows) ? localRows.filter(Boolean) : [];
+    const remotes = Array.isArray(remoteRows) ? remoteRows.filter(Boolean).map(normalizeRemoteAnnotation) : [];
+    if (!locals.length) return remotes;
+
+    // User action / local cache truth wins over server hydrate. Server rows fill gaps only.
+    const byKey = new Map();
+    remotes.forEach((row) => {
+      const key = annotationKey(row) || String(row.id || '');
+      if (key) byKey.set(key, row);
+    });
+    locals.forEach((row) => {
+      const key = annotationKey(row) || String(row.id || '');
+      if (key) byKey.set(key, row);
+    });
+    return Array.from(byKey.values()).sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
+  }
   function allLiveAnnotations() { return (state.annotations || []).filter((row) => row && !row.deleted_at); }
   function liveAnnotations() { const ctx = getReadingContext(); return allLiveAnnotations().filter((row) => sameBook(row, ctx)); }
   function annotationForTarget(target) { const key = annotationKeyFromTarget(target); return key ? allLiveAnnotations().find((row) => annotationKey(row) === key) || null : null; }
@@ -117,6 +146,41 @@
   }
   function previewFor(row) { return row && row.type === 'flashcard' ? (row.flashcard_front || '') : (row && (row.note_text || '')) || ''; }
   function sourcePreviewFor(row) { return trimPreview(row && row.highlighted_text, 36); }
+  function getChapterTitle(chapterIndex) {
+    const idx = Number(chapterIndex);
+    try {
+      const select = document.getElementById('chapterSelect');
+      if (select && Number.isFinite(idx) && idx >= 0) {
+        const option = Array.from(select.options || []).find((opt) => Number(opt.value) === idx);
+        const label = String((option && option.textContent) || '').trim();
+        if (label) return label;
+      }
+    } catch (_) {}
+    return Number.isFinite(idx) && idx >= 0 ? 'Chapter ' + (idx + 1) : 'Chapter';
+  }
+  function chapterLabelFor(row) {
+    return 'CH: “' + trimPreview(getChapterTitle(row && row.chapter_index), 12) + '”';
+  }
+  function locationMetaFor(row) {
+    if (!row) return '';
+    const page = Number(row.page_index);
+    const pageText = Number.isFinite(page) && page >= 0 ? 'Page ' + (page + 1) : 'Page';
+    const sourcePreview = sourcePreviewFor(row);
+    return chapterLabelFor(row) + ' · ' + pageText + (sourcePreview ? ' · “' + escapeHtml(sourcePreview) + '”' : '');
+  }
+  function fillEditorFromAnnotation(row) {
+    if (!row) return;
+    state.activeEditor = row.type === 'flashcard' ? 'flashcard' : 'note';
+    if (row.type === 'flashcard') {
+      state.flashPreviewSide = 'front';
+      state.els.flashFront.value = row.flashcard_front || '';
+      state.els.flashBack.value = row.flashcard_back || '';
+      state.els.flashPreview.querySelector('strong').textContent = 'Front';
+      state.els.flashPreviewText.textContent = row.flashcard_front || '';
+    } else {
+      state.els.noteText.value = row.note_text || '';
+    }
+  }
 
   async function syncAnnotations(action, payload) {
     const token = await Promise.resolve(getSessionToken()).catch(() => '');
@@ -160,8 +224,7 @@
     if (row.type === 'flashcard') {
       const side = state.savedFlashSides[String(row.id)] === 'back' ? 'back' : 'front';
       const text = side === 'front' ? (row.flashcard_front || '') : (row.flashcard_back || '');
-      const sourcePreview = sourcePreviewFor(row);
-      state.els.saved.innerHTML = `<div class="annotations-flash-preview" data-saved-flash><strong>${side === 'front' ? 'Front' : 'Back'}</strong><span>${escapeHtml(text)}</span></div><em class="annotations-source-meta">Chapter ${Number(row.chapter_index) + 1 || 1} · Page ${Number(row.page_index) + 1 || 1}${sourcePreview ? ` · “${escapeHtml(sourcePreview)}”` : ''}</em><div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
+      state.els.saved.innerHTML = `<div class="annotations-flash-preview" data-saved-flash><strong>${side === 'front' ? 'Front' : 'Back'}</strong><span>${escapeHtml(text)}</span></div><em class="annotations-source-meta">${locationMetaFor(row)}</em><div class="annotations-row"><button type="button" data-edit-current>Edit</button><button type="button" data-delete-current>Delete</button></div>`;
       const preview = state.els.saved.querySelector('[data-saved-flash]');
       preview.addEventListener('click', () => {
         const nextSide = state.savedFlashSides[String(row.id)] === 'back' ? 'front' : 'back';
@@ -170,8 +233,7 @@
         preview.querySelector('span').textContent = nextSide === 'front' ? (row.flashcard_front || '') : (row.flashcard_back || '');
       });
     } else {
-      const sourcePreview = sourcePreviewFor(row);
-      state.els.saved.innerHTML = `<strong>Note</strong>${escapeHtml(row.note_text || '')}<em class="annotations-source-meta">Chapter ${Number(row.chapter_index) + 1 || 1} · Page ${Number(row.page_index) + 1 || 1}${sourcePreview ? ` · “${escapeHtml(sourcePreview)}”` : ''}</em><div class="annotations-row"><button type="button" data-delete-current>Delete</button></div>`;
+      state.els.saved.innerHTML = `<strong>Note</strong>${escapeHtml(row.note_text || '')}<em class="annotations-source-meta">${locationMetaFor(row)}</em><div class="annotations-row"><button type="button" data-edit-current>Edit</button><button type="button" data-delete-current>Delete</button></div>`;
     }
     state.els.saved.classList.add('active');
   }
@@ -190,10 +252,9 @@
         const deleting = state.deletingId && String(state.deletingId) === String(row.id);
         const sameChapter = Number(row.chapter_index) === activeChapter;
         const disabled = deleting || state.navigationPending || !sameChapter;
-        const sourcePreview = sourcePreviewFor(row);
-        const location = `Chapter ${Number(row.chapter_index) + 1 || 1} · Page ${Number(row.page_index) + 1 || 1}${sourcePreview ? ` · “${escapeHtml(sourcePreview)}”` : ''}`;
+        const location = locationMetaFor(row);
         const jumpCopy = sameChapter ? location : `${location} · Open this chapter to view`;
-        return `<div class="annotations-widget-item" data-annotation-id="${escapeHtml(row.id)}"><button class="annotations-jump" type="button" data-annotation-jump${disabled ? ' disabled' : ''}><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong><span>${escapeHtml(previewFor(row))}</span><em>${jumpCopy}</em></button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div>`;
+        return `<div class="annotations-widget-item" data-annotation-id="${escapeHtml(row.id)}"><div class="annotations-item-main"><button class="annotations-jump" type="button" data-annotation-jump${disabled ? ' disabled' : ''}><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong><span>${escapeHtml(previewFor(row))}</span><em>${jumpCopy}</em></button><div class="annotations-inline-editor" data-inline-editor></div></div><div class="annotations-item-actions"><button class="annotations-edit" type="button" data-annotation-edit>Edit</button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div></div>`;
       }).join('');
     };
     notesList.innerHTML = renderRows('note');
@@ -222,6 +283,7 @@
     state.els.noteEditor.classList.toggle('active', state.activeEditor === 'note');
     state.els.flashEditor.classList.toggle('active', state.activeEditor === 'flashcard');
     if (state.els.noteContext) state.els.noteContext.textContent = `“${state.target ? state.target.highlightedText : ''}”`;
+    if (state.els.flashContext) state.els.flashContext.textContent = `“${state.target ? state.target.highlightedText : ''}”`;
     renderSaved(currentRow);
     if (!currentRow && !state.activeEditor) renderSaved(null);
     state.els.panel.classList.toggle('open', state.els.panel.classList.contains('open'));
@@ -254,11 +316,32 @@
   async function saveAnnotation(type) {
     const target = state.target || getCurrentTarget();
     if (!target) return;
-    if (annotationForTarget(target)) return;
+    const existing = annotationForTarget(target);
     const now = new Date().toISOString();
     const noteText = String(state.els.noteText.value || '').trim();
     const front = String(state.els.flashFront.value || '').trim();
     const back = String(state.els.flashBack.value || '').trim();
+    if (existing) {
+      const next = markPending(Object.assign({}, existing, {
+        type, annotation_type: type, updated_at: now,
+        note_text: type === 'note' ? noteText : null,
+        flashcard_front: type === 'flashcard' ? front : null,
+        flashcard_back: type === 'flashcard' ? back : null,
+      }));
+      state.annotations = (state.annotations || []).map((item) => String(item.id) === String(existing.id) ? next : item);
+      saveLocalAnnotations(state.annotations);
+      state.activeEditor = '';
+      render();
+      try {
+        const synced = await syncAnnotations('save_annotation', next);
+        if (synced && synced.row && synced.row.id) {
+          state.annotations = state.annotations.map((item) => String(item.id) === String(next.id) ? markSynced(next, synced.row) : item);
+          saveLocalAnnotations(state.annotations);
+          render();
+        }
+      } catch (_) {}
+      return;
+    }
     const row = {
       id: uid(), type, book_id: target.bookId, source_type: target.sourceType,
       chapter_index: target.chapterIndex, page_index: target.pageIndex, page_key: target.pageKey,
@@ -266,7 +349,7 @@
       note_text: type === 'note' ? noteText : null,
       flashcard_front: type === 'flashcard' ? front : null,
       flashcard_back: type === 'flashcard' ? back : null,
-      created_at: now, updated_at: now, deleted_at: null,
+      created_at: now, updated_at: now, deleted_at: null, sync_status: 'pending', local_status: 'pending', local_updated_at: now,
     };
     state.annotations = [row].concat((state.annotations || []).filter((item) => annotationKey(item) !== annotationKey(row)));
     saveLocalAnnotations(state.annotations);
@@ -275,7 +358,7 @@
     try {
       const synced = await syncAnnotations('save_annotation', row);
       if (synced && synced.row && synced.row.id) {
-        state.annotations = state.annotations.map((item) => item.id === row.id ? Object.assign({}, row, synced.row) : item);
+        state.annotations = state.annotations.map((item) => item.id === row.id ? markSynced(row, synced.row) : item);
         saveLocalAnnotations(state.annotations);
         render();
       }
@@ -296,6 +379,39 @@
     return page.querySelector('.page-text') || page;
   }
 
+  function renderInlineEditor(item, row) {
+    const editor = item && item.querySelector('[data-inline-editor]');
+    if (!editor || !row) return;
+    if (row.type === 'flashcard') {
+      editor.innerHTML = `<input data-edit-front value="${escapeHtml(row.flashcard_front || '')}" /><textarea data-edit-back>${escapeHtml(row.flashcard_back || '')}</textarea><div class="annotations-row"><button type="button" data-save-edit>Save</button><button type="button" data-cancel-edit>Cancel</button></div>`;
+    } else {
+      editor.innerHTML = `<textarea data-edit-note>${escapeHtml(row.note_text || '')}</textarea><div class="annotations-row"><button type="button" data-save-edit>Save</button><button type="button" data-cancel-edit>Cancel</button></div>`;
+    }
+    editor.classList.add('open');
+  }
+
+  async function saveInlineEdit(item, row) {
+    if (!item || !row) return;
+    const next = markPending(Object.assign({}, row, { updated_at: new Date().toISOString() }));
+    if (row.type === 'flashcard') {
+      next.flashcard_front = String((item.querySelector('[data-edit-front]') || {}).value || '').trim();
+      next.flashcard_back = String((item.querySelector('[data-edit-back]') || {}).value || '').trim();
+    } else {
+      next.note_text = String((item.querySelector('[data-edit-note]') || {}).value || '').trim();
+    }
+    state.annotations = (state.annotations || []).map((entry) => String(entry.id) === String(row.id) ? next : entry);
+    saveLocalAnnotations(state.annotations);
+    render();
+    try {
+      const synced = await syncAnnotations('save_annotation', next);
+      if (synced && synced.row && synced.row.id) {
+        state.annotations = state.annotations.map((entry) => String(entry.id) === String(next.id) ? markSynced(next, synced.row) : entry);
+        saveLocalAnnotations(state.annotations);
+        render();
+      }
+    } catch (_) { showToast('Saved locally. Sync will retry after refresh.'); }
+  }
+
   async function jumpToAnnotation(row) {
     if (!row || state.navigationPending) return;
     const ctx = getReadingContext();
@@ -306,15 +422,15 @@
     render();
     try {
       if (typeof window.setReadingTarget === 'function') window.setReadingTarget({ sourceType: row.source_type || '', bookId: row.book_id || '', chapterIndex: row.chapter_index, pageIndex: row.page_index });
-      if (typeof window.focusReadingPage === 'function') window.focusReadingPage(Number(row.page_index) || 0, { behavior: 'smooth', reason: 'annotation-jump' });
+      if (typeof window.focusReadingPage === 'function') window.focusReadingPage(Number(row.page_index) || 0, { behavior: 'auto', reason: 'annotation-jump' });
       else {
         const page = document.querySelector(`#reading-mode .page[data-page-index="${Number(row.page_index) || 0}"]`);
-        if (page) page.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (page) page.scrollIntoView({ behavior: 'auto', block: 'center' });
       }
       await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 160)));
       const el = findAnnotationTargetElement(row);
       if (el) {
-        try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+        try { el.scrollIntoView({ behavior: 'auto', block: 'center' }); } catch (_) {}
       }
     } catch (_) {
       showToast('Could not jump to saved location.');
@@ -329,8 +445,7 @@
     render();
     const remote = await fetchRemoteAnnotations().catch(() => null);
     if (Array.isArray(remote)) {
-      const locals = state.annotations.filter((row) => String(row.id || '').startsWith('local-'));
-      state.annotations = remote.concat(locals);
+      state.annotations = mergeRemoteAnnotations(remote, state.annotations);
       saveLocalAnnotations(state.annotations);
       render();
     }
@@ -352,6 +467,7 @@
     if (state.els.panel) state.els.panel.classList.remove('open');
     if (state.els.utilityMenu) state.els.utilityMenu.classList.remove('open');
     if (state.els.launcher) state.els.launcher.classList.remove('open');
+    try { document.body.classList.remove('annotations-modal-open'); } catch (_) {}
   }
 
   function mount() {
@@ -368,19 +484,19 @@
           <p class="annotations-hint">Choose what to save from the current highlighted passage.</p>
           <div class="annotations-actions" data-annotation-actions><button type="button" class="annotations-primary" data-annotation-note>Make Note</button><button type="button" class="annotations-secondary" data-annotation-flash>Make Flashcard</button></div>
           <div class="annotations-form" data-note-editor><div class="annotations-context-label">Highlighted passage</div><div class="annotations-current" data-note-context></div><textarea data-note-text placeholder="Write your note…"></textarea><div class="annotations-row"><button type="button" data-save-note>Save note</button><button type="button" data-cancel>Cancel</button></div></div>
-          <div class="annotations-form" data-flash-editor><div class="annotations-context-label">Flashcard preview</div><div class="annotations-flash-preview" data-flash-preview><strong>Front</strong><span data-flash-preview-text></span></div><input data-flash-front placeholder="Flashcard front" /><textarea data-flash-back placeholder="Flashcard back"></textarea><div class="annotations-row"><button type="button" data-save-flash>Save card</button><button type="button" data-cancel>Cancel</button></div></div>
+          <div class="annotations-form" data-flash-editor><div class="annotations-context-label">Highlighted passage</div><div class="annotations-current" data-flash-context></div><div class="annotations-context-label">Flashcard preview</div><div class="annotations-flash-preview" data-flash-preview><strong>Front</strong><span data-flash-preview-text></span></div><input data-flash-front placeholder="Flashcard front" /><textarea data-flash-back placeholder="Flashcard back"></textarea><div class="annotations-row"><button type="button" data-save-flash>Save card</button><button type="button" data-cancel>Cancel</button></div></div>
           <div class="annotations-saved" data-annotation-saved></div>
         </div>
       </div>
       <div class="annotations-float">
-        <div class="annotations-panel" data-widget-panel><div class="annotations-panel-head"><strong>Notes &amp; Flashcards</strong><button type="button" data-widget-close aria-label="Close notes widget">✕</button></div><div class="annotations-tabs"><button type="button" data-tab="notes">Notes</button><button type="button" data-tab="flashcards">Flashcards</button></div><div class="annotations-list" data-notes-list></div><div class="annotations-list" data-flashcards-list></div></div>
         <div class="annotations-utility-menu" data-utility-menu><button type="button" data-open-notes><span>📝</span><strong>Notes</strong></button><button type="button" data-open-help><span>?</span><strong>Help</strong></button></div>
         <button type="button" class="annotations-widget-button" data-widget-toggle aria-label="Open utilities">📝</button>
       </div>
+      <div class="annotations-modal-backdrop" data-widget-panel><div class="annotations-panel"><div class="annotations-panel-head"><strong>Notes &amp; Flashcards</strong><button type="button" data-widget-close aria-label="Close notes widget">✕</button></div><div class="annotations-tabs"><button type="button" data-tab="notes">Notes</button><button type="button" data-tab="flashcards">Flashcards</button></div><div class="annotations-list" data-notes-list></div><div class="annotations-list" data-flashcards-list></div></div></div>
       <div class="annotations-toast" data-annotation-toast></div>`;
     document.body.appendChild(root);
     state.els = {
-      root, cardRoot: root.querySelector('[data-annotation-card]'), trigger: root.querySelector('[data-annotation-trigger]'), card: root.querySelector('[data-annotation-editor]'), actions: root.querySelector('[data-annotation-actions]'), noteEditor: root.querySelector('[data-note-editor]'), flashEditor: root.querySelector('[data-flash-editor]'), noteText: root.querySelector('[data-note-text]'), noteContext: root.querySelector('[data-note-context]'), flashFront: root.querySelector('[data-flash-front]'), flashBack: root.querySelector('[data-flash-back]'), flashPreview: root.querySelector('[data-flash-preview]'), flashPreviewText: root.querySelector('[data-flash-preview-text]'), saved: root.querySelector('[data-annotation-saved]'), panel: root.querySelector('[data-widget-panel]'), notesList: root.querySelector('[data-notes-list]'), flashcardsList: root.querySelector('[data-flashcards-list]'), utilityMenu: root.querySelector('[data-utility-menu]'), launcher: root.querySelector('[data-widget-toggle]'), toast: root.querySelector('[data-annotation-toast]'),
+      root, cardRoot: root.querySelector('[data-annotation-card]'), trigger: root.querySelector('[data-annotation-trigger]'), card: root.querySelector('[data-annotation-editor]'), actions: root.querySelector('[data-annotation-actions]'), noteEditor: root.querySelector('[data-note-editor]'), flashEditor: root.querySelector('[data-flash-editor]'), noteText: root.querySelector('[data-note-text]'), noteContext: root.querySelector('[data-note-context]'), flashContext: root.querySelector('[data-flash-context]'), flashFront: root.querySelector('[data-flash-front]'), flashBack: root.querySelector('[data-flash-back]'), flashPreview: root.querySelector('[data-flash-preview]'), flashPreviewText: root.querySelector('[data-flash-preview-text]'), saved: root.querySelector('[data-annotation-saved]'), panel: root.querySelector('[data-widget-panel]'), notesList: root.querySelector('[data-notes-list]'), flashcardsList: root.querySelector('[data-flashcards-list]'), utilityMenu: root.querySelector('[data-utility-menu]'), launcher: root.querySelector('[data-widget-toggle]'), toast: root.querySelector('[data-annotation-toast]'),
     };
     root.querySelector('[data-annotation-trigger]').addEventListener('click', () => { if (!state.enabled || !isTtsPaused() || state.navigationPending) return; state.open = !state.open; state.activeEditor = ''; render(); });
     root.querySelector('[data-annotation-note]').addEventListener('click', () => { state.activeEditor = 'note'; state.els.noteText.value = ''; render(); setTimeout(() => { try { state.els.noteText.focus(); } catch (_) {} }, 0); });
@@ -391,13 +507,17 @@
     root.querySelector('[data-save-note]').addEventListener('click', () => saveAnnotation('note'));
     root.querySelector('[data-save-flash]').addEventListener('click', () => saveAnnotation('flashcard'));
     root.querySelectorAll('[data-cancel]').forEach((btn) => btn.addEventListener('click', () => { state.activeEditor = ''; render(); }));
-    state.els.saved.addEventListener('click', (event) => { if (!event.target.closest('[data-delete-current]')) return; const row = annotationForTarget(state.target); deleteAnnotation(row); });
+    state.els.saved.addEventListener('click', (event) => {
+      const row = annotationForTarget(state.target);
+      if (event.target.closest('[data-delete-current]')) { deleteAnnotation(row); return; }
+      if (event.target.closest('[data-edit-current]')) { fillEditorFromAnnotation(row); render(); }
+    });
     state.els.launcher.addEventListener('click', () => {
       if (state.els.panel.classList.contains('open')) { closeWidgetPanel(); return; }
       if (helpIsAvailable()) { state.els.utilityMenu.classList.toggle('open'); state.els.launcher.classList.toggle('open', state.els.utilityMenu.classList.contains('open')); return; }
-      closeHelpPanel(); state.els.panel.classList.toggle('open'); renderWidgetLists();
+      closeHelpPanel(); state.els.panel.classList.toggle('open'); document.body.classList.toggle('annotations-modal-open', state.els.panel.classList.contains('open')); renderWidgetLists();
     });
-    root.querySelector('[data-open-notes]').addEventListener('click', () => { closeHelpPanel(); state.els.utilityMenu.classList.remove('open'); state.els.panel.classList.add('open'); renderWidgetLists(); });
+    root.querySelector('[data-open-notes]').addEventListener('click', () => { closeHelpPanel(); state.els.utilityMenu.classList.remove('open'); state.els.panel.classList.add('open'); document.body.classList.add('annotations-modal-open'); renderWidgetLists(); });
     root.querySelector('[data-open-help]').addEventListener('click', () => { closeWidgetPanel(); try { window.rcHelp.openChat(); } catch (_) {} });
     root.querySelector('[data-widget-close]').addEventListener('click', closeWidgetPanel);
     root.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', () => { state.activeTab = btn.getAttribute('data-tab') === 'flashcards' ? 'flashcards' : 'notes'; renderTabs(); }));
@@ -407,6 +527,10 @@
       if (!item) return;
       const row = liveAnnotations().find((entry) => String(entry.id) === String(item.getAttribute('data-annotation-id')));
       if (deleteBtn) { deleteAnnotation(row); return; }
+      if (event.target.closest('[data-annotation-edit]')) { renderInlineEditor(item, row); return; }
+      const saveEdit = event.target.closest('[data-save-edit]');
+      if (saveEdit) { saveInlineEdit(item, row); return; }
+      if (event.target.closest('[data-cancel-edit]')) { renderWidgetLists(); return; }
       if (event.target.closest('[data-annotation-jump]')) jumpToAnnotation(row);
     });
     state.mounted = true;
