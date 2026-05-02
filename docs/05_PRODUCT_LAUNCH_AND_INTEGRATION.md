@@ -190,6 +190,13 @@ Premium remains intentional and visible even if packaging evolves later.
 - dead-end account or billing buttons are launch failures, not minor polish issues
 - interim modal or section-based public flows still have to obey this framework while route-backed final surfaces are being completed
 
+### Legal policy surfaces
+- legal documents are static source-of-truth pages under `/legal/terms.html` and `/legal/privacy.html`
+- auth, footer, settings, and billing surfaces must link to those same documents rather than duplicating legal copy
+- footer/settings may present the documents in a shell-owned modal, but the modal must load the same `/legal/*.html` source
+- account creation and sign-in surfaces should show lightweight agreement copy with direct links to Terms and Privacy
+- billing/pricing surfaces should link purchases/subscriptions back to Terms and Privacy
+
 ## Data ownership and authority map
 
 ### Shell owns
