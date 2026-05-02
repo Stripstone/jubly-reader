@@ -310,6 +310,14 @@
     flashList.innerHTML = renderRows('flashcard');
   }
 
+
+  function refreshAnnotationSurfaces() {
+    render();
+    try {
+      if (state.els.panel && state.els.panel.classList.contains('open')) renderWidgetLists();
+    } catch (_) {}
+  }
+
   function render() {
     if (!state.mounted) return;
     const visible = !!state.enabled && isReadingVisible();
@@ -367,7 +375,7 @@
     state.editingWidgetId = '';
     state.expandedWidgetId = String(state.expandedWidgetId || '') === id ? '' : state.expandedWidgetId;
     state.sourcePromptId = String(state.sourcePromptId || '') === id ? '' : state.sourcePromptId;
-    render();
+    refreshAnnotationSurfaces();
 
     if (id.startsWith('local-')) return;
 
@@ -383,7 +391,7 @@
         : item);
       saveLocalAnnotations(state.annotations);
     } finally {
-      render();
+      refreshAnnotationSurfaces();
     }
   }
 
@@ -480,13 +488,13 @@
     state.annotations = (state.annotations || []).map((entry) => String(entry.id) === String(row.id) ? next : entry);
     saveLocalAnnotations(state.annotations);
     state.editingWidgetId = '';
-    render();
+    refreshAnnotationSurfaces();
     try {
       const synced = await syncAnnotations('save_annotation', next);
       if (synced && synced.row && synced.row.id) {
         state.annotations = state.annotations.map((entry) => String(entry.id) === String(next.id) ? markSynced(next, synced.row) : entry);
         saveLocalAnnotations(state.annotations);
-        render();
+        refreshAnnotationSurfaces();
       }
     } catch (_) { showToast('Saved locally. Sync will retry after refresh.'); }
   }
