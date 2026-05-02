@@ -210,7 +210,12 @@
     state.els.toast.classList.add('show');
     setTimeout(() => state.els.toast && state.els.toast.classList.remove('show'), 1800);
   }
-  function helpIsAvailable() { return !!(window.rcHelp && typeof window.rcHelp.openChat === 'function'); }
+  function helpIsAvailable() {
+    if (!(window.rcHelp && typeof window.rcHelp.openChat === 'function')) return false;
+    // Treat Help as an available shared utility only while its launcher/panel is mounted.
+    // A hard-close removes the Help root and should leave Notes as a standalone utility.
+    return !!document.getElementById('jubly-support-widget');
+  }
   function closeHelpPanel() { try { if (window.rcHelp && typeof window.rcHelp.close === 'function') window.rcHelp.close(); } catch (_) {} }
   function utilityMode(visible = (!!state.enabled && isReadingVisible())) {
     const notesAvailable = !!visible;
