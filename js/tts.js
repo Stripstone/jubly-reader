@@ -3519,12 +3519,25 @@ async function ttsSpeakQueue(key, parts) {
 
   const before = ttsBlockSnapshot();
 
-  // Case: same key, currently PAUSED → stop/deactivate (not resume).
-  // Bottom-bar Play/Resume remains the resume owner for the paused session.
+  // Case: same key, currently PAUSED → resume the preserved session when a
+  // real resume hook exists. A paused live cloud/browser session is not a toggle
+  // stop; treating it as one clears the session and restarts from the page start.
   if (TTS_STATE.activeKey === key && (TTS_STATE.browserPaused || (!isCloudRestartTransitionActive() && (TTS_STATE.audio && TTS_STATE.audio.paused)))) {
-    ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'toggle-stop-paused-same-key' });
+    const hasRealResumeHook = (!isCloudRestartTransitionActive() && !!(TTS_STATE.audio && TTS_STATE.audio.paused && !TTS_STATE.audio.ended)) ||
+      !!(TTS_STATE.browserPaused && TTS_STATE.browserSpeakFromBlock);
+    if (hasRealResumeHook) {
+      ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'resume-paused-same-key' });
+      const resumed = ttsResume();
+      ttsDiagPush('speak-action', {
+        action: resumed && resumed.success ? 'resumed-paused-session' : 'resume-paused-session-failed',
+        key, before, resume: resumed, after: ttsBlockSnapshot()
+      });
+      return;
+    }
+
+    ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'toggle-stop-stale-paused-same-key' });
     ttsStop();
-    ttsDiagPush('speak-action', { action: 'stopped-paused-session', key, before, after: ttsBlockSnapshot() });
+    ttsDiagPush('speak-action', { action: 'stopped-stale-paused-session', key, before, after: ttsBlockSnapshot() });
     return;
   }
 
