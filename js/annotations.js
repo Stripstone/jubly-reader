@@ -338,8 +338,12 @@
     else renderSaved(currentRow);
     if (!currentRow && !state.activeEditor) renderSaved(null);
     state.els.panel.classList.toggle('open', state.els.panel.classList.contains('open'));
-    const modalEditActive = !!state.editingWidgetId && state.els.panel && state.els.panel.classList.contains('open');
-    if (!modalEditActive) renderWidgetLists();
+    const modalOpen = !!(state.els.panel && state.els.panel.classList.contains('open'));
+    // The annotation card re-renders on a short interval to track TTS pause/highlight truth.
+    // Do not rebuild the modal lists during that polling loop: replacing the scrollable
+    // list while the user is scrolling can trigger browser scroll anchoring/jitter.
+    // Modal actions that mutate list state call renderWidgetLists() directly.
+    if (!modalOpen) renderWidgetLists();
     renderTabs();
   }
 
@@ -606,8 +610,10 @@
     root.querySelector('[data-open-help]').addEventListener('click', () => { closeWidgetPanel(); try { window.rcHelp.openChat(); } catch (_) {} });
     root.querySelector('[data-widget-close]').addEventListener('click', closeWidgetPanel);
     root.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', () => { state.activeTab = btn.getAttribute('data-tab') === 'flashcards' ? 'flashcards' : 'notes'; renderTabs(); }));
+    root.querySelector('[data-widget-panel]').addEventListener('pointerdown', (event) => {
+      if (event.target === event.currentTarget) closeWidgetPanel();
+    });
     root.querySelector('[data-widget-panel]').addEventListener('click', (event) => {
-      if (event.target === event.currentTarget) { closeWidgetPanel(); return; }
       const deleteBtn = event.target.closest('[data-annotation-delete]');
       const item = event.target.closest('[data-annotation-id]');
       if (!item) return;
