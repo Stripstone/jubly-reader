@@ -2671,3 +2671,108 @@ body.annotations-shared-utility-active #jubly-support-widget.open .panel { point
 /* Notes/Flashcards modal polish: inactive flashcards hide side labels until engaged. */
 #annotations-widget .annotations-widget-item .annotations-flash-preview strong { display: none; }
 #annotations-widget .annotations-widget-item .annotations-flash-preview[data-active="true"] strong { display: block; }
+
+
+/* ── Minimal policy surfaces ───────────────────────────────── */
+.auth-policy-copy {
+  margin: 0.75rem 0 0;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.policy-inline-link {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: var(--jubly-purple);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.policy-inline-link:hover { text-decoration: underline; }
+
+.profile-policies-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.25rem;
+}
+
+.profile-policies-row p {
+  margin: 0;
+  min-width: 0;
+}
+
+.profile-policies-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.profile-policy-link {
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--jubly-purple);
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.profile-policy-link:hover {
+  background: #f5f3ff;
+  border-color: #c7d2fe;
+}
+
+.policy-modal-card {
+  width: min(760px, 96vw);
+  max-height: min(86vh, 860px);
+  overflow: hidden;
+}
+
+.policy-modal-body {
+  height: min(72vh, 720px);
+  padding: 0;
+}
+
+.policy-modal-body iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+body.app-dark .auth-policy-copy,
+body.app-dark .profile-policies-row p { color: #94a3b8; }
+
+body.app-dark .profile-policy-link {
+  background: #0f172a;
+  border-color: #334155;
+  color: #a78bfa;
+}
+
+body.app-dark .profile-policy-link:hover { background: #1e293b; }
+
+@media (max-width: 640px) {
+  .profile-policies-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .profile-policies-links {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+}

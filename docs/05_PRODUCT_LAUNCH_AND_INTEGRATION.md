@@ -184,6 +184,14 @@ Premium remains intentional and visible even if packaging evolves later.
 - token or usage display should appear only where it is truly helpful and backed by real values
 - manual tier selector buttons are development-only and must not remain production authority
 
+### Policy surfaces
+- account creation should show a compact agreement sentence linking to **Terms of Service** and **Privacy Policy**
+- policy access after signup lives in `Profile → Settings → Policies`
+- policy entrypoints in settings should be minimal inline buttons or links, not stacked cards
+- policy documents are served from one source each: `/legal/terms.html` and `/legal/privacy.html`
+- landing pages, app footers, and checkout/pricing surfaces should not add policy links by default unless a future billing/legal review explicitly requires them
+- policy surfaces are shell presentation only; they must not own auth, billing, runtime, entitlement, durable, provider, or reading truth
+
 ### Pending and re-hydration framework requirement
 - account, billing, usage, restore, and other server-backed shell/value surfaces must use safe pending, neutral, hidden, or locked states rather than believable wrong values
 - `pending-surfaces.md` is the maintained framework companion for these surfaces and must be updated when they change

@@ -1062,6 +1062,52 @@ window.rcInteraction = (function () {
     }
     function closeModal(id) { const el = document.getElementById(id); if (!el) return; el.classList.add('hidden-section'); if (el.classList.contains('modal-overlay')) el.style.display = 'none'; }
 
+    function normalizePolicyPath(src) {
+        const value = String(src || '').trim();
+        if (value === '/legal/terms.html' || value === 'legal/terms.html') return '/legal/terms.html';
+        if (value === '/legal/privacy.html' || value === 'legal/privacy.html') return '/legal/privacy.html';
+        return null;
+    }
+
+    function openPolicyModal(src, title) {
+        const safeSrc = normalizePolicyPath(src);
+        if (!safeSrc) return;
+        const modal = document.getElementById('policy-modal');
+        const frame = document.getElementById('policy-modal-frame');
+        const titleEl = document.getElementById('policy-modal-title');
+        if (titleEl) titleEl.textContent = title || (safeSrc.includes('privacy') ? 'Privacy Policy' : 'Terms of Service');
+        if (frame) frame.setAttribute('src', safeSrc);
+        if (modal) {
+            modal.classList.remove('hidden-section');
+            modal.style.display = 'flex';
+            return;
+        }
+        try { window.open(safeSrc, '_blank', 'noopener'); } catch (_) { window.location.href = safeSrc; }
+    }
+
+    function closePolicyModal() {
+        const frame = document.getElementById('policy-modal-frame');
+        closeModal('policy-modal');
+        if (frame) frame.setAttribute('src', 'about:blank');
+    }
+
+    function installPolicyModalGuards() {
+        const policyModal = document.getElementById('policy-modal');
+        if (policyModal && !policyModal.__jublyPolicyClickAwayBound) {
+            policyModal.__jublyPolicyClickAwayBound = true;
+            policyModal.addEventListener('click', (event) => {
+                if (event.target === policyModal) closePolicyModal();
+            });
+        }
+        if (document.__jublyPolicyEscapeBound) return;
+        document.__jublyPolicyEscapeBound = true;
+        document.addEventListener('keydown', (event) => {
+            if (event.key !== 'Escape') return;
+            const modal = document.getElementById('policy-modal');
+            if (modal && !modal.classList.contains('hidden-section') && modal.style.display !== 'none') closePolicyModal();
+        });
+    }
+
     function installPricingModalClickAway() {
         const pricingModal = document.getElementById('pricing-modal');
         if (!pricingModal || pricingModal.__jublyPricingClickAwayBound) return;
@@ -1369,12 +1415,14 @@ window.rcInteraction = (function () {
         const passwordWrap  = document.getElementById('auth-password-wrap');
         const confirmWrap   = document.getElementById('auth-confirm-wrap');
         const forgotWrap    = document.getElementById('auth-forgot-wrap');
+        const policyCopy    = document.getElementById('auth-policy-copy');
         const errEl         = document.getElementById('auth-error');
         const okEl          = document.getElementById('auth-success');
         const pwInput       = document.getElementById('loginPassword');
 
         if (errEl) errEl.classList.add('hidden-section');
         if (okEl) okEl.classList.add('hidden-section');
+        if (policyCopy) policyCopy.classList.toggle('hidden-section', _authMode !== 'signup');
 
         if (_authMode === 'signup') {
             if (heading) heading.textContent = 'Create account';
@@ -1925,6 +1973,7 @@ window.rcInteraction = (function () {
     document.addEventListener('DOMContentLoaded', async () => {
         installOwnershipGuards();
         installPricingModalClickAway();
+        installPolicyModalGuards();
         initPublicOnboardingSurface();
         try {
             document.body.classList.add('auth-hydrating');
@@ -3398,6 +3447,9 @@ window.rcInteraction = (function () {
             publicBoundary: getVisiblePublicBoundaryFields()
         };
     }
+
+    window.openPolicyModal = openPolicyModal;
+    window.closePolicyModal = closePolicyModal;
 
     window.getShellSurfaceReport = getShellSurfaceReport;
 

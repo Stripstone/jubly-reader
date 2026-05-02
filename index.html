@@ -664,6 +664,12 @@
                     onkeydown="if(event.key==='Enter') authFormSubmit()">
             </div>
             <button id="auth-submit-btn" onclick="authFormSubmit()" class="btn-jubly w-full py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider">Sign In</button>
+            <p id="auth-policy-copy" class="auth-policy-copy hidden-section">
+                By continuing, you agree to the
+                <button type="button" class="policy-inline-link" onclick="openPolicyModal('/legal/terms.html', 'Terms of Service')">Terms of Service</button>
+                and
+                <button type="button" class="policy-inline-link" onclick="openPolicyModal('/legal/privacy.html', 'Privacy Policy')">Privacy Policy</button>.
+            </p>
             <p id="auth-forgot-wrap" class="text-center text-xs mt-3">
                 <button type="button" onclick="showForgotPasswordPane()" class="font-bold text-indigo-600 hover:underline">Forgot password?</button>
             </p>
@@ -984,6 +990,16 @@
                         </select>
                     </div>
                 </div>
+                <div class="section-card shadow-sm space-y-3">
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400">Policies</h4>
+                    <div class="profile-policies-row">
+                        <p class="text-xs text-slate-400">Review the policies that apply to your account and use of Jubly.</p>
+                        <div class="profile-policies-links" aria-label="Policy links">
+                            <button type="button" class="profile-policy-link" onclick="openPolicyModal('/legal/terms.html', 'Terms of Service')">Terms of Service</button>
+                            <button type="button" class="profile-policy-link" onclick="openPolicyModal('/legal/privacy.html', 'Privacy Policy')">Privacy Policy</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
         <section id="profile-guest-content" class="hidden-section flex-grow min-w-0">
@@ -1206,6 +1222,19 @@
                 </div>
             </div>
             <input id="musicCustomInput" type="file" accept="audio/*" style="display:none;" onchange="handleMusicUpload(this)">
+        </div>
+    </div>
+</div>
+
+<!-- Policy modal — shell-owned presentation. Content source remains /legal/*.html. -->
+<div id="policy-modal" class="hidden-section modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="policy-modal-title">
+    <div class="modal policy-modal-card">
+        <div class="modal-header">
+            <h2 id="policy-modal-title">Policy</h2>
+            <button type="button" class="modal-close" onclick="closePolicyModal()" aria-label="Close policy">✕</button>
+        </div>
+        <div class="policy-modal-body">
+            <iframe id="policy-modal-frame" title="Policy document" src="about:blank" loading="lazy"></iframe>
         </div>
     </div>
 </div>
