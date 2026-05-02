@@ -297,10 +297,13 @@
         const previewCard = type === 'flashcard'
           ? `<div class="annotations-flash-preview" data-widget-flash data-active="${activeFlash ? 'true' : 'false'}"><strong>${side === 'front' ? 'Front' : 'Back'}</strong><span>${escapeHtml(displayText)}</span></div>`
           : `<button class="annotations-item-view" type="button" data-annotation-view><span>${escapeHtml(row.note_text || '')}</span></button>`;
-        const sourceText = expanded && !editing ? `<div class="annotations-modal-source-text" data-widget-source-text><div class="annotations-context-label">Highlighted passage</div>“${escapeHtml(row.highlighted_text || '')}”</div>` : '';
+        const sourceText = (expanded || editing) ? `<div class="annotations-modal-source-text${editing ? ' editing-source' : ''}"${editing ? '' : ' data-widget-source-text'}><div class="annotations-context-label">Highlighted passage</div>“${escapeHtml(row.highlighted_text || '')}”</div>` : '';
         const editorHtml = editing ? inlineEditorMarkup(row) : '';
         const showSourcePrompt = String(state.sourcePromptId || '') === String(row.id);
-        return `<div class="annotations-widget-item${editing ? ' editing' : ''}${expanded ? ' expanded' : ''}" data-annotation-id="${escapeHtml(row.id)}"><div class="annotations-item-main"><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong>${sourceText}${previewCard}<em class="annotations-source-meta">${location}</em><em class="annotations-source-unavailable" data-source-prompt${showSourcePrompt ? '' : ' hidden'}>Open this chapter to view the source.</em><div class="annotations-inline-editor${editing ? ' open' : ''}" data-inline-editor>${editorHtml}</div></div><div class="annotations-item-actions"><button class="annotations-source" type="button" data-annotation-jump${sourceDisabled ? ' disabled' : ''}>Source</button><button class="annotations-edit" type="button" data-annotation-edit>Edit</button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div></div>`;
+        if (editing) {
+          return `<div class="annotations-widget-item editing expanded" data-annotation-id="${escapeHtml(row.id)}"><div class="annotations-item-main"><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong>${sourceText}<div class="annotations-inline-editor open" data-inline-editor>${editorHtml}</div></div></div>`;
+        }
+        return `<div class="annotations-widget-item${expanded ? ' expanded' : ''}" data-annotation-id="${escapeHtml(row.id)}"><div class="annotations-item-main"><strong>${type === 'flashcard' ? 'Flashcard' : 'Note'}</strong>${sourceText}${previewCard}<em class="annotations-source-meta">${location}</em><em class="annotations-source-unavailable" data-source-prompt${showSourcePrompt ? '' : ' hidden'}>Open this chapter to view the source.</em><div class="annotations-inline-editor" data-inline-editor></div></div><div class="annotations-item-actions"><button class="annotations-source" type="button" data-annotation-jump${sourceDisabled ? ' disabled' : ''}>Source</button><button class="annotations-edit" type="button" data-annotation-edit>Edit</button><button class="annotations-delete" type="button" data-annotation-delete${deleting ? ' disabled' : ''}>${deleting ? 'Deleting…' : 'Delete'}</button></div></div>`;
       }).join('');
     };
     notesList.innerHTML = renderRows('note');
@@ -335,7 +338,8 @@
     else renderSaved(currentRow);
     if (!currentRow && !state.activeEditor) renderSaved(null);
     state.els.panel.classList.toggle('open', state.els.panel.classList.contains('open'));
-    renderWidgetLists();
+    const modalEditActive = !!state.editingWidgetId && state.els.panel && state.els.panel.classList.contains('open');
+    if (!modalEditActive) renderWidgetLists();
     renderTabs();
   }
 
@@ -603,6 +607,7 @@
     root.querySelector('[data-widget-close]').addEventListener('click', closeWidgetPanel);
     root.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', () => { state.activeTab = btn.getAttribute('data-tab') === 'flashcards' ? 'flashcards' : 'notes'; renderTabs(); }));
     root.querySelector('[data-widget-panel]').addEventListener('click', (event) => {
+      if (event.target === event.currentTarget) { closeWidgetPanel(); return; }
       const deleteBtn = event.target.closest('[data-annotation-delete]');
       const item = event.target.closest('[data-annotation-id]');
       if (!item) return;
