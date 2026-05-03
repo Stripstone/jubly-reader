@@ -1497,7 +1497,13 @@ function ttsRunPageHandoff(input = {}) {
     }
   } else if (mode === 'speak') {
     try { ttsKeepWarmForAutoplay(); } catch (_) {}
-    ttsSpeakQueue(nextKey, [text]);
+    ttsSpeakQueue(nextKey, [text], {
+      source: 'page-handoff',
+      reason: reason || '',
+      autoplayPageHandoff: String(reason || '') === 'autoplay-countdown-complete',
+      sourcePageIndex: currentIndex,
+      targetPageIndex: nextIndex,
+    });
   }
 
   TTS_DEBUG.lastSkip = {
@@ -3512,7 +3518,9 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
   }
 }
 
-async function ttsSpeakQueue(key, parts) {
+async function ttsSpeakQueue(key, parts, opts = {}) {
+  const speakOpts = opts && typeof opts === 'object' ? opts : {};
+  const isAutoplayPageHandoff = !!speakOpts.autoplayPageHandoff;
   const routeInfo = getPreferredTtsRouteInfo();
   TTS_DEBUG.lastRouteDecision = routeInfo;
   TTS_DEBUG.lastPlayRequest = { key, parts: (parts || []).length, path: routeInfo.requestedPath, reason: routeInfo.reason, selectedVoice: routeInfo.selected.stored };
@@ -3525,7 +3533,7 @@ async function ttsSpeakQueue(key, parts) {
   if (TTS_STATE.activeKey === key && (TTS_STATE.browserPaused || (!isCloudRestartTransitionActive() && (TTS_STATE.audio && TTS_STATE.audio.paused)))) {
     const hasRealResumeHook = (!isCloudRestartTransitionActive() && !!(TTS_STATE.audio && TTS_STATE.audio.paused && !TTS_STATE.audio.ended)) ||
       !!(TTS_STATE.browserPaused && TTS_STATE.browserSpeakFromBlock);
-    if (hasRealResumeHook) {
+    if (!isAutoplayPageHandoff && hasRealResumeHook) {
       ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'resume-paused-same-key' });
       const resumed = ttsResume();
       ttsDiagPush('speak-action', {
@@ -3535,10 +3543,16 @@ async function ttsSpeakQueue(key, parts) {
       return;
     }
 
-    ttsDiagPush('speak-request', { ...TTS_DEBUG.lastPlayRequest, route: 'toggle-stop-stale-paused-same-key' });
+    ttsDiagPush('speak-request', {
+      ...TTS_DEBUG.lastPlayRequest,
+      route: isAutoplayPageHandoff ? 'autoplay-page-handoff-reset-same-key' : 'toggle-stop-stale-paused-same-key'
+    });
     ttsStop();
-    ttsDiagPush('speak-action', { action: 'stopped-stale-paused-session', key, before, after: ttsBlockSnapshot() });
-    return;
+    ttsDiagPush('speak-action', {
+      action: isAutoplayPageHandoff ? 'reset-autoplay-page-handoff-session' : 'stopped-stale-paused-session',
+      key, before, after: ttsBlockSnapshot()
+    });
+    if (!isAutoplayPageHandoff) return;
   }
 
   // Case: same key, actively speaking → stop (toggle off).
