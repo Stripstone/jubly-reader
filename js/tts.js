@@ -134,6 +134,9 @@ const TTS_CLOUD_WINDOW = {
   promotionFetchPromise: null,
   promotionResult: null,
   engagementSignal: null,
+  promotionWaitVisible: false,
+  promotionWaitStartedAt: 0,
+  promotionWaitReason: '',
   charsPhase1: 0,
   charsFullPage: 0,
   charsSessionTotal: 0,
@@ -178,6 +181,73 @@ function clearCloudRestartPendingTimers() {
 function getCloudRestartPendingElapsedMs() {
   const startedAt = Number(TTS_CLOUD_RESTART_PENDING.startedAt || 0);
   return startedAt > 0 ? Math.max(0, Date.now() - startedAt) : 0;
+}
+
+function getPromotionWaitElapsedMs() {
+  const startedAt = Number(TTS_CLOUD_WINDOW.promotionWaitStartedAt || 0);
+  return startedAt > 0 ? Math.max(0, Date.now() - startedAt) : 0;
+}
+
+function isTtsAudioSpeaking(audio = TTS_STATE.audio) {
+  try { return !!(audio && !audio.paused && !audio.ended); } catch (_) { return false; }
+}
+
+function setPromotionWaitVisible(reason = 'promotion-wait') {
+  if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.promotionApplied) return false;
+  if (!TTS_CLOUD_WINDOW.promotionFetchPromise || TTS_CLOUD_WINDOW.promotionResult) return false;
+  // Contract: Buffering is only user-visible once speech has stopped and
+  // promotion readiness is blocking continuation. While chunk A is speaking,
+  // promotion remains silent background work.
+  if (isTtsAudioSpeaking()) return false;
+  if (!TTS_CLOUD_WINDOW.promotionWaitVisible) {
+    TTS_CLOUD_WINDOW.promotionWaitVisible = true;
+    TTS_CLOUD_WINDOW.promotionWaitStartedAt = Date.now();
+  }
+  TTS_CLOUD_WINDOW.promotionWaitReason = String(reason || 'promotion-wait');
+  ttsDiagPush('window-promotion-wait-visible', {
+    sessionId: TTS_CLOUD_WINDOW.sessionId,
+    key: TTS_CLOUD_WINDOW.pageKey,
+    reason: TTS_CLOUD_WINDOW.promotionWaitReason,
+    promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
+    promotionPending: !!TTS_CLOUD_WINDOW.promotionFetchPromise && !TTS_CLOUD_WINDOW.promotionResult,
+    audioEnded: !!TTS_STATE.audio?.ended,
+    audioPaused: !!TTS_STATE.audio?.paused,
+    activeBlockIndex: Number(TTS_STATE.activeBlockIndex ?? -1),
+    chunkASentenceCount: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
+  });
+  return true;
+}
+
+function clearPromotionWaitVisible(reason = 'clear') {
+  if (!TTS_CLOUD_WINDOW.promotionWaitVisible && !TTS_CLOUD_WINDOW.promotionWaitStartedAt) return false;
+  const elapsedMs = getPromotionWaitElapsedMs();
+  const sessionId = TTS_CLOUD_WINDOW.sessionId;
+  const key = TTS_CLOUD_WINDOW.pageKey;
+  TTS_CLOUD_WINDOW.promotionWaitVisible = false;
+  TTS_CLOUD_WINDOW.promotionWaitStartedAt = 0;
+  TTS_CLOUD_WINDOW.promotionWaitReason = '';
+  ttsDiagPush('window-promotion-wait-cleared', { sessionId, key, reason, elapsedMs });
+  return true;
+}
+
+function getPromotionWaitPendingStatus() {
+  const active = !!(TTS_CLOUD_WINDOW.active && TTS_CLOUD_WINDOW.promotionWaitVisible && !TTS_CLOUD_WINDOW.promotionApplied);
+  return {
+    active,
+    message: active ? 'Buffering…' : '',
+    reason: active ? (TTS_CLOUD_WINDOW.promotionWaitReason || 'promotion-wait') : '',
+    elapsedMs: active ? getPromotionWaitElapsedMs() : 0,
+    sessionId: active ? Number(TTS_CLOUD_WINDOW.sessionId || 0) : 0,
+    key: active ? (TTS_CLOUD_WINDOW.pageKey || null) : null,
+  };
+}
+
+function maybeTriggerTtsWindowPromotionFromPlayback(idx, audio, source = 'raf') {
+  if (idx < 1 || !TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.promotionTriggered) return false;
+  const _playing = isTtsAudioSpeaking(audio);
+  const _elapsed = audio ? Number(audio.currentTime || 0) : 0;
+  if (!_playing || _elapsed < TTS_WINDOW_ENGAGEMENT_THRESHOLD_S) return false;
+  try { _ttsWindowTriggerPromotion('engagement-threshold-met'); return true; } catch (_) { return false; }
 }
 
 function setCloudRestartPendingMessage(requestId, message, phase = 'pending') {
@@ -523,6 +593,9 @@ function clearTtsCloudWindow() {
   TTS_CLOUD_WINDOW.promotionFetchPromise = null;
   TTS_CLOUD_WINDOW.promotionResult = null;
   TTS_CLOUD_WINDOW.engagementSignal = null;
+  TTS_CLOUD_WINDOW.promotionWaitVisible = false;
+  TTS_CLOUD_WINDOW.promotionWaitStartedAt = 0;
+  TTS_CLOUD_WINDOW.promotionWaitReason = '';
   TTS_CLOUD_WINDOW.charsPhase1 = 0;
   TTS_CLOUD_WINDOW.charsFullPage = 0;
   TTS_CLOUD_WINDOW.charsSessionTotal = 0;
@@ -1775,27 +1848,13 @@ function ttsStartHighlightLoop(audio) {
       if (idx >= 0) TTS_STATE.activeBlockIndex = idx;
       ttsHighlightBlock(idx);
       lastIdx = idx;
-      // Window promotion gate — checked on every block transition once block 1
-      // is reached. All three conditions must hold simultaneously:
-      //
-      //   1. idx >= 1  — user has progressed past the first block
-      //   2. audio.currentTime >= threshold  — at least 3 s of real audio played;
-      //        currentTime only advances during active playback so countdown,
-      //        loading delays, and paused time are excluded automatically
-      //   3. !audio.paused  — playback is live, not paused
-      //
-      // Pause during block 1 never satisfies (3) so it never promotes.
-      // A pause on block 1+ after threshold is already met is fine: the promotion
-      // fetch launched before the pause and the result will be waiting.
-      if (idx >= 1 && TTS_CLOUD_WINDOW.active && !TTS_CLOUD_WINDOW.promotionTriggered) {
-        const _wa = TTS_STATE.audio;
-        const _playing = !!(_wa && !_wa.paused && !_wa.ended);
-        const _elapsed = _wa ? Number(_wa.currentTime || 0) : 0;
-        if (_playing && _elapsed >= TTS_WINDOW_ENGAGEMENT_THRESHOLD_S) {
-          try { _ttsWindowTriggerPromotion('engagement-threshold-met'); } catch (_) {}
-        }
-      }
     }
+
+    // Window promotion gate — checked on every RAF tick once block 1 is reached,
+    // not only on block transition. This preserves passive handoff ownership but
+    // prevents short block 0 timing from missing the useful background-promotion
+    // window while speech is still active.
+    maybeTriggerTtsWindowPromotionFromPlayback(idx, TTS_STATE.audio, 'raf');
     TTS_STATE.highlightRAF = requestAnimationFrame(tick);
   };
   if (TTS_STATE.highlightRAF) cancelAnimationFrame(TTS_STATE.highlightRAF);
@@ -2603,6 +2662,7 @@ function getPlaybackStatus() {
     blockCount: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0,
     cloudRestartInFlight: isCloudRestartTransitionActive(),
     cloudRestartPending: getCloudRestartPendingStatus(),
+    promotionWaitPending: getPromotionWaitPendingStatus(),
     capability,
   };
 }
@@ -3261,14 +3321,16 @@ async function cloudFetchWithRetry(text, opts, { maxAttempts = 3, sessionId, get
 
 // ─── Cloud synthesis window — promotion functions ─────────────────────────────
 //
-// _ttsWindowTriggerPromotion: called from the highlight loop when activeBlockIndex
-//   reaches 1. Fires a non-blocking full-page cloud fetch and wires the result
-//   handler that immediately switches the audio src once the data arrives.
+// _ttsWindowTriggerPromotion: called from the highlight loop after block-window
+//   playback has reached the engagement threshold. It starts a non-blocking
+//   full-page cloud fetch while chunk A continues to speak. Passive results are
+//   recorded as ready and deferred to the Case B handoff so normal promotion does
+//   not hot-swap audio mid-speech.
 //
-// _ttsWindowApplyPromotion: called from the .then() of the promotion fetch while
-//   chunk A is still playing. Swaps audio.src to the full-page URL, seeks to the
-//   start of the currently-active block, and restarts the highlight loop so skip
-//   and pause immediately see full-page marks.
+// _ttsWindowApplyPromotion: used only for explicit user-driven promotion paths
+//   such as pending skip/replay. It swaps audio.src to the full-page URL, seeks
+//   to the requested full-page block, and restarts the highlight loop so skip and
+//   pause immediately see full-page marks.
 
 function _ttsWindowTriggerPromotion(signal) {
   if (!TTS_CLOUD_WINDOW.active || TTS_CLOUD_WINDOW.promotionTriggered) return;
@@ -3788,8 +3850,11 @@ async function ttsSpeakQueue(key, parts) {
 
           let fullResult = null;
           try {
+            setPromotionWaitVisible('case-b-await-promotion');
             fullResult = await TTS_CLOUD_WINDOW.promotionFetchPromise;
+            clearPromotionWaitVisible('promotion-ready');
           } catch (err) {
+            clearPromotionWaitVisible('promotion-fetch-rejected');
             settleRejectedWindowPromotionAsIdle({
               sessionId,
               key,
@@ -3801,6 +3866,7 @@ async function ttsSpeakQueue(key, parts) {
             return;
           }
           if (!fullResult || TTS_STATE.activeSessionId !== sessionId) {
+            clearPromotionWaitVisible('promotion-empty-or-stale-session');
             clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
             return;
           }
@@ -4553,6 +4619,7 @@ function getTtsDiagnosticsSnapshot() {
       chunkASentenceCount: Number(TTS_CLOUD_WINDOW.chunkASentenceCount || 0),
       promotionTriggered: !!TTS_CLOUD_WINDOW.promotionTriggered,
       promotionApplied: !!TTS_CLOUD_WINDOW.promotionApplied,
+      promotionWaitPending: getPromotionWaitPendingStatus(),
       pendingSkipBlock: Number(TTS_CLOUD_WINDOW.pendingSkipBlock ?? -1),
       pendingSkipSettling: !!TTS_CLOUD_WINDOW.pendingSkipSettling,
       charsPhase1: Number(TTS_CLOUD_WINDOW.charsPhase1 || 0),
