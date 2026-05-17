@@ -161,7 +161,7 @@ Pending UI should not be added to every control.
 - Button-owned waits prefer inline busy states before any global banner.
 - App-level or cross-surface truth settles may use the bottom interaction banner.
 - Skip controls remain immediate in routine operation; the only TTS skip pending surface is the poor-connection cloud seek/restart seam, where audio is already in a restart transition and the user needs honest loading visibility.
-- Promotion buffering is separate from skip/restart loading. It may show only when TTS is not speaking and runtime reports that full-page promotion/readiness is blocking continuation; promotion must remain silent background work while chunk A is still speaking. Chunk A should be a bounded leading speech runway, not a hard-coded two-sentence window, so full-page promotion has a reasonable chance to finish before handoff.
+- Promotion buffering is separate from skip/restart loading. It may show only when TTS is not speaking and runtime reports that full-page promotion/readiness is blocking continuation; promotion must remain silent background work while chunk A is still speaking.
 - Playback-start failure migration is not complete until runtime exposes a settled retry-exhausted/start-error signal that shell can read without touching `tts.js`.
 - Settings stay optimistic/local first; the shared save-failure seam is enough for this pass.
 - Recoverable error banners now standardize to `Try again`, `Refresh`, `Open login`, or `Dismiss`.

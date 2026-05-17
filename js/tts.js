@@ -98,7 +98,7 @@ const TTS_DEBUG = {
 //
 //   mode:
 //     'idle'         — no active window session
-//     'block-window' — computed chunk A runway is synthesising or playing
+//     'block-window' — chunk A (sentences 0+1) is synthesising or playing
 //     'promoting'    — full-page fetch is in-flight; chunk A still playing
 //     'promoted'     — full-page result is available; switch has been applied
 //       or is pending the chunk-A onended handoff
@@ -118,16 +118,9 @@ const TTS_DEBUG = {
 //     full-page synthesis is acceptable immediately. This guard is on the FULL
 //     PAGE length, not on chunk A. A page with a short opening sentence but a
 //     long body still uses block-window; only a genuinely short full page skips it.
-//
-//   TTS_WINDOW_PHASE1_* — bounded speech runway for chunk A. The minimum keeps
-//     tiny citation/reference fragments from ending before promotion can finish;
-//     the maximum prevents Phase 1 from becoming an accidental full-page synth.
 
 const TTS_WINDOW_ENGAGEMENT_THRESHOLD_S = 3;
 const TTS_WINDOW_SMALL_PAGE_CHARS = 200;
-const TTS_WINDOW_PHASE1_MIN_SENTENCES = 2;
-const TTS_WINDOW_PHASE1_MIN_CHARS = 280;
-const TTS_WINDOW_PHASE1_MAX_CHARS = 650;
 
 const TTS_CLOUD_WINDOW = {
   active: false,
@@ -746,44 +739,6 @@ function ttsWindowSplitSentences(text) {
   }
   if (lastEnd < src.length) results.push(src.slice(lastEnd));
   return results.filter(s => s.trim().length > 0);
-}
-
-function buildTtsWindowPhase1(sentences) {
-  const list = Array.isArray(sentences) ? sentences.map(s => String(s || '')).filter(s => s.trim().length > 0) : [];
-  const total = list.length;
-  const minSentences = Math.max(1, Number(TTS_WINDOW_PHASE1_MIN_SENTENCES || 2));
-  const minChars = Math.max(0, Number(TTS_WINDOW_PHASE1_MIN_CHARS || 0));
-  const maxChars = Math.max(minChars, Number(TTS_WINDOW_PHASE1_MAX_CHARS || minChars || 0));
-  if (!total) {
-    return { text: '', count: 0, chars: 0, minChars, maxChars, minRunwaySatisfied: false, leftForHandoff: 0 };
-  }
-
-  // Keep at least one full-page sentence beyond chunk A so Case B can hand off to
-  // the next unspoken block instead of treating a windowed request as complete.
-  const maxCount = Math.max(1, total - 1);
-  let count = Math.min(maxCount, Math.max(minSentences, 1));
-  let text = list.slice(0, count).join('');
-
-  while (count < maxCount && text.length < minChars) {
-    const next = list[count] || '';
-    const nextText = text + next;
-    // Tiny citation/reference fragments need enough runway; very large next
-    // sentences should not turn fast-start Phase 1 into an accidental full-page
-    // synth. Allow growth until the bounded runway is satisfied.
-    if (text.length >= minChars || (nextText.length > maxChars && count >= minSentences)) break;
-    count += 1;
-    text = nextText;
-  }
-
-  return {
-    text,
-    count,
-    chars: text.length,
-    minChars,
-    maxChars,
-    minRunwaySatisfied: text.length >= minChars,
-    leftForHandoff: Math.max(0, total - count),
-  };
 }
 
 function ttsDiagPush(event, data = {}) {
@@ -3680,10 +3635,10 @@ async function ttsSpeakQueue(key, parts) {
   ttsSetHintButton(key, true);
 
   // ── Block-window synthesis setup ──────────────────────────────────────────
-  // For full-page reads (queue.length === 1) where sentence marks are used,
-  // synthesise a bounded leading runway (chunk A) instead of a hard-coded two
-  // sentences. The runway gives full-page promotion time to prepare while speech
-  // is already moving; passive handoff still waits for chunk A to end.
+  // For full-page reads (queue.length === 1) where sentence marks are used and
+  // the page contains more than 2 sentences: synthesise only the first 2
+  // sentences (chunk A) initially. The highlight loop triggers a non-blocking
+  // full-page fetch when block 1 is reached. See _ttsWindowTriggerPromotion.
   const pageText = queue[0];
   const wantMarksForPage = optsForKeySentenceMarks(key);
   let useWindowMode = false;
@@ -3697,46 +3652,24 @@ async function ttsSpeakQueue(key, parts) {
     // already validated full-page marks for the page, replay goes direct to the
     // full-page cache instead of re-entering chunk-A and exposing the same seam.
     if (sentences.length > 2 && pageText.length >= TTS_WINDOW_SMALL_PAGE_CHARS && !pageAlreadyPromoted) {
-      const phase1 = buildTtsWindowPhase1(sentences);
-      // If the bounded runway would consume the whole page, windowing gives no
-      // safe handoff block. Use direct full-page synthesis instead.
-      if (phase1.count > 0 && phase1.count < sentences.length) {
-        useWindowMode = true;
-        chunkAText = phase1.text;
-        TTS_CLOUD_WINDOW.active = true;
-        TTS_CLOUD_WINDOW.mode = 'block-window';
-        TTS_CLOUD_WINDOW.sessionId = sessionId;
-        TTS_CLOUD_WINDOW.pageKey = key;
-        TTS_CLOUD_WINDOW.pageText = pageText;
-        TTS_CLOUD_WINDOW.chunkASentenceCount = phase1.count;
-        TTS_CLOUD_WINDOW.charsPhase1 = phase1.chars;
-        TTS_CLOUD_WINDOW.charsFullPage = pageText.length;
-        TTS_CLOUD_WINDOW.charsSessionTotal = phase1.chars;
-        ttsDiagPush('window-init', {
-          sessionId, key,
-          sentences: sentences.length,
-          chunkASentenceCount: phase1.count,
-          phase1MinSentences: TTS_WINDOW_PHASE1_MIN_SENTENCES,
-          phase1MinChars: phase1.minChars,
-          phase1MaxChars: phase1.maxChars,
-          phase1MinRunwaySatisfied: !!phase1.minRunwaySatisfied,
-          phase1LeftForHandoff: phase1.leftForHandoff,
-          charsPhase1: phase1.chars,
-          charsFullPage: pageText.length,
-          ttsCloudMode: 'block-window',
-        });
-      } else {
-        ttsDiagPush('window-skipped-no-safe-handoff-runway', {
-          sessionId, key,
-          sentences: sentences.length,
-          pageLength: pageText.length,
-          phase1Count: phase1.count,
-          phase1MinChars: phase1.minChars,
-          phase1MaxChars: phase1.maxChars,
-          charsPhase1: phase1.chars,
-          ttsCloudMode: 'full-page',
-        });
-      }
+      useWindowMode = true;
+      chunkAText = sentences.slice(0, 2).join('');
+      TTS_CLOUD_WINDOW.active = true;
+      TTS_CLOUD_WINDOW.mode = 'block-window';
+      TTS_CLOUD_WINDOW.sessionId = sessionId;
+      TTS_CLOUD_WINDOW.pageKey = key;
+      TTS_CLOUD_WINDOW.pageText = pageText;
+      TTS_CLOUD_WINDOW.chunkASentenceCount = 2;
+      TTS_CLOUD_WINDOW.charsPhase1 = chunkAText.length;
+      TTS_CLOUD_WINDOW.charsFullPage = pageText.length;
+      TTS_CLOUD_WINDOW.charsSessionTotal = chunkAText.length;
+      ttsDiagPush('window-init', {
+        sessionId, key,
+        sentences: sentences.length,
+        charsPhase1: chunkAText.length,
+        charsFullPage: pageText.length,
+        ttsCloudMode: 'block-window',
+      });
     } else if (sentences.length > 2) {
       // Full page is short, or this page already proved full-page marks in this
       // tab. Synthesise full page directly.
