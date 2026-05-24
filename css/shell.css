@@ -790,22 +790,6 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
   pointer-events: none;
 }
 
-.shell-playback-indicator--buffering::before {
-  content: '';
-  width: 0.72em;
-  height: 0.72em;
-  margin-right: 0.45em;
-  border-radius: 999px;
-  border: 2px solid rgba(146, 64, 14, 0.24);
-  border-top-color: currentColor;
-  animation: shell-playback-indicator-spin 0.8s linear infinite;
-  flex: 0 0 auto;
-}
-
-@keyframes shell-playback-indicator-spin {
-  to { transform: rotate(360deg); }
-}
-
 .shell-playback-indicator[hidden] {
   display: none;
 }
