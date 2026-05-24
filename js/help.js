@@ -6,6 +6,10 @@
   const STYLE_ID = 'jubly-support-widget-style';
   const ENDPOINT = '/api/app?kind=support-submit';
   const STORAGE_KEY = 'jubly:support-widget-opened';
+  const EVIDENCE_PACKET_KEY = 'jubly:support-evidence-packet:v1';
+  const SUPPORT_JOURNEY_KEY = 'jubly:support-recent-journey:v1';
+  const MAX_SUPPORT_JOURNEY_EVENTS = 18;
+  const PRESERVED_INCIDENT_TTL_MS = 30 * 60 * 1000;
 
   const ROOTS = { question: 'Ask a question', bug: 'Report a problem', feedback: 'Leave feedback' };
   const ROOT_CHOICES = [ROOTS.question, ROOTS.bug, ROOTS.feedback];
@@ -189,6 +193,7 @@
   }
 
   function startBugFlow() {
+    recordSupportJourney('support-root-selected', { root: ROOTS.bug });
     s.placeholder = '';
     s.path = [ROOTS.bug];
     bubble(ROOTS.bug, 'u');
@@ -205,7 +210,7 @@
       chips(BUG_TYPES, (bugType) => {
         s.path.push(bugType);
         bubble(bugType, 'u');
-        bubble('Please describe what happened. Diagnostics will be included automatically.', 'a');
+        bubble('Please describe what happened. We’ll include basic app context to help understand the issue.', 'a');
         unlock();
       });
       lock();
@@ -213,6 +218,7 @@
   }
 
   function startFeedbackFlow() {
+    recordSupportJourney('support-root-selected', { root: ROOTS.feedback });
     s.placeholder = '';
     s.path = [ROOTS.feedback];
     bubble(ROOTS.feedback, 'u');
@@ -235,6 +241,7 @@
   }
 
   function startQuestionFlow() {
+    recordSupportJourney('support-root-selected', { root: ROOTS.question });
     s.placeholder = '';
     s.path = [ROOTS.question];
     bubble(ROOTS.question, 'u');
@@ -272,8 +279,202 @@
     const found = nodes.find((el) => safe(() => { const cs = getComputedStyle(el); const r = el.getBoundingClientRect(); return cs.display !== 'none' && cs.visibility !== 'hidden' && r.width && r.height && !el.classList.contains('hidden-section'); }));
     return found ? found.id : null;
   }
-  function diagnostics() {
+
+  function evidenceStore() {
+    try { return window.sessionStorage || null; } catch (_) { return null; }
+  }
+
+  function jsonClone(value) {
+    try { return JSON.parse(JSON.stringify(value || null)); } catch (_) { return null; }
+  }
+
+  function compactObject(value, allowedKeys, maxString = 220) {
+    if (!value || typeof value !== 'object') return null;
+    const out = {};
+    allowedKeys.forEach((key) => {
+      if (!(key in value)) return;
+      const raw = value[key];
+      if (raw == null) { out[key] = raw; return; }
+      if (typeof raw === 'string') out[key] = raw.length > maxString ? `${raw.slice(0, maxString)}…` : raw;
+      else if (typeof raw === 'number' || typeof raw === 'boolean') out[key] = raw;
+      else if (Array.isArray(raw)) out[key] = raw.slice(0, 8);
+      else if (typeof raw === 'object') out[key] = jsonClone(raw);
+    });
+    return Object.keys(out).length ? out : null;
+  }
+
+  function readStoredJson(key, fallback) {
+    const store = evidenceStore();
+    if (!store) return fallback;
+    try {
+      const parsed = JSON.parse(store.getItem(key) || 'null');
+      return parsed == null ? fallback : parsed;
+    } catch (_) { return fallback; }
+  }
+
+  function writeStoredJson(key, value) {
+    const store = evidenceStore();
+    if (!store) return;
+    try { store.setItem(key, JSON.stringify(value)); } catch (_) {}
+  }
+
+
+  function timeMs(value) {
+    const ms = Date.parse(String(value || ''));
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  function sameEvidenceArea(incident, featureArea) {
+    const incidentArea = String(incident?.activeFeatureArea || '').toLowerCase();
+    const selectedArea = String(featureArea || '').toLowerCase();
+    if (!incidentArea || !selectedArea || selectedArea === 'unknown') return false;
+    if (incidentArea === selectedArea) return true;
+    return selectedArea === 'reading' && incidentArea === 'tts';
+  }
+
+  function isFreshRelevantIncident(incident, featureArea, nowMs = Date.now()) {
+    if (!incident || typeof incident !== 'object') return false;
+    const capturedMs = timeMs(incident.capturedAt);
+    if (!capturedMs || nowMs - capturedMs < 0 || nowMs - capturedMs > PRESERVED_INCIDENT_TTL_MS) return false;
+    return sameEvidenceArea(incident, featureArea);
+  }
+
+  function recordSupportJourney(event, data = {}) {
+    const existing = Array.isArray(readStoredJson(SUPPORT_JOURNEY_KEY, [])) ? readStoredJson(SUPPORT_JOURNEY_KEY, []) : [];
+    existing.push({ at: new Date().toISOString(), event: String(event || 'support-event'), surface: visibleSection(), data: compactObject(data, ['type', 'path', 'choice', 'root', 'visibleSection', 'href'], 160) || {} });
+    writeStoredJson(SUPPORT_JOURNEY_KEY, existing.slice(-MAX_SUPPORT_JOURNEY_EVENTS));
+  }
+
+  function pathToFeatureArea(path) {
+    const joined = Array.isArray(path) ? path.join(' > ').toLowerCase() : String(path || '').toLowerCase();
+    if (/read-aloud|audio|tts|voice/.test(joined)) return 'tts';
+    if (/library|saved book|cloud|book/.test(joined)) return 'library';
+    if (/account|plan|billing|subscription|sign up|signup/.test(joined)) return 'billing-auth';
+    if (/reading/.test(joined)) return 'reading';
+    if (/setting/.test(joined)) return 'settings';
+    return 'unknown';
+  }
+
+  function eventSummary(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const data = entry.data && typeof entry.data === 'object' ? entry.data : {};
     return {
+      seq: Number(entry.seq || 0) || null,
+      at: entry.at || null,
+      event: String(entry.event || ''),
+      data: compactObject(data, [
+        'type', 'resolved', 'reason', 'sourcePageIndex', 'targetPageIndex', 'pageIndex', 'focusedPageIndex',
+        'mode', 'key', 'activeKey', 'sessionId', 'requestId', 'requestMode', 'ok', 'status', 'provider',
+        'cacheHit', 'marksProvenance', 'marksIncludedInResponse', 'preciseSeekAvailable', 'preciseSeekReason',
+        'targetBlock', 'blockIndex', 'seekTime', 'elapsedMs', 'error', 'errorCode', 'recoverable', 'success'
+      ], 180) || {}
+    };
+  }
+
+  function meaningfulTtsEvents(tts) {
+    const events = Array.isArray(tts?.recentEvents) ? tts.recentEvents : [];
+    const important = /handoff|cloud|audio|seek|pause|paused|stop|error|failed|rejected|restart|promotion|clear|abort|presynth|browser-entry|utterance/i;
+    return events.filter((entry) => important.test(String(entry?.event || ''))).slice(-10).map(eventSummary).filter(Boolean);
+  }
+
+  function summarizeTtsIncident(tts, path) {
+    if (!tts || typeof tts !== 'object') return null;
+    const last = tts.last && typeof tts.last === 'object' ? tts.last : {};
+    const playback = tts.playback && typeof tts.playback === 'object' ? tts.playback : null;
+    const events = meaningfulTtsEvents(tts);
+    const handoffEvent = events.slice().reverse().find((entry) => entry.event === 'page-handoff');
+    const cloudEvent = events.slice().reverse().find((entry) => /cloud-response/i.test(entry.event));
+    const stopEvent = events.slice().reverse().find((entry) => /stop|pause|paused|error|failed|rejected|abort|clear/i.test(entry.event));
+    const handoff = compactObject(last.skip || handoffEvent?.data, ['at', 'type', 'resolved', 'sourcePageIndex', 'targetPageIndex', 'mode', 'reason', 'activeKey'], 220);
+    const cloudRequest = compactObject(last.cloudRequest, ['chars', 'textHash', 'sentenceMarks', 'requestMode', 'selectedVoice', 'selectedVoiceType', 'requestedVoiceId', 'variant'], 220);
+    const cloudResponse = compactObject(last.cloudResponse || cloudEvent?.data, ['ok', 'status', 'provider', 'cacheHit', 'requestMode', 'preciseSeekAvailable', 'preciseSeekReason', 'marksIncludedInResponse', 'marksProvenance'], 220);
+    const playRequest = compactObject(last.playRequest, ['key', 'blockCount', 'voice', 'route', 'selectedVoice', 'selectedVoiceType', 'requestedVoiceId'], 220);
+    const audio = compactObject(tts.audio, ['present', 'paused', 'currentTime', 'playbackRate', 'loop'], 220);
+    const session = compactObject(tts.session, ['id', 'activeKey', 'activeBlockIndex', 'blockCount', 'pausedBlockIndex', 'pausedPageKey', 'lastPageKey', 'browserRangeCount'], 220);
+    const capability = compactObject(tts.capability, ['provider', 'marksProvenance', 'providerPreciseMarks', 'preciseSeek', 'marks', 'artifact', 'cache'], 220);
+    const hasUsefulTtsContext = !!(handoff || cloudRequest || cloudResponse || playRequest || events.length);
+    if (!hasUsefulTtsContext) return null;
+    const likelyAutoplayHandoff = !!(handoff && /page-handoff/i.test(String(handoff.resolved || '')) && /autoplay/i.test(String(handoff.reason || '')));
+    const becameInactive = playback && playback.active === false;
+    const incidentType = likelyAutoplayHandoff ? 'tts-autoplay-page-handoff-context' : 'tts-runtime-context';
+    const summary = likelyAutoplayHandoff
+      ? 'Read Aloud recently attempted an autoplay page handoff. Preserve this context separately from the Profile/report-time state.'
+      : 'Recent Read Aloud runtime context preserved for support evidence.';
+    return {
+      capturedAt: new Date().toISOString(),
+      source: 'existing-tts-diagnostics-snapshot',
+      recentSurface: 'reading-view',
+      activeFeatureArea: 'tts',
+      incidentType,
+      summary,
+      reportTimePlaybackActive: playback ? !!playback.active : null,
+      becameInactiveAtReportCapture: becameInactive || null,
+      userPausedKnown: stopEvent && /pause|paused/.test(stopEvent.event) ? true : (likelyAutoplayHandoff ? false : null),
+      handoff,
+      playRequest,
+      cloudRequest,
+      cloudResponse,
+      session,
+      audio,
+      capability,
+      recentEvents: events,
+    };
+  }
+
+  function readPreservedIncident(featureArea) {
+    const stored = readStoredJson(EVIDENCE_PACKET_KEY, null);
+    if (!isFreshRelevantIncident(stored, featureArea)) return null;
+    return stored;
+  }
+
+  function preserveIncident(packet) {
+    if (!packet || typeof packet !== 'object') return null;
+    const bounded = { ...packet, freshnessWindowMs: PRESERVED_INCIDENT_TTL_MS };
+    writeStoredJson(EVIDENCE_PACKET_KEY, bounded);
+    return bounded;
+  }
+
+  function recentJourney(rawDiagnostics, preservedIncident) {
+    const supportEvents = Array.isArray(readStoredJson(SUPPORT_JOURNEY_KEY, [])) ? readStoredJson(SUPPORT_JOURNEY_KEY, []) : [];
+    const ttsEvents = Array.isArray(preservedIncident?.recentEvents) ? preservedIncident.recentEvents.map((entry) => ({ at: entry.at, event: `tts:${entry.event}`, surface: preservedIncident.recentSurface || 'reading-view', data: entry.data || {} })) : [];
+    const current = { at: rawDiagnostics.capturedAt, event: 'support:diagnostics-captured', surface: rawDiagnostics.visibleSection, data: { href: rawDiagnostics.location?.href || '' } };
+    return [...ttsEvents.slice(-8), ...supportEvents.slice(-8), current].slice(-12);
+  }
+
+  function buildSupportEvidencePacket(rawDiagnostics, meta = {}) {
+    const path = Array.isArray(meta.path) ? meta.path.slice(0, 6) : [];
+    const featureArea = pathToFeatureArea(path);
+    const derivedCandidate = summarizeTtsIncident(rawDiagnostics.ttsDiagnosticsSnapshot, meta.path);
+    const derived = isFreshRelevantIncident(derivedCandidate, featureArea) ? derivedCandidate : null;
+    const preserved = derived ? preserveIncident(derived) : readPreservedIncident(featureArea);
+    const packet = {
+      version: '1D-support-evidence-packet-v1',
+      assembledAt: new Date().toISOString(),
+      purpose: 'Existing support widget evidence packet; not a user-facing diagnostics surface.',
+      currentReportContext: {
+        currentSurface: rawDiagnostics.visibleSection || null,
+        supportPath: path,
+        supportType: meta.type || null,
+        selectedFeatureArea: featureArea,
+        route: rawDiagnostics.location || null,
+        signedIn: !!meta.signedIn,
+        tier: meta.tier || null,
+      },
+      preservedRecentIncident: preserved || null,
+      recentJourney: recentJourney(rawDiagnostics, preserved),
+      supportFlowBoundary: {
+        oneSupportSystem: true,
+        entrypoint: 'Profile/Help entrypoints open existing rcHelp support widget.',
+        diagnosticsVisibility: 'hidden support evidence attached to support-submit payload',
+        preservedIncidentFreshnessMs: PRESERVED_INCIDENT_TTL_MS,
+        staleOrUnrelatedPreservedIncidentsAttach: false,
+        createsNewReportingSurface: false,
+      }
+    };
+    return packet;
+  }
+  function diagnostics(meta = {}) {
+    const raw = {
       capturedAt: new Date().toISOString(),
       location: { href: location.href, pathname: location.pathname, search: location.search, hash: location.hash },
       visibleSection: visibleSection(),
@@ -288,6 +489,10 @@
       playbackStatus: safe(() => typeof window.getPlaybackStatus === 'function' ? window.getPlaybackStatus() : null),
       ttsSupportStatus: safe(() => typeof window.getTtsSupportStatus === 'function' ? window.getTtsSupportStatus() : null),
       ttsDiagnosticsSnapshot: safe(() => typeof window.getTtsDiagnosticsSnapshot === 'function' ? window.getTtsDiagnosticsSnapshot() : null)
+    };
+    return {
+      supportEvidencePacket: buildSupportEvidencePacket(raw, meta),
+      ...raw
     };
   }
 
@@ -304,6 +509,7 @@
   }
 
   async function submit(text) {
+    recordSupportJourney('support-submit-attempt', { path: s.path });
     const a = auth();
     const type = s.path[0] === ROOTS.bug ? 'bug' : s.path[0] === ROOTS.feedback ? 'feedback' : 'question';
     const headers = { 'Content-Type': 'application/json' };
@@ -313,8 +519,8 @@
       path: s.path,
       message: text,
       contactEmail: a.user?.email || '',
-      context: { user: a.user, signedIn: a.signedIn, policy: a.policy, route: visibleSection(), location: { href: location.href, pathname: location.pathname, search: location.search, hash: location.hash } },
-      diagnostics: diagnostics(),
+      context: { user: a.user, signedIn: a.signedIn, policy: a.policy, route: visibleSection(), supportPath: s.path, location: { href: location.href, pathname: location.pathname, search: location.search, hash: location.hash } },
+      diagnostics: diagnostics({ type, path: s.path, signedIn: a.signedIn, tier: a.policy?.tier || a.user?.tier || null }),
       transcript: s.transcript.slice(-30),
       screenshot: s.screenshot
     };
@@ -334,10 +540,12 @@
     refreshSend();
     try {
       await submit(text);
-      bubble('Sent — diagnostics were included for the Jubly team.', 'st ok');
+      recordSupportJourney('support-submit-success', { path: s.path });
+      bubble('Sent — app context was included for the Jubly team.', 'st ok');
       bubble('Thanks. You can start another topic whenever you’re ready.', 'a');
       s.path = []; s.placeholder = ''; s.screenshot = null; s.els.note.textContent = ''; lock(); chips(ROOT_CHOICES, chooseType);
     } catch (err) {
+      recordSupportJourney('support-submit-failed', { path: s.path });
       bubble(String(err && err.message || 'Support message could not be sent.'), 'st');
       s.els.msg.disabled = false; s.els.msg.value = text; refreshSend();
     } finally {
@@ -346,6 +554,7 @@
   }
 
   async function openRoot(root) {
+    recordSupportJourney('support-widget-opened', { root });
     try { if (window.rcAnnotations && typeof window.rcAnnotations.closeWidget === 'function') window.rcAnnotations.closeWidget(); } catch (_) {}
     mount();
     setOpen(true);

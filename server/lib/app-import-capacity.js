@@ -49,7 +49,7 @@ export default async function handler(req, res) {
   const resolved = await getResolvedRuntimePolicyForRequest(req);
   const { importSlotLimit } = resolved.policy;
 
-  // null importSlotLimit = unlimited (premium tier).
+  // null importSlotLimit = unlimited legacy behavior; Basic/Pro launch policy uses explicit limits.
   const hasCapacity = importSlotLimit == null ? true : Math.floor(count) < importSlotLimit;
 
   return json(res, 200, {

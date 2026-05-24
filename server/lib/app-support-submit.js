@@ -70,6 +70,67 @@ function safeFilename(value) {
   return name || 'jubly-support-screenshot.png';
 }
 
+function formatPath(value) {
+  return Array.isArray(value) && value.length ? value.map((item) => clampText(item, 80)).join(' > ') : 'unknown';
+}
+
+function evidenceValue(value, fallback = 'unknown') {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'string') return clampText(value, 260);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return safeJson(value, 1200);
+}
+
+function eventLine(entry) {
+  if (!entry || typeof entry !== 'object') return '';
+  const event = clampText(entry.event || '', 80);
+  const surface = clampText(entry.surface || '', 80);
+  const at = clampText(entry.at || '', 40);
+  const detail = entry.data && typeof entry.data === 'object' && Object.keys(entry.data).length ? ` — ${safeJson(entry.data, 500)}` : '';
+  return `- ${at}${surface ? ` [${surface}]` : ''} ${event}${detail}`;
+}
+
+function buildEvidenceSummary(diagnostics) {
+  const packet = diagnostics && typeof diagnostics === 'object' ? diagnostics.supportEvidencePacket : null;
+  if (!packet || typeof packet !== 'object') return 'No 1D support evidence packet was attached.';
+  const current = packet.currentReportContext && typeof packet.currentReportContext === 'object' ? packet.currentReportContext : {};
+  const incident = packet.preservedRecentIncident && typeof packet.preservedRecentIncident === 'object' ? packet.preservedRecentIncident : null;
+  const journey = Array.isArray(packet.recentJourney) ? packet.recentJourney.slice(-12).map(eventLine).filter(Boolean) : [];
+  const lines = [
+    `Packet: ${evidenceValue(packet.version, 'unknown')}`,
+    `Purpose: ${evidenceValue(packet.purpose, 'existing support evidence')}`,
+    '',
+    'Current report context:',
+    `- Current surface: ${evidenceValue(current.currentSurface)}`,
+    `- Support path: ${formatPath(current.supportPath)}`,
+    `- Selected feature area: ${evidenceValue(current.selectedFeatureArea)}`,
+    `- Signed in: ${evidenceValue(current.signedIn)}`,
+    `- Tier: ${evidenceValue(current.tier)}`,
+  ];
+  if (incident) {
+    lines.push(
+      '',
+      'Preserved recent incident:',
+      `- Recent surface: ${evidenceValue(incident.recentSurface)}`,
+      `- Feature area: ${evidenceValue(incident.activeFeatureArea)}`,
+      `- Incident type: ${evidenceValue(incident.incidentType)}`,
+      `- Summary: ${evidenceValue(incident.summary)}`,
+      `- User paused known: ${evidenceValue(incident.userPausedKnown)}`,
+      `- Handoff: ${evidenceValue(incident.handoff, 'none')}`,
+      `- Cloud request: ${evidenceValue(incident.cloudRequest, 'none')}`,
+      `- Cloud response: ${evidenceValue(incident.cloudResponse, 'none')}`
+    );
+  } else {
+    lines.push('', 'Preserved recent incident:', '- none available');
+  }
+  lines.push('', 'Recent journey:', ...(journey.length ? journey : ['- none available']));
+  const boundary = packet.supportFlowBoundary && typeof packet.supportFlowBoundary === 'object' ? packet.supportFlowBoundary : null;
+  if (boundary) {
+    lines.push('', 'Support flow boundary:', safeJson(boundary, 1200));
+  }
+  return lines.join('\n');
+}
+
 function parseDataUrlAttachment(input) {
   if (!input || typeof input !== 'object') return null;
   const dataUrl = String(input.dataUrl || '').trim();
@@ -100,6 +161,7 @@ function buildEmailText({ type, path, message, contactEmail, user, context, diag
     `Route: ${route}`,
     `Timestamp: ${new Date().toISOString()}`,
     '', 'Message:', message,
+    '', '1D Evidence Packet Summary:', buildEvidenceSummary(diagnostics),
     '', 'Transcript:', safeJson(transcript || [], 8000),
     '', 'Context:', safeJson(context || {}, 8000),
     '', 'Diagnostics:', safeJson(diagnostics || {}, MAX_DIAGNOSTICS_CHARS),

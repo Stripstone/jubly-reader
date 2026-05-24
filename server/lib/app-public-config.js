@@ -26,7 +26,7 @@ function envInt(name, fallback = 0) {
 function attachPublicTrialMetadata(plans) {
   const out = plans && typeof plans === 'object' ? { ...plans } : {};
   out.pro = { ...(out.pro || {}), trialDays: envInt('PLAN_PRO_TRIAL_DAYS', 0) };
-  out.premium = { ...(out.premium || {}), trialDays: envInt('PLAN_PREMIUM_TRIAL_DAYS', 0) };
+  out.premium = { ...(out.premium || {}), available: false, launchHidden: true, trialDays: 0 };
   return out;
 }
 
@@ -45,8 +45,8 @@ export default async function handler(req, res) {
   const resetPasswordRedirectUrl = appBaseUrl ? `${appBaseUrl}/?view=reset-password` : '';
   const stripe = {
     plans: attachPublicTrialMetadata(await getPublicPlanCatalog().catch(() => ({
-      pro: { available: !!(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO), amountLabel: 'Configured in Stripe', intervalLabel: '' },
-      premium: { available: !!(process.env.STRIPE_PRICE_PREMIUM_MONTHLY || process.env.STRIPE_PRICE_PREMIUM), amountLabel: 'Configured in Stripe', intervalLabel: '' },
+      pro: { available: !!(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO || process.env.STRIPE_PRICE_PREMIUM_MONTHLY || process.env.STRIPE_PRICE_PREMIUM), amountLabel: 'Configured in Stripe', intervalLabel: '' },
+      premium: { available: false, amountLabel: '', intervalLabel: '', launchHidden: true },
     }))),
   };
 

@@ -49,7 +49,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
   let appMode = 'reading';   // default mode
   let thesisText = ''; // research mode input — coming soon
 
-  // Current resolved runtime tier: 'basic', 'pro', 'premium'.
+  // Current resolved runtime tier: 'basic' or 'pro'. Legacy aliases are normalized at the policy seam.
   // Legacy aliases like 'free' / 'paid' are normalized at the policy seam.
   let appTier = 'basic';
   let runtimePolicy = null;
@@ -70,8 +70,8 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     research: 2,
     ai: 2,
     summary: 2,
-    book_import: 2,
-    import: 2,
+    book_import: 6,
+    import: 6,
     other_protected_backend_action: 2,
   };
 
@@ -80,7 +80,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     tier: 'basic',
     simulationAllowed: false,
     usageDailyLimit: 100,
-    importSlotLimit: 2,
+    importSlotLimit: 20,
     features: Object.freeze({
       modes: Object.freeze({
         reading: true,

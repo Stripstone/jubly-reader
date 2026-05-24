@@ -32,8 +32,7 @@ export function blockingSubscriptionExists(entitlement) {
 
 export function trialDaysForTier(tier) {
   const normalized = String(tier || '').trim().toLowerCase();
-  if (normalized === 'premium') return envInt('PLAN_PREMIUM_TRIAL_DAYS', 0);
-  if (normalized === 'pro') return envInt('PLAN_PRO_TRIAL_DAYS', 0);
+  if (normalized === 'pro' || normalized === 'premium') return envInt('PLAN_PRO_TRIAL_DAYS', 0);
   return 0;
 }
 
@@ -55,7 +54,7 @@ export function getClientIp(req) {
 
 function normalizePlanTier(tier) {
   const normalized = String(tier || '').trim().toLowerCase();
-  return normalized === 'premium' ? 'premium' : normalized === 'pro' ? 'pro' : '';
+  return (normalized === 'premium' || normalized === 'pro') ? 'pro' : '';
 }
 
 function publicEligibilityResult({ tier, eligible, resolved, days = 0, reason = '', ipFingerprintHash = '' }) {

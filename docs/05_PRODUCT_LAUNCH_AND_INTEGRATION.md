@@ -29,7 +29,7 @@ Launch is honest only when a user can:
 3. Account-backed continuity is the real ownership promise.
 4. Pricing should appear early, once, then get out of the way.
 5. There is no throwaway guest-session business path.
-6. Basic, Pro, and Premium remain visible user-facing plans.
+6. Basic and Pro are the only launch-facing plans; Premium is legacy/internal and must map into Pro-facing presentation if encountered.
 7. Usage exhaustion should fall back gracefully rather than destroy progress.
 8. Tier loss should reduce capability and defaults, not delete user history.
 9. Billing and account surfaces should feel like quiet support systems, not a second product.
@@ -65,25 +65,23 @@ Account creation should be prompted by:
 ### Signed-in Basic user
 Should have:
 - durable account identity
-- 2 book import slots
 - baseline reading-view experience
-- enough usage to experience the product
+- starter daily protected usage allowance: 100 units
+- system voices
+- limited cloud/storage continuity as defined by the Cloud Library contract
 - daily reset of usage allowance
 
 ### Signed-in Pro user
 Should have:
-- 5 book import slots
-- some cloud voices
-- some themes
-- more daily usage than Basic
+- full Jubly launch-facing plan identity
+- expanded daily protected usage allowance: 1000 units
+- AI/cloud voices where runtime-backed
+- personalized themes where runtime-backed
+- premium launch-facing feature access through shared entitlement truth
+- expanded cloud/storage continuity as defined by the Cloud Library contract
 
-### Signed-in Premium user
-Should have:
-- highest usage allowance
-- broadest feature unlocks
-- most generous voice, theme, and book capacity
-
-Premium remains intentional and visible even if packaging evolves later.
+### Legacy Premium entitlement
+Premium is not a launch-facing customer tier. Existing Premium/internal state may remain temporarily if removal is risky, but it must resolve to Pro-facing language and Pro runtime behavior.
 
 ## Route and page intent
 
@@ -109,11 +107,11 @@ Premium remains intentional and visible even if packaging evolves later.
 3. `Try it now` opens the sample reading experience directly with no account wall
 4. Exiting sample reading reveals the intro library
 5. From the intro library, account-backed actions open pricing
-6. Pricing presents Basic, Pro, or Premium with a settled first visible paint
+6. Pricing presents Basic or Pro with a settled first visible paint
 7. User chooses plan; Basic uses the user-facing `Continue for free` entry
 8. User completes signup or login
 9. If selected plan is Basic, user enters `/app` immediately
-10. If selected plan is Pro or Premium, backend initiates Stripe checkout as needed
+10. If selected plan is Pro, backend initiates Stripe checkout as needed
 11. Runtime boots with account and entitlement truth
 
 ### Returning user flow
@@ -129,7 +127,7 @@ Premium remains intentional and visible even if packaging evolves later.
 3. Existing-account emails are redirected toward Log In rather than continuing through signup
 4. New-account signup success communicates `Check your email to verify your account`
 5. Verification link returns to the canonical login surface, not a localhost fallback
-6. Paid continuation preserves `next=checkout` plus `tier=pro|premium` through verification and login
+6. Paid continuation preserves `next=checkout` plus `tier=pro` through verification and login
 7. User logs in only after verification is complete
 
 ### Password reset flow
@@ -166,7 +164,7 @@ Premium remains intentional and visible even if packaging evolves later.
 ## Surface wiring rules
 
 ### Public surfaces
-- avoid `free` as canonical plan vocabulary; marketing copy may invite trial, but product/runtime language must stay `basic / pro / premium`
+- avoid `free` as canonical plan vocabulary; product/runtime language must stay `basic / pro` for launch-facing presentation
 - `Sign Up` is the canonical public acquisition action
 - `Login` is the canonical returning-user entry
 - `Try it now` is the canonical landing CTA for entering the sample reading experience
@@ -245,7 +243,8 @@ Premium remains intentional and visible even if packaging evolves later.
 Public plan labels:
 - Basic
 - Pro
-- Premium
+
+Legacy/internal aliases may map Premium/Paid to Pro when necessary.
 
 At runtime boot, derive one resolved entitlement object such as:
 - `tier`
@@ -257,7 +256,7 @@ At runtime boot, derive one resolved entitlement object such as:
 - `theme_access`
 - `premium_feature_flags`
 
-`tier` is the canonical runtime feature-gate vocabulary and must use only `basic / pro / premium`.
+`tier` is the canonical runtime feature-gate vocabulary and must use only `basic / pro` for launch-facing runtime behavior. Legacy `premium` values must map into Pro-facing access rather than appearing as a public tier.
 `provider` and `status` support billing/source interpretation, but must not replace `tier` as the feature gate.
 Shell and runtime should consume resolved entitlement truth.
 Do not scatter plan logic across many DOM checks or cosmetic UI states.
@@ -268,13 +267,18 @@ Do not scatter plan logic across many DOM checks or cosmetic UI states.
 The user-facing promise is daily reset.
 Implementation should prefer one clear server-side interpretation rather than client-local ambiguity.
 
+Launch action-specific costs:
+- Read Aloud / TTS: 2 units
+- Import: 6 units
+
 ### Exhaustion rule
 When usage is exhausted:
 - preserve progress
 - preserve settings that are meant to persist
 - preserve uploaded book references and history when feasible
-- disable or reduce higher-tier actions
-- fall back to lower-tier or default paths
+- pause the protected action clearly
+- explain the daily reset
+- keep the rest of the app feeling usable rather than broken
 
 ### Slot enforcement rule
 When plan limit becomes lower than current owned count:
