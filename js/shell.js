@@ -129,7 +129,7 @@ window.rcInteraction = (function () {
   let _active = null;  // { key, sevName, severity, message, actions, timer }
   let _el = null;
 
-  const PLAYBACK_SURFACE_KEYS = new Set(['tts:cloud-restart']);
+  const PLAYBACK_SURFACE_KEYS = new Set(['tts:cloud-restart', 'tts:promotion-wait']);
 
   function _isPlaybackSurfaceKey(key) {
     return PLAYBACK_SURFACE_KEYS.has(String(key || ''));
@@ -2474,34 +2474,35 @@ window.rcInteraction = (function () {
         return null;
     }
 
-    function computeShellPlaybackIndicatorMessage(status, countdown, support, eligibility) {
-        const supportReason = String(support && support.reason || eligibility?.reasons?.canPlay || '').trim();
-        const browserVoiceUnavailable = support && support.playable === false && support.browserVoiceAvailable === false;
-        if (browserVoiceUnavailable || (!support?.playable && supportReason)) {
-            return supportReason || 'No browser English voice is available on this device.';
-        }
-
+    function computeShellPlaybackIndicatorState(status, countdown, support, eligibility) {
         const voiceVolume = getShellVoiceVolumeLevel();
         if (status?.active && Number.isFinite(voiceVolume) && voiceVolume <= 0) {
-            return 'Voice volume is off';
+            return { message: 'Voice volume is off', kind: 'support' };
+        }
+
+        const promotionWait = status?.promotionWaitPending || null;
+        if (promotionWait?.active) {
+            return { message: String(promotionWait.message || 'Buffering…'), kind: 'buffering' };
         }
 
         const pending = status?.cloudRestartPending || null;
         const cloudRestartActive = !!(status?.cloudRestartInFlight || pending?.active);
         const elapsedMs = Number(pending?.elapsedMs || 0);
         if (cloudRestartActive && elapsedMs >= SHELL_PLAYBACK_CLOUD_RESTART_VISIBLE_AFTER_MS) {
-            return String(pending?.message || 'Loading audio…');
+            return { message: String(pending?.message || 'Loading audio…'), kind: 'restart' };
         }
 
-        // Playback-start failure is intentionally not inferred here. The current
-        // runtime getter does not expose a retry-exhausted/start-error field.
-        return '';
+        // Playback-start failure and unavailable-device errors are intentionally
+        // not inferred here. Settled failures belong on the banner surface, while
+        // this indicator stays reserved for runtime-owned pending/support truth.
+        return { message: '', kind: '' };
     }
 
-    function setShellPlaybackIndicatorMessage(message) {
+    function setShellPlaybackIndicatorMessage(message, kind) {
         const indicator = document.getElementById('shell-playback-indicator');
         if (!indicator) return;
         const text = String(message || '').trim();
+        indicator.classList.toggle('shell-playback-indicator--buffering', String(kind || '') === 'buffering');
         if (text) {
             indicator.textContent = text;
             indicator.hidden = false;
@@ -2528,11 +2529,12 @@ window.rcInteraction = (function () {
         try { if (typeof getTtsSupportStatus === 'function') support = getTtsSupportStatus() || support; } catch (_) {}
         try { if (typeof getPlaybackControlEligibility === 'function') eligibility = getPlaybackControlEligibility() || eligibility; } catch (_) {}
         const canPlay = !!eligibility.canPlay;
-        const indicatorMessage = computeShellPlaybackIndicatorMessage(status, countdown, support, eligibility);
+        const indicatorState = computeShellPlaybackIndicatorState(status, countdown, support, eligibility);
+        const indicatorMessage = indicatorState.message;
         if (btn) {
             const label = eligibility.canResume ? 'Resume' : (eligibility.canPause ? 'Pause' : 'Play');
             btn.classList.toggle('active', !!status.active && !status.paused);
-            btn.title = indicatorMessage || (status.active ? (status.paused ? 'Resume narration' : 'Pause narration') : (countdown.active ? 'Resume current page from countdown' : 'Play current page'));
+            btn.title = indicatorMessage || (!support.playable && support.reason ? support.reason : (status.active ? (status.paused ? 'Resume narration' : 'Pause narration') : (countdown.active ? 'Resume current page from countdown' : 'Play current page')));
             // Keep Play reachable even when runtime reports a blocked state; the
             // indicator explains why while shell still forwards intent only.
             btn.disabled = false;
@@ -2563,7 +2565,7 @@ window.rcInteraction = (function () {
             else pageBtn.removeAttribute('title');
         });
         // Surface playback/support status without taking ownership of runtime truth.
-        setShellPlaybackIndicatorMessage(indicatorMessage);
+        setShellPlaybackIndicatorMessage(indicatorMessage, indicatorState.kind);
         // PATCH(speed-sync): Keep #shell-speed in sync with TTS_STATE.rate.
         // Previously, if setPlaybackRate() was called from any path other than
         // the shell select itself (e.g. programmatic change, restored preference),
@@ -2591,6 +2593,12 @@ window.rcInteraction = (function () {
         };
         let result = false;
         try { if (typeof pauseOrResumeReading === 'function') result = !!pauseOrResumeReading(); } catch (_) {}
+        try {
+            const afterSupport = (typeof getTtsSupportStatus === 'function') ? getTtsSupportStatus() : null;
+            if (!result && afterSupport && afterSupport.playable === false && window.rcInteraction) {
+                window.rcInteraction.error('tts:unavailable', 'Audio is not available on this device.');
+            }
+        } catch (_) {}
         setTimeout(syncShellPlaybackControls, 0);
         const afterPlayback = (typeof getPlaybackStatus === 'function') ? getPlaybackStatus() : null;
         if (afterPlayback?.active && !afterPlayback.paused && (!before.playback?.active || before.playback?.paused || before.countdown?.active)) {
