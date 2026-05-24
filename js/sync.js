@@ -42,75 +42,6 @@ window.rcSync = (function () {
   let _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false, usage: false };
   let _lastSyncSnapshotAt = null;
   let _syncDiagnostics = { users: null, settings: null, progress: null, sessions: null, restore: null, snapshot: null };
-
-  const RC_CLOUD_LIBRARY_LIMITS = Object.freeze({
-    basic: Object.freeze({ deviceBooks: 20, cloudBooks: 3, cloudStorageBytes: 22 * 1024 * 1024, maxUploadBytes: 10 * 1024 * 1024 }),
-    pro: Object.freeze({ deviceBooks: 50, cloudBooks: 20, cloudStorageBytes: 200 * 1024 * 1024, maxUploadBytes: 25 * 1024 * 1024 }),
-  });
-  const RC_CLOUD_STORAGE_KINDS = new Set(['cloud_library', 'account_cloud', 'server_stored', 'supabase_storage']);
-
-  function _normalizeLaunchPlan(value) {
-    const tier = String(value || '').trim().toLowerCase();
-    if (tier === 'pro' || tier === 'premium' || tier === 'paid') return 'pro';
-    return 'basic';
-  }
-
-  function _getLaunchPlan() {
-    try {
-      if (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') return _normalizeLaunchPlan(window.rcPolicy.getTier());
-    } catch (_) {}
-    try {
-      const policy = window.rcPolicy && typeof window.rcPolicy.get === 'function' ? window.rcPolicy.get() : null;
-      if (policy && policy.tier) return _normalizeLaunchPlan(policy.tier);
-    } catch (_) {}
-    return 'basic';
-  }
-
-  function _getCloudLibraryLimits(plan = _getLaunchPlan()) {
-    const key = _normalizeLaunchPlan(plan);
-    return Object.assign({ plan: key }, RC_CLOUD_LIBRARY_LIMITS[key] || RC_CLOUD_LIBRARY_LIMITS.basic);
-  }
-
-  function _isCloudLibraryStorageKind(value) {
-    // Avoid treating generic/legacy labels like `cloud` as proof of account-backed
-    // Cloud Library storage. User-facing Cloud Library claims must be based on
-    // explicit storage kinds only.
-    return RC_CLOUD_STORAGE_KINDS.has(String(value || '').trim().toLowerCase());
-  }
-
-  function _normalizeStorageRef(value) {
-    return String(value || '').trim();
-  }
-
-  function _findRemoteLibraryItem(bookId) {
-    const ref = _normalizeStorageRef(bookId);
-    if (!ref) return null;
-    return (_remoteLibraryItems || []).find((row) => _normalizeStorageRef(row.storage_ref || row.book_id || row.bookId) === ref) || null;
-  }
-
-  function _getCloudLibrarySummary() {
-    const plan = _getLaunchPlan();
-    const limits = _getCloudLibraryLimits(plan);
-    const activeItems = (_remoteLibraryItems || []).filter((row) => String(row?.status || 'active').toLowerCase() === 'active');
-    const cloudItems = activeItems.filter((row) => _isCloudLibraryStorageKind(row?.storage_kind || row?.storageKind));
-    const cloudBytes = cloudItems.reduce((sum, row) => sum + Math.max(0, Number(row?.byte_size ?? row?.byteSize) || 0), 0);
-    return {
-      plan,
-      limits,
-      activeItemCount: activeItems.length,
-      cloudBookCount: cloudItems.length,
-      cloudBytes,
-      cloudItems: cloudItems.slice(),
-      runtimeBacked: cloudItems.length > 0,
-      // Current runtime tracks durable library identity/progress, but does not expose
-      // a proven local-book upload/promote endpoint. UI must present Save to Cloud
-      // as unavailable/pending until a real owner wires this capability.
-      promotionAvailable: false,
-      reason: 'cloud-promotion-runtime-not-wired',
-      hydrated: !!(_hydrationState && (_hydrationState.progress || _hydrationState.users || _lastSyncSnapshotAt)),
-    };
-  }
-
   const RC_EVENT_TRAIL_MAX = 40;
   if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
   function _pushEvent(tag, data) {
@@ -332,7 +263,7 @@ window.rcSync = (function () {
           simulationAllowed: false,
           resolutionMode: 'public-reset',
           usageDailyLimit: 100,
-          importSlotLimit: 20,
+          importSlotLimit: 2,
           features: {
             modes: { reading: true, comprehension: false, research: false },
             aiEvaluate: false,
@@ -1339,10 +1270,6 @@ window.rcSync = (function () {
     getSettings,
     rehydrateDurableData,
     getRemoteUsersRow: () => _remoteUsersRow,
-    getRemoteLibraryItems: () => (_remoteLibraryItems || []).slice(),
-    getRemoteLibraryItem: (bookId) => _findRemoteLibraryItem(bookId),
-    getCloudLibrarySummary: () => _getCloudLibrarySummary(),
-    getCloudLibraryLimits: (plan) => _getCloudLibraryLimits(plan),
     getRemoteUsageSummary: () => _remoteUsageSummary,
     getResolvedUsageSummary: () => _getResolvedUsageSummary(),
     getHydrationState: () => ({ ..._hydrationState }),

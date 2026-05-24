@@ -1,7 +1,7 @@
 import { getActiveEntitlement, getUserFromAccessToken } from './supabase.js';
 
-const VALID_TIERS = new Set(['basic', 'pro']);
-const LEGACY_TIER_ALIASES = new Map([['free', 'basic'], ['paid', 'pro'], ['premium', 'pro']]);
+const VALID_TIERS = new Set(['basic', 'pro', 'premium']);
+const LEGACY_TIER_ALIASES = new Map([['free', 'basic'], ['paid', 'pro']]);
 const CANONICAL_PRODUCTION_HOSTS = new Set(['jubly-reader.vercel.app']);
 
 function normalizeHost(value) {
@@ -114,9 +114,17 @@ export function buildRuntimePolicy(inputTier = 'basic') {
   const tier = resolveRuntimeTier(inputTier);
   const elevated = tier !== 'basic';
 
-  const usageDailyLimit = tier === 'pro' ? 1000 : 100;
+  const usageDailyLimit = tier === 'premium'
+    ? 10000
+    : tier === 'pro'
+      ? 1000
+      : 100;
 
-  const importSlotLimit = tier === 'pro' ? 50 : 20;
+  const importSlotLimit = tier === 'premium'
+    ? null
+    : tier === 'pro'
+      ? 5
+      : 2;
 
   return {
     version: 1,

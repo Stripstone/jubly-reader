@@ -397,8 +397,6 @@ async function requestServerPageBreak(payload) {
         const guard = await guardImportCapacity();
         syncImportEntryState(guard.snapshot);
         if (!guard.ok) return;
-        const usageGate = await guardImportUsage();
-        if (!usageGate.ok) return;
 
         showStage('progress');
         doneBtn.style.display = 'none';
@@ -577,36 +575,12 @@ async function requestServerPageBreak(payload) {
         : `Saved on this device: ${snapshot.count}/${snapshot.limit}`;
     }
 
-    function _describeUsageVerdict(verdict) {
+    function _describeUsageConsumeVerdict(verdict) {
       if (!verdict || verdict.allowed) return null;
       const reason = String(verdict.reason || '');
       if (reason === 'daily_limit_reached') return 'Daily import limit reached — resets at midnight UTC.';
       if (reason === 'auth_required') return 'Sign in to track your import usage.';
       return null;
-    }
-
-    function _describeUsageConsumeVerdict(verdict) {
-      return _describeUsageVerdict(verdict);
-    }
-
-    async function guardImportUsage() {
-      if (!(window.rcUsage && typeof window.rcUsage.check === 'function')) return { ok: true, verdict: null };
-      try {
-        const verdict = await window.rcUsage.check('book_import');
-        if (verdict && verdict.allowed === false) {
-          const msg = _describeUsageVerdict(verdict) || 'Daily import allowance reached.';
-          setStatus(msg);
-          if (uploadStatus) {
-            uploadStatus.style.display = 'block';
-            uploadStatus.textContent = msg;
-          }
-          return { ok: false, verdict, message: msg };
-        }
-        return { ok: true, verdict };
-      } catch (_) {
-        // Server unreachable: preserve the existing local-first degraded posture.
-        return { ok: true, verdict: null };
-      }
     }
 
     function syncImportEntryState(snapshot) {
@@ -889,9 +863,6 @@ async function requestServerPageBreak(payload) {
           return;
         }
 
-        const usageGate = await guardImportUsage();
-        if (!usageGate.ok) return;
-
         const endpoint = apiUrl('/api/content?action=book-import');
 
         // ── Step 1: Get a FreeConvert upload URL (API key stays server-side) ──
@@ -1027,11 +998,6 @@ async function requestServerPageBreak(payload) {
         const guard = await guardImportCapacity();
         syncImportEntryState(guard.snapshot);
         if (!guard.ok) {
-          showStage('upload');
-          return;
-        }
-        const usageGate = await guardImportUsage();
-        if (!usageGate.ok) {
           showStage('upload');
           return;
         }

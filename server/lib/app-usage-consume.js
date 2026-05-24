@@ -21,12 +21,7 @@ import { getAllowedBrowserOrigins } from "./origins.js";
 import { getResolvedRuntimePolicyForRequest } from "./runtime-policy.js";
 import { getUserFromAccessToken, getUsageRow, upsertUsageRow } from "./supabase.js";
 
-const ACTION_COSTS = new Map([
-  ['tts', 2],
-  ['book_import', 6],
-  ['import', 6],
-]);
-const DEFAULT_PROTECTED_ACTION_COST = 2;
+const COST_PER_ACTION = 2;
 const VALID_ACTIONS = new Set([
   'book_import', 'tts', 'ai', 'summary', 'anchors', 'evaluate',
   'import', 'research', 'other_protected_backend_action',
@@ -118,7 +113,7 @@ export default async function handler(req, res) {
 
   const resolved = await getResolvedRuntimePolicyForRequest(req);
   const { usageDailyLimit } = resolved.policy;
-  const cost = ACTION_COSTS.get(action) || DEFAULT_PROTECTED_ACTION_COST;
+  const cost = COST_PER_ACTION;
 
   if (usageDailyLimit == null) {
     return json(res, 200, {

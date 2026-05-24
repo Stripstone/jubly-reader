@@ -329,168 +329,6 @@ function hasTtsFullPageReady(key) {
   return TTS_FULL_PAGE_READY_KEYS.has(String(key || ''));
 }
 
-
-// Runtime-local TTS usage seam state.
-// This is not billing truth and is not durable replay history. It only prevents
-// accidental repeat consumes inside the current tab after a protected cloud
-// playback commit. Durable usage remains owned by window.rcUsage.consume().
-const TTS_USAGE_REPLAY_WINDOW = {
-  anchorKey: null,
-  sourceType: '',
-  bookId: '',
-  chapterIndex: -1,
-  pageIndex: -1,
-  sessionId: 0,
-  committedAt: null,
-};
-
-const TTS_USAGE_SESSION_COMMIT = {
-  sessionId: 0,
-  handled: false,
-  reason: '',
-};
-
-function getTtsUsageTargetContext(key) {
-  let parsed = null;
-  try { parsed = (typeof readingTargetFromKey === 'function') ? readingTargetFromKey(String(key || '')) : null; } catch (_) {}
-  const pageIndex = parsed && Number.isFinite(Number(parsed.pageIndex)) ? Number(parsed.pageIndex) : -1;
-  return {
-    key: String(key || ''),
-    sourceType: parsed && parsed.sourceType != null ? String(parsed.sourceType || '') : '',
-    bookId: parsed && parsed.bookId != null ? String(parsed.bookId || '') : '',
-    chapterIndex: parsed && Number.isFinite(Number(parsed.chapterIndex)) ? Number(parsed.chapterIndex) : -1,
-    pageIndex,
-  };
-}
-
-function hasProtectedTtsUsageAuthContext() {
-  try {
-    const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
-    const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function'
-      ? String(window.rcAuth.getAccessToken() || '').trim()
-      : '';
-    return signedIn && !!token;
-  } catch (_) {
-    return false;
-  }
-}
-
-function isProtectedCloudTtsUsagePath(routeInfo) {
-  const route = routeInfo || getPreferredTtsRouteInfo();
-  if (!route || !route.cloudCapable) return false;
-  if (String(route.requestedPath || '') === 'browser-selected') return false;
-  return hasProtectedTtsUsageAuthContext();
-}
-
-function isTtsUsageReplayWindowCovered(key) {
-  const target = getTtsUsageTargetContext(key);
-  const anchorPage = Number(TTS_USAGE_REPLAY_WINDOW.pageIndex);
-  if (!target.key || !Number.isFinite(target.pageIndex) || target.pageIndex < 0) return false;
-  if (!Number.isFinite(anchorPage) || anchorPage < 0) return false;
-  if (target.sourceType !== String(TTS_USAGE_REPLAY_WINDOW.sourceType || '')) return false;
-  if (target.bookId !== String(TTS_USAGE_REPLAY_WINDOW.bookId || '')) return false;
-  if (Number(target.chapterIndex) !== Number(TTS_USAGE_REPLAY_WINDOW.chapterIndex)) return false;
-  return target.pageIndex === anchorPage || target.pageIndex === anchorPage - 1;
-}
-
-function markTtsUsageReplayWindow(key, sessionId, reason = 'usage-consumed') {
-  const target = getTtsUsageTargetContext(key);
-  if (!target.key || !Number.isFinite(target.pageIndex) || target.pageIndex < 0) return false;
-  TTS_USAGE_REPLAY_WINDOW.anchorKey = target.key;
-  TTS_USAGE_REPLAY_WINDOW.sourceType = target.sourceType;
-  TTS_USAGE_REPLAY_WINDOW.bookId = target.bookId;
-  TTS_USAGE_REPLAY_WINDOW.chapterIndex = target.chapterIndex;
-  TTS_USAGE_REPLAY_WINDOW.pageIndex = target.pageIndex;
-  TTS_USAGE_REPLAY_WINDOW.sessionId = Number(sessionId || 0) || 0;
-  TTS_USAGE_REPLAY_WINDOW.committedAt = new Date().toISOString();
-  ttsDiagPush('usage-replay-window-marked', {
-    key: target.key,
-    sessionId: TTS_USAGE_REPLAY_WINDOW.sessionId,
-    reason,
-    coveredPageIndex: target.pageIndex,
-    coveredPreviousPageIndex: target.pageIndex - 1,
-    sourceType: target.sourceType,
-    bookId: target.bookId,
-    chapterIndex: target.chapterIndex,
-  });
-  return true;
-}
-
-function markTtsUsageSessionHandled(sessionId, reason) {
-  TTS_USAGE_SESSION_COMMIT.sessionId = Number(sessionId || 0) || 0;
-  TTS_USAGE_SESSION_COMMIT.handled = true;
-  TTS_USAGE_SESSION_COMMIT.reason = String(reason || 'handled');
-}
-
-async function maybeCommitTtsUsageOnPlaybackCommit({ key, sessionId, routeInfo, wantMarksForPage, reason } = {}) {
-  const sid = Number(sessionId || 0) || 0;
-  const target = getTtsUsageTargetContext(key);
-  const base = {
-    action: 'tts',
-    key: target.key || String(key || ''),
-    sessionId: sid,
-    pageIndex: target.pageIndex,
-    sourceType: target.sourceType,
-    bookId: target.bookId,
-    chapterIndex: target.chapterIndex,
-    reason: String(reason || 'playback-commit'),
-    replayWindow: {
-      anchorKey: TTS_USAGE_REPLAY_WINDOW.anchorKey,
-      pageIndex: TTS_USAGE_REPLAY_WINDOW.pageIndex,
-      coveredPreviousPageIndex: Number.isFinite(Number(TTS_USAGE_REPLAY_WINDOW.pageIndex)) ? Number(TTS_USAGE_REPLAY_WINDOW.pageIndex) - 1 : -1,
-    },
-  };
-
-  if (TTS_USAGE_SESSION_COMMIT.sessionId === sid && TTS_USAGE_SESSION_COMMIT.handled) {
-    ttsDiagPush('usage-consume-skipped', { ...base, skipReason: 'session-already-handled', handledReason: TTS_USAGE_SESSION_COMMIT.reason });
-    return { consumed: false, skipped: true, reason: 'session-already-handled' };
-  }
-
-  if (!wantMarksForPage) {
-    markTtsUsageSessionHandled(sid, 'not-page-read');
-    ttsDiagPush('usage-consume-skipped', { ...base, skipReason: 'not-page-read' });
-    return { consumed: false, skipped: true, reason: 'not-page-read' };
-  }
-
-  if (!isProtectedCloudTtsUsagePath(routeInfo)) {
-    markTtsUsageSessionHandled(sid, 'nonprotected-path');
-    ttsDiagPush('usage-consume-skipped', { ...base, skipReason: 'nonprotected-path', route: routeInfo || null, authProtected: hasProtectedTtsUsageAuthContext() });
-    return { consumed: false, skipped: true, reason: 'nonprotected-path' };
-  }
-
-  if (isTtsUsageReplayWindowCovered(key)) {
-    markTtsUsageSessionHandled(sid, 'replay-window');
-    ttsDiagPush('usage-consume-skipped', { ...base, skipReason: 'replay-window' });
-    return { consumed: false, skipped: true, reason: 'replay-window' };
-  }
-
-  markTtsUsageSessionHandled(sid, 'consume-in-flight');
-
-  if (!(window.rcUsage && typeof window.rcUsage.consume === 'function')) {
-    ttsDiagPush('usage-consume-skipped', { ...base, skipReason: 'rcUsage.consume-unavailable' });
-    return { consumed: false, skipped: true, reason: 'rcUsage.consume-unavailable' };
-  }
-
-  try {
-    const verdict = await window.rcUsage.consume('tts');
-    const allowed = verdict && verdict.allowed !== false;
-    ttsDiagPush(allowed ? 'usage-consumed' : 'usage-consume-denied-after-commit', {
-      ...base,
-      allowed,
-      cost: verdict?.cost,
-      remaining: verdict?.remaining,
-      limit: verdict?.limit,
-      verdictReason: verdict?.reason || (allowed ? 'ok' : 'denied'),
-      meta: verdict?.meta || {},
-    });
-    if (allowed) markTtsUsageReplayWindow(key, sid, 'usage-consumed');
-    return { consumed: allowed, skipped: false, reason: verdict?.reason || (allowed ? 'ok' : 'denied'), verdict };
-  } catch (err) {
-    ttsDiagPush('usage-consume-failed', { ...base, error: String(err?.message || err) });
-    return { consumed: false, skipped: false, reason: 'consume-error', error: err };
-  }
-}
-
 function isPassiveTtsWindowPromotionSignal(signal) {
   const value = String(signal || '');
   return value === 'engagement-threshold-met' || value === 'chunk-a-ended-no-engagement' || value === 'chunk-ended-natural';
@@ -3797,26 +3635,12 @@ async function ttsSpeakQueue(key, parts) {
     }
   }
   try {
-    // Pre-flight usage check (runs once before any protected cloud request).
-    // This is a read-only gate. Durable usage is consumed only after the runtime
-    // playback path successfully commits. Public/sample or browser paths do not
-    // call usage at all.
-    const protectedCloudTtsUsagePath = wantMarksForPage && isProtectedCloudTtsUsagePath(routeInfo);
-    if (protectedCloudTtsUsagePath) {
+    // Pre-flight usage check (runs once before any cloud request).
+    // Pass 3: server verdict gates the action; client counter is display-only.
+    if (wantMarksForPage) {
       if (window.rcUsage && typeof window.rcUsage.check === 'function') {
         try {
           const verdict = await window.rcUsage.check('tts');
-          ttsDiagPush('usage-check', {
-            action: 'tts',
-            key,
-            sessionId,
-            allowed: !!verdict.allowed,
-            cost: verdict.cost,
-            remaining: verdict.remaining,
-            limit: verdict.limit,
-            reason: verdict.reason || (verdict.allowed ? 'ok' : 'denied'),
-            spendNow: false,
-          });
           if (!verdict.allowed) {
             try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
             ttsSetButtonActive(key, false);
@@ -3824,16 +3648,9 @@ async function ttsSpeakQueue(key, parts) {
             clearTtsCloudWindow();
             return;
           }
-        } catch (err) {
-          // Server unreachable: proceed (safe degraded behavior), but do not
-          // invent a local denial or spend.
-          ttsDiagPush('usage-check', { action: 'tts', key, sessionId, allowed: true, reason: 'usage-check-error-proceed', error: String(err?.message || err), spendNow: false });
-        }
-      } else {
-        ttsDiagPush('usage-check-skipped', { action: 'tts', key, sessionId, reason: 'rcUsage.check-unavailable', spendNow: false });
+        } catch (_) {} // server unreachable: proceed (safe degraded behavior)
       }
-    } else if (wantMarksForPage) {
-      ttsDiagPush('usage-check-skipped', { action: 'tts', key, sessionId, reason: 'nonprotected-path', route: routeInfo, spendNow: false });
+      try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
     }
 
     for (let i = 0; i < queue.length; i++) {
@@ -3898,15 +3715,6 @@ async function ttsSpeakQueue(key, parts) {
         };
         audio.onerror = () => reject(new Error('Audio playback failed'));
         audio.play().then(() => {
-          if (isFirstItem) {
-            void maybeCommitTtsUsageOnPlaybackCommit({
-              key,
-              sessionId,
-              routeInfo,
-              wantMarksForPage,
-              reason: (isFirstItem && useWindowMode) ? 'block-window-play-start' : 'full-page-play-start',
-            });
-          }
           clearTtsStartupBanner();
           applyPending('play-start');
         }).catch(reject);

@@ -2864,17 +2864,7 @@
       deletedCountEl.textContent = `${deleted.length} file${deleted.length === 1 ? '' : 's'} waiting in Deleted Files`;
     }
 
-    function updateManageLibraryCopy() {
-      try {
-        const title = document.getElementById('manageLibraryTitle');
-        if (title) title.textContent = '🗂️ Library > Manage';
-        const hint = modal.querySelector('.import-hint');
-        if (hint) hint.textContent = 'Manage where books live. Device books stay in this browser. Cloud Library promotion controls stay hidden until account-backed storage is runtime-backed.';
-      } catch (_) {}
-    }
-
     function show() {
-      updateManageLibraryCopy();
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
       render();
@@ -2895,73 +2885,6 @@
       deletedModal.setAttribute('aria-hidden', 'true');
     }
 
-    function getSignedInForCloudLibrary() {
-      try { return !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()); } catch (_) { return false; }
-    }
-
-    function getCloudLibrarySummarySafe() {
-      try {
-        if (window.rcSync && typeof window.rcSync.getCloudLibrarySummary === 'function') {
-          const summary = window.rcSync.getCloudLibrarySummary() || {};
-          return summary && typeof summary === 'object' ? summary : {};
-        }
-      } catch (_) {}
-      return { promotionAvailable: false, reason: 'cloud-library-sync-unavailable' };
-    }
-
-    function getRemoteLibraryItemForLocalBook(book) {
-      const storageRef = `local:${String(book?.id || '').trim()}`;
-      if (!storageRef || storageRef === 'local:') return null;
-      try {
-        if (window.rcSync && typeof window.rcSync.getRemoteLibraryItem === 'function') {
-          return window.rcSync.getRemoteLibraryItem(storageRef) || null;
-        }
-      } catch (_) {}
-      return null;
-    }
-
-    function isCloudLibraryBackedItem(item) {
-      if (!item || typeof item !== 'object') return false;
-      const kind = String(item?.storage_kind || item?.storageKind || '').trim().toLowerCase();
-      const explicitCloudKind = ['cloud_library', 'account_cloud', 'server_stored', 'supabase_storage'].includes(kind);
-      if (!explicitCloudKind) return false;
-      const ref = String(item?.storage_ref || item?.storageRef || item?.book_id || item?.bookId || '').trim();
-      if (!ref || /^local:/i.test(ref)) return false;
-      return true;
-    }
-
-    function getCloudLibraryPlanLabel(summary) {
-      const plan = String(summary?.plan || '').trim().toLowerCase() === 'pro' ? 'Pro' : 'Basic';
-      return plan;
-    }
-
-    function getCloudLibraryCapacityLabel(summary) {
-      try {
-        const limits = summary && summary.limits ? summary.limits : null;
-        const limit = Number(limits?.cloudBooks);
-        const count = Number(summary?.cloudBookCount);
-        if (Number.isFinite(limit) && limit >= 0 && Number.isFinite(count) && count >= 0) return `${count}/${limit} Cloud Library`;
-      } catch (_) {}
-      return 'Cloud Library';
-    }
-
-    function getCloudLibraryStatusMessage(summary) {
-      if (!getSignedInForCloudLibrary()) {
-        return 'Cloud Library is account-based. Sign in to manage books that follow you across devices.';
-      }
-      if (summary && summary.promotionAvailable) {
-        return `${getCloudLibraryCapacityLabel(summary)} · Save selected device books to your account for cross-device continuity.`;
-      }
-      return 'Cloud Library promotion is not active in this runtime. Device books remain local and readable here; signed-in progress sync can continue where supported.';
-    }
-
-    function appendCloudActionUnavailable(actions, reason) {
-      const note = document.createElement('div');
-      note.className = 'library-row-meta';
-      note.textContent = reason || 'Cloud Library promotion is not active in this runtime.';
-      actions.appendChild(note);
-    }
-
     async function render() {
       listEl.innerHTML = '';
       let books = [];
@@ -2971,24 +2894,17 @@
       const limit = (window.rcPolicy && typeof window.rcPolicy.getImportSlotLimit === 'function')
         ? window.rcPolicy.getImportSlotLimit()
         : null;
-      const cloudSummary = getCloudLibrarySummarySafe();
       const meta = document.createElement('div');
       meta.className = 'import-status';
       meta.textContent = limit == null
-        ? `Device Library: ${count} book${count === 1 ? '' : 's'} saved on this device`
-        : `Device Library: ${count}/${limit} saved on this device`;
+        ? `Saved on this device: ${count}`
+        : `Saved on this device: ${count}/${limit}`;
       listEl.appendChild(meta);
-
-      const cloudMeta = document.createElement('div');
-      cloudMeta.className = 'import-status';
-      const cloudPrefix = getSignedInForCloudLibrary() ? `${getCloudLibraryPlanLabel(cloudSummary)} continuity` : 'Cloud Library';
-      cloudMeta.textContent = `${cloudPrefix} · ${getCloudLibraryStatusMessage(cloudSummary)}`;
-      listEl.appendChild(cloudMeta);
 
       if (!books.length) {
         const empty = document.createElement('div');
         empty.className = 'import-status';
-        empty.textContent = 'No device books yet. Use Import Book to add one.';
+        empty.textContent = 'No local books yet. Use Import Book to add one.';
         listEl.appendChild(empty);
         return;
       }
@@ -3008,88 +2924,31 @@
           m.className = 'library-row-meta';
           const kb = Math.round((b.byteSize || 0) / 1024);
           const pages = (String(b.markdown || '').match(/^\s*##\s+/gm) || []).length;
-          const remoteItem = getRemoteLibraryItemForLocalBook(b);
-          const cloudBacked = isCloudLibraryBackedItem(remoteItem);
-          const continuityLabel = cloudBacked
-            ? 'Cloud Library · account-backed continuity'
-            : 'This Device · stored in this browser';
-          m.textContent = `${continuityLabel} • ${pages} pages • ~${kb} KB • ${new Date(b.createdAt || Date.now()).toLocaleDateString()}`;
+          m.textContent = `${pages} pages • ~${kb} KB • ${new Date(b.createdAt || Date.now()).toLocaleDateString()}`;
           left.appendChild(t);
           left.appendChild(m);
 
           const actions = document.createElement('div');
           actions.className = 'library-row-actions';
-
-          if (cloudBacked) {
-            const removeCloud = document.createElement('button');
-            removeCloud.className = 'btn-secondary';
-            removeCloud.type = 'button';
-            removeCloud.textContent = 'Remove from Cloud';
-            removeCloud.disabled = !(window.rcSync && typeof window.rcSync.removeBookFromCloud === 'function');
-            removeCloud.title = removeCloud.disabled ? 'Cloud demotion is not available in this runtime yet.' : 'Remove the account-backed copy and keep this device copy.';
-            removeCloud.addEventListener('click', async () => {
-              if (!(window.rcSync && typeof window.rcSync.removeBookFromCloud === 'function')) return;
-              const ok = confirm(`Remove “${b.title || 'this book'}” from Cloud Library?\n\nIt will stop appearing on other devices, but this device copy will remain.`);
-              if (!ok) return;
-              setButtonBusy(removeCloud, true, 'Removing…');
-              try {
-                await window.rcSync.removeBookFromCloud(`local:${String(b.id || '').trim()}`);
-                render();
-              } catch (_) {
-                setButtonBusy(removeCloud, false);
-                alert('Remove from Cloud failed.');
-              }
-            });
-            actions.appendChild(removeCloud);
-
-            const lockedDelete = document.createElement('button');
-            lockedDelete.className = 'btn-danger';
-            lockedDelete.type = 'button';
-            lockedDelete.textContent = 'Delete';
-            lockedDelete.disabled = true;
-            lockedDelete.title = 'Remove from Cloud before deleting this device copy.';
-            actions.appendChild(lockedDelete);
-          } else {
-            if (cloudSummary && cloudSummary.promotionAvailable && window.rcSync && typeof window.rcSync.promoteLocalBookToCloud === 'function') {
-              const saveCloud = document.createElement('button');
-              saveCloud.className = 'btn-secondary';
-              saveCloud.type = 'button';
-              saveCloud.textContent = 'Save to Cloud';
-              saveCloud.addEventListener('click', async () => {
-                const ok = confirm(`Save “${b.title || 'this book'}” to Cloud Library?\n\nIt will count against your Cloud Library limit and become available when you sign in on other devices.`);
-                if (!ok) return;
-                setButtonBusy(saveCloud, true, 'Saving…');
-                try {
-                  await window.rcSync.promoteLocalBookToCloud(b);
-                  render();
-                } catch (_) {
-                  setButtonBusy(saveCloud, false);
-                  alert('Save to Cloud failed. This book remains available on this device.');
-                }
-              });
-              actions.appendChild(saveCloud);
+          const del = document.createElement('button');
+          del.className = 'btn-danger';
+          del.type = 'button';
+          del.textContent = 'Delete';
+          del.addEventListener('click', async () => {
+            const ok = confirm(`Move “${b.title || 'this book'}” to Deleted Files?\n\nIt will leave your Library now, stay on this device, and can be restored later from Profile.`);
+            if (!ok) return;
+            try {
+              await moveLocalBookToDeleted(b.id);
+              await refreshBookSelect();
+              emitLibraryChanged();
+              emitDeletedChanged();
+              await renderDeletedCount();
+              render();
+            } catch (_) {
+              alert('Delete failed.');
             }
-
-            const del = document.createElement('button');
-            del.className = 'btn-danger';
-            del.type = 'button';
-            del.textContent = 'Delete';
-            del.addEventListener('click', async () => {
-              const ok = confirm(`Move “${b.title || 'this book'}” to Deleted Files?\n\nIt will leave your Library now, stay on this device, and can be restored later from Profile.`);
-              if (!ok) return;
-              try {
-                await moveLocalBookToDeleted(b.id);
-                await refreshBookSelect();
-                emitLibraryChanged();
-                emitDeletedChanged();
-                await renderDeletedCount();
-                render();
-              } catch (_) {
-                alert('Delete failed.');
-              }
-            });
-            actions.appendChild(del);
-          }
+          });
+          actions.appendChild(del);
 
           row.appendChild(left);
           row.appendChild(actions);
@@ -3217,11 +3076,6 @@ This removes them from Deleted Files and frees the device storage.`);
     deletedCloseBtn?.addEventListener('click', hideDeleted);
     deletedModal?.addEventListener('click', (e) => { if (e.target === deletedModal) hideDeleted(); });
     window.addEventListener('rc:deleted-library-changed', () => { renderDeletedCount().catch(() => {}); });
-    document.addEventListener('rc:durable-data-hydrated', () => {
-      try {
-        if (modal && modal.style.display !== 'none') render();
-      } catch (_) {}
-    });
     renderDeletedCount().catch(() => {});
   })();
 

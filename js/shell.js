@@ -69,7 +69,7 @@
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
-    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'sara', theme: 'default', speed: 1 });
+    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'mara', theme: 'default', speed: 1 });
     let _publicOnboardingChoices = Object.assign({}, PUBLIC_ONBOARDING_DEFAULTS);
     let _publicOnboardingTimer = null;
     let _shellAuthBootstrapped = false;
@@ -862,26 +862,6 @@ window.rcInteraction = (function () {
         };
     }
 
-    function getActiveProfileTabId() {
-        const active = document.querySelector('.profile-tab-btn.active');
-        return active ? String(active.dataset.tab || '') : '';
-    }
-
-    function syncShellSidebarActiveState(sectionId = getCurrentVisibleSection()) {
-        const id = normalizeSection(sectionId);
-        const activeTab = id === 'profile-page' ? getActiveProfileTabId() : '';
-        const map = {
-            'sb-resume': false,
-            'sb-library': id === 'dashboard',
-            'sb-history': id === 'profile-page' && activeTab === 'tab-analytics',
-            'sb-settings': id === 'profile-page' && activeTab === 'tab-settings'
-        };
-        Object.entries(map).forEach(([buttonId, active]) => {
-            const el = document.getElementById(buttonId);
-            if (el) el.classList.toggle('active', !!active);
-        });
-    }
-
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
         const id = normalizeSection(sectionId);
         const authed = isAuthedUser();
@@ -921,7 +901,8 @@ window.rcInteraction = (function () {
         if (profileEl) profileEl.classList.toggle('with-sidebar', authed);
         const supportFooter = document.getElementById('supportFooter');
         if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'block' : 'none';
-        syncShellSidebarActiveState(id);
+        const sbLibrary = document.getElementById('sb-library');
+        if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
 
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
@@ -1611,7 +1592,7 @@ window.rcInteraction = (function () {
 
     function _existingAccountSteerMessage(pendingPlan) {
         return pendingPlan && pendingPlan !== 'free'
-            ? `An account with this email already exists. Log In to continue with Pro checkout.`
+            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
             : 'An account with this email already exists. Log In to continue.';
     }
 
@@ -1658,7 +1639,7 @@ window.rcInteraction = (function () {
             const pendingPlan = _readAuthPendingPlan();
             if (pendingPlan === 'pro' || pendingPlan === 'premium') {
                 url.searchParams.set('next', 'checkout');
-                url.searchParams.set('tier', 'pro');
+                url.searchParams.set('tier', pendingPlan);
             } else {
                 url.searchParams.delete('next');
                 url.searchParams.delete('tier');
@@ -1861,10 +1842,10 @@ window.rcInteraction = (function () {
                     _steerExistingAccountToSignin(email, pendingPlan);
                 } else if (result?.data?.session) {
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free'
-                        ? `Account created. Redirecting to Pro checkout…`
+                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
                         : 'Account created. Continuing to your library…');
                 } else {
-                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with Pro checkout.` : 'Check your email to verify your account.');
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Check your email to verify your account.');
                 }
             } else {
                 const { error } = await window.rcAuth.signIn(email, password);
@@ -1878,7 +1859,7 @@ window.rcInteraction = (function () {
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     if (pendingPlan === 'pro' || pendingPlan === 'premium') {
-                        _authShowSuccess(`Signed in. Redirecting to Pro checkout…`);
+                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`);
                     }
                 }
             }
@@ -2028,44 +2009,6 @@ window.rcInteraction = (function () {
         releaseBootPending();
         try { await sectionPromise; } catch (_) {}
     });
-    // ── Shell surface navigation helpers ─────────────────────────
-    async function openShellResume() {
-        // Presentation-owned Resume entrypoint. Uses existing Library/Preview owners
-        // only; if no runtime-backed book exists, it safely returns to Library.
-        if (!isAuthedUser()) return showSection('landing-page');
-        if (typeof localBooksGetAll !== 'function') return showSection('dashboard');
-        let books = [];
-        try { books = await localBooksGetAll(); } catch (_) { books = []; }
-        if (!Array.isArray(books) || !books.length) return showSection('dashboard');
-        books.sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0));
-        const book = books[0];
-        const id = 'local:' + String(book && book.id || '');
-        const title = String(book && book.title || 'Book');
-        if (id === 'local:') return showSection('dashboard');
-        try { openPreview(id, title); } catch (_) { showSection('dashboard'); }
-    }
-
-    function showProfileTab(tabId) {
-        const safeTab = ['tab-profile', 'tab-analytics', 'tab-subscription', 'tab-settings'].includes(String(tabId || '')) ? String(tabId) : 'tab-profile';
-        showSection('profile-page', { releaseReason: 'profile-tab:' + safeTab, historyMode: 'push' });
-        switchTab(safeTab);
-    }
-
-    async function openShellSupport(kind) {
-        const mode = String(kind || 'chat');
-        try {
-            if (mode === 'feedback' && window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
-                const ok = await window.rcHelp.openFeedback();
-                if (ok) return;
-            }
-            if (window.rcHelp && typeof window.rcHelp.openChat === 'function') {
-                const ok = await window.rcHelp.openChat();
-                if (ok) return;
-            }
-        } catch (_) {}
-        showProfileTab('tab-profile');
-    }
-
     // ── Profile tabs ─────────────────────────────────────────────
     function switchTab(tabId) {
         document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden-section'));
@@ -2073,8 +2016,7 @@ window.rcInteraction = (function () {
         document.querySelectorAll('.profile-tab-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tab === tabId);
         });
-        try { syncShellSidebarActiveState('profile-page'); } catch (_) {}
-        if (tabId === 'tab-profile' || tabId === 'tab-analytics') { try { renderProfileSurface(); } catch (_) {} }
+        if (tabId === 'tab-profile') { try { renderProfileSurface(); } catch (_) {} }
         if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
     }
 
@@ -2087,7 +2029,7 @@ window.rcInteraction = (function () {
         const current = (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function')
             ? window.rcEntitlements.getTier()
             : ((window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic');
-        const map = { basic: 'Basic', pro: 'Pro', premium: 'Pro' };
+        const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' };
         document.querySelectorAll('.tier-btn').forEach((btn) => {
             const next = map[current] || 'Basic';
             btn.classList.toggle('active', btn.textContent.trim() === next);
@@ -2102,7 +2044,7 @@ window.rcInteraction = (function () {
         if (!canSimulateTierSelection()) return;
         document.querySelectorAll('.tier-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        const map = { 'Basic': 'basic', 'Pro': 'pro' };
+        const map = { 'Basic': 'basic', 'Pro': 'pro', 'Premium': 'premium' };
         const value = map[btn.textContent.trim()] || 'basic';
         // Call the runtime policy API directly — do not dispatch through #tierSelect DOM element.
         if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
@@ -2115,7 +2057,7 @@ window.rcInteraction = (function () {
     function updateTierPill() {
         const tier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
         const pill = document.getElementById('reading-tier-pill');
-        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Pro' }; pill.textContent = map[tier] || 'Basic'; }
+        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' }; pill.textContent = map[tier] || 'Basic'; }
     }
 
     function getCurrentTier() {
@@ -2208,7 +2150,7 @@ window.rcInteraction = (function () {
         const canUse = !!(window.rcTheme && typeof window.rcTheme.canUseTheme === 'function' && window.rcTheme.canUseTheme('explorer'));
         if (!canUse) {
             btn.classList.add('explorer-locked');
-            btn.title = 'Upgrade to Pro to unlock Explorer theme';
+            btn.title = 'Upgrade to Pro+ to unlock Explorer theme';
             if (swatch) swatch.style.opacity = '0.6';
         } else {
             btn.classList.remove('explorer-locked');
@@ -2855,11 +2797,11 @@ window.rcInteraction = (function () {
             const date = new Date(b.createdAt||Date.now()).toLocaleDateString();
             const id = ('local:' + String(b.id)).replace(/'/g,"\\'");
             const title = escHtml(b.title||'Untitled');
-            return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="library-document-row px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
-                <div class="library-document-main flex-grow flex items-center gap-3"><div class="library-document-icon w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div class="library-document-copy"><p class="library-document-title font-semibold text-slate-800 text-sm">${title}</p><p class="library-document-meta text-xs text-slate-400">Added ${date}</p></div></div>
-                <div class="library-document-status w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div>
-                <div class="library-document-time w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div>
-                <div class="library-document-more w-8 text-slate-300">→</div></div>`;
+            return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
+                <div class="flex-grow flex items-center gap-3"><div class="w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">Added ${date}</p></div></div>
+                <div class="w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div>
+                <div class="w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div>
+                <div class="w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
         setLibrarySurfaceState('populated', reason);
@@ -2933,32 +2875,18 @@ window.rcInteraction = (function () {
     }
 
     async function renderSubscriptionSurface(existingBooks) {
-        const deviceValue = document.getElementById('subscription-books-value');
-        const cloudValue = document.getElementById('subscription-storage-value');
-        const planValue = document.getElementById('subscription-billing-state');
+        const booksValue = document.getElementById('subscription-books-value');
+        const storageValue = document.getElementById('subscription-storage-value');
         let books = Array.isArray(existingBooks) ? existingBooks : [];
         if (!books.length && typeof localBooksGetAll === 'function') {
             try { books = await localBooksGetAll(); } catch (_) { books = []; }
         }
-        if (deviceValue) deviceValue.textContent = String(Array.isArray(books) ? books.length : 0);
-        if (cloudValue) {
-            let summary = null;
-            try {
-                summary = window.rcSync && typeof window.rcSync.getCloudLibrarySummary === 'function'
-                    ? window.rcSync.getCloudLibrarySummary()
-                    : null;
-            } catch (_) { summary = null; }
-            if (summary && summary.runtimeBacked) {
-                const limit = Number(summary?.limits?.cloudBooks);
-                const count = Math.max(0, Number(summary.cloudBookCount || 0));
-                cloudValue.textContent = Number.isFinite(limit) ? `${count} / ${limit}` : String(count);
-            } else {
-                cloudValue.textContent = 'Pending';
-            }
-        }
-        if (planValue) {
-            const tier = String(getCurrentTier() || 'basic').toLowerCase();
-            planValue.textContent = /^(pro|premium|paid)$/.test(tier) ? 'Pro' : 'Basic';
+        if (booksValue) booksValue.textContent = String(Array.isArray(books) ? books.length : 0);
+        if (storageValue) {
+            const totalBytes = Array.isArray(books) ? books.reduce((sum, book) => sum + Math.max(0, Number(book?.byteSize || 0)), 0) : 0;
+            if (totalBytes >= 1024 * 1024) storageValue.textContent = `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`;
+            else if (totalBytes >= 1024) storageValue.textContent = `${Math.max(1, Math.round(totalBytes / 1024))} KB`;
+            else storageValue.textContent = totalBytes > 0 ? `${totalBytes} B` : '0 B';
         }
     }
 

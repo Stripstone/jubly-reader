@@ -1,24 +1,9 @@
 import crypto from 'crypto';
 import { requiredEnv } from './env.js';
 
-function normalizeLaunchPlan(plan) {
-  const normalized = String(plan || '').trim().toLowerCase();
-  if (normalized === 'paid' || normalized === 'premium') return 'pro';
-  return normalized;
-}
-
 function getConfiguredPlanRef(plan) {
-  const normalized = normalizeLaunchPlan(plan);
-  if (normalized === 'pro') {
-    return String(
-      process.env.STRIPE_PRICE_PRO_MONTHLY
-      || process.env.STRIPE_PRICE_PAID
-      || process.env.STRIPE_PRICE_PRO
-      || process.env.STRIPE_PRICE_PREMIUM_MONTHLY
-      || process.env.STRIPE_PRICE_PREMIUM
-      || ''
-    ).trim();
-  }
+  if (plan === 'pro' || plan === 'paid') return String(process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PAID || process.env.STRIPE_PRICE_PRO || '').trim();
+  if (plan === 'premium') return String(process.env.STRIPE_PRICE_PREMIUM_MONTHLY || process.env.STRIPE_PRICE_PREMIUM || '').trim();
   return '';
 }
 
@@ -54,9 +39,9 @@ async function resolvePriceFromProduct(productId) {
 }
 
 async function resolveConfiguredPlan(plan) {
-  const normalized = normalizeLaunchPlan(plan);
+  const normalized = String(plan || '').trim().toLowerCase();
   const configuredRef = getConfiguredPlanRef(normalized);
-  if (!configuredRef) throw new Error('Missing Stripe price configuration for Pro plan');
+  if (!configuredRef) throw new Error(`Missing Stripe price configuration for ${normalized === 'premium' ? 'Premium' : 'Pro'} plan`);
 
   const cached = _resolvedPlanRefCache.get(`${normalized}:${configuredRef}`);
   const now = Date.now();
@@ -66,8 +51,8 @@ async function resolveConfiguredPlan(plan) {
   if (isPriceId(configuredRef)) {
     const price = await fetchStripePrice(configuredRef);
     value = {
-      planId: 'pro',
-      tier: 'pro',
+      planId: normalized === 'paid' ? 'pro' : normalized,
+      tier: normalized === 'premium' ? 'premium' : 'pro',
       priceId: price?.id || configuredRef,
       configuredRef,
       price,
@@ -76,8 +61,8 @@ async function resolveConfiguredPlan(plan) {
     const resolved = await resolvePriceFromProduct(configuredRef);
     if (!resolved?.priceId) throw new Error(`No active recurring price found for product ${configuredRef}`);
     value = {
-      planId: 'pro',
-      tier: 'pro',
+      planId: normalized === 'paid' ? 'pro' : normalized,
+      tier: normalized === 'premium' ? 'premium' : 'pro',
       priceId: resolved.priceId,
       configuredRef,
       price: resolved.price,
@@ -92,16 +77,21 @@ async function resolveConfiguredPlan(plan) {
 }
 
 export async function getPlanConfig(planRaw) {
-  const plan = normalizeLaunchPlan(planRaw);
-  if (plan === 'pro') return resolveConfiguredPlan('pro');
+  const plan = String(planRaw || '').trim().toLowerCase();
+  if (plan === 'pro' || plan === 'paid') return resolveConfiguredPlan('pro');
+  if (plan === 'premium') return resolveConfiguredPlan('premium');
   throw new Error(`Unsupported plan: ${planRaw}`);
 }
 
 export async function derivePlanFromPriceId(priceIdRaw) {
   const priceId = String(priceIdRaw || '').trim();
   if (!priceId) return null;
-  const pro = await resolveConfiguredPlan('pro').catch(() => null);
+  const [pro, premium] = await Promise.all([
+    resolveConfiguredPlan('pro').catch(() => null),
+    resolveConfiguredPlan('premium').catch(() => null),
+  ]);
   if (priceId === pro?.priceId) return { planId: 'pro', tier: 'pro', priceId };
+  if (priceId === premium?.priceId) return { planId: 'premium', tier: 'premium', priceId };
   return null;
 }
 
@@ -152,11 +142,11 @@ export async function getPublicPlanCatalog(force = false) {
     }
   };
 
-  const pro = await fetchPlan('pro', 'Configured in Stripe');
-  _publicPlanCatalogCache = {
-    pro,
-    premium: { available: false, amountLabel: '', intervalLabel: '', launchHidden: true },
-  };
+  const [pro, premium] = await Promise.all([
+    fetchPlan('pro', 'Configured in Stripe'),
+    fetchPlan('premium', 'Configured in Stripe'),
+  ]);
+  _publicPlanCatalogCache = { pro, premium };
   _publicPlanCatalogAt = now;
   return _publicPlanCatalogCache;
 }

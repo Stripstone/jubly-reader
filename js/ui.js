@@ -176,8 +176,8 @@
 
       // Voice selects — two dropdowns, one per gender.
       // Selecting from either dropdown sets both the active variant and specific voice.
-      // Basic: browser/device voices only.
-      // Pro: curated Jubly cloud voices first, with other supported cloud/browser voices preserved below.
+      // Free tier: browser voices only.
+      // Paid/Premium: server-backed cloud voices at the top, browser voices below.
       const voiceFemaleSelect = document.getElementById('voiceFemaleSelect');
       const voiceMaleSelect   = document.getElementById('voiceMaleSelect');
 
@@ -187,8 +187,8 @@
         'Superstar','Whisper','Zarvox','Trinoids'
       ];
 
-      const FEMALE_NAMES = ['Sara','Jenny','Aria','Samantha','Karen','Moira','Serena','Tessa','Zira','Eva','Susan','Victoria','Fiona','Allison','Ava','Nora'];
-      const MALE_NAMES   = ['William','Davis','Guy','Ryan','Daniel','Rishi','Alex','Fred','David','Mark','Tom','Bruce','James'];
+      const FEMALE_NAMES = ['Aria','Jenny','Samantha','Karen','Moira','Serena','Tessa','Zira','Eva','Susan','Victoria','Fiona','Allison','Ava','Nora'];
+      const MALE_NAMES   = ['Daniel','Rishi','Alex','Guy','Ryan','Fred','David','Mark','Tom','Bruce','James'];
 
       function buildVoiceSelect(selectEl, gender) {
         if (!selectEl) return;
@@ -227,27 +227,27 @@
         placeholder.selected = !isThisVoiceActive || (!savedBrowser && savedVariant !== gender && isFree);
         selectEl.appendChild(placeholder);
 
-        // Pro cloud voices — curated Jubly launch voices first, then remaining supported catalogue
+        // Cloud voices for Paid/Premium — Azure Neural voice catalogue
         // Voices match what Edge browser exposes natively, so Edge users
         // may get these for free via browserSpeakQueue (see tts.js Edge optimisation).
         if (!isFree) {
           const cloudGrp = document.createElement('optgroup');
-          cloudGrp.label = '☁️ Premium Jubly voices';
+          cloudGrp.label = '☁️ Cloud (Neural)';
 
           const AZURE_VOICES = gender === 'female'
             ? [
-                { id: 'en-US-SaraNeural',     label: 'Sara (US)' },
-                { id: 'en-US-JennyNeural',    label: 'Jenny (US)' },
                 { id: 'en-US-AriaNeural',     label: 'Aria (US)' },
+                { id: 'en-US-JennyNeural',    label: 'Jenny (US)' },
+                { id: 'en-US-SaraNeural',     label: 'Sara (US)' },
                 { id: 'en-GB-SoniaNeural',    label: 'Sonia (UK)' },
                 { id: 'en-AU-NatashaNeural',  label: 'Natasha (AU)' },
               ]
             : [
-                { id: 'en-AU-WilliamNeural',  label: 'William (AU)' },
-                { id: 'en-US-DavisNeural',    label: 'Davis (US)' },
-                { id: 'en-US-GuyNeural',      label: 'Guy (US)' },
                 { id: 'en-US-RyanNeural',     label: 'Ryan (US)' },
+                { id: 'en-US-GuyNeural',      label: 'Guy (US)' },
+                { id: 'en-US-DavisNeural',    label: 'Davis (US)' },
                 { id: 'en-GB-RyanNeural',     label: 'Ryan (UK)' },
+                { id: 'en-AU-WilliamNeural',  label: 'William (AU)' },
               ];
 
           AZURE_VOICES.forEach(v => {
@@ -264,7 +264,7 @@
         // Browser voices — no group label on free tier
         if (quality.length) {
           if (isFree) {
-            // Basic: no optgroup label, voices appear directly
+            // Free: no optgroup label, voices appear directly
             quality.forEach(v => {
               const opt = document.createElement('option');
               opt.value = v.name;
@@ -274,7 +274,7 @@
             });
           } else {
             const grp = document.createElement('optgroup');
-            grp.label = '🖥️ Device / browser voices';
+            grp.label = '🖥️ Browser';
             quality.forEach(v => {
               const opt = document.createElement('option');
               opt.value = v.name;
