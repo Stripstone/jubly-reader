@@ -69,7 +69,7 @@
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
-    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'sara', theme: 'default', speed: 1 });
+    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'mara', theme: 'default', speed: 1 });
     let _publicOnboardingChoices = Object.assign({}, PUBLIC_ONBOARDING_DEFAULTS);
     let _publicOnboardingTimer = null;
     let _shellAuthBootstrapped = false;
@@ -885,7 +885,7 @@ window.rcInteraction = (function () {
         if (navLoginBtn) navLoginBtn.style.display = (!authed && id !== 'login-page') ? '' : 'none';
         if (navSignupBtn) navSignupBtn.style.display = !authed ? '' : 'none';
         if (navProfileTrigger) navProfileTrigger.style.display = authed ? '' : 'none';
-        if (navUsagePill) navUsagePill.classList.toggle('hidden-section', true);
+        if (navUsagePill) navUsagePill.classList.toggle('hidden-section', !authed || isReading);
 
         const remoteDisplayName = (window.rcSync && typeof window.rcSync.getRemoteUsersRow === 'function') ? (window.rcSync.getRemoteUsersRow()?.display_name || '') : '';
         const displayName = remoteDisplayName || deriveDisplayName(user);
@@ -914,10 +914,9 @@ window.rcInteraction = (function () {
             libraryToolbar.classList.toggle('hidden-section', !(authed || isIntroLibraryVisible()));
         }
         if (librarySample && id !== 'dashboard') librarySample.classList.add('hidden-section');
-        if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account when you are ready to import books, save your place, and build your own library.';
-        if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Basic is available for launch; Pro adds more room and enhanced reading support.';
+        if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your own library.';
+        if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Start free, keep your place, and come back anytime.';
         renderLibrarySubtitle(authed);
-        try { renderUsageSurface(); } catch (_) {}
 
         const profileGuestCard = document.getElementById('profile-guest-card');
         const profileGuestContent = document.getElementById('profile-guest-content');
@@ -935,9 +934,9 @@ window.rcInteraction = (function () {
         const profileEmailSettings = document.getElementById('profile-email-settings');
         const profileAvatarSettings = document.getElementById('profile-avatar-settings');
         if (profileNameMain) profileNameMain.textContent = authed ? displayName : 'Your account';
-        if (profileEmailMain) profileEmailMain.textContent = authed ? 'Signed-in account · settings and launch access' : 'Account settings · sign in to save across sessions';
+        if (profileEmailMain) profileEmailMain.textContent = authed ? 'Signed-in account' : 'Account settings';
         if (profileNameSettings) profileNameSettings.textContent = authed ? displayName : 'Your account';
-        if (profileEmailSettings) profileEmailSettings.textContent = authed ? 'Signed-in account · settings and launch access' : 'Account settings · sign in to save across sessions';
+        if (profileEmailSettings) profileEmailSettings.textContent = authed ? 'Signed-in account' : 'Account settings';
         const avatarSrc = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
         if (profileAvatarMain) profileAvatarMain.src = avatarSrc;
         if (profileAvatarSettings) profileAvatarSettings.src = avatarSrc;
@@ -2893,16 +2892,9 @@ window.rcInteraction = (function () {
 
 
     function renderUsageSurface() {
-        const pillEl = document.getElementById('nav-usage-pill');
         const valueEl = document.getElementById('nav-usage-pill-value');
         const labelEl = document.getElementById('nav-usage-pill-label');
         if (!valueEl) return;
-        const isReading = document.body.classList.contains('reading-active');
-        const authed = !!isAuthedUser();
-        if (!authed || isReading) {
-            if (pillEl) pillEl.classList.add('hidden-section');
-            return;
-        }
         const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function')
             ? window.rcUsage.getSnapshot()
             : { remaining: null, allowance: null, authoritative: false };
@@ -2910,13 +2902,11 @@ window.rcInteraction = (function () {
         if (Number.isFinite(remaining)) {
             valueEl.textContent = String(Math.max(0, remaining));
             if (labelEl) labelEl.textContent = ' left today';
-            if (pillEl) pillEl.classList.remove('hidden-section');
         } else {
             // authoritative: false means usage truth is still settling — do not
             // show a believable number. Show neutral pending copy instead.
-            valueEl.textContent = 'Checking…';
+            valueEl.textContent = snapshot?.authoritative === false ? 'Checking…' : 'Usage';
             if (labelEl) labelEl.textContent = '';
-            if (pillEl) pillEl.classList.remove('hidden-section');
         }
     }
 

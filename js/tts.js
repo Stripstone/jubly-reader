@@ -91,18 +91,6 @@ const TTS_DEBUG = {
   lastSkip: null,
 };
 
-const TTS_USAGE_SEAM_DEBUG = {
-  seq: 0,
-  recent: [],
-  lastRouteDecision: null,
-  lastUsageCheck: null,
-  lastDisplaySpend: null,
-  lastDurableConsume: null,
-  lastPlaybackCommit: null,
-  lastConsumeAbsence: null,
-  lastSkipReason: null,
-};
-
 // ─── Cloud synthesis window state ─────────────────────────────────────────────
 //
 // Tracks the block-window → full-page promotion lifecycle for a single session.
@@ -687,72 +675,6 @@ function ttsDiagPush(event, data = {}) {
   if (TTS_DEBUG.recent.length > 60) TTS_DEBUG.recent.shift();
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
   return entry;
-}
-
-function summarizeTtsUsageRoute(routeInfo = {}) {
-  const selected = routeInfo.selected || {};
-  return {
-    tier: routeInfo.tier || null,
-    cloudCapable: !!routeInfo.cloudCapable,
-    requestedPath: routeInfo.requestedPath || null,
-    reason: routeInfo.reason || null,
-    selectedType: selected.type || null,
-    selectedStored: selected.stored || null,
-    explicitCloud: !!selected.explicitCloud,
-  };
-}
-
-function ttsUsageSeamDiagPush(event, data = {}) {
-  const entry = { seq: ++TTS_USAGE_SEAM_DEBUG.seq, at: new Date().toISOString(), event, data };
-  TTS_USAGE_SEAM_DEBUG.recent.push(entry);
-  if (TTS_USAGE_SEAM_DEBUG.recent.length > 80) TTS_USAGE_SEAM_DEBUG.recent.shift();
-  if (event === 'route-decision') TTS_USAGE_SEAM_DEBUG.lastRouteDecision = entry;
-  if (event === 'usage-check') TTS_USAGE_SEAM_DEBUG.lastUsageCheck = entry;
-  if (event === 'display-spend') TTS_USAGE_SEAM_DEBUG.lastDisplaySpend = entry;
-  if (event === 'durable-consume') TTS_USAGE_SEAM_DEBUG.lastDurableConsume = entry;
-  if (event === 'playback-commit') TTS_USAGE_SEAM_DEBUG.lastPlaybackCommit = entry;
-  if (event === 'consume-absence') TTS_USAGE_SEAM_DEBUG.lastConsumeAbsence = entry;
-  if (event === 'skip-reason') TTS_USAGE_SEAM_DEBUG.lastSkipReason = entry;
-  try { ttsDiagPush(`usage-seam-${event}`, data); } catch (_) {}
-  return entry;
-}
-
-function noteTtsConsumeAbsence(reason, context = {}) {
-  return ttsUsageSeamDiagPush('consume-absence', {
-    reason: String(reason || 'unknown'),
-    durableConsumeCalled: false,
-    category: 'tts',
-    ...context,
-  });
-}
-
-function noteTtsUsageSkipReason(reason, context = {}) {
-  return ttsUsageSeamDiagPush('skip-reason', {
-    reason: String(reason || 'unknown'),
-    category: 'tts',
-    ...context,
-  });
-}
-
-function noteTtsPlaybackCommit(context = {}) {
-  return ttsUsageSeamDiagPush('playback-commit', {
-    category: 'tts',
-    committed: true,
-    ...context,
-  });
-}
-
-function getTtsUsageSeamDiagnosticsSnapshot() {
-  return {
-    lastRouteDecision: TTS_USAGE_SEAM_DEBUG.lastRouteDecision,
-    lastUsageCheck: TTS_USAGE_SEAM_DEBUG.lastUsageCheck,
-    lastDisplaySpend: TTS_USAGE_SEAM_DEBUG.lastDisplaySpend,
-    lastDurableConsume: TTS_USAGE_SEAM_DEBUG.lastDurableConsume,
-    lastPlaybackCommit: TTS_USAGE_SEAM_DEBUG.lastPlaybackCommit,
-    lastConsumeAbsence: TTS_USAGE_SEAM_DEBUG.lastConsumeAbsence,
-    lastSkipReason: TTS_USAGE_SEAM_DEBUG.lastSkipReason,
-    recent: TTS_USAGE_SEAM_DEBUG.recent.slice(-50),
-  };
 }
 
 
@@ -1945,8 +1867,6 @@ function browserSpeakQueue(key, parts, opts = {}) {
   TTS_DEBUG.lastResolvedPath = 'browser';
   TTS_DEBUG.lastRouteDecision = getPreferredTtsRouteInfo();
   TTS_DEBUG.lastPlayRequest = { key, parts: (parts || []).length, path: 'browser' };
-  noteTtsUsageSkipReason('browser-basic-playback', { key, path: 'browser', route: summarizeTtsUsageRoute(TTS_DEBUG.lastRouteDecision) });
-  noteTtsConsumeAbsence('browser-basic-playback', { key, path: 'browser', route: summarizeTtsUsageRoute(TTS_DEBUG.lastRouteDecision) });
   ttsDiagPush('browser-speak-request', TTS_DEBUG.lastPlayRequest);
 
   if (!browserTtsSupported()) {
@@ -3553,8 +3473,6 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
           TTS_STATE.cloudRestartInFlight = false;
           return;
         }
-        noteTtsPlaybackCommit({ key, sessionId, source: 'window-promotion-apply', route: summarizeTtsUsageRoute(getPreferredTtsRouteInfo()) });
-        noteTtsConsumeAbsence('visibility-only-no-durable-consume-after-playback-commit', { key, sessionId, source: 'window-promotion-apply', route: summarizeTtsUsageRoute(getPreferredTtsRouteInfo()) });
         TTS_STATE.cloudRestartInFlight = false;
         TTS_CLOUD_WINDOW.promotionApplied = true;
         // Disarm the window coalescing machinery now that full-page audio is live.
@@ -3598,11 +3516,6 @@ async function ttsSpeakQueue(key, parts) {
   const routeInfo = getPreferredTtsRouteInfo();
   TTS_DEBUG.lastRouteDecision = routeInfo;
   TTS_DEBUG.lastPlayRequest = { key, parts: (parts || []).length, path: routeInfo.requestedPath, reason: routeInfo.reason, selectedVoice: routeInfo.selected.stored };
-  ttsUsageSeamDiagPush('route-decision', { key, parts: (parts || []).length, route: summarizeTtsUsageRoute(routeInfo) });
-  if (routeInfo.requestedPath !== 'cloud-selected' && routeInfo.requestedPath !== 'cloud-tier-default') {
-    noteTtsUsageSkipReason(routeInfo.requestedPath === 'browser-selected' ? 'explicit-browser-selection' : 'browser-basic-or-tier-default', { key, route: summarizeTtsUsageRoute(routeInfo) });
-    noteTtsConsumeAbsence('non-cloud-tts-route', { key, route: summarizeTtsUsageRoute(routeInfo) });
-  }
 
   const before = ttsBlockSnapshot();
 
@@ -3727,35 +3640,17 @@ async function ttsSpeakQueue(key, parts) {
     if (wantMarksForPage) {
       if (window.rcUsage && typeof window.rcUsage.check === 'function') {
         try {
-          ttsUsageSeamDiagPush('usage-check', { key, status: 'start', category: 'tts', route: summarizeTtsUsageRoute(routeInfo) });
           const verdict = await window.rcUsage.check('tts');
-          ttsUsageSeamDiagPush('usage-check', { key, status: 'result', category: 'tts', allowed: !!verdict.allowed, reason: verdict.reason || null, remaining: verdict.remaining ?? null, limit: verdict.limit ?? null, route: summarizeTtsUsageRoute(routeInfo) });
           if (!verdict.allowed) {
             try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
-            noteTtsConsumeAbsence('usage-check-denied-before-playback', { key, route: summarizeTtsUsageRoute(routeInfo), verdictReason: verdict.reason || null });
             ttsSetButtonActive(key, false);
             ttsSetHintButton(key, false);
             clearTtsCloudWindow();
             return;
           }
-        } catch (err) {
-          ttsUsageSeamDiagPush('usage-check', { key, status: 'error-proceed', category: 'tts', error: String(err?.message || err), route: summarizeTtsUsageRoute(routeInfo) });
-        } // server unreachable: proceed (safe degraded behavior)
-      } else {
-        ttsUsageSeamDiagPush('usage-check', { key, status: 'skipped', category: 'tts', reason: 'no-usage-check-owner', route: summarizeTtsUsageRoute(routeInfo) });
+        } catch (_) {} // server unreachable: proceed (safe degraded behavior)
       }
-      try {
-        if (window.rcUsage && typeof window.rcUsage.spend === 'function') {
-          window.rcUsage.spend('tts');
-          ttsUsageSeamDiagPush('display-spend', { key, category: 'tts', source: 'rcUsage.spend', durableConsumeCalled: false, route: summarizeTtsUsageRoute(routeInfo) });
-        } else if (typeof tokenSpend === 'function') {
-          tokenSpend('tts');
-          ttsUsageSeamDiagPush('display-spend', { key, category: 'tts', source: 'tokenSpend', durableConsumeCalled: false, route: summarizeTtsUsageRoute(routeInfo) });
-        }
-      } catch (err) {
-        ttsUsageSeamDiagPush('display-spend', { key, category: 'tts', source: 'display-spend-error', error: String(err?.message || err), durableConsumeCalled: false, route: summarizeTtsUsageRoute(routeInfo) });
-      }
-      noteTtsConsumeAbsence('durable-consume-not-called-before-playback-commit', { key, route: summarizeTtsUsageRoute(routeInfo) });
+      try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
     }
 
     for (let i = 0; i < queue.length; i++) {
@@ -3822,8 +3717,6 @@ async function ttsSpeakQueue(key, parts) {
         audio.play().then(() => {
           clearTtsStartupBanner();
           applyPending('play-start');
-          noteTtsPlaybackCommit({ key, sessionId, source: isFirstItem && useWindowMode ? 'cloud-window-phase1' : 'cloud-direct-full-page', route: summarizeTtsUsageRoute(routeInfo) });
-          noteTtsConsumeAbsence('visibility-only-no-durable-consume-after-playback-commit', { key, sessionId, source: isFirstItem && useWindowMode ? 'cloud-window-phase1' : 'cloud-direct-full-page', route: summarizeTtsUsageRoute(routeInfo) });
         }).catch(reject);
       });
 
@@ -4050,8 +3943,6 @@ async function ttsSpeakQueue(key, parts) {
             audio.play().then(() => {
               clearTtsStartupBanner();
               applyPending('play-start');
-              noteTtsPlaybackCommit({ key, sessionId, source: 'window-natural-handoff-full-page', route: summarizeTtsUsageRoute(routeInfo) });
-              noteTtsConsumeAbsence('visibility-only-no-durable-consume-after-playback-commit', { key, sessionId, source: 'window-natural-handoff-full-page', route: summarizeTtsUsageRoute(routeInfo) });
               ttsStartHighlightLoop(audio);
               clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
             }).catch(err => {
@@ -4087,8 +3978,6 @@ async function ttsSpeakQueue(key, parts) {
     const recoverable = isRecoverablePlaybackFailure(err);
     TTS_STATE.playbackBlockedReason = msg;
     TTS_DEBUG.lastError = { at: new Date().toISOString(), path: 'cloud', key, message: msg, recoverable };
-    noteTtsUsageSkipReason(recoverable ? 'retry-before-playback' : 'cloud-playback-failed-before-commit', { key, route: summarizeTtsUsageRoute(ri), recoverable, message: msg });
-    noteTtsConsumeAbsence(recoverable ? 'retry-before-playback' : 'cloud-playback-failed-before-commit', { key, route: summarizeTtsUsageRoute(ri), recoverable, message: msg });
     ttsDiagPush('cloud-playback-failed', { key, message: msg, route: ri, recoverable });
     console.warn('Cloud TTS unavailable; keeping browser fallback disabled for predictable voice behavior:', err);
     try {
@@ -4709,7 +4598,6 @@ function getTtsDiagnosticsSnapshot() {
     audio: { present: !!TTS_AUDIO_ELEMENT, paused: !!TTS_AUDIO_ELEMENT.paused, currentTime: Number(TTS_AUDIO_ELEMENT.currentTime || 0), playbackRate: Number(TTS_AUDIO_ELEMENT.playbackRate || 1), src: TTS_AUDIO_ELEMENT.getAttribute('src') || null, loop: !!TTS_AUDIO_ELEMENT.loop },
     highlight: { pageKey: TTS_STATE.highlightPageKey || null, spanCount: Array.isArray(TTS_STATE.highlightSpans) ? TTS_STATE.highlightSpans.length : 0, marksCount: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0, activeBlockIndex: TTS_STATE.activeBlockIndex, provenance: TTS_STATE.highlightMarksProvenance || 'none' },
     capability: getTtsCapabilityStatus(),
-    usageSeam: getTtsUsageSeamDiagnosticsSnapshot(),
     unlock: { unlocked: !!TTS_AUDIO_UNLOCKED },
     last: { action: TTS_DEBUG.lastAction, error: TTS_DEBUG.lastError, skip: TTS_DEBUG.lastSkip, playRequest: TTS_DEBUG.lastPlayRequest, cloudRequest: TTS_DEBUG.lastCloudRequest, cloudResponse: TTS_DEBUG.lastCloudResponse, capability: TTS_DEBUG.lastCapability, pauseStrategy: TTS_DEBUG.lastPauseStrategy, routeDecision: TTS_DEBUG.lastRouteDecision, resolvedPath: TTS_DEBUG.lastResolvedPath },
     recentEvents: TTS_DEBUG.recent.slice(-40),
@@ -4736,7 +4624,6 @@ window.getCountdownStatus       = getCountdownStatus;
 window.getTtsSupportStatus      = getTtsSupportStatus;
 window.getTtsCapabilityStatus   = getTtsCapabilityStatus;
 window.getTtsDiagnosticsSnapshot = getTtsDiagnosticsSnapshot;
-window.getTtsUsageSeamDiagnosticsSnapshot = getTtsUsageSeamDiagnosticsSnapshot;
 window.pauseOrResumeReading     = pauseOrResumeReading;
 window.toggleAutoplay           = toggleAutoplay;
 window.setPlaybackRate          = setPlaybackRate;
