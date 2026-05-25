@@ -273,7 +273,7 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
         .theme-swatch:hover { transform: scale(1.1); }
         .theme-swatch.selected { border-color: #1e293b; }
         .pricing-card { border: 2px solid #e2e8f0; border-radius: 16px; padding: 1.5rem; flex: 1; transition: border-color 0.2s, transform 0.2s; background: white; }
-        .pricing-card.featured { border-color: var(--jubly-purple); background: #f5f3ff; transform: scale(1.02); }
+        .pricing-card.featured { border-color: var(--jubly-purple); background: #f5f3ff; }
         .sub-hero { background: linear-gradient(135deg, #6344F5 0%, #a78bfa 100%); border-radius: 16px; padding: 2rem; color: white; }
         .theme-dot { background: var(--theme-accent); width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
         /* ── Sidebar ── */
@@ -323,10 +323,9 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
     letter-spacing: 0.01em;
   }
 }
-        /* Support footer is fixed to viewport bottom, clearing the sidebar */
-        #supportFooter { position: fixed; bottom: 0; right: 0; z-index: 40; }
-        @media (max-width: 640px) { #supportFooter { left: 0; } }
-        #dashboard, #profile-page { padding-bottom: calc(var(--support-footer-height) + 24px); }
+        /* Support footer stays in normal document flow for Library/Profile shell cohesion. */
+        #supportFooter { position: relative; z-index: 10; }
+        #dashboard, #profile-page { padding-bottom: 20px; }
         /* ── Explorer theme swatch ── */
         .explorer-locked { position: relative; }
         .explorer-locked::after { content: 'Pro+'; position: absolute; top: -4px; right: -4px; background: var(--jubly-purple); color: white; font-size: 0.5rem; font-weight: 800; padding: 1px 4px; border-radius: 999px; letter-spacing: 0.04em; }
@@ -1845,7 +1844,7 @@ body.reading-active #rc-interaction-banner {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  max-height: 92dvh;
+  max-height: 94dvh;
 }
 
 .pricing-modal-header {
@@ -1867,8 +1866,80 @@ body.reading-active #rc-interaction-banner {
   }
   #pricing-modal > .pricing-modal-card {
     width: min(100%, 390px);
-    max-height: min(78dvh, 620px);
+    max-height: min(88dvh, 720px);
   }
+  .pricing-modal-header {
+    padding: 1.35rem 1.25rem 1rem;
+  }
+  .pricing-modal-body {
+    padding: 0 1.25rem 1.25rem;
+  }
+  .pricing-card {
+    padding: 1.15rem;
+  }
+}
+
+
+.public-onboarding-preview-note {
+  margin-top: -0.35rem;
+  margin-bottom: 1.1rem;
+  border: 1px solid #ddd6fe;
+  border-radius: 16px;
+  background: #f5f3ff;
+  color: #5b21b6;
+  padding: 0.8rem 0.95rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.public-onboarding-option-icon {
+  min-width: 4.35rem;
+  height: auto;
+  min-height: 2.15rem;
+  padding: 0.38rem 0.58rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #ede9fe;
+  color: #5b21b6;
+  flex-shrink: 0;
+}
+
+.pricing-feature-list {
+  display: grid;
+  gap: 0.62rem;
+  margin: 0 0 1.35rem;
+  padding: 0;
+  list-style: none;
+  color: #475569;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.pricing-feature-list li {
+  display: grid;
+  grid-template-columns: 1.35rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.pricing-feature-check {
+  color: #10b981;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.pricing-feature-muted {
+  color: #cbd5e1;
+  font-weight: 900;
+  line-height: 1.35;
 }
 
 /* Group A: pricing modal should first appear only after settled labels are ready. */
@@ -2774,5 +2845,418 @@ body.app-dark .profile-policy-link:hover { background: #1e293b; }
   .profile-policies-links {
     flex-wrap: wrap;
     white-space: normal;
+  }
+}
+
+/* Lane 3A Cycle 1 emergency shell-surface realization. Presentation only. */
+.public-onboarding-title + .public-onboarding-copy {
+  max-width: 34rem;
+}
+
+.pricing-modal-card .pricing-modal-body > .flex {
+  display: flex;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.pricing-modal-card .pricing-card {
+  min-width: 0;
+}
+
+.library-header,
+#profile-page > .flex,
+#supportFooter {
+  position: relative;
+}
+
+.library-header::after,
+#profile-page > .flex::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -18px 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(99, 68, 245, 0.18), transparent);
+  pointer-events: none;
+}
+
+#library-public-sample .section-card,
+.library-pending-card,
+#profile-auth-card,
+#profile-guest-card,
+#profile-auth-content .section-card,
+.sub-hero {
+  border-radius: 24px;
+}
+
+#library-public-sample .section-card,
+.library-pending-card,
+#profile-auth-card,
+#profile-guest-card {
+  box-shadow: 0 18px 44px rgba(99, 68, 245, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.library-pending-card {
+  background:
+    radial-gradient(circle at 92% 14%, rgba(99, 68, 245, 0.12), transparent 28%),
+    linear-gradient(180deg, #ffffff 0%, #fbfaff 100%);
+}
+
+.library-pending-title,
+#profile-page h3,
+#profile-page h4 {
+  letter-spacing: -0.02em;
+}
+
+#profile-page > .flex {
+  align-items: flex-start;
+}
+
+#profile-sidebar .profile-tab-btn {
+  min-height: 42px;
+}
+
+#supportFooter {
+  display: none;
+  position: relative !important;
+  inset: auto !important;
+  border-top: 1px solid rgba(99, 68, 245, 0.16) !important;
+  background: linear-gradient(90deg, #fbfaff 0%, #f8f7ff 100%) !important;
+}
+
+@media (max-width: 767px) {
+  #dashboard,
+  #profile-page {
+    max-width: 100% !important;
+    overflow-x: clip;
+  }
+
+  .library-header {
+    margin-bottom: 1.5rem !important;
+  }
+
+  #profile-page > .flex {
+    gap: 1.25rem !important;
+  }
+
+  #profile-auth-card nav {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem !important;
+  }
+
+  #profile-auth-card nav hr {
+    display: none;
+  }
+
+  #profile-auth-card nav .profile-tab-btn,
+  #profile-auth-card nav button[onclick="shellSignOut()"] {
+    text-align: center;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  #tab-subscription .grid.grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  #profile-page .flex.gap-3:not(.profile-goal-inline-row),
+  #library-toolbar {
+    max-width: 100%;
+  }
+
+  #supportFooter > div {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .pricing-modal-card .pricing-modal-header h2 {
+    font-size: 1.55rem !important;
+    line-height: 1.14 !important;
+  }
+
+  .pricing-modal-card .pricing-card.featured {
+    transform: none;
+  }
+
+  .library-pending-row {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .library-pending-lines {
+    min-width: 0;
+  }
+
+  #profile-auth-content .section-card,
+  #profile-auth-card,
+  #profile-guest-card,
+  .sub-hero {
+    padding: 1rem !important;
+  }
+
+  #profile-page .grid,
+  #dashboard .grid {
+    max-width: 100%;
+  }
+}
+
+/* Lane 3A Cycle 1 full shell realization pass — presentation only */
+.shell-page-header {
+  position: relative;
+  padding: 1.35rem;
+  border: 1px solid rgba(99, 68, 245, 0.12);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 14% 16%, rgba(99, 68, 245, 0.10), transparent 30%),
+    linear-gradient(135deg, rgba(255,255,255,0.94), rgba(248,247,255,0.88));
+  box-shadow: 0 20px 46px rgba(99, 68, 245, 0.09), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.shell-page-kicker,
+.library-shell-eyebrow,
+.support-footer-kicker {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin: 0 0 0.45rem;
+  color: #6344f5;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.library-shell-hero,
+.profile-shell-hero {
+  margin: -0.75rem 0 1.5rem;
+  border: 1px solid rgba(99, 68, 245, 0.14);
+  border-radius: 30px;
+  padding: 1.35rem;
+  background:
+    radial-gradient(circle at 92% 18%, rgba(99, 68, 245, 0.14), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #fbfaff 100%);
+  box-shadow: 0 18px 44px rgba(99, 68, 245, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.library-shell-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 0.42fr);
+  gap: 1rem;
+  align-items: center;
+}
+
+.library-shell-hero h3,
+.profile-shell-hero h2 {
+  margin: 0;
+  color: #0f172a;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1.04;
+}
+
+.library-shell-hero h3 { font-size: clamp(1.45rem, 3vw, 2.25rem); }
+.profile-shell-hero h2 { font-size: clamp(1.55rem, 3.4vw, 2.55rem); max-width: 42rem; }
+
+.library-shell-hero p,
+.profile-shell-hero p {
+  margin: 0.65rem 0 0;
+  max-width: 46rem;
+  color: #64748b;
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.library-shell-points,
+.profile-shell-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: flex-end;
+}
+
+.library-shell-points span,
+.profile-shell-badges span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  border: 1px solid rgba(99, 68, 245, 0.16);
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  background: rgba(255, 255, 255, 0.82);
+  color: #4338ca;
+  font-size: 0.76rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.library-sample-card {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 88% 18%, rgba(99, 68, 245, 0.12), transparent 24%),
+    linear-gradient(135deg, rgba(238,242,255,0.82), rgba(255,255,255,0.94)) !important;
+}
+
+.profile-shell-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: -0.5rem;
+}
+
+.profile-shell-layout {
+  align-items: flex-start;
+}
+
+#profile-sidebar,
+#profile-auth-content {
+  min-width: 0;
+}
+
+#profile-auth-card,
+#profile-guest-card,
+#profile-auth-content .section-card,
+.sub-hero,
+.library-sample-card,
+.library-pending-card {
+  border: 1px solid rgba(99, 68, 245, 0.12) !important;
+}
+
+#profile-auth-card nav .profile-tab-btn.active,
+#profile-auth-card nav .profile-tab-btn:hover {
+  background: rgba(99, 68, 245, 0.08) !important;
+  color: #4338ca !important;
+}
+
+.support-footer-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  max-width: 64rem;
+  margin: 0 auto;
+}
+
+.support-footer-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.support-footer-kicker {
+  margin: 0;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(99, 68, 245, 0.10);
+}
+
+.support-footer-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  background: #ffdd00;
+  color: #111827;
+  text-decoration: none;
+  font-size: 0.78rem;
+  font-weight: 900;
+  box-shadow: 0 8px 18px rgba(251, 191, 36, 0.18);
+}
+
+@media (max-width: 767px) {
+  .shell-page-header,
+  .library-shell-hero,
+  .profile-shell-hero {
+    border-radius: 22px;
+    padding: 1rem;
+  }
+
+  .library-shell-hero,
+  .profile-shell-hero {
+    display: block;
+    margin-bottom: 1rem;
+  }
+
+  .library-shell-points,
+  .profile-shell-badges {
+    justify-content: flex-start;
+    margin-top: 0.9rem;
+  }
+
+  .library-shell-points span,
+  .profile-shell-badges span {
+    white-space: normal;
+    text-align: center;
+  }
+
+  .profile-shell-layout {
+    gap: 1rem !important;
+  }
+
+  #dashboard,
+  #profile-page,
+  #profile-auth-card,
+  #profile-auth-content,
+  #profile-auth-content .section-card,
+  .library-shell-hero,
+  .profile-shell-hero,
+  .library-sample-card,
+  .library-pending-card,
+  #supportFooter {
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .support-footer-shell,
+  .support-footer-copy {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .support-footer-action {
+    width: 100%;
+  }
+}
+
+
+/* Lane 3A targeted Cycle 1 corrections: preview-safe onboarding and pricing containment. */
+.public-onboarding .public-onboarding-option {
+  grid-template-columns: minmax(4.25rem, auto) minmax(0, 1fr) 20px;
+}
+.public-onboarding .public-onboarding-option-icon {
+  width: auto;
+  min-width: 4.25rem;
+  height: auto;
+  min-height: 2.15rem;
+  padding: 0.38rem 0.58rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+@media (max-width: 640px) {
+  .public-onboarding .public-onboarding-option {
+    grid-template-columns: minmax(3.75rem, auto) minmax(0, 1fr) 18px;
+  }
+  .public-onboarding .public-onboarding-option-icon {
+    min-width: 3.75rem;
+    font-size: 0.66rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .pricing-modal-card .pricing-modal-body > .flex {
+    flex-direction: column;
   }
 }

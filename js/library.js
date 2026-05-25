@@ -2885,6 +2885,48 @@
       deletedModal.setAttribute('aria-hidden', 'true');
     }
 
+    function getLibraryCloudReadinessSnapshot(localBooks = []) {
+      const localCount = Array.isArray(localBooks) ? localBooks.length : 0;
+      let syncSnapshot = null;
+      try {
+        syncSnapshot = window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function'
+          ? window.rcSync.getDiagnosticsSnapshot()
+          : null;
+      } catch (_) { syncSnapshot = null; }
+      const hydrated = syncSnapshot && syncSnapshot.hydrated ? syncSnapshot.hydrated : null;
+      return {
+        localCount,
+        localDeviceReadable: true,
+        accountHydrated: !!(hydrated && (hydrated.users || hydrated.progress || hydrated.sessions || hydrated.usage)),
+        remoteLibraryItemCount: syncSnapshot && Number.isFinite(Number(syncSnapshot.libraryItemCount))
+          ? Number(syncSnapshot.libraryItemCount)
+          : null,
+        cloudBookStatusVisible: false,
+        saveToCloudVisible: false,
+        removeFromCloudVisible: false,
+        note: 'Manage Library currently shows local device books only. Cloud ownership/status is intentionally not claimed here.'
+      };
+    }
+
+    function renderLibraryCloudReadinessMeta(localBooks = []) {
+      const snapshot = getLibraryCloudReadinessSnapshot(localBooks);
+      const lines = [];
+      lines.push(`This device: ${snapshot.localCount} local book${snapshot.localCount === 1 ? '' : 's'}.`);
+      lines.push('Cloud status: not shown here yet.');
+      if (snapshot.accountHydrated && snapshot.remoteLibraryItemCount != null) {
+        lines.push(`Signed-in library snapshot visible: ${snapshot.remoteLibraryItemCount} item${snapshot.remoteLibraryItemCount === 1 ? '' : 's'}.`);
+      } else {
+        lines.push('Signed-in library snapshot: pending or unavailable.');
+      }
+      const el = document.createElement('div');
+      el.className = 'import-status';
+      el.dataset.libraryCloudReadiness = 'true';
+      el.textContent = lines.join(' ');
+      return el;
+    }
+
+    try { window.__rcGetLibraryCloudReadinessSnapshot = getLibraryCloudReadinessSnapshot; } catch (_) {}
+
     async function render() {
       listEl.innerHTML = '';
       let books = [];
@@ -2900,6 +2942,7 @@
         ? `Saved on this device: ${count}`
         : `Saved on this device: ${count}/${limit}`;
       listEl.appendChild(meta);
+      listEl.appendChild(renderLibraryCloudReadinessMeta(books));
 
       if (!books.length) {
         const empty = document.createElement('div');
@@ -2925,8 +2968,13 @@
           const kb = Math.round((b.byteSize || 0) / 1024);
           const pages = (String(b.markdown || '').match(/^\s*##\s+/gm) || []).length;
           m.textContent = `${pages} pages • ~${kb} KB • ${new Date(b.createdAt || Date.now()).toLocaleDateString()}`;
+          const status = document.createElement('div');
+          status.className = 'library-row-meta';
+          status.dataset.localCloudStatus = 'device-only';
+          status.textContent = 'Storage: This device. Cloud copy/status is not claimed in this view.';
           left.appendChild(t);
           left.appendChild(m);
+          left.appendChild(status);
 
           const actions = document.createElement('div');
           actions.className = 'library-row-actions';

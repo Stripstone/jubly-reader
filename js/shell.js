@@ -69,7 +69,7 @@
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
-    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'mara', theme: 'default', speed: 1 });
+    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'sara', theme: 'default', speed: 1 });
     let _publicOnboardingChoices = Object.assign({}, PUBLIC_ONBOARDING_DEFAULTS);
     let _publicOnboardingTimer = null;
     let _shellAuthBootstrapped = false;
@@ -885,7 +885,15 @@ window.rcInteraction = (function () {
         if (navLoginBtn) navLoginBtn.style.display = (!authed && id !== 'login-page') ? '' : 'none';
         if (navSignupBtn) navSignupBtn.style.display = !authed ? '' : 'none';
         if (navProfileTrigger) navProfileTrigger.style.display = authed ? '' : 'none';
-        if (navUsagePill) navUsagePill.classList.toggle('hidden-section', !authed || isReading);
+        if (navUsagePill) {
+            let hasSourceBackedRemaining = false;
+            try {
+                const snapshot = (window.rcUsage && typeof window.rcUsage.getSnapshot === 'function') ? window.rcUsage.getSnapshot() : null;
+                const remaining = snapshot && snapshot.remaining != null ? Number(snapshot.remaining) : null;
+                hasSourceBackedRemaining = !!(snapshot && snapshot.authoritative !== false && Number.isFinite(remaining));
+            } catch (_) { hasSourceBackedRemaining = false; }
+            navUsagePill.classList.toggle('hidden-section', !authed || isReading || !hasSourceBackedRemaining);
+        }
 
         const remoteDisplayName = (window.rcSync && typeof window.rcSync.getRemoteUsersRow === 'function') ? (window.rcSync.getRemoteUsersRow()?.display_name || '') : '';
         const displayName = remoteDisplayName || deriveDisplayName(user);
@@ -900,7 +908,10 @@ window.rcInteraction = (function () {
         if (dashboardEl) dashboardEl.classList.toggle('with-sidebar', authed);
         if (profileEl) profileEl.classList.toggle('with-sidebar', authed);
         const supportFooter = document.getElementById('supportFooter');
-        if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'block' : 'none';
+        if (supportFooter) {
+            supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'block' : 'none';
+            supportFooter.setAttribute('data-shell-flow', 'normal');
+        }
         const sbLibrary = document.getElementById('sb-library');
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
 
@@ -914,8 +925,8 @@ window.rcInteraction = (function () {
             libraryToolbar.classList.toggle('hidden-section', !(authed || isIntroLibraryVisible()));
         }
         if (librarySample && id !== 'dashboard') librarySample.classList.add('hidden-section');
-        if (publicSampleCopy) publicSampleCopy.textContent = 'Create an account to import books, save your place, and build your own library.';
-        if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Start free, keep your place, and come back anytime.';
+        if (publicSampleCopy) publicSampleCopy.textContent = 'Try the reading flow first. Create an account when you are ready to import books, save your place, and build your library.';
+        if (publicSampleSubcopy) publicSampleSubcopy.textContent = 'Sample access stays separate from account, cloud, and import ownership until you sign in.';
         renderLibrarySubtitle(authed);
 
         const profileGuestCard = document.getElementById('profile-guest-card');
@@ -2892,6 +2903,7 @@ window.rcInteraction = (function () {
 
 
     function renderUsageSurface() {
+        const pillEl = document.getElementById('nav-usage-pill');
         const valueEl = document.getElementById('nav-usage-pill-value');
         const labelEl = document.getElementById('nav-usage-pill-label');
         if (!valueEl) return;
@@ -2899,14 +2911,15 @@ window.rcInteraction = (function () {
             ? window.rcUsage.getSnapshot()
             : { remaining: null, allowance: null, authoritative: false };
         const remaining = snapshot?.remaining != null ? Number(snapshot.remaining) : null;
-        if (Number.isFinite(remaining)) {
+        const hasSourceBackedRemaining = snapshot?.authoritative !== false && Number.isFinite(remaining);
+        if (hasSourceBackedRemaining) {
             valueEl.textContent = String(Math.max(0, remaining));
             if (labelEl) labelEl.textContent = ' left today';
+            if (pillEl) pillEl.classList.remove('hidden-section');
         } else {
-            // authoritative: false means usage truth is still settling — do not
-            // show a believable number. Show neutral pending copy instead.
-            valueEl.textContent = snapshot?.authoritative === false ? 'Checking…' : 'Usage';
+            valueEl.textContent = '';
             if (labelEl) labelEl.textContent = '';
+            if (pillEl) pillEl.classList.add('hidden-section');
         }
     }
 
