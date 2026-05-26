@@ -2776,3 +2776,573 @@ body.app-dark .profile-policy-link:hover { background: #1e293b; }
     white-space: normal;
   }
 }
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+   1E SHELL COHESION — Warm parchment shell: library, profile, landing
+   Blueprint: jubly_1_e_shell_cohesion_blueprint + profile_structure_wiring
+   Implementation contract: CSS additions to shell.css only. Maps to existing
+   project selectors. Minimal DOM additions only where required.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1E shell token variables ──────────────────────────────────────────── */
+:root {
+  --sh-bg:              #f7f3ec;
+  --sh-bg-top:          #fbf8f2;
+  --sh-bg-bottom:       #f1eadf;
+  --sh-rail:            rgba(255,250,244,.92);
+  --sh-surface-warm:    #fbf8f2;
+  --sh-surface-parch:   rgba(251,248,242,.96);
+  --sh-surface-bp:      rgba(255,252,247,.72);
+  --sh-border:          #e7ded3;
+  --sh-border-warm:     rgba(223,212,198,.88);
+  --sh-divider:         #efe5d8;
+  --sh-ink:             #1e293b;
+  --sh-muted:           #64748b;
+  --sh-warm-muted:      #8a7a69;
+  --sh-shadow-ground:   0 14px 18px rgba(32,20,12,.20), 0 5px 8px rgba(15,23,42,.10);
+  --sh-shadow-panel:    0 14px 18px rgba(32,20,12,.18), 0 5px 8px rgba(15,23,42,.08);
+  --sh-btn-warm-shadow: inset 0 2px 1px rgba(255,255,255,.9),
+                        inset 0 -2px 3px rgba(0,0,0,.035),
+                        0 8px 12px rgba(139,126,99,.25),
+                        0 2px 4px rgba(139,126,99,.15);
+  --sh-btn-primary-shadow: inset 0 2px 1px rgba(255,255,255,.22),
+                           inset 0 -2px 3px rgba(0,0,0,.08),
+                           0 9px 13px rgba(99,68,245,.25),
+                           0 2px 5px rgba(15,23,42,.12);
+}
+
+/* ── Warm dark palette (replaces cold slate dark) ──────────────────────── */
+body.app-dark {
+  --sh-bg:              #1a1512;
+  --sh-bg-top:          #221c18;
+  --sh-bg-bottom:       #120e0c;
+  --sh-rail:            rgba(30,24,20,.94);
+  --sh-surface-warm:    #2e2621;
+  --sh-surface-parch:   rgba(38,32,27,.96);
+  --sh-surface-bp:      rgba(38,32,27,.5);
+  --sh-border:          #3d322a;
+  --sh-border-warm:     rgba(74,61,51,.88);
+  --sh-divider:         #382e26;
+  --sh-ink:             #f4eee7;
+  --sh-muted:           #a89b8d;
+  --sh-warm-muted:      #bdae9e;
+  --sh-shadow-ground:   0 16px 28px rgba(0,0,0,.45), 0 6px 12px rgba(0,0,0,.3);
+  --sh-shadow-panel:    0 14px 24px rgba(0,0,0,.4), 0 5px 10px rgba(0,0,0,.25);
+}
+
+/* ── Warm shell background — all app shell pages, never reading mode ───── */
+body:not(:has(#reading-mode:not(.hidden-section))) {
+  background: linear-gradient(
+    180deg,
+    var(--sh-bg-top)    0%,
+    var(--sh-bg)        42%,
+    var(--sh-bg-bottom) 100%
+  ) !important;
+  background-attachment: fixed !important;
+}
+
+/* Override cold dark body background outside reading mode */
+body.app-dark:not(:has(#reading-mode:not(.hidden-section))) {
+  background: linear-gradient(
+    180deg,
+    var(--sh-bg-top)    0%,
+    var(--sh-bg)        42%,
+    var(--sh-bg-bottom) 100%
+  ) !important;
+  background-attachment: fixed !important;
+  color: var(--sh-ink) !important;
+}
+
+/* ── Top nav: shell rail glass ─────────────────────────────────────────── */
+/* Applied to the shared nav on all app-shell pages */
+body:has(#dashboard:not(.hidden-section)) nav,
+body:has(#profile-page:not(.hidden-section)) nav,
+body:has(#landing-footer:not(.hidden-section)) nav {
+  background: var(--sh-rail) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  border-bottom: 1px solid var(--sh-border-warm) !important;
+  transition: background 0.2s ease, border-color 0.2s ease !important;
+}
+
+/* ── Landing page: NO white top bar ────────────────────────────────────── */
+/* Nav becomes fully transparent — landing content shows through */
+body:has(#landing-page:not(.hidden-section)):not(:has(#dashboard:not(.hidden-section))):not(:has(#profile-page:not(.hidden-section))) nav {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-bottom: 1px solid transparent !important;
+  box-shadow: none !important;
+}
+
+/* ── Landing page gradient hero fade ───────────────────────────────────── */
+/* Give the landing area a natural warm-tinted gradient instead of white */
+#landing-page {
+  background: transparent !important;
+}
+
+#landing-footer {
+  border-color: var(--sh-divider) !important;
+  color: var(--sh-warm-muted) !important;
+}
+
+/* ── App sidebar: widened 156px, horizontal labels ─────────────────────── */
+#app-sidebar {
+  width: 156px !important;
+  background: var(--sh-rail) !important;
+  border-right: 1px solid var(--sh-border-warm) !important;
+  padding: 18px 12px 16px !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+  box-sizing: border-box !important;
+}
+
+/* Sidebar button: horizontal, emoji + label */
+#app-sidebar .sidebar-btn {
+  flex-direction: row !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 0 14px !important;
+  min-height: 46px !important;
+  width: 100% !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  text-transform: none !important;
+  letter-spacing: -0.01em !important;
+  border-radius: 14px !important;
+  color: var(--sh-muted) !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease !important;
+}
+
+/* SVG icon: slightly larger in horizontal layout */
+#app-sidebar .sidebar-btn svg {
+  flex-shrink: 0 !important;
+  width: 19px !important;
+  height: 19px !important;
+}
+
+#app-sidebar .sidebar-btn:hover {
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
+}
+
+#app-sidebar .sidebar-btn.active {
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
+}
+
+/* ── Dashboard layout offset: updated for wider sidebar ────────────────── */
+@media (min-width: 641px) {
+  #dashboard.with-sidebar,
+  #profile-page.with-sidebar {
+    padding-left: calc(156px + 1.5rem) !important;
+    width: min(100%, calc(64rem + 156px)) !important;
+  }
+}
+
+/* ── Library header & toolbar ──────────────────────────────────────────── */
+#dashboard h2.text-3xl,
+#dashboard .library-header h2 {
+  color: var(--sh-ink) !important;
+}
+
+#dashboard #dashboard-subtitle {
+  color: var(--sh-muted) !important;
+}
+
+/* Manage button: warm shell button style */
+#manageLibraryBtn {
+  border: 1px solid var(--sh-border) !important;
+  background: var(--sh-surface-warm) !important;
+  color: var(--sh-ink) !important;
+  font-weight: 800 !important;
+  font-size: 13.5px !important;
+  padding: 10px 16px !important;
+  border-radius: 8px !important;
+  box-shadow: var(--sh-btn-warm-shadow) !important;
+  transition: background .12s ease, box-shadow .12s ease, transform .12s ease !important;
+}
+#manageLibraryBtn:hover {
+  background: #fff !important;
+}
+#manageLibraryBtn:active {
+  transform: translateY(1px) !important;
+}
+
+/* Import button: primary shell button style */
+#importBookBtn {
+  border: none !important;
+  background: var(--jubly-purple) !important;
+  color: #fff !important;
+  font-weight: 800 !important;
+  font-size: 13.5px !important;
+  letter-spacing: -0.01em !important;
+  padding: 11px 22px !important;
+  border-radius: 8px !important;
+  box-shadow: var(--sh-btn-primary-shadow) !important;
+  transition: filter .12s ease, box-shadow .12s ease, transform .12s ease !important;
+}
+#importBookBtn:hover {
+  filter: brightness(1.04) !important;
+}
+#importBookBtn:active {
+  transform: translateY(1px) !important;
+}
+
+/* ── Library populated glass card: parchment surface ───────────────────── */
+#library-populated .glass-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+  overflow: hidden !important;
+}
+
+/* Table head warm surface */
+#library-populated .glass-card > div:first-child {
+  background: var(--sh-surface-warm) !important;
+  border-bottom-color: var(--sh-divider) !important;
+  color: var(--sh-warm-muted) !important;
+}
+
+/* Library rows: warm blueprint surface + warm divider */
+#library-rows > div {
+  background: var(--sh-surface-bp) !important;
+  border-bottom: 1px solid var(--sh-divider) !important;
+}
+#library-rows > div:last-child {
+  border-bottom: none !important;
+}
+#library-rows > div:hover {
+  background: var(--sh-surface-warm) !important;
+}
+
+/* Row typography */
+#library-rows .font-semibold {
+  color: var(--sh-ink) !important;
+  font-weight: 800 !important;
+}
+#library-rows .text-slate-400,
+#library-rows .text-slate-500 {
+  color: var(--sh-muted) !important;
+}
+
+/* Row status pill: brand purple */
+#library-rows span.rounded-full {
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  border: 1px solid var(--sh-border) !important;
+  font-weight: 800 !important;
+}
+
+/* ── Library pending card: parchment ───────────────────────────────────── */
+.library-pending-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+}
+
+.library-pending-label {
+  color: var(--jubly-purple) !important;
+}
+.library-pending-title {
+  color: var(--sh-ink) !important;
+}
+.library-pending-copy {
+  color: var(--sh-muted) !important;
+}
+.library-pending-icon,
+.library-pending-line,
+.library-pending-pill,
+.library-pending-time {
+  background: var(--sh-border) !important;
+}
+
+/* ── Signed-out library CTA card: parchment ─────────────────────────────── */
+#library-public-sample .section-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  box-shadow: var(--sh-shadow-panel) !important;
+  border-radius: 20px !important;
+}
+#library-public-sample .text-indigo-600 {
+  color: var(--jubly-purple) !important;
+}
+#library-public-sample h3 {
+  color: var(--sh-ink) !important;
+}
+#library-public-sample p {
+  color: var(--sh-muted) !important;
+}
+
+/* Empty state card */
+#empty-drop-zone {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+  border-radius: 20px !important;
+}
+#empty-drop-zone h3 {
+  color: var(--sh-ink) !important;
+}
+#empty-drop-zone p {
+  color: var(--sh-muted) !important;
+}
+
+/* ── Profile page: parchment shell ─────────────────────────────────────── */
+#profile-page h2.text-3xl,
+#profile-page > div > h2 {
+  color: var(--sh-ink) !important;
+}
+
+/* Profile sidebar auth card — becomes the profile rail */
+#profile-auth-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  border-radius: 22px !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+}
+
+/* Avatar area top section */
+#profile-auth-card > div:first-child { /* mobile nav row */
+  margin-bottom: 0 !important;
+}
+
+/* Profile avatar identity block */
+#profile-auth-card .flex.items-center.gap-4 {
+  padding: 10px 4px 14px !important;
+  border-bottom: 1px solid var(--sh-divider) !important;
+  margin-bottom: 10px !important;
+}
+
+/* Profile tab nav buttons */
+#profile-auth-card nav a,
+#profile-auth-card nav button.profile-tab-btn {
+  border-radius: 14px !important;
+  font-weight: 800 !important;
+  font-size: 13px !important;
+  color: var(--sh-muted) !important;
+  padding: 0 12px !important;
+  min-height: 42px !important;
+  display: flex !important;
+  align-items: center !important;
+  background: transparent !important;
+  border: none !important;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease !important;
+}
+
+#profile-auth-card nav button.profile-tab-btn:hover {
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
+}
+
+#profile-auth-card nav button.profile-tab-btn.active {
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
+}
+
+/* Logout button stays red-tinted but in the right weight */
+#profile-auth-card nav button[onclick*="shellSignOut"] {
+  color: #ef4444 !important;
+  font-weight: 800 !important;
+  border-radius: 14px !important;
+}
+
+/* Divider in auth card nav */
+#profile-auth-card nav hr {
+  border-color: var(--sh-divider) !important;
+}
+
+/* Profile name + email */
+#profile-name-main {
+  color: var(--sh-ink) !important;
+  font-weight: 800 !important;
+}
+#profile-email-main {
+  color: var(--sh-muted) !important;
+}
+
+/* ── Profile section cards: parchment ──────────────────────────────────── */
+#profile-auth-content .section-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+}
+
+/* Inner section cards with soft treatment */
+#profile-auth-content .section-card.bg-slate-50,
+#profile-auth-content .section-card.border-slate-100 {
+  background: var(--sh-surface-bp) !important;
+  box-shadow: var(--sh-shadow-panel) !important;
+}
+
+/* Section headings and copy inside profile */
+#profile-auth-content h4,
+#profile-auth-content .font-bold {
+  color: var(--sh-ink) !important;
+}
+#profile-auth-content .text-slate-400,
+#profile-auth-content .text-slate-500,
+#profile-auth-content .text-xs.text-slate-400 {
+  color: var(--sh-muted) !important;
+}
+
+/* Metric / stat values */
+#profile-auth-content .text-2xl.font-black,
+#profile-auth-content .text-3xl.font-black {
+  color: var(--sh-ink) !important;
+}
+
+/* Dividers inside section cards */
+#profile-auth-content .border-b,
+#profile-auth-content .border-t,
+#profile-auth-content hr {
+  border-color: var(--sh-divider) !important;
+}
+
+/* Section buttons that aren't already btn-jubly */
+#profile-auth-content button:not(.btn-jubly):not(.appearance-mode-btn):not(.profile-goal-edit-btn):not(.profile-inline-save):not(.profile-inline-cancel):not([onclick*="openPricingForSignup"]):not([onclick*="openCustomerPortal"]):not([type="submit"]) {
+  border-color: var(--sh-border) !important;
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  font-weight: 800 !important;
+  transition: background .15s ease !important;
+}
+#profile-auth-content button:not(.btn-jubly):not(.appearance-mode-btn):not(.profile-goal-edit-btn):not(.profile-inline-save):not(.profile-inline-cancel):not([onclick*="openPricingForSignup"]):not([onclick*="openCustomerPortal"]):not([type="submit"]):hover {
+  background: var(--sh-surface-parch) !important;
+}
+
+/* Subscription sub-hero card */
+#profile-auth-content .sub-hero {
+  background: var(--jubly-purple) !important;
+  border-radius: 20px !important;
+  padding: 24px !important;
+  box-shadow: var(--sh-btn-primary-shadow) !important;
+}
+
+/* App tiles (iOS / Desktop) */
+#profile-auth-content .bg-slate-50.border.border-slate-100 {
+  background: var(--sh-surface-bp) !important;
+  border-color: var(--sh-border) !important;
+  border-radius: 16px !important;
+}
+#profile-auth-content .bg-slate-50.border.border-slate-100:hover {
+  background: var(--sh-surface-warm) !important;
+}
+
+/* ── Profile guest card (signed-out) ────────────────────────────────────── */
+#profile-guest-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  border-radius: 22px !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+}
+
+/* ── General section-card parchment overrides ───────────────────────────── */
+/* Applies to any section-card visible in dashboard or profile shell */
+#dashboard .section-card,
+#profile-page .section-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+  border-radius: 20px !important;
+}
+
+/* Indigo sample card keeps a subtle brand tint */
+#library-public-sample .section-card {
+  background: var(--sh-surface-parch) !important;
+}
+
+/* ── Dark mode overrides for app-dark sidebar/nav ───────────────────────── */
+body.app-dark #app-sidebar {
+  background: var(--sh-rail) !important;
+  border-right-color: var(--sh-border-warm) !important;
+}
+body.app-dark #app-sidebar .sidebar-btn {
+  color: var(--sh-muted) !important;
+}
+body.app-dark #app-sidebar .sidebar-btn:hover,
+body.app-dark #app-sidebar .sidebar-btn.active {
+  background: var(--sh-surface-warm) !important;
+  color: #8168ff !important;
+  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
+}
+body.app-dark #dashboard .section-card,
+body.app-dark #profile-page .section-card {
+  background: var(--sh-surface-parch) !important;
+  border-color: var(--sh-border-warm) !important;
+}
+body.app-dark #library-populated .glass-card {
+  background: var(--sh-surface-parch) !important;
+  border-color: var(--sh-border-warm) !important;
+}
+body.app-dark #library-populated .glass-card > div:first-child {
+  background: var(--sh-surface-warm) !important;
+  border-bottom-color: var(--sh-divider) !important;
+  color: var(--sh-warm-muted) !important;
+}
+body.app-dark #library-rows > div {
+  background: var(--sh-surface-bp) !important;
+  border-bottom-color: var(--sh-divider) !important;
+}
+body.app-dark #library-rows > div:hover {
+  background: var(--sh-surface-warm) !important;
+}
+body.app-dark #profile-auth-card,
+body.app-dark #profile-guest-card {
+  background: var(--sh-surface-parch) !important;
+  border-color: var(--sh-border-warm) !important;
+}
+body.app-dark #manageLibraryBtn {
+  background: var(--sh-surface-warm) !important;
+  border-color: var(--sh-border) !important;
+  color: var(--sh-ink) !important;
+}
+body.app-dark #manageLibraryBtn:hover {
+  background: var(--sh-surface-parch) !important;
+}
+body.app-dark nav,
+body.app-dark nav .text-slate-900 {
+  color: var(--sh-ink) !important;
+}
+
+/* ── Mobile adaptations ─────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Sidebar resets on mobile (existing rule hides it; no further changes needed) */
+  #app-sidebar {
+    width: 100% !important;
+  }
+
+  /* Dashboard stays full width */
+  #dashboard.with-sidebar,
+  #profile-page.with-sidebar {
+    width: 100% !important;
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+
+  /* Warm background still applies on mobile */
+  body:not(:has(#reading-mode:not(.hidden-section))) {
+    background-attachment: scroll !important;
+  }
+
+  /* Library card stays readable on small screens */
+  #library-populated .glass-card {
+    border-radius: 16px !important;
+  }
+
+  /* Profile card full width */
+  #profile-auth-card {
+    border-radius: 18px !important;
+  }
+}
