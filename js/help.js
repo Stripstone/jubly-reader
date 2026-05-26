@@ -1,8 +1,6 @@
 // js/help.js
 // Native Jubly support widget. Replaces Intercom and keeps the existing
 // rcHelp.openChat/openFeedback surface used by the shell.
-// Merged 3B + 3C support archaeology: help.js assembles sanitized diagnostics only;
-// Library/account and TTS/usage truth remain owned by their source getters.
 (function () {
   const ID = 'jubly-support-widget';
   const STYLE_ID = 'jubly-support-widget-style';
@@ -289,15 +287,7 @@
       runtimeUiState: safe(() => typeof window.getRuntimeUiState === 'function' ? window.getRuntimeUiState() : null),
       playbackStatus: safe(() => typeof window.getPlaybackStatus === 'function' ? window.getPlaybackStatus() : null),
       ttsSupportStatus: safe(() => typeof window.getTtsSupportStatus === 'function' ? window.getTtsSupportStatus() : null),
-      ttsUsageSeamSnapshot: safe(() => typeof window.getTtsUsageSeamSnapshot === 'function' ? window.getTtsUsageSeamSnapshot() : null),
-      ttsDiagnosticsSnapshot: safe(() => typeof window.getTtsDiagnosticsSnapshot === 'function' ? window.getTtsDiagnosticsSnapshot() : null),
-      incidentState: {
-        readingTts: safe(() => typeof window.getTtsIncidentFootprint === 'function' ? window.getTtsIncidentFootprint() : (window.__rcLastTtsIncident || null))
-      },
-      libraryAccountMetadataSnapshot: safe(() => window.rcSync && typeof window.rcSync.getLibraryAccountSupportSummary === 'function' ? window.rcSync.getLibraryAccountSupportSummary() : (window.rcSync && typeof window.rcSync.getLibraryAccountSummary === 'function' ? (() => { const summary = window.rcSync.getLibraryAccountSummary(); return summary ? { signedIn: !!summary.signedIn, hydrated: !!summary.hydrated, source: summary.source, activeCount: summary.activeCount, deletedCount: summary.deletedCount, totalCount: summary.totalCount, lastSnapshotAt: summary.lastSnapshotAt || null, lastLibraryAction: summary.lastLibraryAction || null } : null; })() : null)),
-      syncDiagnosticsSnapshot: safe(() => window.rcSync && typeof window.rcSync.getDiagnosticsSnapshot === 'function' ? window.rcSync.getDiagnosticsSnapshot() : null),
-      recentLibraryImporterIncident: safe(() => typeof window.__rcGetLibraryImporterIncidentSnapshot === 'function' ? window.__rcGetLibraryImporterIncidentSnapshot() : (window.__rcLastLibraryImporterIncident || null)),
-      lastMeaningfulIncident: safe(() => window.__rcLastMeaningfulIncident || null)
+      ttsDiagnosticsSnapshot: safe(() => typeof window.getTtsDiagnosticsSnapshot === 'function' ? window.getTtsDiagnosticsSnapshot() : null)
     };
   }
 
@@ -323,17 +313,7 @@
       path: s.path,
       message: text,
       contactEmail: a.user?.email || '',
-      context: {
-        user: a.user,
-        signedIn: a.signedIn,
-        policy: a.policy,
-        route: visibleSection(),
-        currentSurface: visibleSection(),
-        recentSurface: safe(() => (window.__rcLastMeaningfulIncident && window.__rcLastMeaningfulIncident.surface) || null),
-        recentJourney: safe(() => Array.isArray(window.__rcEventTrail) ? window.__rcEventTrail.slice(-12) : []),
-        lastMeaningfulIncident: safe(() => window.__rcLastMeaningfulIncident || null),
-        location: { href: location.href, pathname: location.pathname, search: location.search, hash: location.hash }
-      },
+      context: { user: a.user, signedIn: a.signedIn, policy: a.policy, route: visibleSection(), location: { href: location.href, pathname: location.pathname, search: location.search, hash: location.hash } },
       diagnostics: diagnostics(),
       transcript: s.transcript.slice(-30),
       screenshot: s.screenshot

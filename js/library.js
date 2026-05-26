@@ -11,34 +11,6 @@
     } catch (_) {}
   }
 
-
-  function recordLibraryIncident(kind, data = {}) {
-    try {
-      const entry = {
-        at: new Date().toISOString(),
-        surface: String(data.surface || 'library'),
-        feature: String(data.feature || 'library-account-import'),
-        kind: String(kind || 'library-event'),
-        detail: Object.assign({}, data || {}),
-      };
-      delete entry.detail.surface;
-      delete entry.detail.feature;
-      window.__rcLastLibraryImporterIncident = entry;
-      window.__rcLastMeaningfulIncident = entry;
-      libraryTrailPush(`library-incident:${entry.kind}`, { surface: entry.surface, feature: entry.feature, detail: entry.detail });
-      return entry;
-    } catch (_) { return null; }
-  }
-
-  function getRecentLibraryIncidentSnapshot() {
-    try { return window.__rcLastLibraryImporterIncident || null; } catch (_) { return null; }
-  }
-
-  try {
-    window.__rcRecordLibraryImporterIncident = recordLibraryIncident;
-    window.__rcGetLibraryImporterIncidentSnapshot = getRecentLibraryIncidentSnapshot;
-  } catch (_) {}
-
   // LOCAL LIBRARY (IndexedDB)
   // ===================================
   const LOCAL_DB_NAME = 'rc_local_library_v1';
@@ -343,14 +315,6 @@
     });
   }
 
-  async function localBookPutWithEvent(record, options = {}) {
-    const saved = await localBookPut(record);
-    try {
-      window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { reason: String(options.reason || 'local-book-put'), bookId: record && record.id ? String(record.id) : '' } }));
-    } catch (_) {}
-    return saved;
-  }
-
   async function localDeletedBooksGetAll() {
     const db = await openLocalDb();
     return new Promise((resolve, reject) => {
@@ -514,7 +478,7 @@
       tx.onerror = () => reject(tx.error || new Error('move failed'));
       tx.onabort = () => reject(tx.error || new Error('move aborted'));
     });
-    recordLibraryIncident('local-delete', { surface: 'library', bookId: `local:${String(id || '').trim()}`, behavior: 'moved-to-device-deleted-files' });
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: false });
     return true;
   }
 
@@ -538,13 +502,13 @@
       tx.onerror = () => reject(tx.error || new Error('restore failed'));
       tx.onabort = () => reject(tx.error || new Error('restore aborted'));
     });
-    recordLibraryIncident('local-restore', { surface: 'library', bookId: `local:${String(id || '').trim()}`, behavior: 'restored-device-local-copy' });
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { restore: true });
     return true;
   }
 
   async function permanentlyDeleteLocalBook(id) {
     await localDeletedBookDelete(id);
-    recordLibraryIncident('local-purge', { surface: 'library', bookId: `local:${String(id || '').trim()}`, behavior: 'permanently-deleted-device-local-copy' });
+    queueRemoteLibraryItemState(`local:${String(id || '').trim()}`, { purge: true });
     return true;
   }
 
@@ -552,14 +516,13 @@
     const uniqueIds = Array.from(new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean)));
     for (const id of uniqueIds) {
       await localDeletedBookDelete(id);
-      recordLibraryIncident('local-purge', { surface: 'library', bookId: `local:${id}`, behavior: 'permanently-deleted-device-local-copy' });
+      queueRemoteLibraryItemState(`local:${id}`, { purge: true });
     }
     return true;
   }
 
   window.__rcLocalBookGet = localBookGet;
-  window.__rcLocalBookPut = localBookPutWithEvent;
-  window.__rcLocalBookPutRaw = localBookPut;
+  window.__rcLocalBookPut = localBookPut;
   window.__rcLocalBooksGetAll = localBooksGetAll;
   window.__rcLocalDeletedBooksGetAll = localDeletedBooksGetAll;
   libraryTrailPush('library-owner-available', { hasLocalBooksGetAll: typeof localBooksGetAll === 'function' });
@@ -2922,84 +2885,6 @@
       deletedModal.setAttribute('aria-hidden', 'true');
     }
 
-
-    function getAccountSummary() {
-      try {
-        if (window.rcSync && typeof window.rcSync.getLibraryAccountSummary === 'function') return window.rcSync.getLibraryAccountSummary();
-      } catch (_) {}
-      const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
-      return { signedIn, hydrated: false, source: signedIn ? 'pending-server-snapshot' : 'signed-out', activeCount: 0, deletedCount: 0, totalCount: 0 };
-    }
-
-    function getAccountMetadataState(book) {
-      try {
-        if (window.rcSync && typeof window.rcSync.getLibraryAccountMetadataState === 'function') return window.rcSync.getLibraryAccountMetadataState(book);
-      } catch (_) {}
-      return { state: 'unknown-pending', source: 'unavailable', bookId: `local:${String(book?.id || '').trim()}` };
-    }
-
-    function accountMetadataLabelForState(state) {
-      const s = String(state?.state || '').trim();
-      if (s === 'account-metadata-active') return 'Account-library metadata visible';
-      if (s === 'removed-from-account') return 'Account-library metadata removed; still on this device';
-      if (s === 'signed-out') return 'On this device only; sign in to record account-library metadata';
-      if (s === 'unknown-pending') return 'Checking account-library metadata…';
-      return 'On this device only';
-    }
-
-    function setRowStatus(row, text) {
-      try {
-        const el = row && row.querySelector ? row.querySelector('[data-account-metadata-row-status="true"]') : null;
-        if (el) el.textContent = String(text || '');
-      } catch (_) {}
-    }
-
-    async function saveBookToAccount(book, row, btn) {
-      if (!(window.rcSync && typeof window.rcSync.recordLocalBookInAccountLibrary === 'function')) {
-        setRowStatus(row, 'Account-library metadata action is not available in this build.');
-        recordLibraryIncident('account-metadata-record-blocked', { surface: 'library-manage', bookId: `local:${String(book?.id || '').trim()}`, reason: 'missing-client-seam' });
-        return;
-      }
-      setButtonBusy(btn, true, 'Recording…');
-      setRowStatus(row, 'Recording account-library metadata…');
-      recordLibraryIncident('account-metadata-record-request', { surface: 'library-manage', bookId: `local:${String(book?.id || '').trim()}` });
-      const result = await window.rcSync.recordLocalBookInAccountLibrary(book).catch((error) => ({ ok: false, message: String(error?.message || error || 'metadata record failed') }));
-      if (!result || result.ok === false) {
-        setButtonBusy(btn, false);
-        const message = result?.reason === 'signed-out' ? 'Sign in to record this book in account-library metadata.' : (result?.message || 'Account-library metadata record failed.');
-        setRowStatus(row, message);
-        recordLibraryIncident('account-metadata-record-failed', { surface: 'library-manage', bookId: `local:${String(book?.id || '').trim()}`, reason: result?.reason || 'failed', message });
-        return;
-      }
-      recordLibraryIncident('account-metadata-record-success', { surface: 'library-manage', bookId: `local:${String(book?.id || '').trim()}`, source: 'durable-sync' });
-      emitLibraryChanged();
-      await render();
-    }
-
-    async function removeBookFromAccount(book, row, btn) {
-      const ok = confirm(`Remove account-library metadata for “${book.title || 'this book'}” from the account-library metadata?\n\nIt will stay readable on this device, but the account metadata row will be removed from the signed-in server snapshot.`);
-      if (!ok) return;
-      if (!(window.rcSync && typeof window.rcSync.removeLocalBookAccountMetadata === 'function')) {
-        setRowStatus(row, 'Account-library metadata removal is not available in this build.');
-        recordLibraryIncident('account-metadata-remove-blocked', { surface: 'library-manage', bookId: `local:${String(book?.id || '').trim()}`, reason: 'missing-client-seam' });
-        return;
-      }
-      setButtonBusy(btn, true, 'Removing…');
-      setRowStatus(row, 'Removing account-library metadata…');
-      recordLibraryIncident('account-metadata-remove-request', { surface: 'library-manage', bookId: `local:${String(book?.id || '').trim()}` });
-      const result = await window.rcSync.removeLocalBookAccountMetadata(book).catch((error) => ({ ok: false, message: String(error?.message || error || 'metadata removal failed') }));
-      if (!result || result.ok === false) {
-        setButtonBusy(btn, false);
-        const message = result?.reason === 'signed-out' ? 'Sign in to remove the account-library metadata row.' : (result?.message || 'Account-library metadata removal failed.');
-        setRowStatus(row, message);
-        recordLibraryIncident('account-metadata-metadata-removal-failed', { surface: 'library-manage', bookId: `local:${String(book?.id || '').trim()}`, reason: result?.reason || 'failed', message });
-        return;
-      }
-      recordLibraryIncident('account-metadata-remove-success', { surface: 'library-manage', bookId: `local:${String(book?.id || '').trim()}`, source: 'durable-sync' });
-      emitLibraryChanged();
-      await render();
-    }
-
     async function render() {
       listEl.innerHTML = '';
       let books = [];
@@ -3009,16 +2894,11 @@
       const limit = (window.rcPolicy && typeof window.rcPolicy.getImportSlotLimit === 'function')
         ? window.rcPolicy.getImportSlotLimit()
         : null;
-      const accountSummary = getAccountSummary();
       const meta = document.createElement('div');
       meta.className = 'import-status';
-      const deviceText = limit == null
-        ? `Device books: ${count}`
-        : `Device books: ${count}/${limit}`;
-      const accountText = accountSummary.signedIn
-        ? (accountSummary.hydrated ? `Account metadata rows: ${accountSummary.activeCount}` : 'Account metadata rows: checking…')
-        : 'Account metadata rows: sign in to view';
-      meta.textContent = `${deviceText} • ${accountText}`;
+      meta.textContent = limit == null
+        ? `Saved on this device: ${count}`
+        : `Saved on this device: ${count}/${limit}`;
       listEl.appendChild(meta);
 
       if (!books.length) {
@@ -3045,38 +2925,11 @@
           const kb = Math.round((b.byteSize || 0) / 1024);
           const pages = (String(b.markdown || '').match(/^\s*##\s+/gm) || []).length;
           m.textContent = `${pages} pages • ~${kb} KB • ${new Date(b.createdAt || Date.now()).toLocaleDateString()}`;
-          const accountMetadataState = getAccountMetadataState(b);
-          const cm = document.createElement('div');
-          cm.className = 'library-row-meta';
-          cm.dataset.accountMetadataRowStatus = 'true';
-          cm.textContent = accountMetadataLabelForState(accountMetadataState);
           left.appendChild(t);
           left.appendChild(m);
-          left.appendChild(cm);
 
           const actions = document.createElement('div');
           actions.className = 'library-row-actions';
-          const accountMetadataStateForActions = getAccountMetadataState(b);
-          if (accountMetadataStateForActions.state === 'account-metadata-active') {
-            const remove = document.createElement('button');
-            remove.className = 'btn-secondary';
-            remove.type = 'button';
-            remove.textContent = 'Remove account record';
-            remove.addEventListener('click', () => removeBookFromAccount(b, row, remove));
-            actions.appendChild(remove);
-          } else {
-            const save = document.createElement('button');
-            save.className = 'btn-secondary';
-            save.type = 'button';
-            save.textContent = 'Record in account library';
-            const canSave = accountMetadataStateForActions.state === 'device-only' || accountMetadataStateForActions.state === 'removed-from-account';
-            save.disabled = !canSave;
-            save.title = accountMetadataStateForActions.state === 'signed-out'
-              ? 'Sign in to record this device book in account-library metadata.'
-              : (accountMetadataStateForActions.state === 'unknown-pending' ? 'Waiting for account library state.' : 'Record this device book in account-library metadata.');
-            save.addEventListener('click', () => saveBookToAccount(b, row, save));
-            actions.appendChild(save);
-          }
           const del = document.createElement('button');
           del.className = 'btn-danger';
           del.type = 'button';
@@ -3217,7 +3070,6 @@ This removes them from Deleted Files and frees the device storage.`);
     }
 
     openBtn.addEventListener('click', show);
-    try { document.addEventListener('rc:durable-data-hydrated', () => { if (modal && modal.style.display === 'flex') render(); }); } catch (_) {}
     closeBtn?.addEventListener('click', hide);
     modal.addEventListener('click', (e) => { if (e.target === modal) hide(); });
     deletedManageBtn?.addEventListener('click', showDeleted);

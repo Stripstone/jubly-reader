@@ -375,19 +375,6 @@ async function requestServerPageBreak(payload) {
       return `${safePrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     }
 
-
-    function recordImportIncident(kind, data = {}) {
-      try {
-        if (typeof window.__rcRecordLibraryImporterIncident === 'function') {
-          return window.__rcRecordLibraryImporterIncident(kind, Object.assign({ surface: 'importer', feature: 'import' }, data || {}));
-        }
-        const entry = { at: new Date().toISOString(), surface: 'importer', feature: 'import', kind: String(kind || 'import-event'), detail: Object.assign({}, data || {}) };
-        window.__rcLastLibraryImporterIncident = entry;
-        window.__rcLastMeaningfulIncident = entry;
-        return entry;
-      } catch (_) { return null; }
-    }
-
     async function completeImportAndReturn(countLabel) {
       try { if (typeof window.__rcRefreshBookSelect === 'function') await window.__rcRefreshBookSelect(); } catch (_) {}
       try { window.dispatchEvent(new CustomEvent('rc:local-library-changed', { detail: { count: await getLocalBookCount() } })); } catch (_) {}
@@ -443,16 +430,11 @@ async function requestServerPageBreak(payload) {
           byteSize: raw.length,
           pageCount: Number(pageBreak?.pageCount || pages.length),
           markdown,
-          storageKind: 'device_local',
-          accountLibraryStatus: 'device_only',
-          importCompletedAt: new Date().toISOString(),
-          importState: 'completed',
         };
 
         setProgress(75, 'Saving to device', `${pages.length} pages created`);
-        if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record, { reason: 'text-import-complete' });
+        if (typeof window.__rcLocalBookPut === 'function') await window.__rcLocalBookPut(record);
         else if (typeof localBookPut === 'function') await localBookPut(record);
-        recordImportIncident('import-complete', { bookId: `local:${id}`, importKind: 'text', pageCount: Number(pageBreak?.pageCount || pages.length), syncState: 'device-local' });
         setProgress(100, 'Import complete', `${pages.length} pages created`);
         try {
           if (window.rcUsage && typeof window.rcUsage.consume === 'function') {
@@ -464,7 +446,6 @@ async function requestServerPageBreak(payload) {
         await completeImportAndReturn(`${pages.length} pages created`);
       } catch (e) {
         console.error('Text import error:', e);
-        recordImportIncident('import-failed', { importKind: 'text', message: String(e && e.message || e || 'text import failed') });
         setProgress(100, 'Import failed', 'Try again with different text.');
         doneBtn.style.display = 'inline-block';
       } finally {
@@ -1074,14 +1055,9 @@ async function requestServerPageBreak(payload) {
           importKind: (_inputFormat || 'epub').toLowerCase(),
           byteSize: selectedFile.size || 0,
           pageCount: createdPages,
-          markdown: md,
-          storageKind: 'device_local',
-          accountLibraryStatus: 'device_only',
-          importCompletedAt: new Date().toISOString(),
-          importState: 'completed',
+          markdown: md
         };
         await localBookPut(record);
-        recordImportIncident('import-complete', { bookId: `local:${id}`, importKind: (_inputFormat || 'epub').toLowerCase(), pageCount: createdPages, syncState: 'device-local' });
 
         setProgress(100, 'Import complete', `${createdPages} pages created`);
         try {
@@ -1094,7 +1070,6 @@ async function requestServerPageBreak(payload) {
         await completeImportAndReturn(`${createdPages} pages created`);
       } catch (e) {
         console.error('EPUB import error:', e);
-        recordImportIncident('import-failed', { importKind: (_inputFormat || 'epub').toLowerCase(), message: String(e && e.message || e || 'EPUB import failed') });
         setProgress(100, 'Import failed', 'Try again with a different file.');
         doneBtn.style.display = 'inline-block';
       } finally {
