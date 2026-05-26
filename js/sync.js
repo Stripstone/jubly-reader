@@ -41,7 +41,8 @@ window.rcSync = (function () {
   const _cachedSnapshotApplyCount = Object.create(null);
   let _hydrationState = { inFlight: false, users: false, settings: false, progress: false, sessions: false, usage: false };
   let _lastSyncSnapshotAt = null;
-  let _syncDiagnostics = { users: null, settings: null, progress: null, sessions: null, restore: null, snapshot: null };
+  let _syncDiagnostics = { users: null, settings: null, progress: null, sessions: null, restore: null, snapshot: null, library: null };
+  let _lastLibraryAction = null;
   const RC_EVENT_TRAIL_MAX = 40;
   if (!Array.isArray(window.__rcEventTrail)) window.__rcEventTrail = [];
   function _pushEvent(tag, data) {
@@ -921,6 +922,151 @@ window.rcSync = (function () {
     }
   }
 
+
+  function _activeLibraryItems() {
+    return (_remoteLibraryItems || []).filter((row) => String(row?.status || 'active') === 'active');
+  }
+
+  function _findRemoteLibraryItemByBookId(bookId, { includeDeleted = true } = {}) {
+    const key = _normalizeBookId(bookId);
+    if (!key) return null;
+    const rows = Array.isArray(_remoteLibraryItems) ? _remoteLibraryItems : [];
+    const matches = rows.filter((row) => _normalizeBookId(row?.storage_ref || row?.book_id || row?.bookId) === key);
+    if (!includeDeleted) return matches.find((row) => String(row?.status || 'active') === 'active') || null;
+    return matches.find((row) => String(row?.status || 'active') === 'active') || matches[0] || null;
+  }
+
+  function _getLibraryAccountSummary() {
+    const hydrated = !!(_hydrationState.progress || _lastSyncSnapshotAt);
+    const signedIn = _ready();
+    const rows = Array.isArray(_remoteLibraryItems) ? _remoteLibraryItems.slice() : [];
+    const active = rows.filter((row) => String(row?.status || 'active') === 'active');
+    const deleted = rows.filter((row) => String(row?.status || '') === 'deleted');
+    return {
+      signedIn,
+      hydrated,
+      source: hydrated ? 'server-snapshot' : (signedIn ? 'pending-server-snapshot' : 'signed-out'),
+      activeCount: active.length,
+      deletedCount: deleted.length,
+      totalCount: rows.length,
+      active,
+      deleted,
+      lastSnapshotAt: _lastSyncSnapshotAt,
+      lastLibraryAction: _lastLibraryAction,
+    };
+  }
+
+
+  function _sanitizeLibraryActionForSupport(action) {
+    if (!action || typeof action !== 'object') return null;
+    return {
+      action: String(action.action || '').trim() || null,
+      status: String(action.status || '').trim() || null,
+      reason: String(action.reason || '').trim() || null,
+      bookId: String(action.bookId || action.book_id || '').trim() || null,
+      at: String(action.at || '').trim() || null,
+    };
+  }
+
+  function _getLibraryAccountSupportSummary() {
+    const summary = _getLibraryAccountSummary();
+    return {
+      signedIn: !!summary.signedIn,
+      hydrated: !!summary.hydrated,
+      source: summary.source,
+      activeCount: summary.activeCount,
+      deletedCount: summary.deletedCount,
+      totalCount: summary.totalCount,
+      lastSnapshotAt: summary.lastSnapshotAt || null,
+      lastLibraryAction: _sanitizeLibraryActionForSupport(summary.lastLibraryAction),
+    };
+  }
+
+  function _normalizeLocalLibraryBookId(recordOrId) {
+    const raw = typeof recordOrId === 'object' && recordOrId ? (recordOrId.id || recordOrId.storage_ref || recordOrId.book_id || recordOrId.bookId) : recordOrId;
+    const id = _normalizeBookId(raw);
+    if (!id) return '';
+    return /^local:/i.test(id) ? id : `local:${id}`;
+  }
+
+  function _getLibraryAccountMetadataState(recordOrId) {
+    const bookId = _normalizeLocalLibraryBookId(recordOrId);
+    const row = _findRemoteLibraryItemByBookId(bookId, { includeDeleted: true });
+    const summary = _getLibraryAccountSummary();
+    if (row && String(row.status || 'active') === 'active') {
+      return { state: 'account-metadata-active', source: 'server-snapshot', bookId, row, summary };
+    }
+    if (row && String(row.status || '') === 'deleted') {
+      return { state: 'removed-from-account', source: 'server-snapshot', bookId, row, summary };
+    }
+    if (!summary.signedIn) return { state: 'signed-out', source: 'auth', bookId, row: null, summary };
+    if (!summary.hydrated) return { state: 'unknown-pending', source: 'pending-server-snapshot', bookId, row: null, summary };
+    return { state: 'device-only', source: 'server-snapshot', bookId, row: null, summary };
+  }
+
+  async function recordLocalBookInAccountLibrary(recordOrId) {
+    if (!_ready()) {
+      _lastLibraryAction = { action: 'record-account-library-metadata', status: 'blocked', reason: 'signed-out', at: new Date().toISOString() };
+      _recordSync('library', 'blocked', _lastLibraryAction);
+      return { ok: false, reason: 'signed-out' };
+    }
+    const bookId = _normalizeLocalLibraryBookId(recordOrId);
+    if (!bookId) return { ok: false, reason: 'missing-book-id' };
+    const meta = await _collectLibraryItemMeta(bookId, 0);
+    const payload = Object.assign({}, meta || {}, {
+      book_id: bookId,
+      source_type: 'book',
+      source_id: bookId,
+      chapter_id: null,
+      last_page_index: 0,
+      last_read_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      is_active: true,
+      session_version: 1,
+    });
+    _lastLibraryAction = { action: 'record-account-library-metadata', status: 'pending', bookId, at: new Date().toISOString() };
+    _recordSync('library', 'pending', { ..._lastLibraryAction, payload });
+    try {
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'write_progress', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      const row = _findRemoteLibraryItemByBookId(bookId, { includeDeleted: true }) || (data && data.row ? data.row : null);
+      _lastLibraryAction = { action: 'record-account-library-metadata', status: 'success', bookId, row, at: new Date().toISOString() };
+      _recordSync('library', 'success', _lastLibraryAction);
+      _emitHydrated('library');
+      return { ok: true, row, snapshotAt: _lastSyncSnapshotAt };
+    } catch (error) {
+      _lastLibraryAction = { action: 'record-account-library-metadata', status: 'error', bookId, message: String(error?.message || error || 'metadata record failed'), at: new Date().toISOString() };
+      _recordSync('library', 'error', _lastLibraryAction);
+      return { ok: false, reason: 'metadata-record-failed', message: _lastLibraryAction.message };
+    }
+  }
+
+  async function removeLocalBookAccountMetadata(recordOrId) {
+    if (!_ready()) {
+      _lastLibraryAction = { action: 'remove-account-library-metadata', status: 'blocked', reason: 'signed-out', at: new Date().toISOString() };
+      _recordSync('library', 'blocked', _lastLibraryAction);
+      return { ok: false, reason: 'signed-out' };
+    }
+    const bookId = _normalizeLocalLibraryBookId(recordOrId);
+    if (!bookId) return { ok: false, reason: 'missing-book-id' };
+    _lastLibraryAction = { action: 'remove-account-library-metadata', status: 'pending', bookId, at: new Date().toISOString() };
+    _recordSync('library', 'pending', _lastLibraryAction);
+    try {
+      const payload = { book_id: bookId, purge: false };
+      const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'delete_library_item', payload } });
+      if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+      const row = data && data.row ? data.row : _findRemoteLibraryItemByBookId(bookId, { includeDeleted: true });
+      _lastLibraryAction = { action: 'remove-account-library-metadata', status: 'success', bookId, row, at: new Date().toISOString() };
+      _recordSync('library', 'success', _lastLibraryAction);
+      _emitHydrated('library');
+      return { ok: true, row, snapshotAt: _lastSyncSnapshotAt };
+    } catch (error) {
+      _lastLibraryAction = { action: 'remove-account-library-metadata', status: 'error', bookId, message: String(error?.message || error || 'metadata removal failed'), at: new Date().toISOString() };
+      _recordSync('library', 'error', _lastLibraryAction);
+      return { ok: false, reason: 'metadata-removal-failed', message: _lastLibraryAction.message };
+    }
+  }
+
   // ── Progress identity ─────────────────────────────────────────────────────
   function _collectProgressIdentity(bookId, chapterIndex) {
     const target = window.__rcReadingTarget || {};
@@ -1270,6 +1416,12 @@ window.rcSync = (function () {
     getSettings,
     rehydrateDurableData,
     getRemoteUsersRow: () => _remoteUsersRow,
+    getRemoteLibraryItems: () => Array.isArray(_remoteLibraryItems) ? _remoteLibraryItems.slice() : [],
+    getLibraryAccountSummary: () => _getLibraryAccountSummary(),
+    getLibraryAccountSupportSummary: () => _getLibraryAccountSupportSummary(),
+    getLibraryAccountMetadataState: (recordOrId) => _getLibraryAccountMetadataState(recordOrId),
+    recordLocalBookInAccountLibrary,
+    removeLocalBookAccountMetadata,
     getRemoteUsageSummary: () => _remoteUsageSummary,
     getResolvedUsageSummary: () => _getResolvedUsageSummary(),
     getHydrationState: () => ({ ..._hydrationState }),
@@ -1284,6 +1436,7 @@ window.rcSync = (function () {
       usage: _remoteUsageSummary,
       resolvedUsage: _getResolvedUsageSummary(),
       libraryItemCount: (_remoteLibraryItems || []).length,
+      libraryAccountSummary: _getLibraryAccountSupportSummary(),
       progressCount: (_remoteProgressRows || []).length,
       bookMetricsCount: (_remoteBookMetricsRows || []).length,
       dailyStatCount: (_remoteDailyStatsRows || []).length,

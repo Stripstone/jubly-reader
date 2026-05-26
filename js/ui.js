@@ -187,8 +187,8 @@
         'Superstar','Whisper','Zarvox','Trinoids'
       ];
 
-      const FEMALE_NAMES = ['Aria','Jenny','Samantha','Karen','Moira','Serena','Tessa','Zira','Eva','Susan','Victoria','Fiona','Allison','Ava','Nora'];
-      const MALE_NAMES   = ['Daniel','Rishi','Alex','Guy','Ryan','Fred','David','Mark','Tom','Bruce','James'];
+      const FEMALE_NAMES = ['Sara','Jenny','Aria','Samantha','Karen','Moira','Serena','Tessa','Zira','Eva','Susan','Victoria','Fiona','Allison','Ava','Nora'];
+      const MALE_NAMES   = ['William','Davis','Guy','Daniel','Rishi','Alex','Ryan','Fred','David','Mark','Tom','Bruce','James'];
 
       function buildVoiceSelect(selectEl, gender) {
         if (!selectEl) return;
@@ -236,18 +236,18 @@
 
           const AZURE_VOICES = gender === 'female'
             ? [
-                { id: 'en-US-AriaNeural',     label: 'Aria (US)' },
-                { id: 'en-US-JennyNeural',    label: 'Jenny (US)' },
-                { id: 'en-US-SaraNeural',     label: 'Sara (US)' },
+                { id: 'en-US-SaraNeural',     label: 'Sara — Premium Jubly' },
+                { id: 'en-US-JennyNeural',    label: 'Jenny — Premium Jubly' },
+                { id: 'en-US-AriaNeural',     label: 'Aria — Premium Jubly' },
                 { id: 'en-GB-SoniaNeural',    label: 'Sonia (UK)' },
                 { id: 'en-AU-NatashaNeural',  label: 'Natasha (AU)' },
               ]
             : [
+                { id: 'en-AU-WilliamNeural',  label: 'William — Premium Jubly' },
+                { id: 'en-US-DavisNeural',    label: 'Davis — Premium Jubly' },
+                { id: 'en-US-GuyNeural',      label: 'Guy — Premium Jubly' },
                 { id: 'en-US-RyanNeural',     label: 'Ryan (US)' },
-                { id: 'en-US-GuyNeural',      label: 'Guy (US)' },
-                { id: 'en-US-DavisNeural',    label: 'Davis (US)' },
                 { id: 'en-GB-RyanNeural',     label: 'Ryan (UK)' },
-                { id: 'en-AU-WilliamNeural',  label: 'William (AU)' },
               ];
 
           AZURE_VOICES.forEach(v => {

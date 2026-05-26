@@ -69,7 +69,7 @@
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
-    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'mara', theme: 'default', speed: 1 });
+    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'sara', theme: 'default', speed: 1 });
     let _publicOnboardingChoices = Object.assign({}, PUBLIC_ONBOARDING_DEFAULTS);
     let _publicOnboardingTimer = null;
     let _shellAuthBootstrapped = false;
@@ -1592,7 +1592,7 @@ window.rcInteraction = (function () {
 
     function _existingAccountSteerMessage(pendingPlan) {
         return pendingPlan && pendingPlan !== 'free'
-            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Pro' : 'Pro'} checkout.`
             : 'An account with this email already exists. Log In to continue.';
     }
 
@@ -1842,10 +1842,10 @@ window.rcInteraction = (function () {
                     _steerExistingAccountToSignin(email, pendingPlan);
                 } else if (result?.data?.session) {
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free'
-                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
+                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Pro' : 'Pro'} checkout…`
                         : 'Account created. Continuing to your library…');
                 } else {
-                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Check your email to verify your account.');
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Pro' : 'Pro'} checkout.` : 'Check your email to verify your account.');
                 }
             } else {
                 const { error } = await window.rcAuth.signIn(email, password);
@@ -1859,7 +1859,7 @@ window.rcInteraction = (function () {
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     if (pendingPlan === 'pro' || pendingPlan === 'premium') {
-                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`);
+                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Pro' : 'Pro'} checkout…`);
                     }
                 }
             }
@@ -2029,7 +2029,7 @@ window.rcInteraction = (function () {
         const current = (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function')
             ? window.rcEntitlements.getTier()
             : ((window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic');
-        const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' };
+        const map = { basic: 'Basic', pro: 'Pro', premium: 'Pro' };
         document.querySelectorAll('.tier-btn').forEach((btn) => {
             const next = map[current] || 'Basic';
             btn.classList.toggle('active', btn.textContent.trim() === next);
@@ -2057,7 +2057,7 @@ window.rcInteraction = (function () {
     function updateTierPill() {
         const tier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
         const pill = document.getElementById('reading-tier-pill');
-        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' }; pill.textContent = map[tier] || 'Basic'; }
+        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Pro' }; pill.textContent = map[tier] || 'Basic'; }
     }
 
     function getCurrentTier() {

@@ -89,6 +89,18 @@ const TTS_DEBUG = {
   lastPauseStrategy: null,
   lastRouteDecision: null,
   lastSkip: null,
+  lastUsage: null,
+  lastIncident: null,
+};
+
+const TTS_USAGE_SEAM = {
+  active: null,
+  consumedReplayKeys: [],
+  commits: [],
+  lastCheck: null,
+  lastConsume: null,
+  lastSkipped: null,
+  lastBlocked: null,
 };
 
 // ─── Cloud synthesis window state ─────────────────────────────────────────────
@@ -673,10 +685,225 @@ function ttsDiagPush(event, data = {}) {
   TTS_DEBUG.lastAction = entry;
   TTS_DEBUG.recent.push(entry);
   if (TTS_DEBUG.recent.length > 60) TTS_DEBUG.recent.shift();
+  if (/^(usage-|playback-committed|cloud-playback-failed|browser-|autoplay-|window-)/.test(String(event || ''))) {
+    recordTtsIncidentFootprint(event, data, entry);
+  }
   try { if (typeof updateDiagnostics === 'function') updateDiagnostics(); } catch (_) {}
   return entry;
 }
 
+function recordTtsIncidentFootprint(event, data = {}, entry) {
+  const key = data && data.key ? String(data.key || '') : String(TTS_STATE.activeKey || TTS_STATE.pausedPageKey || TTS_STATE.lastPageKey || '');
+  const parsed = key && typeof readingTargetFromKey === 'function' ? readingTargetFromKey(key) : null;
+  const footprint = {
+    capturedAt: entry && entry.at ? entry.at : new Date().toISOString(),
+    currentSurface: 'reading-tts',
+    recentSurface: 'reading-tts',
+    featureOwner: 'Lane 3C / TTS usage seam',
+    event: String(event || ''),
+    sessionId: Number((data && data.sessionId) || TTS_STATE.activeSessionId || 0),
+    pageKey: key || null,
+    pageIndex: parsed && Number.isFinite(Number(parsed.pageIndex)) ? Number(parsed.pageIndex) : ((typeof inferCurrentPageIndex === 'function') ? inferCurrentPageIndex() : -1),
+    activeBlockIndex: Number(TTS_STATE.activeBlockIndex ?? -1),
+    route: safeTtsRouteForDiagnostics(),
+    usage: getTtsUsageSeamSnapshot(),
+    playback: {
+      active: !!TTS_STATE.activeKey,
+      paused: !!(TTS_STATE.audio && TTS_STATE.audio.paused),
+      currentTime: Number((TTS_STATE.audio && TTS_STATE.audio.currentTime) || 0),
+      blockedReason: TTS_STATE.playbackBlockedReason || '',
+    },
+  };
+  TTS_DEBUG.lastIncident = footprint;
+  try { window.__rcLastTtsIncident = footprint; } catch (_) {}
+  try { window.dispatchEvent(new CustomEvent('rc:tts-incident', { detail: footprint })); } catch (_) {}
+  return footprint;
+}
+
+function safeTtsRouteForDiagnostics() {
+  try { return getPreferredTtsRouteInfo(); } catch (_) { return null; }
+}
+
+function getAuthSignedInForTts() {
+  try { return !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn()); } catch (_) { return false; }
+}
+
+function getTtsKeyPageIndex(key) {
+  try {
+    const parsed = key && typeof readingTargetFromKey === 'function' ? readingTargetFromKey(key) : null;
+    const n = parsed ? Number(parsed.pageIndex) : NaN;
+    return Number.isFinite(n) ? n : -1;
+  } catch (_) { return -1; }
+}
+
+function isSignedOutPublicSampleTts(key) {
+  if (getAuthSignedInForTts()) return false;
+  let target = null;
+  try { target = key && typeof readingTargetFromKey === 'function' ? readingTargetFromKey(key) : null; } catch (_) {}
+  const sourceType = String((target && target.sourceType) || (window.__rcReadingTarget && window.__rcReadingTarget.sourceType) || '').toLowerCase();
+  const bookId = String((target && target.bookId) || (window.__rcReadingTarget && window.__rcReadingTarget.bookId) || '').toLowerCase();
+  const href = String((typeof location !== 'undefined' && location.href) || '').toLowerCase();
+  return /public|sample|demo|trial|intro/.test(sourceType) || /public|sample|demo|trial|intro|readingtraining/.test(bookId) || /public|sample|demo|trial/.test(href);
+}
+
+function isProtectedCloudTtsRoute(routeInfo, key) {
+  if (!routeInfo || !routeInfo.cloudCapable) return false;
+  if (routeInfo.requestedPath === 'browser-selected') return false;
+  if (isSignedOutPublicSampleTts(key)) return false;
+  return true;
+}
+
+function isTtsReplayGraceKey(key) {
+  const k = String(key || '');
+  return !!k && TTS_USAGE_SEAM.consumedReplayKeys.includes(k);
+}
+
+function rememberTtsConsumedReplayKey(key) {
+  const k = String(key || '');
+  if (!k) return;
+  TTS_USAGE_SEAM.consumedReplayKeys = [k].concat(TTS_USAGE_SEAM.consumedReplayKeys.filter(x => x !== k)).slice(0, 2);
+}
+
+function getTtsUsageSeamSnapshot() {
+  return {
+    active: TTS_USAGE_SEAM.active ? { ...TTS_USAGE_SEAM.active } : null,
+    replayGraceKeys: TTS_USAGE_SEAM.consumedReplayKeys.slice(0, 2),
+    commits: TTS_USAGE_SEAM.commits.slice(-8),
+    lastCheck: TTS_USAGE_SEAM.lastCheck,
+    lastConsume: TTS_USAGE_SEAM.lastConsume,
+    lastSkipped: TTS_USAGE_SEAM.lastSkipped,
+    lastBlocked: TTS_USAGE_SEAM.lastBlocked,
+  };
+}
+
+function recordTtsUsageSkipped(reason, detail = {}) {
+  const payload = { at: new Date().toISOString(), reason: String(reason || 'unknown'), ...detail, spendNow: false, durableConsume: false };
+  TTS_USAGE_SEAM.lastSkipped = payload;
+  TTS_DEBUG.lastUsage = { type: 'skipped', ...payload };
+  ttsDiagPush('usage-consume-skipped', payload);
+  return payload;
+}
+
+async function beginTtsUsageSeamForSession(key, sessionId, routeInfo, detail = {}) {
+  const protectedCloud = isProtectedCloudTtsRoute(routeInfo, key);
+  const replayGrace = protectedCloud && isTtsReplayGraceKey(key);
+  const publicSampleNoCharge = !!isSignedOutPublicSampleTts(key);
+  const seam = {
+    key: String(key || ''),
+    pageIndex: getTtsKeyPageIndex(key),
+    sessionId: Number(sessionId || 0),
+    routePath: routeInfo && routeInfo.requestedPath ? routeInfo.requestedPath : '',
+    routeReason: routeInfo && routeInfo.reason ? routeInfo.reason : '',
+    selectedVoiceType: routeInfo && routeInfo.selected ? routeInfo.selected.type : '',
+    protectedCloud,
+    checked: false,
+    checkAllowed: null,
+    checkReason: '',
+    consumeAttempted: false,
+    consumed: false,
+    consumeReason: '',
+    commitRecorded: false,
+    replayGrace,
+    publicSampleNoCharge,
+    startedAt: new Date().toISOString(),
+    source: detail.source || 'ttsSpeakQueue',
+    autoplay: !!detail.autoplay,
+  };
+  TTS_USAGE_SEAM.active = seam;
+  ttsDiagPush('usage-path-resolved', { ...seam, route: routeInfo });
+
+  if (!protectedCloud) {
+    const reason = publicSampleNoCharge ? 'signed-out-public-sample' : (routeInfo && routeInfo.requestedPath === 'browser-selected' ? 'browser-selected' : 'browser-basic-or-nonprotected-path');
+    recordTtsUsageSkipped(reason, { key, sessionId, routePath: seam.routePath, selectedVoiceType: seam.selectedVoiceType });
+    return { allowed: true, protectedCloud: false, replayGrace: false, reason };
+  }
+
+  if (replayGrace) {
+    recordTtsUsageSkipped('replay-window', { key, sessionId, replayGraceKeys: TTS_USAGE_SEAM.consumedReplayKeys.slice(0, 2), routePath: seam.routePath });
+    return { allowed: true, protectedCloud: true, replayGrace: true, reason: 'replay-window' };
+  }
+
+  if (!(window.rcUsage && typeof window.rcUsage.check === 'function')) {
+    seam.checked = false;
+    seam.checkAllowed = true;
+    seam.checkReason = 'no-usage-check-owner';
+    TTS_USAGE_SEAM.lastCheck = { at: new Date().toISOString(), key, sessionId, allowed: true, reason: seam.checkReason, source: 'missing-rcUsage.check' };
+    ttsDiagPush('usage-check-skipped', { key, sessionId, allowed: true, reason: seam.checkReason, protectedCloud: true });
+    return { allowed: true, protectedCloud: true, replayGrace: false, reason: seam.checkReason };
+  }
+
+  try {
+    const verdict = await window.rcUsage.check('tts');
+    const allowed = !!verdict?.allowed;
+    seam.checked = true;
+    seam.checkAllowed = allowed;
+    seam.checkReason = verdict?.reason || (allowed ? 'ok' : 'denied');
+    TTS_USAGE_SEAM.lastCheck = { at: new Date().toISOString(), key, sessionId, allowed, reason: seam.checkReason, cost: verdict?.cost, remaining: verdict?.remaining, limit: verdict?.limit, meta: verdict?.meta || null };
+    ttsDiagPush('usage-check-result', { key, sessionId, allowed, reason: seam.checkReason, cost: verdict?.cost, remaining: verdict?.remaining, limit: verdict?.limit, protectedCloud: true, routePath: seam.routePath });
+    if (!allowed) {
+      TTS_USAGE_SEAM.lastBlocked = { at: new Date().toISOString(), key, sessionId, reason: seam.checkReason, source: 'usage-check' };
+      ttsDiagPush('usage-blocked', { key, sessionId, reason: seam.checkReason, protectedCloud: true, routePath: seam.routePath });
+    }
+    return { allowed, protectedCloud: true, replayGrace: false, reason: seam.checkReason, verdict };
+  } catch (err) {
+    seam.checked = false;
+    seam.checkAllowed = true;
+    seam.checkReason = 'usage-check-error-proceed';
+    TTS_USAGE_SEAM.lastCheck = { at: new Date().toISOString(), key, sessionId, allowed: true, reason: seam.checkReason, error: String(err?.message || err) };
+    ttsDiagPush('usage-check-error', { key, sessionId, allowed: true, reason: seam.checkReason, error: String(err?.message || err), protectedCloud: true });
+    return { allowed: true, protectedCloud: true, replayGrace: false, reason: seam.checkReason };
+  }
+}
+
+async function consumeTtsUsageAfterCommittedPlayback({ key, sessionId, source, audio, autoplay }) {
+  const seam = TTS_USAGE_SEAM.active;
+  const k = String(key || (seam && seam.key) || '');
+  const sid = Number(sessionId || (seam && seam.sessionId) || 0);
+  const base = { key: k, sessionId: sid, source: source || 'playback-commit', autoplay: !!autoplay, currentTime: Number((audio && audio.currentTime) || 0) };
+  if (!seam || seam.key !== k || Number(seam.sessionId || 0) !== sid) return recordTtsUsageSkipped('no-active-usage-seam', base);
+  if (!seam.protectedCloud) return recordTtsUsageSkipped(seam.publicSampleNoCharge ? 'signed-out-public-sample' : 'nonprotected-path', { ...base, routePath: seam.routePath });
+  if (seam.replayGrace) return recordTtsUsageSkipped('replay-window', { ...base, routePath: seam.routePath });
+  if (seam.consumed || seam.consumeAttempted) return recordTtsUsageSkipped('already-consumed-this-session', { ...base, routePath: seam.routePath });
+  if (!(window.rcUsage && typeof window.rcUsage.consume === 'function')) return recordTtsUsageSkipped('no-usage-consume-owner', { ...base, routePath: seam.routePath });
+
+  seam.commitRecorded = true;
+  seam.consumeAttempted = true;
+  TTS_USAGE_SEAM.commits.push({ at: new Date().toISOString(), ...base, routePath: seam.routePath, selectedVoiceType: seam.selectedVoiceType });
+  TTS_USAGE_SEAM.commits = TTS_USAGE_SEAM.commits.slice(-12);
+  ttsDiagPush('playback-committed', { ...base, protectedCloud: true, routePath: seam.routePath, selectedVoiceType: seam.selectedVoiceType });
+  try {
+    const result = await window.rcUsage.consume('tts');
+    seam.consumed = !!result?.allowed;
+    seam.consumeReason = result?.reason || (result?.allowed ? 'ok' : 'rejected');
+    if (seam.consumed) rememberTtsConsumedReplayKey(k);
+    TTS_USAGE_SEAM.lastConsume = { at: new Date().toISOString(), key: k, sessionId: sid, allowed: !!result?.allowed, reason: seam.consumeReason, cost: result?.cost, remaining: result?.remaining, limit: result?.limit, meta: result?.meta || null, source: source || 'playback-commit' };
+    TTS_DEBUG.lastUsage = { type: 'consume', ...TTS_USAGE_SEAM.lastConsume };
+    ttsDiagPush(result?.allowed ? 'usage-consume-result' : 'usage-consume-rejected', { ...TTS_USAGE_SEAM.lastConsume, protectedCloud: true, replayGraceKeys: TTS_USAGE_SEAM.consumedReplayKeys.slice(0, 2) });
+    return result;
+  } catch (err) {
+    seam.consumed = false;
+    seam.consumeReason = 'usage-consume-error';
+    TTS_USAGE_SEAM.lastConsume = { at: new Date().toISOString(), key: k, sessionId: sid, allowed: false, reason: seam.consumeReason, error: String(err?.message || err), source: source || 'playback-commit' };
+    TTS_DEBUG.lastUsage = { type: 'consume-error', ...TTS_USAGE_SEAM.lastConsume };
+    ttsDiagPush('usage-consume-error', { ...TTS_USAGE_SEAM.lastConsume, protectedCloud: true });
+    return null;
+  }
+}
+
+function armTtsPlaybackCommit(audio, { key, sessionId, source, autoplay } = {}) {
+  if (!audio) return false;
+  let fired = false;
+  const fire = () => {
+    if (fired) return;
+    fired = true;
+    try { audio.removeEventListener('playing', fire); } catch (_) {}
+    try { audio.removeEventListener('timeupdate', fire); } catch (_) {}
+    try { consumeTtsUsageAfterCommittedPlayback({ key, sessionId, source, audio, autoplay }); } catch (_) {}
+  };
+  try { audio.addEventListener('playing', fire, { once: true }); } catch (_) {}
+  try { audio.addEventListener('timeupdate', () => { if (Number(audio.currentTime || 0) > 0) fire(); }, { once: true }); } catch (_) {}
+  return true;
+}
 
 function normalizeTtsCapability(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -1228,8 +1455,8 @@ function consumeAutoplayPresynthForResolved(resolved) {
   if (token.ready && token.status === 'ready') {
     token.consumed = true;
     token.status = 'consumed';
-    markTtsFullPageReady(nextKey, { source: 'autoplay-presynth-consumed', marksCount: Array.isArray(token.result?.sentenceMarks) ? token.result.sentenceMarks.length : 0 });
-    ttsDiagPush('autoplay-presynth-consumed', {
+    markTtsFullPageReady(nextKey, { source: 'autoplay-presynth-cache-used-no-durable-consume', marksCount: Array.isArray(token.result?.sentenceMarks) ? token.result.sentenceMarks.length : 0 });
+    ttsDiagPush('autoplay-presynth-cache-used-no-durable-consume', {
       ...base,
       elapsedMs: token.readyAt ? token.readyAt - token.requestedAt : Date.now() - token.requestedAt,
       marksCount: Array.isArray(token.result?.sentenceMarks) ? token.result.sentenceMarks.length : 0,
@@ -1497,7 +1724,7 @@ function ttsRunPageHandoff(input = {}) {
     }
   } else if (mode === 'speak') {
     try { ttsKeepWarmForAutoplay(); } catch (_) {}
-    ttsSpeakQueue(nextKey, [text]);
+    ttsSpeakQueue(nextKey, [text], { autoplay: String(reason || '') === 'autoplay-countdown-complete' });
   }
 
   TTS_DEBUG.lastSkip = {
@@ -3512,7 +3739,7 @@ function _ttsWindowApplyPromotion(sessionId, key, result) {
   }
 }
 
-async function ttsSpeakQueue(key, parts) {
+async function ttsSpeakQueue(key, parts, opts = {}) {
   const routeInfo = getPreferredTtsRouteInfo();
   TTS_DEBUG.lastRouteDecision = routeInfo;
   TTS_DEBUG.lastPlayRequest = { key, parts: (parts || []).length, path: routeInfo.requestedPath, reason: routeInfo.reason, selectedVoice: routeInfo.selected.stored };
@@ -3635,22 +3862,16 @@ async function ttsSpeakQueue(key, parts) {
     }
   }
   try {
-    // Pre-flight usage check (runs once before any cloud request).
-    // Pass 3: server verdict gates the action; client counter is display-only.
-    if (wantMarksForPage) {
-      if (window.rcUsage && typeof window.rcUsage.check === 'function') {
-        try {
-          const verdict = await window.rcUsage.check('tts');
-          if (!verdict.allowed) {
-            try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
-            ttsSetButtonActive(key, false);
-            ttsSetHintButton(key, false);
-            clearTtsCloudWindow();
-            return;
-          }
-        } catch (_) {} // server unreachable: proceed (safe degraded behavior)
-      }
-      try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
+    // 1F usage seam: check before protected cloud action, but do not consume
+    // durable usage until committed protected playback. Browser/basic, replay,
+    // presynthesis and detectable signed-out/public sample paths are no-charge.
+    const usageGate = await beginTtsUsageSeamForSession(key, sessionId, routeInfo, { source: opts.autoplay ? 'autoplay' : 'manual-read-page', autoplay: !!opts.autoplay });
+    if (!usageGate.allowed) {
+      try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
+      ttsSetButtonActive(key, false);
+      ttsSetHintButton(key, false);
+      clearTtsCloudWindow();
+      return;
     }
 
     for (let i = 0; i < queue.length; i++) {
@@ -3714,6 +3935,7 @@ async function ttsSpeakQueue(key, parts) {
           resolve();
         };
         audio.onerror = () => reject(new Error('Audio playback failed'));
+        armTtsPlaybackCommit(audio, { key, sessionId, source: (isFirstItem && useWindowMode) ? 'cloud-window-chunk-a' : 'cloud-full-page', autoplay: !!opts.autoplay });
         audio.play().then(() => {
           clearTtsStartupBanner();
           applyPending('play-start');
@@ -3940,6 +4162,7 @@ async function ttsSpeakQueue(key, parts) {
             try { audio.oncanplay = () => applyPending('canplay'); } catch (_) {}
             audio.onended = () => { ttsClearSentenceHighlight(); resolve(); };
             audio.onerror = () => reject(new Error('Audio playback failed'));
+            armTtsPlaybackCommit(audio, { key, sessionId, source: 'cloud-window-handoff-full-page', autoplay: !!opts.autoplay });
             audio.play().then(() => {
               clearTtsStartupBanner();
               applyPending('play-start');
@@ -4189,6 +4412,7 @@ function ttsRestartCloudFromBlockStart(audio, key, sessionId, blockIdx, seekTime
       return false;
     }
     audio.currentTime = seekTime;
+    armTtsPlaybackCommit(audio, { key, sessionId, source: 'cloud-restart-playback', autoplay: false });
     const playResult = audio.play();
     if (playResult && typeof playResult.then === 'function') {
       playResult.then(() => {
@@ -4598,8 +4822,10 @@ function getTtsDiagnosticsSnapshot() {
     audio: { present: !!TTS_AUDIO_ELEMENT, paused: !!TTS_AUDIO_ELEMENT.paused, currentTime: Number(TTS_AUDIO_ELEMENT.currentTime || 0), playbackRate: Number(TTS_AUDIO_ELEMENT.playbackRate || 1), src: TTS_AUDIO_ELEMENT.getAttribute('src') || null, loop: !!TTS_AUDIO_ELEMENT.loop },
     highlight: { pageKey: TTS_STATE.highlightPageKey || null, spanCount: Array.isArray(TTS_STATE.highlightSpans) ? TTS_STATE.highlightSpans.length : 0, marksCount: Array.isArray(TTS_STATE.highlightMarks) ? TTS_STATE.highlightMarks.length : 0, activeBlockIndex: TTS_STATE.activeBlockIndex, provenance: TTS_STATE.highlightMarksProvenance || 'none' },
     capability: getTtsCapabilityStatus(),
+    usageSeam: getTtsUsageSeamSnapshot(),
+    incidentFootprint: TTS_DEBUG.lastIncident || null,
     unlock: { unlocked: !!TTS_AUDIO_UNLOCKED },
-    last: { action: TTS_DEBUG.lastAction, error: TTS_DEBUG.lastError, skip: TTS_DEBUG.lastSkip, playRequest: TTS_DEBUG.lastPlayRequest, cloudRequest: TTS_DEBUG.lastCloudRequest, cloudResponse: TTS_DEBUG.lastCloudResponse, capability: TTS_DEBUG.lastCapability, pauseStrategy: TTS_DEBUG.lastPauseStrategy, routeDecision: TTS_DEBUG.lastRouteDecision, resolvedPath: TTS_DEBUG.lastResolvedPath },
+    last: { action: TTS_DEBUG.lastAction, error: TTS_DEBUG.lastError, skip: TTS_DEBUG.lastSkip, usage: TTS_DEBUG.lastUsage, incident: TTS_DEBUG.lastIncident, playRequest: TTS_DEBUG.lastPlayRequest, cloudRequest: TTS_DEBUG.lastCloudRequest, cloudResponse: TTS_DEBUG.lastCloudResponse, capability: TTS_DEBUG.lastCapability, pauseStrategy: TTS_DEBUG.lastPauseStrategy, routeDecision: TTS_DEBUG.lastRouteDecision, resolvedPath: TTS_DEBUG.lastResolvedPath },
     recentEvents: TTS_DEBUG.recent.slice(-40),
   };
 }
@@ -4623,6 +4849,8 @@ window.applyAutoplayRuntimePreference = applyAutoplayRuntimePreference;
 window.getCountdownStatus       = getCountdownStatus;
 window.getTtsSupportStatus      = getTtsSupportStatus;
 window.getTtsCapabilityStatus   = getTtsCapabilityStatus;
+window.getTtsUsageSeamSnapshot   = getTtsUsageSeamSnapshot;
+window.getTtsIncidentFootprint   = function () { return TTS_DEBUG.lastIncident || null; };
 window.getTtsDiagnosticsSnapshot = getTtsDiagnosticsSnapshot;
 window.pauseOrResumeReading     = pauseOrResumeReading;
 window.toggleAutoplay           = toggleAutoplay;
