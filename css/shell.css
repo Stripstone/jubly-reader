@@ -3172,71 +3172,222 @@ body.sh-shell-active #dashboard .section-card {
   border-radius: 20px;
   box-shadow: var(--sh-shadow-ground);
 }
-body.sh-shell-active #profile-auth-content .section-card {
-  background: var(--sh-surface-parch);
-  border: 1px solid var(--sh-border-warm);
-  border-radius: 20px;
-  box-shadow: var(--sh-shadow-ground);
-}
 
-/* ── 11. Profile auth card (sidebar rail) ───────────────────────────────── */
-/* Double-ID selector (specificity 0,2,1,1) beats #profile-auth-content .section-card (0,1,2,1) */
+/* ── 11. Profile auth card (rail) ───────────────────────────────────────── */
+/* Blueprint: .profile-rail — overflow:hidden, padding:16px, border-radius:22px */
+/* Double-ID specificity beats #profile-auth-content .section-card */
 body.sh-shell-active #profile-page #profile-auth-card {
-  background: var(--sh-surface-parch);
-  border: 1px solid var(--sh-border-warm);
-  border-radius: 22px;
-  box-shadow: var(--sh-shadow-ground);
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  border-radius: 22px !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+  overflow: hidden !important;
+  padding: 16px !important;
 }
-/* Avatar identity row border */
+/* Identity row: avatar + name, bottom border */
 body.sh-shell-active #profile-auth-card .flex.items-center.gap-4.mb-4 {
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--sh-divider);
-  margin-bottom: 10px;
+  padding: 10px 8px 16px !important;
+  border-bottom: 1px solid var(--sh-divider) !important;
+  margin-bottom: 12px !important;
 }
-/* Profile tab buttons */
+/* Profile tab buttons — full blueprint .ptab spec */
+/* !important required to beat: hover:bg-slate-100 (0,0,2,0), text-slate-600 (0,0,1,0) */
 body.sh-shell-active #profile-auth-card nav button.profile-tab-btn {
-  border-radius: 14px;
-  font-weight: 800;
-  font-size: 13px;
-  color: var(--sh-muted);
-  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+  min-height: 42px !important;
+  padding: 0 12px !important;
+  border-radius: 14px !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--sh-muted) !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  text-align: left !important;
+  letter-spacing: -0.01em !important;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease !important;
+  box-shadow: none !important;
 }
 body.sh-shell-active #profile-auth-card nav button.profile-tab-btn:hover {
-  background: var(--sh-surface-warm);
-  color: var(--jubly-purple);
-  box-shadow: inset 0 0 0 1px var(--sh-border);
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
 }
 body.sh-shell-active #profile-auth-card nav button.profile-tab-btn.active {
-  background: var(--sh-surface-warm);
-  color: var(--jubly-purple);
-  box-shadow: inset 0 0 0 1px var(--sh-border);
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
+}
+/* Logout tab: red tint, no active state */
+body.sh-shell-active #profile-auth-card nav button.profile-tab-btn-logout {
+  color: #ef4444 !important;
+}
+body.sh-shell-active #profile-auth-card nav button.profile-tab-btn-logout:hover {
+  background: #fff1f1 !important;
+  color: #dc2626 !important;
+  box-shadow: inset 0 0 0 1px #fecaca !important;
 }
 body.sh-shell-active #profile-auth-card nav hr {
-  border-color: var(--sh-divider);
+  border-color: var(--sh-divider) !important;
+  margin: 6px 0 !important;
 }
 
 /* ── 12. Profile content ────────────────────────────────────────────────── */
+/* Tab content panels: flex column gap-16px matching blueprint .panel.active */
+body.sh-shell-active .tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+body.sh-shell-active .tab-content.hidden-section {
+  display: none !important;
+}
+
+/* Section cards: parchment surface, 20px padding matching blueprint .sc */
+body.sh-shell-active #profile-auth-content .section-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+  padding: 20px !important;
+}
+/* Soft cards: blueprint .sc.soft — surface-blueprint bg, lighter shadow */
+body.sh-shell-active #profile-auth-content .profile-soft-card {
+  background: var(--sh-surface-bp) !important;
+  box-shadow: var(--sh-shadow-panel) !important;
+  border-color: var(--sh-border) !important;
+}
+
+/* Section heading labels */
+body.sh-shell-active #profile-auth-content h4 {
+  color: var(--sh-warm-muted) !important;
+}
+body.sh-shell-active #profile-auth-content h3 {
+  color: var(--sh-ink) !important;
+  font-size: 16px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+}
+
+/* Dividers inside section cards */
 body.sh-shell-active #profile-auth-content .border-b,
 body.sh-shell-active #profile-auth-content .border-t,
 body.sh-shell-active #profile-auth-content hr {
-  border-color: var(--sh-divider);
+  border-color: var(--sh-divider) !important;
 }
-/* Subscription sub-hero */
-body.sh-shell-active .sub-hero {
-  background: var(--jubly-purple);
-  border-radius: 20px;
-  padding: 24px;
-  box-shadow: var(--sh-btn-primary);
-}
-/* App tiles */
+
+/* App tiles: blueprint .app-tile — surface-blueprint bg */
 body.sh-shell-active #profile-auth-content .bg-slate-50.border.border-slate-100 {
-  background: var(--sh-surface-bp);
-  border-color: var(--sh-border);
-  border-radius: 16px;
+  background: var(--sh-surface-bp) !important;
+  border-color: var(--sh-border) !important;
+  border-radius: 16px !important;
 }
 body.sh-shell-active #profile-auth-content .bg-slate-50.border.border-slate-100:hover {
-  background: var(--sh-surface-warm);
+  background: var(--sh-surface-warm) !important;
 }
+
+/* Subscription metric cards: blueprint .metric — surface-blueprint */
+body.sh-shell-active #profile-auth-content .grid.grid-cols-3 .section-card,
+body.sh-shell-active #profile-auth-content .grid.grid-cols-3 .section-card.text-center {
+  background: var(--sh-surface-bp) !important;
+  box-shadow: var(--sh-shadow-panel) !important;
+  border-color: var(--sh-border) !important;
+  border-radius: 16px !important;
+  padding: 15px !important;
+}
+body.sh-shell-active #profile-auth-content .grid.grid-cols-3 .text-2xl.font-black,
+body.sh-shell-active #profile-auth-content .grid.grid-cols-3 .text-xl.font-black {
+  color: var(--sh-ink) !important;
+}
+
+/* ── 12a. Profile button language ───────────────────────────────────────── */
+/* Blueprint: primary = shell-btn.primary, ghost = shell-btn.ghost */
+/* .profile-btn-primary — maps to blueprint .shell-btn.primary */
+body.sh-shell-active .profile-btn-primary {
+  border: none !important;
+  background: var(--jubly-purple) !important;
+  color: #fff !important;
+  padding: 11px 18px !important;
+  font-size: 13.5px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.01em !important;
+  border-radius: 8px !important;
+  box-shadow: var(--sh-btn-primary) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-family: inherit !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  text-decoration: none !important;
+  transition: filter .12s ease, transform .12s ease !important;
+}
+body.sh-shell-active .profile-btn-primary:hover { filter: brightness(1.04) !important; }
+body.sh-shell-active .profile-btn-primary:active { transform: translateY(1px) !important; }
+
+/* .profile-btn-ghost — maps to blueprint .shell-btn.ghost */
+body.sh-shell-active .profile-btn-ghost {
+  border: 1px solid var(--sh-border) !important;
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  padding: 10px 14px !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  border-radius: 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  font-family: inherit !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  text-decoration: none !important;
+  transition: background .12s ease, transform .12s ease !important;
+}
+body.sh-shell-active .profile-btn-ghost:hover { background: var(--sh-surface-parch) !important; }
+body.sh-shell-active .profile-btn-ghost:active { transform: translateY(1px) !important; }
+
+/* Change Password button — ghost treatment */
+body.sh-shell-active #profile-password-toggle-btn {
+  border: 1px solid var(--sh-border) !important;
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  border-radius: 8px !important;
+  padding: 10px 14px !important;
+  transition: background .12s ease !important;
+}
+body.sh-shell-active #profile-password-toggle-btn:hover {
+  background: var(--sh-surface-parch) !important;
+}
+
+/* Policy link buttons */
+body.sh-shell-active .profile-policy-link {
+  border: 1px solid var(--sh-border) !important;
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  border-radius: 8px !important;
+  padding: 10px 14px !important;
+  transition: background .12s ease !important;
+  cursor: pointer !important;
+  font-family: inherit !important;
+}
+body.sh-shell-active .profile-policy-link:hover {
+  background: var(--sh-surface-parch) !important;
+}
+
+/* Subscription sub-hero */
+body.sh-shell-active .sub-hero {
+  background: var(--jubly-purple) !important;
+  border-radius: 20px !important;
+  padding: 24px !important;
+  box-shadow: var(--sh-btn-primary) !important;
+  border: none !important;
+}
+
 
 /* ── 13. Support footer ─────────────────────────────────────────────────── */
 body.sh-shell-active #supportFooter {
@@ -3467,8 +3618,7 @@ body.app-dark.sh-shell-active #library-rows > div {
 body.app-dark.sh-shell-active #library-rows > div:hover {
   background: var(--sh-surface-warm) !important;
 }
-body.app-dark.sh-shell-active #dashboard .section-card,
-body.app-dark.sh-shell-active #profile-auth-content .section-card {
+body.app-dark.sh-shell-active #dashboard .section-card {
   background: var(--sh-surface-parch) !important;
   border-color: var(--sh-border-warm) !important;
   color: var(--sh-ink) !important;
@@ -3476,7 +3626,31 @@ body.app-dark.sh-shell-active #profile-auth-content .section-card {
 body.app-dark.sh-shell-active #profile-page #profile-auth-card {
   background: var(--sh-surface-parch) !important;
   border-color: var(--sh-border-warm) !important;
+}
+body.app-dark.sh-shell-active #profile-auth-content .section-card {
+  background: var(--sh-surface-parch) !important;
+  border-color: var(--sh-border-warm) !important;
   color: var(--sh-ink) !important;
+}
+body.app-dark.sh-shell-active #profile-auth-content .profile-soft-card {
+  background: var(--sh-surface-bp) !important;
+  border-color: var(--sh-border) !important;
+}
+body.app-dark.sh-shell-active #profile-auth-content .grid.grid-cols-3 .section-card {
+  background: var(--sh-surface-bp) !important;
+  border-color: var(--sh-border) !important;
+}
+body.app-dark.sh-shell-active .profile-btn-ghost,
+body.app-dark.sh-shell-active .profile-policy-link,
+body.app-dark.sh-shell-active #profile-password-toggle-btn {
+  background: var(--sh-surface-warm) !important;
+  border-color: var(--sh-border) !important;
+  color: var(--jubly-purple) !important;
+}
+body.app-dark.sh-shell-active .profile-btn-ghost:hover,
+body.app-dark.sh-shell-active .profile-policy-link:hover,
+body.app-dark.sh-shell-active #profile-password-toggle-btn:hover {
+  background: var(--sh-surface-parch) !important;
 }
 body.app-dark.sh-shell-active #manageLibraryBtn {
   background: var(--sh-surface-warm) !important;
