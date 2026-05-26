@@ -69,7 +69,7 @@
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
-    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'sara', theme: 'default', speed: 1 });
+    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'mara', theme: 'default', speed: 1 });
     let _publicOnboardingChoices = Object.assign({}, PUBLIC_ONBOARDING_DEFAULTS);
     let _publicOnboardingTimer = null;
     let _shellAuthBootstrapped = false;
@@ -1592,7 +1592,7 @@ window.rcInteraction = (function () {
 
     function _existingAccountSteerMessage(pendingPlan) {
         return pendingPlan && pendingPlan !== 'free'
-            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Pro' : 'Pro'} checkout.`
+            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
             : 'An account with this email already exists. Log In to continue.';
     }
 
@@ -1842,10 +1842,10 @@ window.rcInteraction = (function () {
                     _steerExistingAccountToSignin(email, pendingPlan);
                 } else if (result?.data?.session) {
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free'
-                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Pro' : 'Pro'} checkout…`
+                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
                         : 'Account created. Continuing to your library…');
                 } else {
-                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Pro' : 'Pro'} checkout.` : 'Check your email to verify your account.');
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Check your email to verify your account.');
                 }
             } else {
                 const { error } = await window.rcAuth.signIn(email, password);
@@ -1859,7 +1859,7 @@ window.rcInteraction = (function () {
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     if (pendingPlan === 'pro' || pendingPlan === 'premium') {
-                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Pro' : 'Pro'} checkout…`);
+                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`);
                     }
                 }
             }
@@ -2029,7 +2029,7 @@ window.rcInteraction = (function () {
         const current = (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function')
             ? window.rcEntitlements.getTier()
             : ((window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic');
-        const map = { basic: 'Basic', pro: 'Pro', premium: 'Pro' };
+        const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' };
         document.querySelectorAll('.tier-btn').forEach((btn) => {
             const next = map[current] || 'Basic';
             btn.classList.toggle('active', btn.textContent.trim() === next);
@@ -2057,7 +2057,7 @@ window.rcInteraction = (function () {
     function updateTierPill() {
         const tier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
         const pill = document.getElementById('reading-tier-pill');
-        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Pro' }; pill.textContent = map[tier] || 'Basic'; }
+        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' }; pill.textContent = map[tier] || 'Basic'; }
     }
 
     function getCurrentTier() {
@@ -2797,11 +2797,11 @@ window.rcInteraction = (function () {
             const date = new Date(b.createdAt||Date.now()).toLocaleDateString();
             const id = ('local:' + String(b.id)).replace(/'/g,"\\'");
             const title = escHtml(b.title||'Untitled');
-            return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
-                <div class="flex-grow flex items-center gap-3"><div class="w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">Added ${date}</p></div></div>
-                <div class="w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div>
-                <div class="w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div>
-                <div class="w-8 text-slate-300">→</div></div>`;
+            return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="library-row px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
+                <div class="library-row-identity flex-grow flex items-center gap-3"><div class="library-row-icon w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div class="library-row-copy"><p class="library-row-title font-semibold text-slate-800 text-sm">${title}</p><p class="library-row-meta text-xs text-slate-400">Added ${date}</p></div></div>
+                <div class="library-row-status w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div>
+                <div class="library-row-time w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div>
+                <div class="library-row-action w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
         setLibrarySurfaceState('populated', reason);

@@ -2776,3 +2776,428 @@ body.app-dark .profile-policy-link:hover { background: #1e293b; }
     white-space: normal;
   }
 }
+
+
+:root {
+  --jubly-shell-bg: #f7f3ea;
+  --jubly-shell-bg-soft: #fbf8f1;
+  --jubly-shell-surface: rgba(255, 252, 246, 0.92);
+  --jubly-shell-surface-strong: #fffaf2;
+  --jubly-shell-border: rgba(139, 92, 246, 0.16);
+  --jubly-shell-border-strong: rgba(99, 68, 245, 0.24);
+  --jubly-shell-shadow: 0 18px 45px rgba(58, 42, 92, 0.10);
+  --jubly-shell-shadow-soft: 0 10px 25px rgba(58, 42, 92, 0.08);
+  --jubly-shell-radius: 22px;
+  --jubly-shell-sidebar-width: 192px;
+  --jubly-shell-nav-height: 57px;
+}
+
+html:not(.reading-active),
+body:not(.reading-active) {
+  background:
+    radial-gradient(circle at top left, rgba(245, 158, 11, 0.12), transparent 34rem),
+    radial-gradient(circle at 85% 10%, rgba(99, 68, 245, 0.10), transparent 28rem),
+    var(--jubly-shell-bg);
+}
+
+.shell-top-nav {
+  background: rgba(255, 252, 246, 0.90) !important;
+  border-color: rgba(148, 163, 184, 0.24) !important;
+  box-shadow: 0 10px 30px rgba(30, 41, 59, 0.06);
+  backdrop-filter: blur(18px);
+}
+
+#app-sidebar {
+  width: var(--jubly-shell-sidebar-width) !important;
+  padding: 18px 14px !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+  background: rgba(255, 252, 246, 0.94) !important;
+  border-right: 1px solid rgba(148, 163, 184, 0.24) !important;
+  box-shadow: 14px 0 30px rgba(58, 42, 92, 0.07);
+  backdrop-filter: blur(16px);
+}
+
+.sidebar-primary-actions,
+.sidebar-secondary-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-secondary-actions {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+#app-sidebar .sidebar-btn {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 14px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  color: #475569;
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.1;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+#app-sidebar .sidebar-btn:hover,
+#app-sidebar .sidebar-btn:focus-visible {
+  color: #3730a3;
+  background: rgba(99, 68, 245, 0.08);
+  border-color: rgba(99, 68, 245, 0.14);
+  outline: none;
+}
+
+#app-sidebar .sidebar-btn:active {
+  transform: translateY(1px);
+}
+
+#app-sidebar .sidebar-btn.active {
+  color: #312e81;
+  background: linear-gradient(135deg, rgba(99, 68, 245, 0.14), rgba(245, 158, 11, 0.12));
+  border-color: rgba(99, 68, 245, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.52), 0 8px 18px rgba(58, 42, 92, 0.08);
+}
+
+.sidebar-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+}
+
+.sidebar-label {
+  display: inline-flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+#dashboard.with-sidebar,
+#profile-page.with-sidebar {
+  width: min(100%, calc(72rem + var(--jubly-shell-sidebar-width))) !important;
+  max-width: none !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding-left: calc(var(--jubly-shell-sidebar-width) + 2rem) !important;
+  padding-right: 2rem !important;
+}
+
+#dashboard.shell-surface,
+#profile-page.shell-surface {
+  color: #1f2937;
+}
+
+#dashboard .glass-card,
+#dashboard .section-card,
+#profile-page .section-card,
+#profile-auth-card,
+#profile-guest-card,
+.sub-hero,
+#library-public-sample .section-card,
+#library-empty .glass-card,
+#library-populated .glass-card,
+.library-pending-card {
+  border-radius: var(--jubly-shell-radius) !important;
+  border: 1px solid var(--jubly-shell-border) !important;
+  background: var(--jubly-shell-surface) !important;
+  box-shadow: var(--jubly-shell-shadow-soft) !important;
+}
+
+#dashboard .glass-card:hover,
+#profile-page .section-card:hover,
+#library-empty .glass-card:hover,
+#library-populated .glass-card:hover {
+  box-shadow: var(--jubly-shell-shadow) !important;
+}
+
+.library-header {
+  border-radius: 26px;
+  padding: 18px 20px;
+  background: rgba(255, 252, 246, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 12px 30px rgba(58, 42, 92, 0.06);
+}
+
+#library-toolbar {
+  align-items: center;
+  gap: 10px;
+}
+
+#manageLibraryBtn,
+#importBookBtn,
+#profile-page button:not(.profile-tab-btn):not(.music-upload-btn):not(.music-delete-btn),
+.reading-top-settings-btn,
+.reading-top-exit,
+.reading-bottom-bar .pb-icon-btn {
+  border-radius: 14px !important;
+}
+
+#manageLibraryBtn {
+  background: rgba(255, 255, 255, 0.72) !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  color: #475569 !important;
+  box-shadow: 0 6px 16px rgba(58, 42, 92, 0.05);
+}
+
+#importBookBtn,
+.btn-jubly {
+  box-shadow: 0 10px 22px rgba(99, 68, 245, 0.18) !important;
+}
+
+#library-populated .glass-card > div:first-child {
+  background: rgba(248, 250, 252, 0.76) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+.library-row {
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.library-row:hover {
+  background: rgba(250, 245, 255, 0.72) !important;
+}
+
+.library-row-identity,
+.library-row-copy,
+.library-row-title,
+.library-row-meta {
+  min-width: 0;
+}
+
+.library-row-title,
+.library-row-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#profile-page .flex.flex-col.md\:flex-row.gap-10 {
+  align-items: flex-start;
+}
+
+#profile-sidebar {
+  position: sticky;
+  top: calc(var(--jubly-shell-nav-height) + 24px);
+}
+
+.profile-tab-btn {
+  border: 1px solid transparent;
+}
+
+.profile-tab-btn.active {
+  background: rgba(99, 68, 245, 0.10) !important;
+  border-color: rgba(99, 68, 245, 0.18) !important;
+  color: #3730a3 !important;
+}
+
+.sub-hero {
+  background: linear-gradient(135deg, #5b3ff4, #7c3aed 60%, #9f7aea) !important;
+  box-shadow: 0 16px 36px rgba(99, 68, 245, 0.20) !important;
+}
+
+#supportFooter.support-footer {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 10 !important;
+  margin: 0 !important;
+  background: rgba(255, 252, 246, 0.92) !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.22) !important;
+  box-shadow: 0 -10px 28px rgba(58, 42, 92, 0.05);
+}
+
+#dashboard,
+#profile-page {
+  min-height: calc(100dvh - var(--jubly-shell-nav-height) - 72px) !important;
+  padding-bottom: 28px !important;
+}
+
+.reading-top-bar,
+.reading-bottom-bar {
+  background: rgba(255, 252, 246, 0.94) !important;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  box-shadow: 0 10px 28px rgba(30, 41, 59, 0.08);
+  backdrop-filter: blur(14px);
+}
+
+.reading-bottom-bar {
+  box-shadow: 0 -10px 28px rgba(30, 41, 59, 0.08);
+}
+
+.reading-settings-card,
+#reading-settings-panel .modal,
+.settings-modal,
+#settings-modal .modal {
+  border-radius: 22px !important;
+  border: 1px solid var(--jubly-shell-border) !important;
+  background: var(--jubly-shell-surface-strong) !important;
+  box-shadow: 0 24px 55px rgba(30, 41, 59, 0.16) !important;
+}
+
+.next-chapter-btn,
+button.next-chapter,
+#nextChapterBtn {
+  border-radius: 14px !important;
+  box-shadow: 0 10px 22px rgba(99, 68, 245, 0.16) !important;
+}
+
+body.app-dark {
+  --jubly-shell-bg: #171923;
+  --jubly-shell-bg-soft: #1f2330;
+  --jubly-shell-surface: rgba(31, 35, 48, 0.94);
+  --jubly-shell-surface-strong: #242938;
+  --jubly-shell-border: rgba(226, 232, 240, 0.10);
+  --jubly-shell-border-strong: rgba(226, 232, 240, 0.16);
+  --jubly-shell-shadow: 0 18px 45px rgba(0, 0, 0, 0.34);
+  --jubly-shell-shadow-soft: 0 10px 25px rgba(0, 0, 0, 0.24);
+  color-scheme: dark;
+}
+
+body.app-dark:not(.reading-active) {
+  background:
+    radial-gradient(circle at top left, rgba(245, 158, 11, 0.10), transparent 32rem),
+    radial-gradient(circle at 85% 10%, rgba(124, 58, 237, 0.16), transparent 28rem),
+    var(--jubly-shell-bg) !important;
+}
+
+body.app-dark .shell-top-nav,
+body.app-dark #app-sidebar,
+body.app-dark #supportFooter.support-footer {
+  background: rgba(31, 35, 48, 0.94) !important;
+  border-color: rgba(226, 232, 240, 0.10) !important;
+}
+
+body.app-dark #dashboard .glass-card,
+body.app-dark #dashboard .section-card,
+body.app-dark #profile-page .section-card,
+body.app-dark #profile-auth-card,
+body.app-dark #profile-guest-card,
+body.app-dark #library-public-sample .section-card,
+body.app-dark #library-empty .glass-card,
+body.app-dark #library-populated .glass-card,
+body.app-dark .library-pending-card {
+  background: var(--jubly-shell-surface) !important;
+  border-color: var(--jubly-shell-border) !important;
+  color: #e5e7eb !important;
+}
+
+body.app-dark .library-header {
+  background: rgba(31, 35, 48, 0.72);
+  border-color: rgba(226, 232, 240, 0.08);
+}
+
+body.app-dark #app-sidebar .sidebar-btn {
+  color: #cbd5e1;
+}
+
+body.app-dark #app-sidebar .sidebar-btn:hover,
+body.app-dark #app-sidebar .sidebar-btn:focus-visible,
+body.app-dark #app-sidebar .sidebar-btn.active {
+  color: #ede9fe;
+  background: rgba(124, 58, 237, 0.20);
+  border-color: rgba(167, 139, 250, 0.18);
+}
+
+body.app-dark .reading-top-bar,
+body.app-dark .reading-bottom-bar {
+  background: rgba(31, 35, 48, 0.94) !important;
+  border-color: rgba(226, 232, 240, 0.10) !important;
+}
+
+@media (max-width: 900px) {
+  #dashboard.with-sidebar,
+  #profile-page.with-sidebar {
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+    width: 100% !important;
+  }
+
+  #app-sidebar {
+    display: none !important;
+  }
+
+  .library-header {
+    padding: 16px;
+  }
+
+  #library-toolbar {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  #profile-sidebar {
+    position: static;
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 640px) {
+  #dashboard.with-sidebar,
+  #profile-page.with-sidebar {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    padding-top: 1.5rem !important;
+  }
+
+  .library-header {
+    gap: 14px;
+    margin-bottom: 1.25rem !important;
+  }
+
+  #library-toolbar {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  #manageLibraryBtn,
+  #importBookBtn {
+    width: 100%;
+  }
+
+  #library-populated .glass-card > div:first-child {
+    display: none !important;
+  }
+
+  .library-row {
+    align-items: flex-start !important;
+    gap: 10px;
+    padding: 14px 16px !important;
+  }
+
+  .library-row-identity {
+    align-items: flex-start !important;
+  }
+
+  .library-row-status,
+  .library-row-time {
+    display: block !important;
+    width: auto !important;
+    margin-left: 42px;
+    font-size: 0.76rem;
+  }
+
+  .library-row-action {
+    margin-left: auto;
+    width: auto !important;
+  }
+
+  #profile-page .grid.grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  #supportFooter.support-footer > div {
+    gap: 0.65rem !important;
+  }
+}

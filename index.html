@@ -395,7 +395,7 @@
     </div>
 </div>
 
-<nav class="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-3">
+<nav class="shell-top-nav bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-3">
     <div class="max-w-5xl mx-auto flex justify-between items-center">
         <div class="flex items-center gap-8">
             <div class="flex items-center gap-2 cursor-pointer" onclick="showSection('landing-page')">
@@ -422,11 +422,19 @@
 </nav>
 
 <!-- SIDEBAR (logged-in, non-reading views only) -->
-<aside id="app-sidebar" class="fixed left-0 z-40 flex-col items-center pt-5 gap-1 bg-white border-r border-slate-200" style="top:57px; height:calc(100vh - 57px); width:68px; display:none;">
-    <button onclick="showSection('dashboard')" id="sb-library" class="sidebar-btn" title="Library">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-        Library
-    </button>
+<aside id="app-sidebar" class="fixed left-0 z-40 flex-col bg-white border-r border-slate-200" style="top:57px; height:calc(100vh - 57px); width:68px; display:none;">
+    <div class="sidebar-primary-actions">
+        <button onclick="showSection('dashboard')" id="sb-library" class="sidebar-btn" title="Library">
+            <span class="sidebar-icon" aria-hidden="true">📚</span>
+            <span class="sidebar-label">Library</span>
+        </button>
+    </div>
+    <div class="sidebar-secondary-actions">
+        <button type="button" onclick="openModal('pricing-modal')" id="sb-upgrade" class="sidebar-btn sidebar-btn-secondary" title="Upgrade">
+            <span class="sidebar-icon" aria-hidden="true">⚡</span>
+            <span class="sidebar-label">Upgrade</span>
+        </button>
+    </div>
 </aside>
 <div id="landing-page" class="min-h-[88vh] flex flex-col md:flex-row items-center justify-center max-w-6xl mx-auto px-6 gap-10 py-16">
     <div class="w-full md:w-1/2 flex justify-center order-1 md:order-1">
@@ -683,7 +691,7 @@
 </div>
 
 <!-- DASHBOARD -->
-<main id="dashboard" class="hidden-section max-w-5xl mx-auto py-12 px-6 with-sidebar">
+<main id="dashboard" class="hidden-section max-w-5xl mx-auto py-12 px-6 with-sidebar shell-surface">
     <header class="library-header flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
         <div>
             <h2 class="text-3xl font-extrabold text-slate-900 tracking-tight">Library</h2>
@@ -789,7 +797,7 @@
 </main>
 
 <!-- PROFILE PAGE -->
-<main id="profile-page" class="hidden-section max-w-5xl mx-auto py-12 px-6 with-sidebar">
+<main id="profile-page" class="hidden-section max-w-5xl mx-auto py-12 px-6 with-sidebar shell-surface">
     <div class="flex flex-col md:flex-row gap-10">
         <aside id="profile-sidebar" class="w-full md:w-64 flex-shrink-0">
             <div id="profile-guest-card" class="hidden-section section-card shadow-sm">
@@ -1259,7 +1267,7 @@
 <script src="js/app.js"></script>
 
 <!-- Support footer — shown on Library and Profile only via showSection() -->
-<footer id="supportFooter" style="display:none; width:100%; background:#f8f7ff; border-top:1px solid #e2e8f0; padding:1rem 1.5rem; text-align:center; box-sizing:border-box;">
+<footer id="supportFooter" class="support-footer" style="display:none; width:100%; background:#f8f7ff; border-top:1px solid #e2e8f0; padding:1rem 1.5rem; text-align:center; box-sizing:border-box;">
     <div style="display:flex; align-items:center; justify-content:center; gap:1rem; flex-wrap:wrap;">
         <span style="font-size:0.8rem; color:#94a3b8;">📖 If jubly helped you, consider supporting the project</span>
         <a href="https://www.buymeacoffee.com/tristonb" target="_blank" rel="noopener" style="display:inline-block; background:#FFDD00; color:#000; font-weight:800; font-size:0.78rem; padding:6px 14px; border-radius:8px; text-decoration:none;">☕ Buy me a coffee</a>
