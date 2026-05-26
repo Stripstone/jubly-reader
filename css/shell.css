@@ -2778,85 +2778,94 @@ body.app-dark .profile-policy-link:hover { background: #1e293b; }
 }
 
 
+
 /* ════════════════════════════════════════════════════════════════════════════
-   1E SHELL COHESION
-   Scope: signed-in shell only (body.sh-shell-active = authed + sidebar section).
-   Landing, login, public-onboarding, and reading-mode are untouched.
-   Replaces: sidebar-btn icon-stack, glass-card/section-card white bg on shell
-             pages, cold dark overrides on shell pages, with-sidebar 68px offset.
-   Does NOT replace: reading-mode surfaces, dark mode reading bars, modals,
-                     pricing cards, or any non-shell context.
+   1E SHELL COHESION — single canonical block, no duplicates
+   Scope: body.sh-shell-active (set by syncShellAuthPresentation when
+          authed + on a sidebar section). Landing, login, onboarding,
+          reading-mode, modals, and pricing are untouched.
+   Dark mode: body.app-dark.sh-shell-active token override drives all surfaces.
    ════════════════════════════════════════════════════════════════════════════ */
 
-/* ── 1E token variables ─────────────────────────────────────────────────── */
+/* ── 1. Token variables ─────────────────────────────────────────────────── */
 :root {
-  --sh-bg:               #f7f3ec;
-  --sh-bg-top:           #fbf8f2;
-  --sh-bg-bottom:        #f1eadf;
-  --sh-rail:             rgba(255,250,244,.92);
-  --sh-surface-warm:     #fbf8f2;
-  --sh-surface-parch:    rgba(251,248,242,.96);
-  --sh-surface-bp:       rgba(255,252,247,.72);
-  --sh-border:           #e7ded3;
-  --sh-border-warm:      rgba(223,212,198,.88);
-  --sh-divider:          #efe5d8;
-  --sh-ink:              #1e293b;
-  --sh-muted:            #64748b;
-  --sh-warm-muted:       #8a7a69;
-  --sh-shadow-ground:    0 14px 18px rgba(32,20,12,.20), 0 5px 8px rgba(15,23,42,.10);
-  --sh-shadow-panel:     0 14px 18px rgba(32,20,12,.18), 0 5px 8px rgba(15,23,42,.08);
-  --sh-btn-warm:         inset 0 2px 1px rgba(255,255,255,.9),
-                         inset 0 -2px 3px rgba(0,0,0,.035),
-                         0 8px 12px rgba(139,126,99,.25),
-                         0 2px 4px rgba(139,126,99,.15);
-  --sh-btn-primary:      inset 0 2px 1px rgba(255,255,255,.22),
-                         inset 0 -2px 3px rgba(0,0,0,.08),
-                         0 9px 13px rgba(99,68,245,.25),
-                         0 2px 5px rgba(15,23,42,.12);
+  --sh-bg:              #f7f3ec;
+  --sh-bg-top:          #fbf8f2;
+  --sh-bg-bottom:       #f1eadf;
+  --sh-rail:            rgba(255,250,244,.92);
+  --sh-surface:         #ffffff;
+  --sh-surface-warm:    #fbf8f2;
+  --sh-surface-parch:   rgba(251,248,242,.96);
+  --sh-surface-bp:      rgba(255,252,247,.72);
+  --sh-border:          #e7ded3;
+  --sh-border-warm:     rgba(223,212,198,.88);
+  --sh-divider:         #efe5d8;
+  --sh-ink:             #1e293b;
+  --sh-muted:           #64748b;
+  --sh-warm-muted:      #8a7a69;
+  --sh-shadow-ground:   0 14px 18px rgba(32,20,12,.20), 0 5px 8px rgba(15,23,42,.10);
+  --sh-shadow-panel:    0 14px 18px rgba(32,20,12,.18), 0 5px 8px rgba(15,23,42,.08);
+  --sh-btn-warm:        inset 0 2px 1px rgba(255,255,255,.9),
+                        inset 0 -2px 3px rgba(0,0,0,.035),
+                        0 8px 12px rgba(139,126,99,.25),
+                        0 2px 4px rgba(139,126,99,.15);
+  --sh-btn-primary:     inset 0 2px 1px rgba(255,255,255,.22),
+                        inset 0 -2px 3px rgba(0,0,0,.08),
+                        0 9px 13px rgba(99,68,245,.25),
+                        0 2px 5px rgba(15,23,42,.12);
 }
 
-/* Warm dark overrides — shell pages only */
+/* Warm dark token override — shell pages in dark mode only */
 body.app-dark.sh-shell-active {
-  --sh-bg:            #1a1512;
-  --sh-bg-top:        #221c18;
-  --sh-bg-bottom:     #120e0c;
-  --sh-rail:          rgba(30,24,20,.94);
-  --sh-surface-warm:  #2e2621;
-  --sh-surface-parch: rgba(38,32,27,.96);
-  --sh-surface-bp:    rgba(38,32,27,.5);
-  --sh-border:        #3d322a;
-  --sh-border-warm:   rgba(74,61,51,.88);
-  --sh-divider:       #382e26;
-  --sh-ink:           #f4eee7;
-  --sh-muted:         #a89b8d;
-  --sh-warm-muted:    #bdae9e;
-  --sh-shadow-ground: 0 16px 28px rgba(0,0,0,.45), 0 6px 12px rgba(0,0,0,.3);
-  --sh-shadow-panel:  0 14px 24px rgba(0,0,0,.4), 0 5px 10px rgba(0,0,0,.25);
+  --jubly-purple:       #8168ff;
+  --sh-bg:              #1a1512;
+  --sh-bg-top:          #221c18;
+  --sh-bg-bottom:       #120e0c;
+  --sh-rail:            rgba(30,24,20,.94);
+  --sh-surface:         #26201b;
+  --sh-surface-warm:    #2e2621;
+  --sh-surface-parch:   rgba(38,32,27,.96);
+  --sh-surface-bp:      rgba(38,32,27,.5);
+  --sh-border:          #3d322a;
+  --sh-border-warm:     rgba(74,61,51,.88);
+  --sh-divider:         #382e26;
+  --sh-ink:             #f4eee7;
+  --sh-muted:           #a89b8d;
+  --sh-warm-muted:      #bdae9e;
+  --sh-shadow-ground:   0 16px 28px rgba(0,0,0,.45), 0 6px 12px rgba(0,0,0,.3);
+  --sh-shadow-panel:    0 14px 24px rgba(0,0,0,.4), 0 5px 10px rgba(0,0,0,.25);
 }
 
-/* ── Shell background — signed-in shell only ────────────────────────────── */
-/* Replaces body.app-light #ffffff and body.app-dark #0f172a for shell pages. */
+/* ── 2. Background — shell pages only ───────────────────────────────────── */
+/* html gets the bottom gradient color so viewport gaps below body are warm,
+   not the boot-scrim white (#ffffff) from the early-paint CSS. */
+html:has(body.sh-shell-active) {
+  background-color: var(--sh-bg-bottom);
+}
 body.sh-shell-active {
+  min-height: 100dvh;
   background: linear-gradient(
-    180deg,
-    var(--sh-bg-top)    0%,
-    var(--sh-bg)       42%,
-    var(--sh-bg-bottom) 100%
+    180deg, var(--sh-bg-top) 0%, var(--sh-bg) 42%, var(--sh-bg-bottom) 100%
   ) !important;
   background-attachment: fixed !important;
 }
 
-/* ── Top nav: shell rail glass on signed-in shell ───────────────────────── */
-/* Replaces bg-white TW class. Landing-page nav untouched (not sh-shell-active). */
+/* ── 3. Nav ─────────────────────────────────────────────────────────────── */
 body.sh-shell-active nav {
+  height: 60px !important;
   background: var(--sh-rail) !important;
   backdrop-filter: blur(10px) !important;
   -webkit-backdrop-filter: blur(10px) !important;
   border-bottom: 1px solid var(--sh-border-warm) !important;
 }
-
-/* Landing page: transparent nav, white body — no sh-shell-active so these
-   rules do not apply there. Only explicit landing-page nav rule needed: */
+/* Brand text sizing per blueprint */
+body.sh-shell-active nav span.text-2xl {
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+  color: var(--sh-ink) !important;
+}
+/* Landing page: fully transparent nav, no interference with white landing bg */
 body:has(#landing-page:not(.hidden-section)) nav {
   background: transparent !important;
   backdrop-filter: none !important;
@@ -2864,20 +2873,42 @@ body:has(#landing-page:not(.hidden-section)) nav {
   border-bottom-color: transparent !important;
   box-shadow: none !important;
 }
+/* Nav usage pill */
+body.sh-shell-active #nav-usage-pill {
+  background: var(--sh-rail) !important;
+  border: 1px solid var(--sh-border) !important;
+  color: var(--jubly-purple) !important;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+/* Nav profile trigger */
+body.sh-shell-active #nav-profile-trigger {
+  border: 1px solid var(--sh-border) !important;
+  background: var(--sh-surface) !important;
+  border-radius: 999px !important;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04) !important;
+  padding: 4px !important;
+}
+body.sh-shell-active #nav-profile-trigger:hover {
+  background: var(--sh-surface-warm) !important;
+}
 
-/* ── App sidebar: 156px, horizontal labels ──────────────────────────────── */
-/* Replaces the 68px icon-stack sidebar-btn rules in lines 280-282.
-   Only applies when the sidebar is showing (sh-shell-active). */
+/* ── 4. App sidebar ─────────────────────────────────────────────────────── */
 body.sh-shell-active #app-sidebar {
   width: 156px !important;
+  top: 60px !important;
+  height: calc(100vh - 60px) !important;
   background: var(--sh-rail) !important;
   border-right: 1px solid var(--sh-border-warm) !important;
   padding: 18px 12px 16px !important;
   align-items: stretch !important;
   gap: 8px !important;
+  overflow: visible !important;
 }
-
-/* Sidebar buttons: replace vertical icon-stack with horizontal emoji+label */
+/* Sidebar buttons: horizontal emoji + label layout */
 body.sh-shell-active #app-sidebar .sidebar-btn {
   flex-direction: row !important;
   align-items: center !important;
@@ -2894,7 +2925,8 @@ body.sh-shell-active #app-sidebar .sidebar-btn {
   color: var(--sh-muted) !important;
   background: transparent !important;
   box-shadow: none !important;
-  transition: background .15s ease, color .15s ease, box-shadow .15s ease !important;
+  transition: background .15s ease, color .15s ease,
+              box-shadow .15s ease, transform .15s ease !important;
 }
 body.sh-shell-active #app-sidebar .sidebar-btn svg {
   flex-shrink: 0;
@@ -2906,14 +2938,30 @@ body.sh-shell-active #app-sidebar .sidebar-btn:hover {
   color: var(--jubly-purple) !important;
   box-shadow: inset 0 0 0 1px var(--sh-border) !important;
 }
+body.sh-shell-active #app-sidebar .sidebar-btn:active {
+  transform: translateY(1px) !important;
+}
 body.sh-shell-active #app-sidebar .sidebar-btn.active {
   background: var(--sh-surface-warm) !important;
   color: var(--jubly-purple) !important;
   box-shadow: inset 0 0 0 1px var(--sh-border) !important;
 }
+/* Secondary rail buttons */
+body.sh-shell-active #app-sidebar .sh-secondary-btn {
+  min-height: 36px !important;
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.012em !important;
+  padding: 0 8px 0 10px !important;
+  color: var(--sh-warm-muted) !important;
+}
+body.sh-shell-active #app-sidebar .sh-secondary-btn.active {
+  background: transparent !important;
+  color: var(--sh-warm-muted) !important;
+  box-shadow: none !important;
+}
 
-/* ── Dashboard / profile layout offset: updated for 156px sidebar ──────── */
-/* Replaces the calc(68px + 1.5rem) rule at line 1192-1195. */
+/* ── 5. Layout offset for 156px sidebar ─────────────────────────────────── */
 @media (min-width: 641px) {
   body.sh-shell-active #dashboard.with-sidebar,
   body.sh-shell-active #profile-page.with-sidebar {
@@ -2923,11 +2971,14 @@ body.sh-shell-active #app-sidebar .sidebar-btn.active {
   }
 }
 
-/* ── Library header and toolbar buttons ─────────────────────────────────── */
-/* Replaces generic TW styling. Manage = warm shell button, Import = primary. */
-body.sh-shell-active #dashboard h2 { color: var(--sh-ink); }
-body.sh-shell-active #dashboard-subtitle { color: var(--sh-muted); }
-
+/* ── 6. Library header ──────────────────────────────────────────────────── */
+body.sh-shell-active #dashboard h2 {
+  color: var(--sh-ink);
+}
+body.sh-shell-active #dashboard-subtitle {
+  color: var(--sh-muted);
+}
+/* Manage button */
 body.sh-shell-active #manageLibraryBtn {
   border: 1px solid var(--sh-border) !important;
   background: var(--sh-surface-warm) !important;
@@ -2937,11 +2988,15 @@ body.sh-shell-active #manageLibraryBtn {
   padding: 10px 16px !important;
   border-radius: 8px !important;
   box-shadow: var(--sh-btn-warm) !important;
-  transition: background .12s ease, transform .12s ease !important;
+  transition: background .12s ease, transform .12s ease, box-shadow .12s ease !important;
 }
-body.sh-shell-active #manageLibraryBtn:hover { background: #fff !important; }
-body.sh-shell-active #manageLibraryBtn:active { transform: translateY(1px) !important; }
-
+body.sh-shell-active #manageLibraryBtn:hover {
+  background: var(--sh-surface) !important;
+}
+body.sh-shell-active #manageLibraryBtn:active {
+  transform: translateY(1px) !important;
+}
+/* Add Book button */
 body.sh-shell-active #importBookBtn {
   border: none !important;
   background: var(--jubly-purple) !important;
@@ -2952,13 +3007,22 @@ body.sh-shell-active #importBookBtn {
   padding: 11px 22px !important;
   border-radius: 8px !important;
   box-shadow: var(--sh-btn-primary) !important;
-  transition: filter .12s ease, transform .12s ease !important;
+  transition: filter .12s ease, box-shadow .12s ease, transform .12s ease !important;
 }
-body.sh-shell-active #importBookBtn:hover { filter: brightness(1.04) !important; }
-body.sh-shell-active #importBookBtn:active { transform: translateY(1px) !important; }
+body.sh-shell-active #importBookBtn:hover {
+  filter: brightness(1.03) !important;
+  box-shadow: inset 0 2px 1px rgba(255,255,255,.24),
+              inset 0 -2px 3px rgba(0,0,0,.08),
+              0 10px 15px rgba(99,68,245,.29),
+              0 2px 6px rgba(15,23,42,.13) !important;
+}
+body.sh-shell-active #importBookBtn:active {
+  transform: translateY(1px) !important;
+  box-shadow: inset 0 3px 5px rgba(0,0,0,.14),
+              0 2px 3px rgba(99,68,245,.16) !important;
+}
 
-/* ── Library populated glass card ───────────────────────────────────────── */
-/* Replaces white background from .glass-card { background: white } (line 188). */
+/* ── 7. Library glass card ──────────────────────────────────────────────── */
 body.sh-shell-active #library-populated .glass-card {
   background: var(--sh-surface-parch);
   border: 1px solid var(--sh-border-warm);
@@ -2966,27 +3030,117 @@ body.sh-shell-active #library-populated .glass-card {
   box-shadow: var(--sh-shadow-ground);
   overflow: hidden;
 }
+/* Table head: grid layout, inset divider, warm surface */
 body.sh-shell-active #library-populated .glass-card > div:first-child {
-  background: var(--sh-surface-warm);
-  border-bottom-color: var(--sh-divider);
-  color: var(--sh-warm-muted);
-}
-body.sh-shell-active #library-rows > div {
-  background: var(--sh-surface-bp);
-  border-bottom: 1px solid var(--sh-divider);
-}
-body.sh-shell-active #library-rows > div:last-child { border-bottom: none; }
-body.sh-shell-active #library-rows > div:hover { background: var(--sh-surface-warm); }
-body.sh-shell-active #library-rows .font-semibold { color: var(--sh-ink); font-weight: 800; }
-body.sh-shell-active #library-rows span.rounded-full {
-  background: var(--sh-surface-warm);
-  color: var(--jubly-purple);
-  border: 1px solid var(--sh-border);
+  position: relative;
+  display: grid !important;
+  grid-template-columns: minmax(0,1fr) 128px 128px 32px !important;
+  align-items: center !important;
+  padding: 12px 24px !important;
+  background: var(--sh-surface-warm) !important;
+  border-bottom: none !important;
+  color: var(--sh-warm-muted) !important;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: 12px;
   font-weight: 800;
 }
+body.sh-shell-active #library-populated .glass-card > div:first-child::after {
+  content: "";
+  position: absolute;
+  left: .5%; bottom: 0;
+  width: 99%; height: 1px;
+  background: var(--sh-divider);
+  border-radius: 999px;
+}
 
-/* ── Library pending card ───────────────────────────────────────────────── */
-/* Replaces .library-pending-card plain border at line 1325. */
+/* ── 8. Library rows ────────────────────────────────────────────────────── */
+body.sh-shell-active #library-rows > div {
+  position: relative;
+  display: grid !important;
+  grid-template-columns: minmax(0,1fr) 128px 128px 32px !important;
+  align-items: center !important;
+  padding: 16px 24px !important;
+  min-height: 70px !important;
+  background: var(--sh-surface-bp) !important;
+  border-bottom: none !important;
+}
+body.sh-shell-active #library-rows > div::after {
+  content: "";
+  position: absolute;
+  left: .5%; bottom: 0;
+  width: 99%; height: 1px;
+  background: var(--sh-divider);
+  border-radius: 999px;
+}
+body.sh-shell-active #library-rows > div:last-child::after {
+  display: none;
+}
+body.sh-shell-active #library-rows > div:hover {
+  background: var(--sh-surface-warm) !important;
+}
+/* Doc identity cell */
+body.sh-shell-active #library-rows > div > div:first-child {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+/* Doc icon: portrait shape */
+body.sh-shell-active #library-rows .w-8.h-8 {
+  width: 38px !important;
+  height: 48px !important;
+  border-radius: 10px !important;
+  background: var(--sh-surface-warm) !important;
+  border: 1px solid var(--sh-border) !important;
+  color: var(--sh-muted) !important;
+  flex-shrink: 0 !important;
+}
+/* Title */
+body.sh-shell-active #library-rows p.font-semibold {
+  font-weight: 800 !important;
+  font-size: 15px !important;
+  color: var(--sh-ink) !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Meta */
+body.sh-shell-active #library-rows p.text-xs {
+  font-size: 12px !important;
+  color: var(--sh-muted) !important;
+  margin-top: 4px;
+}
+/* Unhide status/time columns (were hidden md:block) */
+body.sh-shell-active #library-rows .w-32 {
+  display: block !important;
+}
+/* Status pill */
+body.sh-shell-active #library-rows span.rounded-full {
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  color: var(--jubly-purple) !important;
+  background: var(--sh-surface-warm) !important;
+  border: 1px solid var(--sh-border) !important;
+  border-radius: 999px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 5px 9px !important;
+  width: max-content !important;
+}
+/* Time */
+body.sh-shell-active #library-rows .w-32.text-sm {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: var(--sh-muted) !important;
+}
+/* Arrow/kebab column */
+body.sh-shell-active #library-rows .w-8.text-slate-300 {
+  color: var(--sh-muted) !important;
+}
+
+/* ── 9. Library pending + empty ─────────────────────────────────────────── */
 body.sh-shell-active .library-pending-card {
   background: var(--sh-surface-parch);
   border-color: var(--sh-border-warm);
@@ -2994,13 +3148,12 @@ body.sh-shell-active .library-pending-card {
 }
 body.sh-shell-active .library-pending-label { color: var(--jubly-purple); }
 body.sh-shell-active .library-pending-title { color: var(--sh-ink); }
-body.sh-shell-active .library-pending-copy { color: var(--sh-muted); }
+body.sh-shell-active .library-pending-copy  { color: var(--sh-muted); }
 body.sh-shell-active .library-pending-icon,
 body.sh-shell-active .library-pending-line,
 body.sh-shell-active .library-pending-pill,
-body.sh-shell-active .library-pending-time { background: var(--sh-border); }
+body.sh-shell-active .library-pending-time  { background: var(--sh-border); }
 
-/* ── Library empty state ────────────────────────────────────────────────── */
 body.sh-shell-active #empty-drop-zone {
   background: var(--sh-surface-parch);
   border: 1px solid var(--sh-border-warm);
@@ -3008,35 +3161,37 @@ body.sh-shell-active #empty-drop-zone {
   box-shadow: var(--sh-shadow-ground);
 }
 body.sh-shell-active #empty-drop-zone h3 { color: var(--sh-ink); }
-body.sh-shell-active #empty-drop-zone p { color: var(--sh-muted); }
+body.sh-shell-active #empty-drop-zone p  { color: var(--sh-muted); }
 
-/* ── Signed-out library CTA card ────────────────────────────────────────── */
-/* NOTE: sh-shell-active is NOT set when signed out, so this card retains its
-   existing white styling on a white body. No parchment applied to signed-out
-   library state — keeps it consistent with the landing-page white treatment. */
-
-/* ── Section cards on signed-in shell ──────────────────────────────────── */
-/* Replaces .section-card { background: #ffffff } (line 189) for shell pages. */
-body.sh-shell-active #dashboard .section-card,
-body.sh-shell-active #profile-page .section-card {
+/* ── 10. Section cards — library and profile (separate selectors, no ambiguity) */
+body.sh-shell-active #dashboard .section-card {
+  background: var(--sh-surface-parch);
+  border: 1px solid var(--sh-border-warm);
+  border-radius: 20px;
+  box-shadow: var(--sh-shadow-ground);
+}
+body.sh-shell-active #profile-auth-content .section-card {
   background: var(--sh-surface-parch);
   border: 1px solid var(--sh-border-warm);
   border-radius: 20px;
   box-shadow: var(--sh-shadow-ground);
 }
 
-/* ── Profile sidebar card ───────────────────────────────────────────────── */
-body.sh-shell-active #profile-auth-card {
+/* ── 11. Profile auth card (sidebar rail) ───────────────────────────────── */
+/* Double-ID selector (specificity 0,2,1,1) beats #profile-auth-content .section-card (0,1,2,1) */
+body.sh-shell-active #profile-page #profile-auth-card {
   background: var(--sh-surface-parch);
   border: 1px solid var(--sh-border-warm);
   border-radius: 22px;
   box-shadow: var(--sh-shadow-ground);
 }
+/* Avatar identity row border */
 body.sh-shell-active #profile-auth-card .flex.items-center.gap-4.mb-4 {
   padding-bottom: 14px;
   border-bottom: 1px solid var(--sh-divider);
   margin-bottom: 10px;
 }
+/* Profile tab buttons */
 body.sh-shell-active #profile-auth-card nav button.profile-tab-btn {
   border-radius: 14px;
   font-weight: 800;
@@ -3054,21 +3209,23 @@ body.sh-shell-active #profile-auth-card nav button.profile-tab-btn.active {
   color: var(--jubly-purple);
   box-shadow: inset 0 0 0 1px var(--sh-border);
 }
-body.sh-shell-active #profile-auth-card nav hr { border-color: var(--sh-divider); }
+body.sh-shell-active #profile-auth-card nav hr {
+  border-color: var(--sh-divider);
+}
 
-/* Profile section content dividers */
+/* ── 12. Profile content ────────────────────────────────────────────────── */
 body.sh-shell-active #profile-auth-content .border-b,
 body.sh-shell-active #profile-auth-content .border-t,
-body.sh-shell-active #profile-auth-content hr { border-color: var(--sh-divider); }
-
-/* Subscription sub-hero card */
+body.sh-shell-active #profile-auth-content hr {
+  border-color: var(--sh-divider);
+}
+/* Subscription sub-hero */
 body.sh-shell-active .sub-hero {
   background: var(--jubly-purple);
   border-radius: 20px;
   padding: 24px;
   box-shadow: var(--sh-btn-primary);
 }
-
 /* App tiles */
 body.sh-shell-active #profile-auth-content .bg-slate-50.border.border-slate-100 {
   background: var(--sh-surface-bp);
@@ -3079,14 +3236,14 @@ body.sh-shell-active #profile-auth-content .bg-slate-50.border.border-slate-100:
   background: var(--sh-surface-warm);
 }
 
-/* ── supportFooter shell-page styling ───────────────────────────────────── */
-/* Replaces existing cold #f8f7ff background — only on shell pages. */
+/* ── 13. Support footer ─────────────────────────────────────────────────── */
 body.sh-shell-active #supportFooter {
   background: var(--sh-surface-warm) !important;
   border-top-color: var(--sh-border) !important;
+  color: var(--sh-warm-muted) !important;
 }
 
-/* ── Sidebar structure: secondary section ───────────────────────────────── */
+/* ── 14. Sidebar structural CSS (not scoped to sh-shell-active) ─────────── */
 .sh-sidebar-main {
   display: flex;
   flex-direction: column;
@@ -3105,40 +3262,27 @@ body.sh-shell-active #supportFooter {
 .sh-sidebar-secondary::before {
   content: "";
   position: absolute;
-  top: 0;
-  left: 50%;
+  top: 0; left: 50%;
   transform: translateX(-50%);
-  width: 95%;
-  height: 1px;
+  width: 95%; height: 1px;
   background: var(--sh-border);
 }
-.sh-secondary-btn {
-  min-height: 36px !important;
-  font-size: 11.5px !important;
-  font-weight: 700 !important;
-  letter-spacing: -0.012em !important;
-  padding: 0 8px 0 10px !important;
-}
-body.sh-shell-active .sh-secondary-btn { color: var(--sh-warm-muted) !important; }
-
 .sh-has-dot { position: relative; }
 .sh-has-dot::after {
   content: "•";
   color: #ef4444;
   font-size: 16px;
   position: absolute;
-  right: 14px;
-  top: 50%;
+  right: 14px; top: 50%;
   transform: translateY(-52%);
 }
 
-/* ── Resume popout ──────────────────────────────────────────────────────── */
+/* ── 15. Resume popout ──────────────────────────────────────────────────── */
 .sh-resume-anchor { position: relative; }
 .sh-resume-popout {
   display: none;
   position: absolute;
-  left: calc(100% + 16px);
-  top: 0;
+  left: calc(100% + 16px); top: 0;
   width: 246px;
   background: var(--sh-surface-warm);
   border: 1px solid var(--sh-border);
@@ -3151,8 +3295,9 @@ body.sh-shell-active .sh-secondary-btn { color: var(--sh-warm-muted) !important;
 }
 .sh-resume-popout.open { display: flex; }
 .sh-resume-label {
-  font-size: 10px; font-weight: 900; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--jubly-purple);
+  font-size: 10px; font-weight: 900;
+  letter-spacing: .08em; text-transform: uppercase;
+  color: var(--jubly-purple);
 }
 .sh-resume-title {
   font-size: 14px; font-weight: 900;
@@ -3172,8 +3317,9 @@ body.sh-shell-active .sh-secondary-btn { color: var(--sh-warm-muted) !important;
   color: var(--jubly-purple); border-radius: 10px; padding: 8px 11px;
   font-size: 12px; font-weight: 800; cursor: pointer; font-family: inherit;
 }
+.sh-resume-secondary:hover { background: var(--sh-surface-parch); }
 
-/* ── Hamburger trigger ──────────────────────────────────────────────────── */
+/* ── 16. Hamburger + overlay ────────────────────────────────────────────── */
 .sh-hamburger-trigger {
   display: none;
   width: 38px; height: 38px;
@@ -3183,34 +3329,31 @@ body.sh-shell-active .sh-secondary-btn { color: var(--sh-warm-muted) !important;
   align-items: center; justify-content: center;
   color: var(--sh-warm-muted);
   box-shadow: 0 1px 2px rgba(15,23,42,.04);
-  cursor: pointer; flex-shrink: 0; order: -1;
+  cursor: pointer; flex-shrink: 0;
   transition: background .15s ease;
 }
 .sh-hamburger-trigger:hover { background: var(--sh-surface-parch); }
 
-/* ── Mobile overlay ─────────────────────────────────────────────────────── */
 #sh-mobile-overlay {
   display: none;
   position: fixed;
-  top: 57px; left: 0; right: 0; bottom: 0;
+  top: 60px; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,.35);
   z-index: 15;
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
 }
 
-/* ── Mobile: sidebar dropdown ───────────────────────────────────────────── */
+/* ── 17. Mobile ─────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  /* Show hamburger when signed in (sh-shell-active on body) */
   body.sh-shell-active .sh-hamburger-trigger { display: flex; }
 
-  /* Override the existing display:none !important (line 286).
-     body.sh-shell-active #app-sidebar has specificity 0,2,1 vs
-     the existing 0,1,0 — higher specificity wins even with !important. */
+  /* Override existing display:none !important on #app-sidebar at lower specificity.
+     body.sh-shell-active has specificity 0,2,1 vs existing 0,1,1 — wins. */
   body.sh-shell-active #app-sidebar {
     display: flex !important;
     position: fixed !important;
-    top: 57px !important;
+    top: 60px !important;
     left: 0 !important; right: 0 !important;
     width: 100% !important;
     height: auto !important;
@@ -3223,219 +3366,47 @@ body.sh-shell-active .sh-secondary-btn { color: var(--sh-warm-muted) !important;
     flex-direction: column !important;
     align-items: stretch !important;
     z-index: 35 !important;
-    transition:
-      max-height .3s cubic-bezier(.4,0,.2,1),
-      padding .3s ease,
-      border-bottom-width .1s ease !important;
+    transition: max-height .3s cubic-bezier(.4,0,.2,1),
+                padding .3s ease,
+                border-bottom-width .1s ease !important;
   }
-
-  /* Expanded state — class toggled by initShellNav1E */
   body.sh-shell-active #app-sidebar.open {
     max-height: 340px !important;
     padding: 16px !important;
     border-bottom-width: 1px !important;
     box-shadow: 0 12px 20px rgba(32,20,12,.08) !important;
   }
-
-  /* Show overlay backdrop when drawer is open */
+  /* Sidebar buttons in open drawer */
+  body.sh-shell-active #app-sidebar.open .sidebar-btn {
+    min-height: 44px !important;
+    padding: 0 16px !important;
+  }
+  /* Secondary rail hidden on mobile */
+  .sh-sidebar-secondary { display: none !important; }
+  /* Resume side-popout suppressed */
+  .sh-resume-popout.open { display: none !important; }
+  /* Overlay via sibling combinator */
   body.sh-shell-active #app-sidebar.open ~ #sh-mobile-overlay { display: block; }
 
-  /* Secondary rail hidden on mobile per blueprint */
-  .sh-sidebar-secondary { display: none !important; }
-
-  /* Resume side-popout suppressed on mobile */
-  .sh-resume-popout.open { display: none !important; }
-
-  /* Dashboard offset resets on mobile */
+  /* Layout resets */
   body.sh-shell-active #dashboard.with-sidebar,
   body.sh-shell-active #profile-page.with-sidebar {
     width: 100% !important;
     padding-left: 1rem !important;
     padding-right: 1rem !important;
   }
-}
 
-/* ── Dark mode shell overrides ──────────────────────────────────────────── */
-/* Replaces body.app-dark #app-sidebar { background: #111827 } (line 130)
-   and body.app-dark .glass-card/.section-card (line 131-136) for shell pages. */
-body.app-dark.sh-shell-active nav {
-  color: var(--sh-ink);
-}
-body.app-dark.sh-shell-active #library-populated .glass-card,
-body.app-dark.sh-shell-active #dashboard .section-card,
-body.app-dark.sh-shell-active #profile-page .section-card,
-body.app-dark.sh-shell-active #profile-auth-card {
-  background: var(--sh-surface-parch) !important;
-  border-color: var(--sh-border-warm) !important;
-  color: var(--sh-ink) !important;
-}
-body.app-dark.sh-shell-active #library-populated .glass-card > div:first-child {
-  background: var(--sh-surface-warm) !important;
-  border-bottom-color: var(--sh-divider) !important;
-}
-body.app-dark.sh-shell-active #library-rows > div {
-  background: var(--sh-surface-bp) !important;
-  border-bottom-color: var(--sh-divider) !important;
-}
-body.app-dark.sh-shell-active #library-rows > div:hover {
-  background: var(--sh-surface-warm) !important;
-}
-body.app-dark.sh-shell-active #manageLibraryBtn {
-  background: var(--sh-surface-warm) !important;
-  border-color: var(--sh-border) !important;
-  color: var(--sh-ink) !important;
-}
-body.app-dark.sh-shell-active .sh-resume-popout,
-body.app-dark.sh-shell-active .sh-resume-secondary {
-  background: var(--sh-surface-warm);
-  border-color: var(--sh-border);
-}
-
-/* ── 1E visual refinements (matched to blueprint reference) ─────────────── */
-
-/* Nav usage pill: shell rail styling on signed-in shell */
-body.sh-shell-active #nav-usage-pill {
-  background: var(--sh-rail) !important;
-  border: 1px solid var(--sh-border) !important;
-  color: var(--jubly-purple) !important;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 6px 10px;
-}
-
-/* Nav profile trigger: warm border + surface on signed-in shell */
-body.sh-shell-active #nav-profile-trigger {
-  border: 1px solid var(--sh-border) !important;
-  background: var(--sh-surface-warm, #fbf8f2) !important;
-  border-radius: 999px !important;
-  box-shadow: 0 1px 2px rgba(15,23,42,.04) !important;
-  padding: 4px !important;
-}
-body.sh-shell-active #nav-profile-trigger:hover {
-  background: var(--sh-surface-parch) !important;
-}
-
-/* ── Library rows: 4-column grid matching blueprint layout ──────────────── */
-/* Blueprint: grid-template-columns: minmax(0,1fr) 128px 128px 32px         */
-/* Overrides the flex layout the JS template emits.                          */
-body.sh-shell-active #library-rows > div {
-  display: grid !important;
-  grid-template-columns: minmax(0,1fr) 128px 128px 32px !important;
-  align-items: center !important;
-  position: relative !important;
-  padding: 16px 24px !important;
-  min-height: 70px !important;
-  border-bottom: none !important; /* replaced by ::after inset divider below */
-}
-
-/* Inset row divider — 99% width floated via ::after, matching blueprint */
-body.sh-shell-active #library-rows > div::after {
-  content: "";
-  position: absolute;
-  left: .5%;
-  bottom: 0;
-  width: 99%;
-  height: 1px;
-  background: var(--sh-divider);
-  border-radius: 999px;
-}
-body.sh-shell-active #library-rows > div:last-child::after {
-  display: none;
-}
-
-/* Doc identity cell: flex row, gap matching blueprint */
-body.sh-shell-active #library-rows > div > div:first-child {
-  display: flex !important;
-  align-items: center !important;
-  gap: 12px !important;
-  min-width: 0 !important;
-  overflow: hidden !important;
-}
-
-/* Doc icon: portrait 38×48px matching blueprint spec */
-body.sh-shell-active #library-rows .w-8.h-8 {
-  width: 38px !important;
-  height: 48px !important;
-  border-radius: 10px !important;
-  background: var(--sh-surface-warm) !important;
-  border: 1px solid var(--sh-border) !important;
-  color: var(--sh-muted) !important;
-  flex-shrink: 0 !important;
-}
-
-/* Book title */
-body.sh-shell-active #library-rows p.font-semibold {
-  font-weight: 800 !important;
-  font-size: 15px !important;
-  color: var(--sh-ink) !important;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Book meta */
-body.sh-shell-active #library-rows p.text-xs {
-  font-size: 12px !important;
-  color: var(--sh-muted) !important;
-  margin-top: 4px;
-}
-
-/* Status columns: unhide on desktop (override hidden md:block) */
-body.sh-shell-active #library-rows .w-32 {
-  display: block !important;
-}
-
-/* Status pill: exact blueprint spec */
-body.sh-shell-active #library-rows span.rounded-full {
-  font-size: 12px !important;
-  font-weight: 800 !important;
-  color: var(--jubly-purple) !important;
-  background: var(--sh-surface-warm) !important;
-  border: 1px solid var(--sh-border) !important;
-  border-radius: 999px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 5px 9px !important;
-  width: max-content !important;
-}
-
-/* Time column */
-body.sh-shell-active #library-rows .w-32.text-sm {
-  font-size: 12px !important;
-  font-weight: 700 !important;
-  color: var(--sh-muted) !important;
-}
-
-/* Kebab / arrow column */
-body.sh-shell-active #library-rows .w-8.text-slate-300 {
-  color: var(--sh-muted) !important;
-  font-size: 22px !important;
-  line-height: 1;
-}
-
-/* Table head: inset divider via ::after, matching blueprint */
-body.sh-shell-active #library-populated .glass-card > div:first-child {
-  position: relative;
-}
-body.sh-shell-active #library-populated .glass-card > div:first-child::after {
-  content: "";
-  position: absolute;
-  left: .5%;
-  bottom: 0;
-  width: 99%;
-  height: 1px;
-  background: var(--sh-divider);
-  border-radius: 999px;
-}
-/* Remove border-bottom that was there before (inset ::after replaces it) */
-body.sh-shell-active #library-populated .glass-card > div:first-child {
-  border-bottom: none !important;
-}
-
-/* Mobile: collapse back to simpler layout */
-@media (max-width: 640px) {
+  /* Library table head: single column on mobile */
+  body.sh-shell-active #library-populated .glass-card > div:first-child {
+    grid-template-columns: 1fr !important;
+    padding: 10px 12px !important;
+    font-size: 10px !important;
+    letter-spacing: .05em !important;
+  }
+  body.sh-shell-active #library-populated .glass-card > div:first-child > div:not(:first-child) {
+    display: none !important;
+  }
+  /* Library rows: 2-column mobile grid */
   body.sh-shell-active #library-rows > div {
     grid-template-columns: minmax(0,1fr) auto !important;
     gap: 8px 10px !important;
@@ -3454,120 +3425,90 @@ body.sh-shell-active #library-populated .glass-card > div:first-child {
     border-radius: 8px !important;
   }
   body.sh-shell-active #library-rows .w-32:nth-child(2) {
-    grid-column: 2;
-    grid-row: 1;
+    grid-column: 2; grid-row: 1;
     display: flex !important;
-    align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-end; align-items: center;
   }
   body.sh-shell-active #library-rows .w-32:nth-child(3) {
-    grid-column: 2;
-    grid-row: 2;
+    grid-column: 2; grid-row: 2;
     display: flex !important;
-    align-items: flex-start;
-    justify-content: flex-end;
+    justify-content: flex-end; align-self: start;
   }
   body.sh-shell-active #library-rows .w-8.text-slate-300 {
     display: none !important;
   }
 }
 
-/* ── 1E final precision pass ─────────────────────────────────────────────
-   Each rule below is traced directly to a blueprint CSS declaration.
-   ──────────────────────────────────────────────────────────────────────── */
-
-/* 1. Nav height + brand text sizing
-   Blueprint: .topnav height:60px  .brand font-size:18px letter-spacing:-.02em */
-body.sh-shell-active nav {
-  height: 60px !important;
-}
-body.sh-shell-active nav .text-2xl,
-body.sh-shell-active nav span.text-2xl {
-  font-size: 18px !important;
-  letter-spacing: -0.02em !important;
+/* ── 18. Dark mode — explicit surface overrides ──────────────────────────
+   These beat the existing body.app-dark rules (background:#111827 !important)
+   which have specificity 0,2,1. Our body.app-dark.sh-shell-active rules have
+   specificity 0,3,1 and appear later in the file — both ensure they win.    */
+body.app-dark.sh-shell-active nav {
   color: var(--sh-ink) !important;
 }
-
-/* Sidebar top must match nav height */
-body.sh-shell-active #app-sidebar {
-  top: 60px !important;
-  height: calc(100vh - 60px) !important;
-  overflow: visible !important;
+body.app-dark.sh-shell-active #app-sidebar {
+  background: var(--sh-rail) !important;
+  border-right-color: var(--sh-border-warm) !important;
 }
-#sh-mobile-overlay { top: 60px; }
-
-/* 2. Sidebar button press feedback
-   Blueprint: .sidebar-btn:active { transform:translateY(1px) } */
-body.sh-shell-active #app-sidebar .sidebar-btn:active {
-  transform: translateY(1px) !important;
+body.app-dark.sh-shell-active #library-populated .glass-card {
+  background: var(--sh-surface-parch) !important;
+  border-color: var(--sh-border-warm) !important;
 }
-
-/* 3. Secondary button active-state reset
-   Blueprint: .sidebar-btn.secondary.active { background:transparent;
-              color:var(--warm-muted); box-shadow:none } */
-body.sh-shell-active #app-sidebar .sh-secondary-btn.active {
-  background: transparent !important;
+body.app-dark.sh-shell-active #library-populated .glass-card > div:first-child {
+  background: var(--sh-surface-warm) !important;
+  border-bottom-color: var(--sh-divider) !important;
   color: var(--sh-warm-muted) !important;
-  box-shadow: none !important;
 }
-
-/* 4. Import button hover — full shadow from blueprint, not just brightness
-   Blueprint: filter:brightness(1.03) + specific box-shadow */
-body.sh-shell-active #importBookBtn:hover {
-  filter: brightness(1.03) !important;
-  box-shadow:
-    inset 0 2px 1px rgba(255,255,255,.24),
-    inset 0 -2px 3px rgba(0,0,0,.08),
-    0 10px 15px rgba(99,68,245,.29),
-    0 2px 6px rgba(15,23,42,.13) !important;
+body.app-dark.sh-shell-active #library-rows > div {
+  background: var(--sh-surface-bp) !important;
 }
-
-/* 5. Import button active — pressed shadow from blueprint
-   Blueprint: transform:translateY(1px) + reduced inset shadow */
-body.sh-shell-active #importBookBtn:active {
-  transform: translateY(1px) !important;
-  box-shadow:
-    inset 0 3px 5px rgba(0,0,0,.14),
-    0 2px 3px rgba(99,68,245,.16) !important;
+body.app-dark.sh-shell-active #library-rows > div:hover {
+  background: var(--sh-surface-warm) !important;
 }
-
-/* 6. Table head: 4-column grid to align precisely with row grid
-   Blueprint: .table-head display:grid grid-template-columns:minmax(0,1fr) 128px 128px 32px
-              padding:12px 24px  uppercase letter-spacing:.06em */
-body.sh-shell-active #library-populated .glass-card > div:first-child {
-  display: grid !important;
-  grid-template-columns: minmax(0,1fr) 128px 128px 32px !important;
-  align-items: center !important;
-  padding: 12px 24px !important;
-  letter-spacing: .06em !important;
-  font-size: 12px !important;
-  font-weight: 800 !important;
-  text-transform: uppercase !important;
+body.app-dark.sh-shell-active #dashboard .section-card,
+body.app-dark.sh-shell-active #profile-auth-content .section-card {
+  background: var(--sh-surface-parch) !important;
+  border-color: var(--sh-border-warm) !important;
+  color: var(--sh-ink) !important;
 }
-
-/* 7. Mobile: table-head hide non-first columns; hide kebab in rows
-   Blueprint: .table-head div:not(:first-child){display:none}
-              .row > button.kebab{display:none}
-   Mobile sidebar-btn sizing in open drawer per blueprint */
-@media (max-width: 640px) {
-  body.sh-shell-active #library-populated .glass-card > div:first-child > div:not(:first-child) {
-    display: none !important;
-  }
-  body.sh-shell-active #library-populated .glass-card > div:first-child {
-    grid-template-columns: 1fr !important;
-    padding: 10px 12px !important;
-    font-size: 10px !important;
-    letter-spacing: .05em !important;
-  }
-  body.sh-shell-active #library-rows > div > .w-8.text-slate-300 {
-    display: none !important;
-  }
-  body.sh-shell-active #app-sidebar.open .sidebar-btn {
-    min-height: 44px !important;
-    padding: 0 16px !important;
-  }
-  body.sh-shell-active #app-sidebar {
-    top: 60px !important;
-  }
-  #sh-mobile-overlay { top: 60px; }
+body.app-dark.sh-shell-active #profile-page #profile-auth-card {
+  background: var(--sh-surface-parch) !important;
+  border-color: var(--sh-border-warm) !important;
+  color: var(--sh-ink) !important;
+}
+body.app-dark.sh-shell-active #manageLibraryBtn {
+  background: var(--sh-surface-warm) !important;
+  border-color: var(--sh-border) !important;
+  color: var(--sh-ink) !important;
+}
+body.app-dark.sh-shell-active #manageLibraryBtn:hover {
+  background: var(--sh-surface-parch) !important;
+}
+body.app-dark.sh-shell-active .sh-resume-popout {
+  background: var(--sh-surface-warm);
+  border-color: var(--sh-border);
+}
+body.app-dark.sh-shell-active #supportFooter {
+  background: var(--sh-surface-warm) !important;
+  border-top-color: var(--sh-border) !important;
+}
+/* Dark mode: override cold .bg-white and .bg-slate-50 on shell surfaces
+   (existing rule is body.app-dark .bg-white at specificity 0,2,0;
+   body.app-dark.sh-shell-active #dashboard/.section-card already covers
+   the important ones; this catches remaining bg- utility classes inside them) */
+body.app-dark.sh-shell-active #dashboard .bg-white,
+body.app-dark.sh-shell-active #dashboard .bg-slate-50,
+body.app-dark.sh-shell-active #profile-auth-content .bg-white,
+body.app-dark.sh-shell-active #profile-auth-content .bg-slate-50 {
+  background-color: var(--sh-surface-warm) !important;
+}
+body.app-dark.sh-shell-active #dashboard .text-slate-800,
+body.app-dark.sh-shell-active #dashboard .text-slate-900,
+body.app-dark.sh-shell-active #profile-auth-content .text-slate-800,
+body.app-dark.sh-shell-active #profile-auth-content .text-slate-900 {
+  color: var(--sh-ink) !important;
+}
+body.app-dark.sh-shell-active #dashboard .border-slate-200,
+body.app-dark.sh-shell-active #profile-auth-content .border-slate-200 {
+  border-color: var(--sh-border) !important;
 }
