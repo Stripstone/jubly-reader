@@ -905,6 +905,8 @@ window.rcInteraction = (function () {
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
         const sbSettings = document.getElementById('sb-settings');
         if (sbSettings) sbSettings.classList.toggle('active', id === 'profile-page');
+        // sh-shell-active: body class used by 1E CSS to scope shell-only styling
+        document.body.classList.toggle('sh-shell-active', !!(authed && SIDEBAR_SECTIONS.includes(id)));
         // Close mobile nav drawer on any section transition
         try { const _sid = document.getElementById('app-sidebar'); if (_sid) _sid.classList.remove('open'); } catch (_) {}
         try { const _hmb = document.getElementById('sh-hamburger'); if (_hmb) _hmb.setAttribute('aria-expanded', 'false'); } catch (_) {}
@@ -3076,7 +3078,7 @@ window.rcInteraction = (function () {
             resumePopout.addEventListener('click', (e) => e.stopPropagation());
         }
 
-        // Resume popout: populate and toggle
+        // Resume popout: open immediately against safe defaults, populate async
         if (resumeBtn) {
             resumeBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
@@ -3084,19 +3086,21 @@ window.rcInteraction = (function () {
                 const isOpen = resumePopout && resumePopout.classList.contains('open');
                 closeResumePopout();
                 if (isOpen) return;
-                // Thin bridge: read last book from runtime library owner for display
+                // Show immediately with safe default content from HTML
+                if (resumePopout) resumePopout.classList.add('open');
+                // Populate from runtime owners asynchronously
                 try {
                     if (typeof localBooksGetAll === 'function' && resumePopout) {
                         const books = await localBooksGetAll();
+                        if (!resumePopout.classList.contains('open')) return;
                         if (books && books.length > 0) {
                             books.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
                             const last = books[0];
                             const title = last.title || 'Untitled';
-                            const titleEl = document.getElementById('sh-resume-title');
-                            const subEl   = document.getElementById('sh-resume-sub');
+                            const titleEl    = document.getElementById('sh-resume-title');
+                            const subEl      = document.getElementById('sh-resume-sub');
                             const primaryBtn = document.getElementById('sh-resume-btn-primary');
                             if (titleEl) titleEl.textContent = title;
-                            // Thin bridge: read progress summary from runtime metrics owner
                             let pageRef = '';
                             try {
                                 if (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingBookSummary === 'function') {
@@ -3104,23 +3108,22 @@ window.rcInteraction = (function () {
                                     if (summary && !summary.completed) {
                                         pageRef = `Last position: page ${Math.max(1, (summary.lastPageIndex || 0) + 1)}`;
                                     } else if (summary && summary.completed) {
-                                        pageRef = 'Completed — read again?';
+                                        pageRef = 'Completed \u2014 read again?';
                                     }
                                 }
                             } catch (_) {}
                             if (subEl) subEl.textContent = pageRef || 'Continue reading';
                             if (primaryBtn) {
-                                const safeId = ('local:' + String(last.id)).replace(/'/g, "\\'");
-                                const safeTitle = title.replace(/'/g, "\\'");
+                                const bookId    = 'local:' + String(last.id);
+                                const bookTitle = title;
                                 primaryBtn.onclick = () => {
                                     closeResumePopout();
-                                    if (typeof openPreview === 'function') openPreview(safeId, safeTitle);
+                                    if (typeof openPreview === 'function') openPreview(bookId, bookTitle);
                                 };
                             }
                         }
                     }
                 } catch (_) {}
-                if (resumePopout) resumePopout.classList.add('open');
             });
         }
 
