@@ -871,11 +871,12 @@
                     </div>
                 </div>
                 <nav class="flex flex-col gap-1">
-                    <button data-tab="tab-profile"       onclick="switchTab('tab-profile')"       class="profile-tab-btn active text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Profile</button>
-                    <button data-tab="tab-subscription"  onclick="switchTab('tab-subscription')"  class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Subscription</button>
-                    <button data-tab="tab-settings"      onclick="switchTab('tab-settings')"      class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Settings</button>
+                    <button data-tab="tab-profile"      onclick="switchTab('tab-profile')"      class="profile-tab-btn active text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">👤 Profile</button>
+                    <button data-tab="tab-analytics"    onclick="switchTab('tab-analytics')"    class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">📊 Analytics</button>
+                    <button data-tab="tab-subscription" onclick="switchTab('tab-subscription')" class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">💳 Subscription</button>
+                    <button data-tab="tab-settings"     onclick="switchTab('tab-settings')"     class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">⚙️ Settings</button>
                     <hr class="my-2 border-slate-200">
-                    <button type="button" onclick="shellSignOut()" class="text-left px-4 py-2.5 rounded-lg font-semibold text-red-500 hover:bg-red-50 transition text-sm">Logout</button>
+                    <button type="button" onclick="shellSignOut()" class="profile-tab-btn profile-tab-btn-logout text-left px-4 py-2.5 rounded-lg font-semibold text-red-500 hover:bg-red-50 transition text-sm">🚪 Logout</button>
                 </nav>
             </div>
         </aside>
@@ -925,22 +926,48 @@
                         </div>
                     </div>
                 </div>
-                <div class="section-card shadow-sm">
+                <div class="section-card shadow-sm profile-soft-card">
                     <div class="flex items-center justify-between">
                         <div>
                             <h4 class="font-bold text-sm">Deleted Files</h4>
                             <p id="profile-deleted-count" class="text-xs text-slate-400 mt-0.5">0 files waiting in Deleted Files</p>
                         </div>
-                        <button id="profile-deleted-manage-btn" type="button" class="text-xs font-bold text-slate-500 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition">Manage Deleted Files</button>
+                        <button id="profile-deleted-manage-btn" type="button" class="profile-btn-ghost">Manage Deleted Files</button>
                     </div>
                 </div>
-                <div class="section-card shadow-sm">
-                    <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400 mb-4">Get Help</h4>
+                <div class="section-card shadow-sm profile-soft-card">
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400 mb-3">Get Help</h4>
+                    <p class="text-xs text-slate-400 mb-4">Support routes into the existing help flow.</p>
                     <div class="flex gap-3 flex-wrap">
-                        <button class="flex items-center gap-2 bg-green-50 text-green-700 font-bold text-xs px-4 py-2.5 rounded-xl hover:bg-green-100 transition border border-green-100"><span>💬</span> WhatsApp</button>
-                        <button id="profile-help-chat-btn" type="button" class="flex items-center gap-2 font-bold text-xs px-4 py-2.5 rounded-xl transition border text-brand hover:bg-accent-soft border-accent-soft"><span>🗨️</span> Start Chat</button>
+                        <button id="profile-help-chat-btn" type="button" class="profile-btn-primary"><span>🗨️</span> Start Chat</button>
+                        <a id="profile-help-feedback-link" href="#" class="profile-btn-ghost">Share your thoughts →</a>
                     </div>
-                    <p class="text-xs text-slate-400 mt-4">Have an idea? <a id="profile-help-feedback-link" href="#" class="text-brand font-semibold hover:underline">Share your thoughts →</a></p>
+                </div>
+            </div>
+
+            <!-- Analytics Tab -->
+            <div id="tab-analytics" class="tab-content hidden-section space-y-5">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="section-card shadow-sm profile-goal-card">
+                        <div class="profile-goal-copy-block">
+                            <span class="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-2">Daily Goal</span>
+                            <div class="text-2xl font-black"><span id="analytics-daily-minutes">0</span> <span class="text-slate-300 text-lg">/ <span id="analytics-goal-minutes">15</span> min</span></div>
+                            <p id="analytics-goal-copy" class="text-xs text-slate-400 mt-2">Keep reading and the goal ring will update automatically.</p>
+                        </div>
+                        <div class="profile-goal-ring" id="analytics-goal-ring" style="--goal-progress: 0%;">
+                            <div class="profile-goal-ring-inner"><strong id="analytics-goal-progress-label" aria-hidden="true"></strong></div>
+                        </div>
+                    </div>
+                    <div class="section-card shadow-sm">
+                        <span class="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-2">This Week</span>
+                        <div class="text-2xl font-black text-accent"><span id="analytics-weekly-minutes">0</span> min</div>
+                        <p class="text-xs text-slate-400 mt-1"><span id="analytics-sessions-completed">0</span> sessions completed</p>
+                    </div>
+                </div>
+                <div class="section-card shadow-sm profile-soft-card">
+                    <h4 class="font-bold text-sm" style="margin-bottom:6px">Currently Reading</h4>
+                    <p class="text-xs text-slate-400">Reading progress uses current library state.</p>
+                    <p id="analytics-currently-reading" class="text-sm font-bold mt-3" style="color:var(--jubly-purple)">Open a book to track progress.</p>
                 </div>
             </div>
 
@@ -1008,7 +1035,7 @@
                                 <p class="font-bold text-sm">Change Password</p>
                                 <p class="text-xs text-slate-400 mt-0.5">Update your password directly here.</p>
                             </div>
-                            <button id="profile-password-toggle-btn" type="button" class="shrink-0 text-xs font-bold border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50 transition text-slate-600">Change Password</button>
+                            <button id="profile-password-toggle-btn" type="button" class="profile-btn-ghost shrink-0">Change Password</button>
                         </div>
                         <form id="profile-password-form" class="profile-inline-form hidden-section">
                             <input id="profile-password-input" type="password" class="profile-inline-input" minlength="8" placeholder="New password" aria-label="New password">
