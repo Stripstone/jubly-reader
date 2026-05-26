@@ -2777,663 +2777,427 @@ body.app-dark .profile-policy-link:hover { background: #1e293b; }
   }
 }
 
-/* ── 1E Shell Cohesion Blueprint — direct selector application ──────────────
-   Source: Designs.zip / jubly_1_e_shell_cohesion_blueprint.html.
-   This block maps the blueprint CSS contract onto the existing project DOM
-   owners named by the blueprint. It is styling-only: no runtime authority,
-   no cloud/account/usage/TTS behavior, and no new product copy. */
+
 :root {
-  color-scheme: light dark;
-  --jubly-purple: #6344f5;
-  --jubly-purple-dark: #5236d9;
-  --shell-bg: #f7f3ec;
-  --shell-bg-top: #fbf8f2;
-  --shell-bg-bottom: #f1eadf;
-  --shell-rail: rgba(255,250,244,.92);
-  --surface: #ffffff;
-  --surface-warm: #fbf8f2;
-  --surface-parchment: rgba(251,248,242,.96);
-  --surface-content: rgba(255,252,247,.72);
-  --surface-blueprint: rgba(255,252,247,.72);
-  --border: #e7ded3;
-  --border-warm: rgba(223,212,198,.88);
-  --divider-warm: #efe5d8;
-  --text: #0f172a;
-  --ink: #1e293b;
-  --muted: #64748b;
-  --warm-muted: #8a7a69;
-  --faint: #94a3b8;
-  --shadow-ground: 0 14px 18px rgba(32,20,12,.20), 0 5px 8px rgba(15,23,42,.10);
-  --shadow-panel: 0 14px 18px rgba(32,20,12,.18), 0 5px 8px rgba(15,23,42,.08);
-  --shadow-button-warm: inset 0 2px 1px rgba(255,255,255,.9), inset 0 -2px 3px rgba(0,0,0,.035), 0 8px 12px rgba(139,126,99,.25), 0 2px 4px rgba(139,126,99,.15);
-  --shadow-button-primary: inset 0 2px 1px rgba(255,255,255,.22), inset 0 -2px 3px rgba(0,0,0,.08), 0 9px 13px rgba(99,68,245,.25), 0 2px 5px rgba(15,23,42,.12);
-  --shell-sidebar-width: 156px;
-  --shell-topnav-height: 57px;
+  --jubly-shell-bg: #f7f3ea;
+  --jubly-shell-bg-soft: #fbf8f1;
+  --jubly-shell-surface: rgba(255, 252, 246, 0.92);
+  --jubly-shell-surface-strong: #fffaf2;
+  --jubly-shell-border: rgba(139, 92, 246, 0.16);
+  --jubly-shell-border-strong: rgba(99, 68, 245, 0.24);
+  --jubly-shell-shadow: 0 18px 45px rgba(58, 42, 92, 0.10);
+  --jubly-shell-shadow-soft: 0 10px 25px rgba(58, 42, 92, 0.08);
+  --jubly-shell-radius: 22px;
+  --jubly-shell-sidebar-width: 192px;
+  --jubly-shell-nav-height: 57px;
 }
 
-body.app-dark {
-  --jubly-purple: #8168ff;
-  --jubly-purple-dark: #6344f5;
-  --shell-bg: #1a1512;
-  --shell-bg-top: #221c18;
-  --shell-bg-bottom: #120e0c;
-  --shell-rail: rgba(30,24,20,.94);
-  --surface: #26201b;
-  --surface-warm: #2e2621;
-  --surface-parchment: rgba(38,32,27,.96);
-  --surface-content: rgba(46,38,32,.78);
-  --surface-blueprint: rgba(38,32,27,.5);
-  --border: #3d322a;
-  --border-warm: rgba(74,61,51,.88);
-  --divider-warm: #382e26;
-  --text: #f4eee7;
-  --ink: #fff7ee;
-  --muted: #a89b8d;
-  --warm-muted: #bdae9e;
-  --faint: #7a6e62;
-  --shadow-ground: 0 16px 28px rgba(0,0,0,.45), 0 6px 12px rgba(0,0,0,.3);
-  --shadow-panel: 0 14px 24px rgba(0,0,0,.4), 0 5px 10px rgba(0,0,0,.25);
+html:not(.reading-active),
+body:not(.reading-active) {
+  background:
+    radial-gradient(circle at top left, rgba(245, 158, 11, 0.12), transparent 34rem),
+    radial-gradient(circle at 85% 10%, rgba(99, 68, 245, 0.10), transparent 28rem),
+    var(--jubly-shell-bg);
 }
 
-body.app-light,
-body.app-dark {
-  background: linear-gradient(180deg, var(--shell-bg-top) 0%, var(--shell-bg) 42%, var(--shell-bg-bottom) 100%) !important;
-  color: var(--text);
+.shell-top-nav {
+  background: rgba(255, 252, 246, 0.90) !important;
+  border-color: rgba(148, 163, 184, 0.24) !important;
+  box-shadow: 0 10px 30px rgba(30, 41, 59, 0.06);
+  backdrop-filter: blur(18px);
 }
 
-body.app-light nav.bg-white,
-body.app-dark nav.bg-white {
-  min-height: var(--shell-topnav-height);
-  border-bottom: 1px solid var(--border) !important;
-  background: var(--shell-rail) !important;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-
-body.app-light nav .bg-brand,
-body.app-dark nav .bg-brand {
-  background: linear-gradient(135deg, var(--jubly-purple), var(--jubly-purple-dark)) !important;
-  box-shadow: 0 8px 18px rgba(99,68,245,.22);
-}
-
-body.app-light #nav-profile-trigger,
-body.app-dark #nav-profile-trigger {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgba(15,23,42,.04);
-}
-
-body.app-light #nav-usage-pill,
-body.app-dark #nav-usage-pill {
-  color: var(--jubly-purple) !important;
-  background: var(--shell-rail) !important;
-  border: 1px solid var(--border);
-}
-
-body.app-light #app-sidebar,
-body.app-dark #app-sidebar {
-  top: var(--shell-topnav-height) !important;
-  width: var(--shell-sidebar-width) !important;
-  height: calc(100vh - var(--shell-topnav-height)) !important;
-  border-right: 1px solid var(--border) !important;
-  background: var(--shell-rail) !important;
+#app-sidebar {
+  width: var(--jubly-shell-sidebar-width) !important;
+  padding: 18px 14px !important;
   align-items: stretch !important;
-  padding: 18px 12px 16px !important;
-  gap: 8px !important;
-  overflow: visible;
+  gap: 10px !important;
+  background: rgba(255, 252, 246, 0.94) !important;
+  border-right: 1px solid rgba(148, 163, 184, 0.24) !important;
+  box-shadow: 14px 0 30px rgba(58, 42, 92, 0.07);
+  backdrop-filter: blur(16px);
 }
 
-body.app-light .sidebar-btn,
-body.app-dark .sidebar-btn {
-  width: 100% !important;
-  min-height: 46px;
-  border: 0;
-  background: transparent;
-  color: var(--muted) !important;
+.sidebar-primary-actions,
+.sidebar-secondary-actions {
   display: flex;
-  flex-direction: row !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  gap: 10px;
-  font-size: 13px !important;
-  font-weight: 800;
-  line-height: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-secondary-actions {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+#app-sidebar .sidebar-btn {
+  width: 100%;
+  min-height: 44px;
   border-radius: 14px;
-  cursor: pointer;
-  letter-spacing: -.01em !important;
-  margin: 0;
-  padding: 0 14px !important;
-  text-align: left;
-  text-transform: none !important;
-  transition: background .15s ease, color .15s ease, box-shadow .15s ease, transform .15s ease;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  color: #475569;
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.1;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
-body.app-light .sidebar-btn:hover,
-body.app-dark .sidebar-btn:hover,
-body.app-light .sidebar-btn.active,
-body.app-dark .sidebar-btn.active {
-  background: var(--surface-warm) !important;
-  color: var(--jubly-purple) !important;
-  box-shadow: inset 0 0 0 1px var(--border);
+#app-sidebar .sidebar-btn:hover,
+#app-sidebar .sidebar-btn:focus-visible {
+  color: #3730a3;
+  background: rgba(99, 68, 245, 0.08);
+  border-color: rgba(99, 68, 245, 0.14);
+  outline: none;
 }
 
-body.app-light .sidebar-btn:active,
-body.app-dark .sidebar-btn:active {
+#app-sidebar .sidebar-btn:active {
   transform: translateY(1px);
 }
 
-body.app-light #dashboard.with-sidebar,
-body.app-dark #dashboard.with-sidebar,
-body.app-light #profile-page.with-sidebar,
-body.app-dark #profile-page.with-sidebar {
-  box-sizing: border-box;
-  width: 100% !important;
-  max-width: 1024px !important;
-  margin: 0 auto !important;
-  padding: 48px 32px 48px 196px !important;
-  min-height: calc(100dvh - var(--shell-topnav-height) - var(--support-footer-flow-height, 58px));
+#app-sidebar .sidebar-btn.active {
+  color: #312e81;
+  background: linear-gradient(135deg, rgba(99, 68, 245, 0.14), rgba(245, 158, 11, 0.12));
+  border-color: rgba(99, 68, 245, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.52), 0 8px 18px rgba(58, 42, 92, 0.08);
 }
 
-body.app-light .library-header,
-body.app-dark .library-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 16px;
-  margin-bottom: 40px !important;
-}
-
-body.app-light .library-header h2,
-body.app-dark .library-header h2 {
-  margin: 0;
-  font-size: 30px !important;
-  line-height: 1.2;
-  font-weight: 800 !important;
-  letter-spacing: -.04em;
-  color: var(--text) !important;
-}
-
-body.app-light #dashboard-subtitle,
-body.app-dark #dashboard-subtitle {
-  margin: 5px 0 0;
-  color: var(--muted) !important;
-  font-size: 14px;
-  min-height: 20px;
-}
-
-body.app-light #library-toolbar,
-body.app-dark #library-toolbar {
-  display: flex;
+.sidebar-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
+  justify-content: center;
+  flex: 0 0 24px;
 }
 
-body.app-light #manageLibraryBtn,
-body.app-dark #manageLibraryBtn {
-  border: 1px solid #e7ded3 !important;
-  background: #fbf8f2 !important;
-  color: #0f172a !important;
-  border-radius: 8px !important;
-  padding: 10px 16px !important;
-  font-size: 14px !important;
-  font-weight: 800 !important;
-  box-shadow: var(--shadow-button-warm) !important;
+.sidebar-label {
+  display: inline-flex;
+  min-width: 0;
+  white-space: nowrap;
 }
 
-body.app-light #importBookBtn,
-body.app-dark #importBookBtn {
-  border: 0 !important;
-  background: var(--jubly-purple) !important;
-  color: #fff !important;
-  border-radius: 8px !important;
-  padding: 11px 22px !important;
-  font-size: 13.5px !important;
-  font-weight: 800 !important;
-  letter-spacing: -.01em;
-  box-shadow: var(--shadow-button-primary) !important;
+#dashboard.with-sidebar,
+#profile-page.with-sidebar {
+  width: min(100%, calc(72rem + var(--jubly-shell-sidebar-width))) !important;
+  max-width: none !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding-left: calc(var(--jubly-shell-sidebar-width) + 2rem) !important;
+  padding-right: 2rem !important;
 }
 
-body.app-light #library-populated .glass-card,
-body.app-dark #library-populated .glass-card,
-body.app-light #library-pending .glass-card,
-body.app-dark #library-pending .glass-card,
-body.app-light #library-empty .glass-card,
-body.app-dark #library-empty .glass-card,
-body.app-light #profile-page .section-card,
-body.app-dark #profile-page .section-card {
-  background: var(--surface-parchment) !important;
-  border: 1px solid var(--border-warm) !important;
-  border-radius: 20px !important;
-  box-shadow: var(--shadow-ground) !important;
-  color: var(--text);
+#dashboard.shell-surface,
+#profile-page.shell-surface {
+  color: #1f2937;
 }
 
-body.app-light #library-populated .glass-card > .bg-slate-50,
-body.app-dark #library-populated .glass-card > .bg-slate-50 {
-  position: relative;
-  background: var(--surface-warm) !important;
-  border-bottom: 0 !important;
-  display: grid !important;
-  grid-template-columns: minmax(0,1fr) 128px 128px 32px;
+#dashboard .glass-card,
+#dashboard .section-card,
+#profile-page .section-card,
+#profile-auth-card,
+#profile-guest-card,
+.sub-hero,
+#library-public-sample .section-card,
+#library-empty .glass-card,
+#library-populated .glass-card,
+.library-pending-card {
+  border-radius: var(--jubly-shell-radius) !important;
+  border: 1px solid var(--jubly-shell-border) !important;
+  background: var(--jubly-shell-surface) !important;
+  box-shadow: var(--jubly-shell-shadow-soft) !important;
+}
+
+#dashboard .glass-card:hover,
+#profile-page .section-card:hover,
+#library-empty .glass-card:hover,
+#library-populated .glass-card:hover {
+  box-shadow: var(--jubly-shell-shadow) !important;
+}
+
+.library-header {
+  border-radius: 26px;
+  padding: 18px 20px;
+  background: rgba(255, 252, 246, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 12px 30px rgba(58, 42, 92, 0.06);
+}
+
+#library-toolbar {
   align-items: center;
-  padding: 12px 24px !important;
-  color: var(--warm-muted) !important;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  font-size: 12px !important;
-  font-weight: 800 !important;
+  gap: 10px;
 }
 
-body.app-light #library-populated .glass-card > .bg-slate-50::after,
-body.app-dark #library-populated .glass-card > .bg-slate-50::after {
-  content: "";
-  position: absolute;
-  left: .5%;
-  bottom: 0;
-  width: 99%;
-  height: 1px;
-  background: var(--divider-warm);
-  border-radius: 999px;
+#manageLibraryBtn,
+#importBookBtn,
+#profile-page button:not(.profile-tab-btn):not(.music-upload-btn):not(.music-delete-btn),
+.reading-top-settings-btn,
+.reading-top-exit,
+.reading-bottom-bar .pb-icon-btn {
+  border-radius: 14px !important;
 }
 
-body.app-light .library-book-row,
-body.app-dark .library-book-row {
-  position: relative;
-  display: grid !important;
-  grid-template-columns: minmax(0,1fr) 128px 128px 32px;
-  align-items: center;
-  padding: 16px 24px !important;
-  background: var(--surface-blueprint) !important;
-  border-bottom: 0 !important;
-  min-height: 70px;
+#manageLibraryBtn {
+  background: rgba(255, 255, 255, 0.72) !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  color: #475569 !important;
+  box-shadow: 0 6px 16px rgba(58, 42, 92, 0.05);
 }
 
-body.app-light .library-book-row::after,
-body.app-dark .library-book-row::after {
-  content: "";
-  position: absolute;
-  left: .5%;
-  bottom: 0;
-  width: 99%;
-  height: 1px;
-  background: var(--divider-warm);
-  border-radius: 999px;
+#importBookBtn,
+.btn-jubly {
+  box-shadow: 0 10px 22px rgba(99, 68, 245, 0.18) !important;
 }
 
-body.app-light .library-book-row:last-child::after,
-body.app-dark .library-book-row:last-child::after {
-  display: none;
+#library-populated .glass-card > div:first-child {
+  background: rgba(248, 250, 252, 0.76) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
 }
 
-body.app-light .library-row-doc,
-body.app-dark .library-row-doc {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.library-row {
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.library-row:hover {
+  background: rgba(250, 245, 255, 0.72) !important;
+}
+
+.library-row-identity,
+.library-row-copy,
+.library-row-title,
+.library-row-meta {
   min-width: 0;
 }
 
-body.app-light .library-row-icon,
-body.app-dark .library-row-icon {
-  width: 38px !important;
-  height: 48px !important;
-  border-radius: 10px !important;
-  background: var(--surface-warm) !important;
-  border: 1px solid var(--border) !important;
-  color: var(--muted) !important;
-}
-
-body.app-light .library-row-title,
-body.app-dark .library-row-title {
-  font-weight: 800 !important;
-  color: var(--ink) !important;
-  font-size: 15px !important;
-  white-space: nowrap;
+.library-row-title,
+.library-row-meta {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-body.app-light .library-row-meta,
-body.app-dark .library-row-meta {
-  font-size: 12px !important;
-  color: var(--muted) !important;
-  margin-top: 4px;
-}
-
-body.app-light .library-row-status,
-body.app-dark .library-row-status {
-  font-size: 12px !important;
-  font-weight: 800 !important;
-  color: var(--jubly-purple) !important;
-  background: var(--surface-warm) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 999px !important;
-  padding: 5px 9px !important;
-}
-
-body.app-light .library-row-time,
-body.app-dark .library-row-time,
-body.app-light .library-row-open,
-body.app-dark .library-row-open {
-  color: var(--muted) !important;
-  font-weight: 700 !important;
-}
-
-body.app-light #profile-page > .flex,
-body.app-dark #profile-page > .flex {
+#profile-page .flex.flex-col.md\:flex-row.gap-10 {
   align-items: flex-start;
-  gap: 24px !important;
 }
 
-body.app-light #profile-sidebar,
-body.app-dark #profile-sidebar {
-  width: 240px !important;
-  flex: 0 0 240px !important;
+#profile-sidebar {
+  position: sticky;
+  top: calc(var(--jubly-shell-nav-height) + 24px);
 }
 
-body.app-light #profile-auth-content,
-body.app-dark #profile-auth-content {
-  min-width: 0;
+.profile-tab-btn {
+  border: 1px solid transparent;
 }
 
-body.app-light .profile-tab-btn.active,
-body.app-dark .profile-tab-btn.active {
-  background: var(--surface-warm) !important;
-  color: var(--jubly-purple) !important;
-  box-shadow: inset 0 0 0 1px var(--border);
+.profile-tab-btn.active {
+  background: rgba(99, 68, 245, 0.10) !important;
+  border-color: rgba(99, 68, 245, 0.18) !important;
+  color: #3730a3 !important;
 }
 
-body.app-light .reading-top-bar,
-body.app-light .reading-bottom-bar,
+.sub-hero {
+  background: linear-gradient(135deg, #5b3ff4, #7c3aed 60%, #9f7aea) !important;
+  box-shadow: 0 16px 36px rgba(99, 68, 245, 0.20) !important;
+}
+
+#supportFooter.support-footer {
+  position: relative !important;
+  inset: auto !important;
+  z-index: 10 !important;
+  margin: 0 !important;
+  background: rgba(255, 252, 246, 0.92) !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.22) !important;
+  box-shadow: 0 -10px 28px rgba(58, 42, 92, 0.05);
+}
+
+#dashboard,
+#profile-page {
+  min-height: calc(100dvh - var(--jubly-shell-nav-height) - 72px) !important;
+  padding-bottom: 28px !important;
+}
+
+.reading-top-bar,
+.reading-bottom-bar {
+  background: rgba(255, 252, 246, 0.94) !important;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  box-shadow: 0 10px 28px rgba(30, 41, 59, 0.08);
+  backdrop-filter: blur(14px);
+}
+
+.reading-bottom-bar {
+  box-shadow: 0 -10px 28px rgba(30, 41, 59, 0.08);
+}
+
+.reading-settings-card,
+#reading-settings-panel .modal,
+.settings-modal,
+#settings-modal .modal {
+  border-radius: 22px !important;
+  border: 1px solid var(--jubly-shell-border) !important;
+  background: var(--jubly-shell-surface-strong) !important;
+  box-shadow: 0 24px 55px rgba(30, 41, 59, 0.16) !important;
+}
+
+.next-chapter-btn,
+button.next-chapter,
+#nextChapterBtn {
+  border-radius: 14px !important;
+  box-shadow: 0 10px 22px rgba(99, 68, 245, 0.16) !important;
+}
+
+body.app-dark {
+  --jubly-shell-bg: #171923;
+  --jubly-shell-bg-soft: #1f2330;
+  --jubly-shell-surface: rgba(31, 35, 48, 0.94);
+  --jubly-shell-surface-strong: #242938;
+  --jubly-shell-border: rgba(226, 232, 240, 0.10);
+  --jubly-shell-border-strong: rgba(226, 232, 240, 0.16);
+  --jubly-shell-shadow: 0 18px 45px rgba(0, 0, 0, 0.34);
+  --jubly-shell-shadow-soft: 0 10px 25px rgba(0, 0, 0, 0.24);
+  color-scheme: dark;
+}
+
+body.app-dark:not(.reading-active) {
+  background:
+    radial-gradient(circle at top left, rgba(245, 158, 11, 0.10), transparent 32rem),
+    radial-gradient(circle at 85% 10%, rgba(124, 58, 237, 0.16), transparent 28rem),
+    var(--jubly-shell-bg) !important;
+}
+
+body.app-dark .shell-top-nav,
+body.app-dark #app-sidebar,
+body.app-dark #supportFooter.support-footer {
+  background: rgba(31, 35, 48, 0.94) !important;
+  border-color: rgba(226, 232, 240, 0.10) !important;
+}
+
+body.app-dark #dashboard .glass-card,
+body.app-dark #dashboard .section-card,
+body.app-dark #profile-page .section-card,
+body.app-dark #profile-auth-card,
+body.app-dark #profile-guest-card,
+body.app-dark #library-public-sample .section-card,
+body.app-dark #library-empty .glass-card,
+body.app-dark #library-populated .glass-card,
+body.app-dark .library-pending-card {
+  background: var(--jubly-shell-surface) !important;
+  border-color: var(--jubly-shell-border) !important;
+  color: #e5e7eb !important;
+}
+
+body.app-dark .library-header {
+  background: rgba(31, 35, 48, 0.72);
+  border-color: rgba(226, 232, 240, 0.08);
+}
+
+body.app-dark #app-sidebar .sidebar-btn {
+  color: #cbd5e1;
+}
+
+body.app-dark #app-sidebar .sidebar-btn:hover,
+body.app-dark #app-sidebar .sidebar-btn:focus-visible,
+body.app-dark #app-sidebar .sidebar-btn.active {
+  color: #ede9fe;
+  background: rgba(124, 58, 237, 0.20);
+  border-color: rgba(167, 139, 250, 0.18);
+}
+
 body.app-dark .reading-top-bar,
 body.app-dark .reading-bottom-bar {
-  background: var(--shell-rail) !important;
-  border-color: var(--border) !important;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(31, 35, 48, 0.94) !important;
+  border-color: rgba(226, 232, 240, 0.10) !important;
 }
 
-body.app-light .reading-settings-card,
-body.app-dark .reading-settings-card {
-  background: var(--surface-parchment) !important;
-  border: 1px solid var(--border-warm) !important;
-  border-radius: 20px !important;
-  box-shadow: var(--shadow-panel) !important;
-}
-
-body.app-light .next-chapter-btn,
-body.app-dark .next-chapter-btn {
-  background: var(--jubly-purple) !important;
-  color: #fff !important;
-  border-color: transparent !important;
-  box-shadow: var(--shadow-button-primary) !important;
-}
-
-body.app-light #supportFooter,
-body.app-dark #supportFooter {
-  position: relative !important;
-  left: auto !important;
-  right: auto !important;
-  bottom: auto !important;
-  width: auto !important;
-  margin-left: var(--shell-sidebar-width) !important;
-  background: var(--shell-rail) !important;
-  border-top: 1px solid var(--border) !important;
-  z-index: 10;
-}
-
-@media (max-width: 640px) {
-  :root {
-    --shell-sidebar-width: 0px;
-    --shell-topnav-height: 58px;
+@media (max-width: 900px) {
+  #dashboard.with-sidebar,
+  #profile-page.with-sidebar {
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+    width: 100% !important;
   }
 
-  body.app-light #app-sidebar,
-  body.app-dark #app-sidebar {
+  #app-sidebar {
     display: none !important;
   }
 
-  body.app-light #dashboard.with-sidebar,
-  body.app-dark #dashboard.with-sidebar,
-  body.app-light #profile-page.with-sidebar,
-  body.app-dark #profile-page.with-sidebar {
-    width: 100% !important;
-    max-width: 100% !important;
-    padding: 28px 16px 96px !important;
+  .library-header {
+    padding: 16px;
   }
 
-  body.app-light .library-header,
-  body.app-dark .library-header {
-    flex-direction: column;
-    align-items: stretch;
-    margin-bottom: 24px !important;
-    gap: 14px;
-  }
-
-  body.app-light #library-toolbar,
-  body.app-dark #library-toolbar {
+  #library-toolbar {
+    width: 100%;
     justify-content: flex-start;
   }
 
-  body.app-light #library-populated .glass-card > .bg-slate-50,
-  body.app-dark #library-populated .glass-card > .bg-slate-50 {
-    grid-template-columns: minmax(0,1fr);
-    padding: 10px 12px !important;
-    font-size: 10px !important;
-    letter-spacing: .05em;
-  }
-
-  body.app-light #library-populated .glass-card > .bg-slate-50 > div:not(:first-child),
-  body.app-dark #library-populated .glass-card > .bg-slate-50 > div:not(:first-child) {
-    display: none !important;
-  }
-
-  body.app-light .library-book-row,
-  body.app-dark .library-book-row {
-    display: grid !important;
-    grid-template-columns: minmax(0,1fr) auto;
-    align-items: center;
-    gap: 8px 10px;
-    padding: 13px 12px !important;
-    min-height: 64px;
-  }
-
-  body.app-light .library-row-doc,
-  body.app-dark .library-row-doc {
-    grid-column: 1;
-    grid-row: 1 / span 2;
-    align-items: flex-start;
-    gap: 9px;
-  }
-
-  body.app-light .library-row-icon,
-  body.app-dark .library-row-icon {
-    width: 32px !important;
-    height: 40px !important;
-    border-radius: 8px !important;
-  }
-
-  body.app-light .library-row-title,
-  body.app-dark .library-row-title {
-    font-size: 13px !important;
-  }
-
-  body.app-light .library-row-meta,
-  body.app-dark .library-row-meta {
-    font-size: 10.5px !important;
-  }
-
-  body.app-light .library-row-status-cell,
-  body.app-dark .library-row-status-cell,
-  body.app-light .library-row-time,
-  body.app-dark .library-row-time {
-    display: flex !important;
-    align-items: center;
-    justify-content: flex-end;
-    width: auto !important;
-  }
-
-  body.app-light .library-row-status-cell,
-  body.app-dark .library-row-status-cell {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  body.app-light .library-row-time,
-  body.app-dark .library-row-time {
-    grid-column: 2;
-    grid-row: 2;
-    font-size: 11px !important;
-    white-space: nowrap;
-  }
-
-  body.app-light .library-row-open,
-  body.app-dark .library-row-open {
-    display: none !important;
-  }
-
-  body.app-light #profile-page > .flex,
-  body.app-dark #profile-page > .flex {
-    flex-direction: column !important;
-    gap: 16px !important;
-  }
-
-  body.app-light #profile-sidebar,
-  body.app-dark #profile-sidebar {
+  #profile-sidebar {
+    position: static;
     width: 100% !important;
-    flex: 1 1 auto !important;
-  }
-
-  body.app-light #supportFooter,
-  body.app-dark #supportFooter {
-    margin-left: 0 !important;
   }
 }
 
-/* Existing generated library rows receive the same 1E table treatment without
-   changing row generation code. */
-body.app-light #library-rows > div,
-body.app-dark #library-rows > div {
-  position: relative;
-  display: grid !important;
-  grid-template-columns: minmax(0,1fr) 128px 128px 32px;
-  align-items: center;
-  padding: 16px 24px !important;
-  background: var(--surface-blueprint) !important;
-  border-bottom: 0 !important;
-  min-height: 70px;
-}
-body.app-light #library-rows > div::after,
-body.app-dark #library-rows > div::after {
-  content: "";
-  position: absolute;
-  left: .5%;
-  bottom: 0;
-  width: 99%;
-  height: 1px;
-  background: var(--divider-warm);
-  border-radius: 999px;
-}
-body.app-light #library-rows > div:last-child::after,
-body.app-dark #library-rows > div:last-child::after { display: none; }
-body.app-light #library-rows > div > div:first-child,
-body.app-dark #library-rows > div > div:first-child {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-body.app-light #library-rows > div > div:first-child > div:first-child,
-body.app-dark #library-rows > div > div:first-child > div:first-child {
-  width: 38px !important;
-  height: 48px !important;
-  border-radius: 10px !important;
-  background: var(--surface-warm) !important;
-  border: 1px solid var(--border) !important;
-  color: var(--muted) !important;
-}
-body.app-light #library-rows > div p:first-child,
-body.app-dark #library-rows > div p:first-child {
-  font-weight: 800 !important;
-  color: var(--ink) !important;
-  font-size: 15px !important;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-body.app-light #library-rows > div p:last-child,
-body.app-dark #library-rows > div p:last-child {
-  font-size: 12px !important;
-  color: var(--muted) !important;
-  margin-top: 4px;
-}
-body.app-light #library-rows > div > div:nth-child(2) span,
-body.app-dark #library-rows > div > div:nth-child(2) span {
-  font-size: 12px !important;
-  font-weight: 800 !important;
-  color: var(--jubly-purple) !important;
-  background: var(--surface-warm) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 999px !important;
-  padding: 5px 9px !important;
-}
-body.app-light #library-rows > div > div:nth-child(3),
-body.app-dark #library-rows > div > div:nth-child(3),
-body.app-light #library-rows > div > div:nth-child(4),
-body.app-dark #library-rows > div > div:nth-child(4) {
-  color: var(--muted) !important;
-  font-weight: 700 !important;
-}
 @media (max-width: 640px) {
-  body.app-light #library-rows > div,
-  body.app-dark #library-rows > div {
-    display: grid !important;
-    grid-template-columns: minmax(0,1fr) auto;
-    align-items: center;
-    gap: 8px 10px;
-    padding: 13px 12px !important;
-    min-height: 64px;
+  #dashboard.with-sidebar,
+  #profile-page.with-sidebar {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    padding-top: 1.5rem !important;
   }
-  body.app-light #library-rows > div > div:first-child,
-  body.app-dark #library-rows > div > div:first-child {
-    grid-column: 1;
-    grid-row: 1 / span 2;
-    align-items: flex-start;
-    gap: 9px;
+
+  .library-header {
+    gap: 14px;
+    margin-bottom: 1.25rem !important;
   }
-  body.app-light #library-rows > div > div:first-child > div:first-child,
-  body.app-dark #library-rows > div > div:first-child > div:first-child {
-    width: 32px !important;
-    height: 40px !important;
-    border-radius: 8px !important;
+
+  #library-toolbar {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
   }
-  body.app-light #library-rows > div p:first-child,
-  body.app-dark #library-rows > div p:first-child { font-size: 13px !important; }
-  body.app-light #library-rows > div p:last-child,
-  body.app-dark #library-rows > div p:last-child { font-size: 10.5px !important; }
-  body.app-light #library-rows > div > div:nth-child(2),
-  body.app-dark #library-rows > div > div:nth-child(2),
-  body.app-light #library-rows > div > div:nth-child(3),
-  body.app-dark #library-rows > div > div:nth-child(3) {
-    display: flex !important;
-    align-items: center;
-    justify-content: flex-end;
+
+  #manageLibraryBtn,
+  #importBookBtn {
+    width: 100%;
+  }
+
+  #library-populated .glass-card > div:first-child {
+    display: none !important;
+  }
+
+  .library-row {
+    align-items: flex-start !important;
+    gap: 10px;
+    padding: 14px 16px !important;
+  }
+
+  .library-row-identity {
+    align-items: flex-start !important;
+  }
+
+  .library-row-status,
+  .library-row-time {
+    display: block !important;
+    width: auto !important;
+    margin-left: 42px;
+    font-size: 0.76rem;
+  }
+
+  .library-row-action {
+    margin-left: auto;
     width: auto !important;
   }
-  body.app-light #library-rows > div > div:nth-child(2),
-  body.app-dark #library-rows > div > div:nth-child(2) {
-    grid-column: 2;
-    grid-row: 1;
+
+  #profile-page .grid.grid-cols-3 {
+    grid-template-columns: 1fr !important;
   }
-  body.app-light #library-rows > div > div:nth-child(3),
-  body.app-dark #library-rows > div > div:nth-child(3) {
-    grid-column: 2;
-    grid-row: 2;
-    font-size: 11px !important;
-    white-space: nowrap;
+
+  #supportFooter.support-footer > div {
+    gap: 0.65rem !important;
   }
-  body.app-light #library-rows > div > div:nth-child(4),
-  body.app-dark #library-rows > div > div:nth-child(4) { display: none !important; }
 }
