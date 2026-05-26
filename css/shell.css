@@ -3471,3 +3471,103 @@ body.sh-shell-active #library-populated .glass-card > div:first-child {
     display: none !important;
   }
 }
+
+/* ── 1E final precision pass ─────────────────────────────────────────────
+   Each rule below is traced directly to a blueprint CSS declaration.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* 1. Nav height + brand text sizing
+   Blueprint: .topnav height:60px  .brand font-size:18px letter-spacing:-.02em */
+body.sh-shell-active nav {
+  height: 60px !important;
+}
+body.sh-shell-active nav .text-2xl,
+body.sh-shell-active nav span.text-2xl {
+  font-size: 18px !important;
+  letter-spacing: -0.02em !important;
+  color: var(--sh-ink) !important;
+}
+
+/* Sidebar top must match nav height */
+body.sh-shell-active #app-sidebar {
+  top: 60px !important;
+  height: calc(100vh - 60px) !important;
+  overflow: visible !important;
+}
+#sh-mobile-overlay { top: 60px; }
+
+/* 2. Sidebar button press feedback
+   Blueprint: .sidebar-btn:active { transform:translateY(1px) } */
+body.sh-shell-active #app-sidebar .sidebar-btn:active {
+  transform: translateY(1px) !important;
+}
+
+/* 3. Secondary button active-state reset
+   Blueprint: .sidebar-btn.secondary.active { background:transparent;
+              color:var(--warm-muted); box-shadow:none } */
+body.sh-shell-active #app-sidebar .sh-secondary-btn.active {
+  background: transparent !important;
+  color: var(--sh-warm-muted) !important;
+  box-shadow: none !important;
+}
+
+/* 4. Import button hover — full shadow from blueprint, not just brightness
+   Blueprint: filter:brightness(1.03) + specific box-shadow */
+body.sh-shell-active #importBookBtn:hover {
+  filter: brightness(1.03) !important;
+  box-shadow:
+    inset 0 2px 1px rgba(255,255,255,.24),
+    inset 0 -2px 3px rgba(0,0,0,.08),
+    0 10px 15px rgba(99,68,245,.29),
+    0 2px 6px rgba(15,23,42,.13) !important;
+}
+
+/* 5. Import button active — pressed shadow from blueprint
+   Blueprint: transform:translateY(1px) + reduced inset shadow */
+body.sh-shell-active #importBookBtn:active {
+  transform: translateY(1px) !important;
+  box-shadow:
+    inset 0 3px 5px rgba(0,0,0,.14),
+    0 2px 3px rgba(99,68,245,.16) !important;
+}
+
+/* 6. Table head: 4-column grid to align precisely with row grid
+   Blueprint: .table-head display:grid grid-template-columns:minmax(0,1fr) 128px 128px 32px
+              padding:12px 24px  uppercase letter-spacing:.06em */
+body.sh-shell-active #library-populated .glass-card > div:first-child {
+  display: grid !important;
+  grid-template-columns: minmax(0,1fr) 128px 128px 32px !important;
+  align-items: center !important;
+  padding: 12px 24px !important;
+  letter-spacing: .06em !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  text-transform: uppercase !important;
+}
+
+/* 7. Mobile: table-head hide non-first columns; hide kebab in rows
+   Blueprint: .table-head div:not(:first-child){display:none}
+              .row > button.kebab{display:none}
+   Mobile sidebar-btn sizing in open drawer per blueprint */
+@media (max-width: 640px) {
+  body.sh-shell-active #library-populated .glass-card > div:first-child > div:not(:first-child) {
+    display: none !important;
+  }
+  body.sh-shell-active #library-populated .glass-card > div:first-child {
+    grid-template-columns: 1fr !important;
+    padding: 10px 12px !important;
+    font-size: 10px !important;
+    letter-spacing: .05em !important;
+  }
+  body.sh-shell-active #library-rows > div > .w-8.text-slate-300 {
+    display: none !important;
+  }
+  body.sh-shell-active #app-sidebar.open .sidebar-btn {
+    min-height: 44px !important;
+    padding: 0 16px !important;
+  }
+  body.sh-shell-active #app-sidebar {
+    top: 60px !important;
+  }
+  #sh-mobile-overlay { top: 60px; }
+}
