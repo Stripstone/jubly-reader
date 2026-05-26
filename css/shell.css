@@ -2954,6 +2954,8 @@ body.sh-shell-active #app-sidebar .sh-secondary-btn {
   letter-spacing: -0.012em !important;
   padding: 0 8px 0 10px !important;
   color: var(--sh-warm-muted) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
 }
 body.sh-shell-active #app-sidebar .sh-secondary-btn.active {
   background: transparent !important;
