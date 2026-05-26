@@ -1,5 +1,5 @@
 // ============================================================
-// jubly — Shell + App bridge
+// jubly â€” Shell + App bridge
 // ============================================================
 //
 // PRE-RUNTIME APPEARANCE BOOTSTRAP RETIRED:
@@ -20,8 +20,8 @@
 // ============================================================
 
     // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 1/6 — Shell Surface Contract & Release Decision
-    // Logical boundary declaration only — code not physically separated yet.
+    // SLICE 7 MODULE BOUNDARY 1/6 â€” Shell Surface Contract & Release Decision
+    // Logical boundary declaration only â€” code not physically separated yet.
     // Primary content: showSection(), releaseDashboardSectionVisibility(),
     //   releaseStandardSectionVisibility(), surface state machine, boot release
     //   transaction, interaction banner. Theme/appearance shell and reading
@@ -29,10 +29,10 @@
     //   as part of the presentation layer for this same logical module.
     // =========================================================================
 
-    // ── Boot timing probe — dev-only, removable after Bucket E proof ────────────
+    // â”€â”€ Boot timing probe â€” dev-only, removable after Bucket E proof â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Proves whether shell's rc:runtime-policy-changed listener is always attached
     // before state.js fires its initial policy event. Required before touching the
-    // 500ms boot-order bridge (Bucket E, RUNTIME_PROTECTION_LEDGER.md §15).
+    // 500ms boot-order bridge (Bucket E, RUNTIME_PROTECTION_LEDGER.md Â§15).
     //
     // To enable:  localStorage.setItem('rcBootProbe', '1')  then hard-refresh.
     // To disable: localStorage.removeItem('rcBootProbe')     then hard-refresh.
@@ -52,7 +52,7 @@
         function report() {
             try {
                 const out = { probe: 'rcBootProbe v1', scenario: 'cold-boot', marks: _marks };
-                console.group('[rcBootProbe] Boot timing report — copy the JSON below for Bucket E evidence:');
+                console.group('[rcBootProbe] Boot timing report â€” copy the JSON below for Bucket E evidence:');
                 console.log(JSON.stringify(out, null, 2));
                 console.groupEnd();
                 window.__rcBootProbeResult = out;
@@ -60,9 +60,9 @@
         }
         return { mark, report };
     })();
-    // ─────────────────────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    // ── Section routing ──────────────────────────────────────────
+    // â”€â”€ Section routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const ALL_SECTIONS     = ['landing-page', 'public-onboarding', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
     const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
     const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
@@ -91,11 +91,11 @@
     };
 
 // Shell-resident interaction banner
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Shared interaction banner.
 //
 // The single surface where the shell surfaces pending, success, and
-// recoverable-error states for async operations. Shell presents — it does
+// recoverable-error states for async operations. Shell presents â€” it does
 // NOT own auth, billing, or runtime truth.
 //
 // Rules (from product docs):
@@ -118,11 +118,11 @@
 //   window.rcInteraction.actions.dismiss(key)
 //   window.rcInteraction.clear(key)
 //   window.rcInteraction.clearAll()
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 window.rcInteraction = (function () {
 
-  // Severity order — higher number wins when two keys compete for the banner
+  // Severity order â€” higher number wins when two keys compete for the banner
   const SEV = { pending: 0, success: 1, error: 2, blocking: 3 };
 
   // Single active slot
@@ -165,7 +165,7 @@ window.rcInteraction = (function () {
     },
   };
 
-  // ── DOM ───────────────────────────────────────────────────────────────────
+  // â”€â”€ DOM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   function _ensureEl() {
     if (_el && _el.isConnected) return _el;
@@ -221,14 +221,14 @@ window.rcInteraction = (function () {
       closeBtn.type = 'button';
       closeBtn.className = 'rc-banner__close';
       closeBtn.setAttribute('aria-label', 'Dismiss');
-      closeBtn.textContent = '×';
+      closeBtn.textContent = 'Ã—';
       const capturedKey = _active.key;
       closeBtn.addEventListener('click', () => clear(capturedKey));
       el.appendChild(closeBtn);
     }
   }
 
-  // ── Core show logic ───────────────────────────────────────────────────────
+  // â”€â”€ Core show logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   function _show(key, sevName, message, actions) {
     // Playback notices have a dedicated reading-view surface driven by
@@ -236,7 +236,7 @@ window.rcInteraction = (function () {
     if (_isPlaybackSurfaceKey(key)) return;
     const sev = SEV[sevName] ?? 0;
 
-    // A different key at higher severity keeps its banner — do not override
+    // A different key at higher severity keeps its banner â€” do not override
     if (_active && _active.key !== key && sev < _active.severity) return;
 
     // Clear any existing auto-dismiss timer
@@ -266,7 +266,7 @@ window.rcInteraction = (function () {
     _render();
   }
 
-  // ── Public API ────────────────────────────────────────────────────────────
+  // â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   function pending(key, message) {
     _show(key, 'pending', message);
@@ -384,7 +384,7 @@ window.rcInteraction = (function () {
             try {
                 const copy = document.getElementById('boot-scrim-copy');
                 if (!copy) return;
-                copy.textContent = 'Checking your account…';
+                copy.textContent = 'Checking your accountâ€¦';
                 copy.classList.add('boot-scrim-copy--visible');
             } catch (_) {}
         }, 1200);
@@ -429,8 +429,8 @@ window.rcInteraction = (function () {
         at: null
     };
     // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 3/6 — Account-Control Readiness
-    // Logical boundary declaration only — code not physically separated yet.
+    // SLICE 7 MODULE BOUNDARY 3/6 â€” Account-Control Readiness
+    // Logical boundary declaration only â€” code not physically separated yet.
     // Primary content: signed-in control state record, readiness reader,
     //   readiness poll. Auth presentation layer (sign-in/sign-up/sign-out
     //   shell, profile tabs, subscription surface rendering) continues after
@@ -602,7 +602,7 @@ window.rcInteraction = (function () {
     function renderLibrarySubtitle(authed) {
         const subtitle = document.getElementById('dashboard-subtitle');
         if (!subtitle) return;
-        // Do not toggle display — CSS min-height on #dashboard-subtitle reserves
+        // Do not toggle display â€” CSS min-height on #dashboard-subtitle reserves
         // a fixed line of space so text changes never cause layout shift.
         if (!authed) {
             subtitle.innerHTML = 'Bring in your own books or text and make this reading space yours.';
@@ -693,15 +693,15 @@ window.rcInteraction = (function () {
     }
 
     // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 2/6 — Dashboard/Library Visible Settlement
-    // Logical boundary declaration only — code not physically separated yet.
+    // SLICE 7 MODULE BOUNDARY 2/6 â€” Dashboard/Library Visible Settlement
+    // Logical boundary declaration only â€” code not physically separated yet.
     // Primary content here: dashboard pending/ready release decision, owner
     //   report reads, settlement thresholds, releaseDashboardSectionVisibility().
     // Library table rendering (the visible settlement output) continues further
-    //   in this file — see the matching MODULE BOUNDARY 2/6 continuation marker.
+    //   in this file â€” see the matching MODULE BOUNDARY 2/6 continuation marker.
     // =========================================================================
 
-    // ── Dashboard release seam ────────────────────────────────────────────────
+    // â”€â”€ Dashboard release seam â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Shell owns the first-visible dashboard state decision before the section
     // is made visible. Dashboard hidden-section removal is owned exclusively by
     // releaseDashboardSectionVisibility(). showSection() is the requester, not
@@ -720,7 +720,7 @@ window.rcInteraction = (function () {
         return state === 'populated' || state === 'empty' || state === 'error';
     }
 
-    // Derives release state from authoritative owner signals only — never from
+    // Derives release state from authoritative owner signals only â€” never from
     // shell-held mirror state. Signed-in path can never produce 'sample'.
     function readDashboardLibraryOwnerReport(reason = 'dashboard-release') {
         const authed = !!isAuthedUser();
@@ -737,7 +737,7 @@ window.rcInteraction = (function () {
         if (!initialResolved) {
             return { state: 'pending', ownerReady, initialResolved, authed, source: 'signed-in-pending', pendingReason: 'resolution-pending', reason, at: new Date().toISOString() };
         }
-        // Only read committed DOM state after owner has resolved — not before.
+        // Only read committed DOM state after owner has resolved â€” not before.
         const committed = readDashboardLibraryState();
         const state = isSettledDashboardLibraryState(committed) ? committed : 'pending';
         return { state, ownerReady, initialResolved, authed, source: 'signed-in-settled', reason, at: new Date().toISOString() };
@@ -792,7 +792,7 @@ window.rcInteraction = (function () {
     }
 
     // Single owner of dashboard hidden-section removal. showSection() is the
-    // requester only — it must not directly remove hidden-section from dashboard.
+    // requester only â€” it must not directly remove hidden-section from dashboard.
     function releaseDashboardSectionVisibility(requestedSurface, options = {}) {
         const release = prepareDashboardRelease(requestedSurface, options);
         ALL_SECTIONS.forEach((sectionId) => {
@@ -1016,15 +1016,15 @@ window.rcInteraction = (function () {
     }
 
     // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 6/6 — Public Route Coordination
-    // Logical boundary declaration only — code not physically separated yet.
+    // SLICE 7 MODULE BOUNDARY 6/6 â€” Public Route Coordination
+    // Logical boundary declaration only â€” code not physically separated yet.
     // Primary content: focus mode, public sample entry/exit, reading session
     //   entry, preview modal, session-complete surface. Shell frames user
-    //   intent into runtime reading transitions — reading truth stays with
+    //   intent into runtime reading transitions â€” reading truth stays with
     //   the runtime owner.
     // =========================================================================
 
-    // ── Focus mode fade ──────────────────────────────────────────
+    // â”€â”€ Focus mode fade â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let focusModeTimer   = null;
     let focusModeHandler = null;
 
@@ -1047,16 +1047,16 @@ window.rcInteraction = (function () {
 
 
     // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 4/6 — Modal Opener Provenance
-    // Logical boundary declaration only — code not physically separated yet.
+    // SLICE 7 MODULE BOUNDARY 4/6 â€” Modal Opener Provenance
+    // Logical boundary declaration only â€” code not physically separated yet.
     // Primary content: openModal(), closeModal(), ownership guards,
     //   promptOwnershipAction(). Opener truth for pricing-modal is currently
-    //   inferred, not authoritative — see getActiveModalReport() HELD comment
+    //   inferred, not authoritative â€” see getActiveModalReport() HELD comment
     //   (Bucket F). Do not treat this section as provenance-complete until
     //   Bucket F retirement conditions are met.
     // =========================================================================
 
-    // ── Modals ───────────────────────────────────────────────────
+    // â”€â”€ Modals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function openModal(id)  {
         const el = document.getElementById(id);
         if (!el) return;
@@ -1241,7 +1241,7 @@ window.rcInteraction = (function () {
             const pct = ((value - min) / (max - min) * 100).toFixed(1) + '%';
             slider.style.setProperty('--fill', pct);
         }
-        if (label) label.textContent = (Number.isInteger(value) ? value.toFixed(1) : String(value)) + '×';
+        if (label) label.textContent = (Number.isInteger(value) ? value.toFixed(1) : String(value)) + 'Ã—';
         const shellSpeed = document.getElementById('shell-speed');
         if (shellSpeed) shellSpeed.value = String(value);
         shellSetSpeed(value);
@@ -1347,7 +1347,7 @@ window.rcInteraction = (function () {
             window.rcBilling.showPricingForGatedAction(message);
         } else {
             // Fallback: billing module unavailable. Set the gated message directly
-            // before opening. This is the billing-unavailable degradation path only —
+            // before opening. This is the billing-unavailable degradation path only â€”
             // when billing is present, showPricingForGatedAction owns message delivery.
             const msgEl = document.getElementById('pricing-message');
             if (msgEl) msgEl.textContent = message;
@@ -1375,7 +1375,7 @@ window.rcInteraction = (function () {
         bind('empty-drop-zone', 'import');
     }
 
-    // ── Auth — Pass 4 sign-in / sign-up / sign-out ───────────────
+    // â”€â”€ Auth â€” Pass 4 sign-in / sign-up / sign-out â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Shell is a thin presenter. It calls rcAuth, reflects state, and routes.
     // It does not own auth state or Supabase operations.
 
@@ -1454,7 +1454,7 @@ window.rcInteraction = (function () {
             if (pwInput) pwInput.setAttribute('autocomplete', 'new-password');
         } else if (_authMode === 'forgot') {
             if (heading) heading.textContent = 'Reset password';
-            if (subheading) subheading.textContent = 'Enter your email and we’ll send a reset link.';
+            if (subheading) subheading.textContent = 'Enter your email and weâ€™ll send a reset link.';
             if (toggleBtn) toggleBtn.textContent = 'Sign in';
             if (toggleLabel) toggleLabel.textContent = 'Remembered it?';
             if (emailWrap) emailWrap.classList.remove('hidden-section');
@@ -1690,7 +1690,7 @@ window.rcInteraction = (function () {
                 _authShowError('Password reset is not available in this environment.');
                 return;
             }
-            if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+            if (btn) { btn.disabled = true; btn.textContent = 'Sendingâ€¦'; }
             try {
                 const result = await window.rcAuth.requestPasswordReset(email, {
                     redirectTo: buildPasswordResetRedirect(),
@@ -1731,7 +1731,7 @@ window.rcInteraction = (function () {
                 _authShowError('Password reset is not available in this environment.');
                 return;
             }
-            if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+            if (btn) { btn.disabled = true; btn.textContent = 'Savingâ€¦'; }
             try {
                 const result = await window.rcAuth.changePassword(password);
                 const error = result && result.error ? result.error : null;
@@ -1770,7 +1770,7 @@ window.rcInteraction = (function () {
                 _authShowError('Enter a valid email address.');
                 return;
             }
-            if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+            if (btn) { btn.disabled = true; btn.textContent = 'Checkingâ€¦'; }
             try {
                 const pendingPlan = _readAuthPendingPlan();
                 const allowedToContinue = await _inspectSignupEmailOrBlock(email, pendingPlan);
@@ -1822,7 +1822,7 @@ window.rcInteraction = (function () {
             return;
         }
 
-        if (btn) { btn.disabled = true; btn.textContent = 'Please wait…'; }
+        if (btn) { btn.disabled = true; btn.textContent = 'Please waitâ€¦'; }
 
         try {
             if (_authMode === 'signup') {
@@ -1849,8 +1849,8 @@ window.rcInteraction = (function () {
                     _steerExistingAccountToSignin(email, pendingPlan);
                 } else if (result?.data?.session) {
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free'
-                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
-                        : 'Account created. Continuing to your library…');
+                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkoutâ€¦`
+                        : 'Account created. Continuing to your libraryâ€¦');
                 } else {
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Check your email to verify your account.');
                 }
@@ -1866,7 +1866,7 @@ window.rcInteraction = (function () {
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     if (pendingPlan === 'pro' || pendingPlan === 'premium') {
-                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`);
+                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkoutâ€¦`);
                     }
                 }
             }
@@ -1885,7 +1885,7 @@ window.rcInteraction = (function () {
         _accountControlsTransientBlock = 'auth:signout';
         applySignedInAccountControlReadiness('signout-start');
         if (logoutBtn) logoutBtn.disabled = true;
-        try { window.rcInteraction && window.rcInteraction.pending('auth:signout', 'Signing out…'); } catch (_) {}
+        try { window.rcInteraction && window.rcInteraction.pending('auth:signout', 'Signing outâ€¦'); } catch (_) {}
         try {
             if (window.rcAuth && typeof window.rcAuth.signOut === 'function') {
                 const result = await window.rcAuth.signOut();
@@ -2016,7 +2016,7 @@ window.rcInteraction = (function () {
         releaseBootPending();
         try { await sectionPromise; } catch (_) {}
     });
-    // ── Profile tabs ─────────────────────────────────────────────
+    // â”€â”€ Profile tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function switchTab(tabId) {
         document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden-section'));
         document.getElementById(tabId).classList.remove('hidden-section');
@@ -2024,10 +2024,39 @@ window.rcInteraction = (function () {
             btn.classList.toggle('active', btn.dataset.tab === tabId);
         });
         if (tabId === 'tab-profile') { try { renderProfileSurface(); } catch (_) {} }
+        if (tabId === 'tab-analytics') { try { renderAnalyticsSurface(); } catch (_) {} }
         if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
     }
 
-    // ── Tier simulation (dev/localhost only, gated by canSimulateTierSelection) ──
+    // â”€â”€ Analytics surface â€” thin bridge to same reading metrics owner â”€â”€â”€â”€â”€â”€â”€â”€
+    function renderAnalyticsSurface() {
+        const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
+            ? window.rcReadingMetrics.getReadingProfileMetrics()
+            : { dailyGoalMinutes: 15, dailyMinutes: 0, weeklyMinutes: 0, sessionsCompleted: 0, progressPct: 0 };
+        const goalMinutes = Math.max(5, Number(metrics.dailyGoalMinutes || 15));
+        const displayDaily = Math.max(0, Number(metrics.displayDailyMinutes != null ? metrics.displayDailyMinutes : Math.min(Number(metrics.dailyMinutes || 0), goalMinutes)));
+        const remaining = Math.max(0, Number(metrics.remainingGoalMinutes != null ? metrics.remainingGoalMinutes : Math.max(0, goalMinutes - Number(metrics.dailyMinutes || 0))));
+        const d = (id) => document.getElementById(id);
+        if (d('analytics-daily-minutes')) d('analytics-daily-minutes').textContent = String(Math.round(displayDaily));
+        if (d('analytics-goal-minutes'))  d('analytics-goal-minutes').textContent  = String(goalMinutes);
+        if (d('analytics-weekly-minutes')) d('analytics-weekly-minutes').textContent = String(metrics.weeklyMinutes || 0);
+        if (d('analytics-sessions-completed')) d('analytics-sessions-completed').textContent = String(metrics.sessionsCompleted || 0);
+        if (d('analytics-goal-ring')) d('analytics-goal-ring').style.setProperty('--goal-progress', `${Math.max(0, Math.min(100, Number(metrics.progressPct || 0)))}%`);
+        if (d('analytics-goal-copy')) d('analytics-goal-copy').textContent = metrics.progressPct >= 100 ? 'Goal complete for today.' : `${remaining} min to go today.`;
+        // Currently reading: thin bridge to library owner
+        try {
+            if (typeof localBooksGetAll === 'function') {
+                localBooksGetAll().then(books => {
+                    if (!books || !books.length) return;
+                    books.sort((a,b) => (b.createdAt||0)-(a.createdAt||0));
+                    const el = d('analytics-currently-reading');
+                    if (el) el.textContent = books[0].title || 'Untitled';
+                }).catch(()=>{});
+            }
+        } catch (_) {}
+    }
+    // â”€â”€ end renderAnalyticsSurface â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
     function canSimulateTierSelection() {
         return !!(window.rcPolicy && typeof window.rcPolicy.canSimulateTier === 'function' && window.rcPolicy.canSimulateTier());
     }
@@ -2053,7 +2082,7 @@ window.rcInteraction = (function () {
         btn.classList.add('active');
         const map = { 'Basic': 'basic', 'Pro': 'pro', 'Premium': 'premium' };
         const value = map[btn.textContent.trim()] || 'basic';
-        // Call the runtime policy API directly — do not dispatch through #tierSelect DOM element.
+        // Call the runtime policy API directly â€” do not dispatch through #tierSelect DOM element.
         if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
             window.rcPolicy.refreshForTier(value).catch(() => {});
         }
@@ -2077,7 +2106,7 @@ window.rcInteraction = (function () {
         return 'basic';
     }
 
-    // ── Theme ────────────────────────────────────────────────────
+    // â”€â”€ Theme â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const BUILTIN_MUSIC_SRC = 'assets/song.mp3';
     let _customMusicUrl = null;
     let _customMusicRecord = null;
@@ -2314,7 +2343,7 @@ window.rcInteraction = (function () {
         return true;
     }
 
-    // ── F1: TTS Speed Control bridge ─────────────────────────────
+    // â”€â”€ F1: TTS Speed Control bridge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function shellSetSpeed(value) {
         const rate = parseFloat(value) || 1;
         try { if (typeof setPlaybackRate === 'function') return setPlaybackRate(rate); } catch(_) {}
@@ -2407,7 +2436,7 @@ window.rcInteraction = (function () {
         try { if (typeof exitReadingSession === 'function') exitReadingSession(); } catch(_) {}
     }
 
-    // ── Bottom bar controls ──────────────────────────────────────
+    // â”€â”€ Bottom bar controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     const SHELL_PLAYBACK_CLOUD_RESTART_VISIBLE_AFTER_MS = 400;
 
@@ -2439,7 +2468,7 @@ window.rcInteraction = (function () {
         const cloudRestartActive = !!(status?.cloudRestartInFlight || pending?.active);
         const elapsedMs = Number(pending?.elapsedMs || 0);
         if (cloudRestartActive && elapsedMs >= SHELL_PLAYBACK_CLOUD_RESTART_VISIBLE_AFTER_MS) {
-            return String(pending?.message || 'Loading audio…');
+            return String(pending?.message || 'Loading audioâ€¦');
         }
 
         // Playback-start failure is intentionally not inferred here. The current
@@ -2460,7 +2489,7 @@ window.rcInteraction = (function () {
         }
     }
 
-    // Pause/Play — calls app's tts.js functions if available.
+    // Pause/Play â€” calls app's tts.js functions if available.
     // Guards against first-use case where TTS was never started (TTS_STATE.activeKey is null).
     function syncShellPlaybackControls() {
         const btn = document.getElementById('shell-play-btn');
@@ -2530,8 +2559,8 @@ window.rcInteraction = (function () {
     }
 
     function handlePausePlay() {
-        // Shell is a pure delegate. All routing — resume, pause, countdown
-        // cancel+restart, and fresh-start — is owned by pauseOrResumeReading()
+        // Shell is a pure delegate. All routing â€” resume, pause, countdown
+        // cancel+restart, and fresh-start â€” is owned by pauseOrResumeReading()
         // in tts.js. Shell does not inspect eligibility or countdown here.
         // Runtime owns current-page truth; shell only forwards play/pause intent.
         const before = {
@@ -2578,7 +2607,7 @@ window.rcInteraction = (function () {
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        // HELD — boot-order bridge. Do not remove without boot timing proof.
+        // HELD â€” boot-order bridge. Do not remove without boot timing proof.
         //
         // Why this exists: shell.js attaches its rc:runtime-policy-changed listener
         // during DOMContentLoaded, but state.js is injected later by app.js and emits
@@ -2605,17 +2634,17 @@ window.rcInteraction = (function () {
             // Delayed report: fires after timeout so all marks are present.
             setTimeout(() => { _bootProbe.report(); }, 150);
         }, 500);
-        // Reading entry is fully runtime-owned via startReadingFromPreview → __rcLoadBook.
+        // Reading entry is fully runtime-owned via startReadingFromPreview â†’ __rcLoadBook.
     });
 
     // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 2/6 (continued) — Dashboard/Library Visible Settlement
+    // SLICE 7 MODULE BOUNDARY 2/6 (continued) â€” Dashboard/Library Visible Settlement
     // Library table rendering: the visible output of the settlement decision
     // made in the primary 2/6 block above. Refresh is driven by the
     // rc:local-library-changed event and show-section-dashboard transitions.
     // =========================================================================
 
-    // ── Library table — refreshed via rc:local-library-changed and show-section-dashboard ──
+    // â”€â”€ Library table â€” refreshed via rc:local-library-changed and show-section-dashboard â”€â”€
     function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     let libraryRefreshRetryTimer = null;
     let _loggedFirstLocalLibraryRead = false;
@@ -2635,7 +2664,7 @@ window.rcInteraction = (function () {
             if (!isAuthedUser()) return;
             if (getCurrentVisibleSection() !== 'dashboard') return;
             try {
-                window.rcInteraction && window.rcInteraction.pending('library:hydrate', 'Books are still loading…');
+                window.rcInteraction && window.rcInteraction.pending('library:hydrate', 'Books are still loadingâ€¦');
             } catch (_) {}
         }, 1400);
     }
@@ -2768,7 +2797,7 @@ window.rcInteraction = (function () {
         // Until runtime book storage is actually available, do not imply an empty
         // library and do not leave a blank gap. Keep the pending surface visible
         // and retry owner discovery.
-        // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
+        // IMPORTANT: the inner retry call is fire-and-forget â€” do NOT await it here,
         // or successive unavailability creates an infinite chain that hangs the page.
         if (!hasLocalLibraryOwner) {
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
@@ -2805,17 +2834,17 @@ window.rcInteraction = (function () {
             const id = ('local:' + String(b.id)).replace(/'/g,"\\'");
             const title = escHtml(b.title||'Untitled');
             return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
-                <div class="flex-grow flex items-center gap-3"><div class="w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">Added ${date}</p></div></div>
+                <div class="flex-grow flex items-center gap-3"><div class="w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">ðŸ“„</div><div><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">Added ${date}</p></div></div>
                 <div class="w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div>
                 <div class="w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div>
-                <div class="w-8 text-slate-300">→</div></div>`;
+                <div class="w-8 text-slate-300">â†’</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
         setLibrarySurfaceState('populated', reason);
         try { renderSubscriptionSurface(books); } catch (_) {}
 
     }
-    // Scroll affordance — called by library.js via __jublyAfterRender after render()
+    // Scroll affordance â€” called by library.js via __jublyAfterRender after render()
     window.__jublyAfterRender = function() {
         document.querySelectorAll('#pages .page').forEach(function(pageEl) {
             const textEl = pageEl.querySelector('.page-text');
@@ -2832,7 +2861,7 @@ window.rcInteraction = (function () {
         });
     };
 
-    // ── Reading session ──────────────────────────────────────────
+    // â”€â”€ Reading session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     let _previewBookId = null;
     function openPreview(id, title) {
         _previewBookId = id;
@@ -2870,7 +2899,7 @@ window.rcInteraction = (function () {
         const banner = document.getElementById('profile-goal-celebration');
         if (!banner) return;
         if (_goalCelebrationTimer) clearTimeout(_goalCelebrationTimer);
-        banner.textContent = '🎉🎊 Goal reached';
+        banner.textContent = 'ðŸŽ‰ðŸŽŠ Goal reached';
         banner.classList.remove('hidden-section');
         void banner.offsetWidth;
         banner.classList.remove('profile-goal-celebration-animate');
@@ -2910,9 +2939,9 @@ window.rcInteraction = (function () {
             valueEl.textContent = String(Math.max(0, remaining));
             if (labelEl) labelEl.textContent = ' left today';
         } else {
-            // authoritative: false means usage truth is still settling — do not
+            // authoritative: false means usage truth is still settling â€” do not
             // show a believable number. Show neutral pending copy instead.
-            valueEl.textContent = snapshot?.authoritative === false ? 'Checking…' : 'Usage';
+            valueEl.textContent = snapshot?.authoritative === false ? 'Checkingâ€¦' : 'Usage';
             if (labelEl) labelEl.textContent = '';
         }
     }
@@ -2921,7 +2950,7 @@ window.rcInteraction = (function () {
         // When signed in, require at least one confirmed snapshot (cache or live)
         // before rendering values. Until settings hydration is confirmed, local
         // pref values can contradict server truth (e.g. a local goal of 5 against
-        // a server-confirmed 30 → "15/5"). A safe blank is correct here per the
+        // a server-confirmed 30 â†’ "15/5"). A safe blank is correct here per the
         // runtime contract. rc:durable-data-hydrated fires after cache apply
         // (sub-100ms on returning users) and re-triggers this render with clean data.
         if (isAuthedUser()) {
@@ -2966,16 +2995,16 @@ window.rcInteraction = (function () {
         const titleEl = document.getElementById('preview-title');
         const trioEl = document.getElementById('preview-meta-trio');
         if (titleEl) titleEl.innerText = fallbackTitle || 'Book';
-        if (trioEl) trioEl.textContent = 'Loading preview…';
+        if (trioEl) trioEl.textContent = 'Loading previewâ€¦';
         try {
             if (window.rcLibraryData && typeof window.rcLibraryData.getBookPreviewSurface === 'function') {
                 const surface = await window.rcLibraryData.getBookPreviewSurface(id);
                 if (titleEl) titleEl.innerText = surface.title || fallbackTitle || 'Book';
-                if (trioEl) trioEl.textContent = surface.previewTrio || '0 Pages • 0 min read • Unread';
+                if (trioEl) trioEl.textContent = surface.previewTrio || '0 Pages â€¢ 0 min read â€¢ Unread';
                 return;
             }
         } catch (_) {}
-        if (trioEl) trioEl.textContent = '0 Pages • 0 min read • Unread';
+        if (trioEl) trioEl.textContent = '0 Pages â€¢ 0 min read â€¢ Unread';
     }
 
     // Empty state drag/drop
@@ -2987,14 +3016,14 @@ window.rcInteraction = (function () {
         if (!files || !files.length) return;
         // Use the one authoritative importer-entry path so the capacity check,
         // modal open, state reset, and file staging happen in a single async
-        // sequence — eliminates the race where showModal()'s reset cleared a
+        // sequence â€” eliminates the race where showModal()'s reset cleared a
         // file staged immediately before via click+dispatch.
         if (typeof window.openImporterWithFile === 'function') {
             window.openImporterWithFile(files[0]);
         }
     }
 
-    // Session complete signal — presents current runtime page truth only.
+    // Session complete signal â€” presents current runtime page truth only.
     function showSessionComplete() {
         const signal = document.getElementById('session-complete');
         if (!signal || !hasActiveReadingCards()) return;
@@ -3010,11 +3039,11 @@ window.rcInteraction = (function () {
         signal.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
-    // Page progress bar — uses real pages[] from app state
+    // Page progress bar â€” uses real pages[] from app state
     function updateProgressBar() {
         const prog  = document.getElementById('shell-page-progress');
         if (!prog) return;
-        if (!hasActiveReadingCards()) { prog.textContent = '—'; return; }
+        if (!hasActiveReadingCards()) { prog.textContent = 'â€”'; return; }
         const total = (typeof pages !== 'undefined' && Array.isArray(pages)) ? pages.length : 0;
         let playback = { active: false, paused: false, key: null };
         try { if (typeof getPlaybackStatus === 'function') playback = getPlaybackStatus() || playback; } catch (_) {}
@@ -3023,14 +3052,14 @@ window.rcInteraction = (function () {
                         : Math.max(0, getVisibleReadingPageIndex());
         const currentLabel = (typeof getDisplayPageNumber === 'function') ? getDisplayPageNumber(cur) : (cur + 1);
         const totalLabel = (typeof getDisplayPageTotal === 'function') ? getDisplayPageTotal(total) : total;
-        prog.textContent = total > 0 ? `Page ${currentLabel} / ${totalLabel}` : '—';
+        prog.textContent = total > 0 ? `Page ${currentLabel} / ${totalLabel}` : 'â€”';
     }
 
-    // ── 1E Shell Navigation Cohesion ─────────────────────────────────────────
+    // â”€â”€ 1E Shell Navigation Cohesion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Shell-owned presentation behavior: hamburger mobile drawer, resume popout,
     // and secondary nav button wiring. Reads runtime APIs as thin bridge calls
     // only; never mirrors runtime state in shell variables.
-    // ─────────────────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     function initShellNav1E() {
         const sidebar    = document.getElementById('app-sidebar');
         const hamburger  = document.getElementById('sh-hamburger');
@@ -3165,7 +3194,7 @@ window.rcInteraction = (function () {
             if (!isMobile()) { closeMobileDrawer(); closeResumePopout(); }
         });
     }
-    // ─── end 1E Shell Navigation Cohesion ────────────────────────────────────
+    // â”€â”€â”€ end 1E Shell Navigation Cohesion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     document.addEventListener('DOMContentLoaded', () => {
         _bootProbe.mark('dcl-handler-entry', {
@@ -3230,7 +3259,7 @@ window.rcInteraction = (function () {
             const nextName = String(nameInput?.value || '').trim();
             if (!nextName) { setSettingsStatus('Username is required.', 'error'); return; }
             const saveBtn = document.getElementById('profile-name-save-btn');
-            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Savingâ€¦'; }
             const result = await (window.rcAuth && typeof window.rcAuth.updateDisplayName === 'function'
                 ? window.rcAuth.updateDisplayName(nextName)
                 : Promise.resolve({ error: { message: 'Profile editing is not available.' } }));
@@ -3247,7 +3276,7 @@ window.rcInteraction = (function () {
             setSettingsStatus('', 'success');
             const nextPassword = String(passwordInput?.value || '');
             const saveBtn = document.getElementById('profile-password-save-btn');
-            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Savingâ€¦'; }
             const result = await (window.rcAuth && typeof window.rcAuth.changePassword === 'function'
                 ? window.rcAuth.changePassword(nextPassword)
                 : Promise.resolve({ error: { message: 'Password changes are not available.' } }));
@@ -3259,7 +3288,7 @@ window.rcInteraction = (function () {
         document.getElementById('profile-help-chat-btn')?.addEventListener('click', async (e) => {
             e.preventDefault();
             const btn = e.currentTarget;
-            setInlineBusy(btn, 'Opening…');
+            setInlineBusy(btn, 'Openingâ€¦');
             try {
                 if (window.rcHelp && typeof window.rcHelp.openChat === 'function') {
                     const ok = await window.rcHelp.openChat();
@@ -3276,7 +3305,7 @@ window.rcInteraction = (function () {
         document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => {
             e.preventDefault();
             const btn = e.currentTarget;
-            setInlineBusy(btn, 'Opening…');
+            setInlineBusy(btn, 'Openingâ€¦');
             try {
                 if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
                     const ok = await window.rcHelp.openFeedback();
@@ -3394,7 +3423,7 @@ window.rcInteraction = (function () {
         }
 
         // Exit reading: stop TTS, cancel autoplay, clear countdown poll before navigating away.
-        // The button's inline onclick still fires (showSection) — this just cleans up first.
+        // The button's inline onclick still fires (showSection) â€” this just cleans up first.
         const exitBtn = document.querySelector('.reading-top-exit');
         if (exitBtn) {
             exitBtn.addEventListener('click', () => { try { syncShellPlaybackControls(); } catch(_) {} });
@@ -3409,8 +3438,8 @@ window.rcInteraction = (function () {
     });
 
     // =========================================================================
-    // SLICE 7 MODULE BOUNDARY 5/6 — Shell Report & Diagnostics
-    // Logical boundary declaration only — code not physically separated yet.
+    // SLICE 7 MODULE BOUNDARY 5/6 â€” Shell Report & Diagnostics
+    // Logical boundary declaration only â€” code not physically separated yet.
     // Primary content: snapshotShellControl(), getVisiblePublicBoundaryFields(),
     //   isElementVisible(), getActiveModalReport(), getSignedInInteractionReport(),
     //   and any exported shell report surface (window.rcShell).
@@ -3494,7 +3523,7 @@ window.rcInteraction = (function () {
         return {
             open: !!open,
             id: open ? (open.id || '') : null,
-            // HELD — opener is inferred, not truthful provenance.
+            // HELD â€” opener is inferred, not truthful provenance.
             // billing.js entry points (openPricingForSignup, openPricingForAccount,
             // showPricingForGatedAction) do not persist a shared opener context that
             // shell can read back. Reporting here is inference from billing side effects
@@ -3502,7 +3531,7 @@ window.rcInteraction = (function () {
             //
             // Retirement condition: billing.js must be extended (in a Central-authorized
             // Station 2 follow-up slice scoping js/billing.js) to write a single readable
-            // pricing-open context — opener, allowed surface, message/source, timestamp —
+            // pricing-open context â€” opener, allowed surface, message/source, timestamp â€”
             // from the three legitimate entry points only. Shell reads that context here
             // instead of inferring. Acceptance requires runtime test with probes.
             opener: open && open.id === 'pricing-modal' ? 'pricing' : (open ? 'unknown' : 'none'),
