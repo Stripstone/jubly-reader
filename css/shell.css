@@ -3346,3 +3346,221 @@ body.app-dark nav .text-slate-900 {
     border-radius: 18px !important;
   }
 }
+
+/* ── 1E sidebar structure: secondary section separator ─────────────────── */
+.sh-sidebar-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+}
+
+.sh-sidebar-secondary {
+  margin-top: auto;
+  margin-bottom: 34px;
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: relative;
+}
+.sh-sidebar-secondary::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 95%;
+  height: 1px;
+  background: var(--sh-border);
+}
+
+/* Secondary (lower-priority) rail buttons */
+.sh-secondary-btn {
+  min-height: 36px !important;
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  color: var(--sh-warm-muted) !important;
+  letter-spacing: -0.012em !important;
+  padding: 0 8px 0 10px !important;
+}
+.sh-secondary-btn:hover {
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
+}
+/* Red dot indicator on What's new */
+.sh-has-dot { position: relative; }
+.sh-has-dot::after {
+  content: "•";
+  color: #ef4444;
+  font-size: 16px;
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-52%);
+}
+
+/* Resume popout anchor — desktop only */
+.sh-resume-anchor {
+  position: relative;
+}
+.sh-resume-popout {
+  position: absolute;
+  left: calc(100% + 16px);
+  top: 0;
+  width: 246px;
+  background: var(--sh-surface-warm);
+  border: 1px solid var(--sh-border);
+  border-radius: 16px;
+  padding: 15px;
+  box-shadow: var(--sh-shadow-panel);
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 40;
+}
+.sh-resume-popout.open { display: flex; }
+
+.sh-resume-label {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--jubly-purple);
+}
+.sh-resume-title {
+  font-size: 14px;
+  font-weight: 900;
+  color: var(--sh-ink);
+  letter-spacing: -.02em;
+}
+.sh-resume-sub {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--sh-warm-muted);
+}
+.sh-resume-actions { display: flex; gap: 8px; }
+.sh-resume-primary {
+  border: none;
+  background: var(--jubly-purple);
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: var(--sh-btn-primary-shadow);
+  cursor: pointer;
+  font-family: inherit;
+}
+.sh-resume-secondary {
+  border: 1px solid var(--sh-border);
+  background: var(--sh-surface-warm);
+  color: var(--jubly-purple);
+  border-radius: 10px;
+  padding: 8px 11px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* ── Hamburger trigger — hidden on desktop, shown on mobile when authed ── */
+.sh-hamburger-trigger {
+  display: none;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--sh-border);
+  background: var(--sh-surface-warm);
+  border-radius: 999px;
+  align-items: center;
+  justify-content: center;
+  color: var(--sh-warm-muted);
+  box-shadow: 0 1px 2px rgba(15,23,42,.04);
+  font-size: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  order: -1; /* Left of usage pill */
+  transition: background .15s ease;
+}
+.sh-hamburger-trigger:hover { background: var(--sh-surface-parch); }
+
+/* ── Mobile overlay backdrop ────────────────────────────────────────────── */
+#sh-mobile-overlay {
+  display: none;
+  position: fixed;
+  top: 57px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,.35);
+  z-index: 15;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+/* ── Mobile: sidebar becomes full-width top dropdown ───────────────────── */
+@media (max-width: 640px) {
+  /* Show hamburger */
+  .sh-hamburger-trigger { display: flex; }
+
+  /* Override the existing display:none !important on #app-sidebar.
+     When the sidebar's inline display is 'flex' (set by shell.js when authed),
+     allow it to render as a collapsed dropdown. The existing rule has
+     specificity 0,1,0 with !important; body #app-sidebar has 0,1,1 which
+     also uses !important and wins in the cascade when both are !important. */
+  body #app-sidebar {
+    display: flex !important;
+    position: fixed !important;
+    top: 57px !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    border-right: none !important;
+    border-bottom: 0px solid var(--sh-border-warm) !important;
+    padding: 0 16px !important;
+    gap: 0 !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    z-index: 35 !important;
+    transition:
+      max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+      padding 0.3s ease,
+      border-bottom-width 0.1s ease !important;
+  }
+
+  /* When not authed, JS sets style.display='none' (inline), which loses to
+     !important. Hide via visibility + pointer-events instead when sidebar
+     display should be none but CSS wins. Since JS controls this via inline
+     style but CSS overrides it, we rely on the max-height:0 collapse to
+     visually hide it when not authed. The sidebar buttons are inert at
+     max-height:0 via overflow:hidden. */
+  body #app-sidebar[style*="display: none"],
+  body #app-sidebar[style*="display:none"] {
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+
+  /* Open state: slide down */
+  body #app-sidebar.open {
+    max-height: 340px !important;
+    padding: 16px !important;
+    border-bottom-width: 1px !important;
+    box-shadow: 0 12px 20px rgba(32,20,12,.08) !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+  }
+
+  /* Show mobile overlay when sidebar is open */
+  body:has(#app-sidebar.open) #sh-mobile-overlay { display: block; }
+
+  /* Secondary section visible on mobile (hidden in blueprint but useful for
+     feedback/help access; secondary items excluded as spec'd) */
+  .sh-sidebar-secondary { display: none !important; }
+
+  /* Resume popout must not appear as a side panel on mobile */
+  .sh-resume-popout.open { display: none !important; }
+}

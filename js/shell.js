@@ -903,6 +903,11 @@ window.rcInteraction = (function () {
         if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'block' : 'none';
         const sbLibrary = document.getElementById('sb-library');
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
+        const sbSettings = document.getElementById('sb-settings');
+        if (sbSettings) sbSettings.classList.toggle('active', id === 'profile-page');
+        // Close mobile nav drawer on any section transition
+        try { const _sid = document.getElementById('app-sidebar'); if (_sid) _sid.classList.remove('open'); } catch (_) {}
+        try { const _hmb = document.getElementById('sh-hamburger'); if (_hmb) _hmb.setAttribute('aria-expanded', 'false'); } catch (_) {}
 
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
@@ -3019,6 +3024,146 @@ window.rcInteraction = (function () {
         prog.textContent = total > 0 ? `Page ${currentLabel} / ${totalLabel}` : '—';
     }
 
+    // ── 1E Shell Navigation Cohesion ─────────────────────────────────────────
+    // Shell-owned presentation behavior: hamburger mobile drawer, resume popout,
+    // and secondary nav button wiring. Reads runtime APIs as thin bridge calls
+    // only; never mirrors runtime state in shell variables.
+    // ─────────────────────────────────────────────────────────────────────────
+    function initShellNav1E() {
+        const sidebar    = document.getElementById('app-sidebar');
+        const hamburger  = document.getElementById('sh-hamburger');
+        const overlay    = document.getElementById('sh-mobile-overlay');
+        const resumePopout = document.getElementById('sh-resumePopout');
+        const resumeBtn  = document.getElementById('sb-resume');
+
+        const isMobile = () => window.innerWidth <= 640;
+
+        function openMobileDrawer() {
+            if (!sidebar) return;
+            sidebar.classList.add('open');
+            if (hamburger) hamburger.setAttribute('aria-expanded', 'true');
+        }
+        function closeMobileDrawer() {
+            if (!sidebar) return;
+            sidebar.classList.remove('open');
+            if (hamburger) hamburger.setAttribute('aria-expanded', 'false');
+        }
+        function closeResumePopout() {
+            if (resumePopout) resumePopout.classList.remove('open');
+        }
+
+        // Hamburger: toggle mobile drawer
+        if (hamburger) {
+            hamburger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!isAuthedUser()) return;
+                if (sidebar && sidebar.classList.contains('open')) {
+                    closeMobileDrawer();
+                } else {
+                    openMobileDrawer();
+                }
+            });
+        }
+
+        // Mobile overlay backdrop: close drawer
+        if (overlay) {
+            overlay.addEventListener('click', closeMobileDrawer);
+        }
+
+        // Close resume popout on outside click
+        document.addEventListener('click', () => { closeResumePopout(); });
+        if (resumePopout) {
+            resumePopout.addEventListener('click', (e) => e.stopPropagation());
+        }
+
+        // Resume popout: populate and toggle
+        if (resumeBtn) {
+            resumeBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (isMobile()) { closeMobileDrawer(); return; }
+                const isOpen = resumePopout && resumePopout.classList.contains('open');
+                closeResumePopout();
+                if (isOpen) return;
+                // Thin bridge: read last book from runtime library owner for display
+                try {
+                    if (typeof localBooksGetAll === 'function' && resumePopout) {
+                        const books = await localBooksGetAll();
+                        if (books && books.length > 0) {
+                            books.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                            const last = books[0];
+                            const title = last.title || 'Untitled';
+                            const titleEl = document.getElementById('sh-resume-title');
+                            const subEl   = document.getElementById('sh-resume-sub');
+                            const primaryBtn = document.getElementById('sh-resume-btn-primary');
+                            if (titleEl) titleEl.textContent = title;
+                            // Thin bridge: read progress summary from runtime metrics owner
+                            let pageRef = '';
+                            try {
+                                if (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingBookSummary === 'function') {
+                                    const summary = window.rcReadingMetrics.getReadingBookSummary('local:' + String(last.id));
+                                    if (summary && !summary.completed) {
+                                        pageRef = `Last position: page ${Math.max(1, (summary.lastPageIndex || 0) + 1)}`;
+                                    } else if (summary && summary.completed) {
+                                        pageRef = 'Completed — read again?';
+                                    }
+                                }
+                            } catch (_) {}
+                            if (subEl) subEl.textContent = pageRef || 'Continue reading';
+                            if (primaryBtn) {
+                                const safeId = ('local:' + String(last.id)).replace(/'/g, "\\'");
+                                const safeTitle = title.replace(/'/g, "\\'");
+                                primaryBtn.onclick = () => {
+                                    closeResumePopout();
+                                    if (typeof openPreview === 'function') openPreview(safeId, safeTitle);
+                                };
+                            }
+                        }
+                    }
+                } catch (_) {}
+                if (resumePopout) resumePopout.classList.add('open');
+            });
+        }
+
+        // Secondary nav: Upgrade, Feedback, What's new
+        const sbUpgrade  = document.getElementById('sb-upgrade');
+        const sbFeedback = document.getElementById('sb-feedback');
+        const sbWhatsnew = document.getElementById('sb-whatsnew');
+        if (sbUpgrade) {
+            sbUpgrade.addEventListener('click', () => {
+                closeMobileDrawer();
+                try {
+                    if (window.rcBilling && typeof window.rcBilling.openPricingForAccount === 'function') {
+                        window.rcBilling.openPricingForAccount();
+                    } else if (typeof openModal === 'function') {
+                        openModal('pricing-modal');
+                    }
+                } catch (_) {}
+            });
+        }
+        if (sbFeedback) {
+            sbFeedback.addEventListener('click', () => {
+                closeMobileDrawer();
+                try {
+                    if (window.rcHelp && typeof window.rcHelp.openChat === 'function') window.rcHelp.openChat();
+                } catch (_) {}
+            });
+        }
+        if (sbWhatsnew) {
+            sbWhatsnew.addEventListener('click', () => {
+                closeMobileDrawer();
+                try {
+                    if (window.rcHelp && typeof window.rcHelp.openChat === 'function') window.rcHelp.openChat();
+                } catch (_) {}
+            });
+        }
+
+        // Resize: close mobile drawer if viewport widens past mobile breakpoint
+        window.addEventListener('resize', () => {
+            if (!isMobile()) { closeMobileDrawer(); closeResumePopout(); }
+        });
+    }
+    // ─── end 1E Shell Navigation Cohesion ────────────────────────────────────
+
     document.addEventListener('DOMContentLoaded', () => {
         _bootProbe.mark('dcl-handler-entry', {
             rcPolicyPresent:     !!window.rcPolicy,
@@ -3251,6 +3396,8 @@ window.rcInteraction = (function () {
         if (exitBtn) {
             exitBtn.addEventListener('click', () => { try { syncShellPlaybackControls(); } catch(_) {} });
         }
+
+        try { initShellNav1E(); } catch (_) {}
 
         setInterval(() => {
             try { syncShellPlaybackControls(); } catch(_) {}

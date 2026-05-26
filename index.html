@@ -404,6 +404,9 @@
             </div>
         </div>
         <div id="nav-user-controls" class="hidden-section flex items-center gap-3">
+            <button id="sh-hamburger" class="sh-hamburger-trigger" aria-label="Toggle navigation" aria-expanded="false">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
             <div id="nav-usage-pill" class="hidden-section flex items-center gap-1 font-bold px-3 py-1 rounded-full text-sm text-accent bg-accent-soft">
                 <span aria-hidden="true">✨</span> <span id="nav-usage-pill-value">Usage</span><span id="nav-usage-pill-label" class="nav-usage-pill-label"></span>
             </div>
@@ -422,12 +425,51 @@
 </nav>
 
 <!-- SIDEBAR (logged-in, non-reading views only) -->
-<aside id="app-sidebar" class="fixed left-0 z-40 flex-col items-center pt-5 gap-1 bg-white border-r border-slate-200" style="top:57px; height:calc(100vh - 57px); width:68px; display:none;">
-    <button onclick="showSection('dashboard')" id="sb-library" class="sidebar-btn" title="Library">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-        Library
-    </button>
+<aside id="app-sidebar" class="fixed left-0 z-40 flex-col items-center pt-5 gap-1 bg-white border-r border-slate-200" style="top:57px; height:calc(100vh - 57px); width:68px; display:none;" aria-label="Shell navigation">
+    <div class="sh-sidebar-main">
+        <!-- Resume: popout anchor on desktop -->
+        <div class="sh-resume-anchor">
+            <button id="sb-resume" class="sidebar-btn" data-sh-nav="resume" data-sh-popout="resume" title="Resume">
+                <span aria-hidden="true">▶️</span>
+                Resume
+            </button>
+            <div class="sh-resume-popout" id="sh-resumePopout" aria-label="Resume reading popout" role="dialog" aria-modal="false">
+                <div class="sh-resume-label">Continue where you left off</div>
+                <div class="sh-resume-title" id="sh-resume-title">—</div>
+                <div class="sh-resume-sub" id="sh-resume-sub">Open a book to track your position</div>
+                <div class="sh-resume-actions">
+                    <button class="sh-resume-primary" id="sh-resume-btn-primary">Resume reading</button>
+                    <button class="sh-resume-secondary" id="sh-resume-btn-secondary" onclick="showSection('dashboard')">Library</button>
+                </div>
+            </div>
+        </div>
+
+        <button onclick="showSection('dashboard')" id="sb-library" class="sidebar-btn" data-sh-nav="library" title="Library">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            Library
+        </button>
+
+        <button onclick="showSection('profile-page')" id="sb-settings" class="sidebar-btn" data-sh-nav="settings" title="Settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Settings
+        </button>
+    </div>
+
+    <div class="sh-sidebar-secondary">
+        <button class="sidebar-btn sh-secondary-btn" data-sh-nav="upgrade" id="sb-upgrade" title="Upgrade">
+            <span aria-hidden="true">⚡</span> Upgrade
+        </button>
+        <button class="sidebar-btn sh-secondary-btn sh-has-dot" data-sh-nav="whats-new" id="sb-whatsnew" title="What's new">
+            <span aria-hidden="true">🔖</span> What's new
+        </button>
+        <button class="sidebar-btn sh-secondary-btn" data-sh-nav="feedback" id="sb-feedback" title="Help &amp; feedback">
+            <span aria-hidden="true">💭</span> Help
+        </button>
+    </div>
 </aside>
+
+<!-- Mobile nav overlay — shown when sidebar is open on mobile -->
+<div id="sh-mobile-overlay" aria-hidden="true"></div>
 <div id="landing-page" class="min-h-[88vh] flex flex-col md:flex-row items-center justify-center max-w-6xl mx-auto px-6 gap-10 py-16">
     <div class="w-full md:w-1/2 flex justify-center order-1 md:order-1">
         <!-- Hero illustration — decorative colors intentionally fixed (not theme-switchable) -->
