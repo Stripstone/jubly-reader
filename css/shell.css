@@ -3290,3 +3290,184 @@ body.app-dark.sh-shell-active .sh-resume-secondary {
   background: var(--sh-surface-warm);
   border-color: var(--sh-border);
 }
+
+/* ── 1E visual refinements (matched to blueprint reference) ─────────────── */
+
+/* Nav usage pill: shell rail styling on signed-in shell */
+body.sh-shell-active #nav-usage-pill {
+  background: var(--sh-rail) !important;
+  border: 1px solid var(--sh-border) !important;
+  color: var(--jubly-purple) !important;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+}
+
+/* Nav profile trigger: warm border + surface on signed-in shell */
+body.sh-shell-active #nav-profile-trigger {
+  border: 1px solid var(--sh-border) !important;
+  background: var(--sh-surface-warm, #fbf8f2) !important;
+  border-radius: 999px !important;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04) !important;
+  padding: 4px !important;
+}
+body.sh-shell-active #nav-profile-trigger:hover {
+  background: var(--sh-surface-parch) !important;
+}
+
+/* ── Library rows: 4-column grid matching blueprint layout ──────────────── */
+/* Blueprint: grid-template-columns: minmax(0,1fr) 128px 128px 32px         */
+/* Overrides the flex layout the JS template emits.                          */
+body.sh-shell-active #library-rows > div {
+  display: grid !important;
+  grid-template-columns: minmax(0,1fr) 128px 128px 32px !important;
+  align-items: center !important;
+  position: relative !important;
+  padding: 16px 24px !important;
+  min-height: 70px !important;
+  border-bottom: none !important; /* replaced by ::after inset divider below */
+}
+
+/* Inset row divider — 99% width floated via ::after, matching blueprint */
+body.sh-shell-active #library-rows > div::after {
+  content: "";
+  position: absolute;
+  left: .5%;
+  bottom: 0;
+  width: 99%;
+  height: 1px;
+  background: var(--sh-divider);
+  border-radius: 999px;
+}
+body.sh-shell-active #library-rows > div:last-child::after {
+  display: none;
+}
+
+/* Doc identity cell: flex row, gap matching blueprint */
+body.sh-shell-active #library-rows > div > div:first-child {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+/* Doc icon: portrait 38×48px matching blueprint spec */
+body.sh-shell-active #library-rows .w-8.h-8 {
+  width: 38px !important;
+  height: 48px !important;
+  border-radius: 10px !important;
+  background: var(--sh-surface-warm) !important;
+  border: 1px solid var(--sh-border) !important;
+  color: var(--sh-muted) !important;
+  flex-shrink: 0 !important;
+}
+
+/* Book title */
+body.sh-shell-active #library-rows p.font-semibold {
+  font-weight: 800 !important;
+  font-size: 15px !important;
+  color: var(--sh-ink) !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Book meta */
+body.sh-shell-active #library-rows p.text-xs {
+  font-size: 12px !important;
+  color: var(--sh-muted) !important;
+  margin-top: 4px;
+}
+
+/* Status columns: unhide on desktop (override hidden md:block) */
+body.sh-shell-active #library-rows .w-32 {
+  display: block !important;
+}
+
+/* Status pill: exact blueprint spec */
+body.sh-shell-active #library-rows span.rounded-full {
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  color: var(--jubly-purple) !important;
+  background: var(--sh-surface-warm) !important;
+  border: 1px solid var(--sh-border) !important;
+  border-radius: 999px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 5px 9px !important;
+  width: max-content !important;
+}
+
+/* Time column */
+body.sh-shell-active #library-rows .w-32.text-sm {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: var(--sh-muted) !important;
+}
+
+/* Kebab / arrow column */
+body.sh-shell-active #library-rows .w-8.text-slate-300 {
+  color: var(--sh-muted) !important;
+  font-size: 22px !important;
+  line-height: 1;
+}
+
+/* Table head: inset divider via ::after, matching blueprint */
+body.sh-shell-active #library-populated .glass-card > div:first-child {
+  position: relative;
+}
+body.sh-shell-active #library-populated .glass-card > div:first-child::after {
+  content: "";
+  position: absolute;
+  left: .5%;
+  bottom: 0;
+  width: 99%;
+  height: 1px;
+  background: var(--sh-divider);
+  border-radius: 999px;
+}
+/* Remove border-bottom that was there before (inset ::after replaces it) */
+body.sh-shell-active #library-populated .glass-card > div:first-child {
+  border-bottom: none !important;
+}
+
+/* Mobile: collapse back to simpler layout */
+@media (max-width: 640px) {
+  body.sh-shell-active #library-rows > div {
+    grid-template-columns: minmax(0,1fr) auto !important;
+    gap: 8px 10px !important;
+    padding: 13px 12px !important;
+    min-height: 64px !important;
+  }
+  body.sh-shell-active #library-rows > div > div:first-child {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-items: flex-start !important;
+    gap: 9px !important;
+  }
+  body.sh-shell-active #library-rows .w-8.h-8 {
+    width: 32px !important;
+    height: 40px !important;
+    border-radius: 8px !important;
+  }
+  body.sh-shell-active #library-rows .w-32:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex !important;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  body.sh-shell-active #library-rows .w-32:nth-child(3) {
+    grid-column: 2;
+    grid-row: 2;
+    display: flex !important;
+    align-items: flex-start;
+    justify-content: flex-end;
+  }
+  body.sh-shell-active #library-rows .w-8.text-slate-300 {
+    display: none !important;
+  }
+}
