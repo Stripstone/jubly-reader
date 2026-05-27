@@ -3688,3 +3688,347 @@ body.app-dark.sh-shell-active #dashboard .border-slate-200,
 body.app-dark.sh-shell-active #profile-auth-content .border-slate-200 {
   border-color: var(--sh-border) !important;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   1E Profile Structure — blueprint-matched structural classes
+   New classes used in the rebuilt profile section. Visual treatment comes
+   from the existing sh-shell-active rules above. These handle layout only.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Page header ────────────────────────────────────────────────────────── */
+.profile-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 30px;
+}
+.profile-page-title {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--sh-ink, #1e293b);
+  margin: 0;
+}
+.profile-page-subtitle {
+  margin: 5px 0 0;
+  color: var(--sh-muted, #64748b);
+  font-size: 14px;
+}
+
+/* ── Shell grid: 250px rail + content ───────────────────────────────────── */
+/* Blueprint: .profile-shell { grid-template-columns: 250px minmax(0,1fr) } */
+.profile-shell-grid {
+  display: grid;
+  grid-template-columns: 250px minmax(0,1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* ── Rail aside ─────────────────────────────────────────────────────────── */
+.profile-rail-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Rail card — blueprint .profile-rail ────────────────────────────────── */
+/* Visual properties (bg, border, shadow, radius) set by sh-shell-active below */
+.profile-rail-card {
+  border-radius: 22px;
+  overflow: hidden;
+  padding: 16px;
+}
+
+/* ── Identity row ───────────────────────────────────────────────────────── */
+.profile-identity-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 8px 16px;
+  border-bottom: 1px solid var(--sh-divider, #efe5d8);
+  margin-bottom: 12px;
+}
+.profile-identity-name {
+  display: block;
+  color: var(--sh-ink, #1e293b);
+  font-size: 14px;
+  font-weight: 800;
+}
+.profile-identity-sub {
+  display: block;
+  color: var(--sh-muted, #64748b);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+/* ── Tab nav ────────────────────────────────────────────────────────────── */
+.profile-tab-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.profile-rail-divider {
+  border: none;
+  border-top: 1px solid var(--sh-divider, #efe5d8);
+  margin: 6px 0;
+}
+
+/* ── Tab buttons — blueprint .ptab ─────────────────────────────────────── */
+.profile-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--sh-muted, #64748b);
+  font-size: 13px;
+  font-weight: 800;
+  font-family: inherit;
+  letter-spacing: -0.01em;
+  border-radius: 14px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.profile-tab-btn:hover {
+  background: var(--sh-surface-warm, #fbf8f2);
+  color: var(--jubly-purple, #6344f5);
+  box-shadow: inset 0 0 0 1px var(--sh-border, #e7ded3);
+}
+.profile-tab-btn.active {
+  background: var(--sh-surface-warm, #fbf8f2);
+  color: var(--jubly-purple, #6344f5);
+  box-shadow: inset 0 0 0 1px var(--sh-border, #e7ded3);
+}
+.profile-tab-btn-logout {
+  color: #ef4444 !important;
+}
+.profile-tab-btn-logout:hover {
+  background: #fff1f1 !important;
+  color: #dc2626 !important;
+  box-shadow: inset 0 0 0 1px #fecaca !important;
+}
+
+/* ── Content area ───────────────────────────────────────────────────────── */
+.profile-content-area { min-width: 0; }
+.profile-auth-content { display: flex; flex-direction: column; }
+
+/* ── Tab panels — blueprint .panel.active ───────────────────────────────── */
+.profile-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* tab-content hidden state wins over .profile-panel flex */
+.tab-content.hidden-section { display: none !important; }
+
+/* ── Section cards — blueprint .sc / .sc.soft ───────────────────────────── */
+.profile-sc {
+  background: var(--sh-surface-parch, rgba(251,248,242,.96));
+  border: 1px solid var(--sh-border-warm, rgba(223,212,198,.88));
+  border-radius: 20px;
+  box-shadow: var(--sh-shadow-ground);
+  padding: 20px;
+}
+.profile-sc-soft {
+  background: var(--sh-surface-bp, rgba(255,252,247,.72));
+  box-shadow: var(--sh-shadow-panel);
+  border-color: var(--sh-border, #e7ded3);
+}
+
+/* ── Card typography ────────────────────────────────────────────────────── */
+.profile-section-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--sh-warm-muted, #8a7a69);
+  margin-bottom: 8px;
+}
+.profile-card-h3 {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--sh-ink, #1e293b);
+}
+.profile-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* ── App tiles — blueprint .app-tile ────────────────────────────────────── */
+.profile-app-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 12px;
+}
+.profile-app-tile {
+  border: 1px solid var(--sh-border, #e7ded3);
+  background: var(--sh-surface-bp, rgba(255,252,247,.72));
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.profile-app-tile:hover { background: var(--sh-surface-warm, #fbf8f2); }
+.profile-tile-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--sh-surface-warm, #fbf8f2);
+  border: 1px solid var(--sh-border, #e7ded3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+/* ── Metric cards — blueprint .metric ───────────────────────────────────── */
+.profile-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
+  gap: 12px;
+}
+.profile-metric-card {
+  background: var(--sh-surface-bp, rgba(255,252,247,.72)) !important;
+  border-color: var(--sh-border, #e7ded3) !important;
+  border-radius: 16px !important;
+  padding: 15px !important;
+  box-shadow: var(--sh-shadow-panel) !important;
+}
+.profile-metric-value {
+  font-size: 24px;
+  font-weight: 900;
+  color: var(--sh-ink, #1e293b);
+  letter-spacing: -0.04em;
+}
+
+/* ── Form rows — blueprint .form-row ────────────────────────────────────── */
+.profile-form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid var(--sh-divider, #efe5d8);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
+/* ── Button row ─────────────────────────────────────────────────────────── */
+.profile-btn-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Buttons — blueprint .shell-btn.primary / .shell-btn.ghost ─────────── */
+.profile-btn-primary {
+  border: none;
+  background: var(--jubly-purple, #6344f5);
+  color: #fff;
+  padding: 11px 18px;
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  border-radius: 8px;
+  box-shadow: var(--sh-btn-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: filter .12s ease, transform .12s ease;
+}
+.profile-btn-primary:hover { filter: brightness(1.04); }
+.profile-btn-primary:active { transform: translateY(1px); }
+
+.profile-btn-ghost {
+  border: 1px solid var(--sh-border, #e7ded3);
+  background: var(--sh-surface-warm, #fbf8f2);
+  color: var(--jubly-purple, #6344f5);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 800;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background .12s ease, transform .12s ease;
+}
+.profile-btn-ghost:hover { background: var(--sh-surface-parch, rgba(251,248,242,.96)); }
+.profile-btn-ghost:active { transform: translateY(1px); }
+
+/* ── Mobile ─────────────────────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  .profile-shell-grid {
+    grid-template-columns: 1fr;
+  }
+  .profile-tab-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0,1fr));
+    gap: 8px;
+  }
+  .profile-tab-btn {
+    justify-content: center;
+    text-align: center;
+    min-height: 40px;
+    font-size: 12px;
+  }
+  .profile-metric-grid { grid-template-columns: 1fr; }
+  .profile-app-tiles { grid-template-columns: 1fr; }
+  .profile-form-row { flex-direction: column; align-items: flex-start; }
+  .profile-card-head { flex-direction: column; }
+}
+
+/* ── Dark mode ──────────────────────────────────────────────────────────── */
+body.app-dark.sh-shell-active .profile-rail-card {
+  background: var(--sh-surface-parch) !important;
+  border-color: var(--sh-border-warm) !important;
+}
+body.app-dark.sh-shell-active .profile-sc {
+  background: var(--sh-surface-parch) !important;
+  border-color: var(--sh-border-warm) !important;
+  color: var(--sh-ink) !important;
+}
+body.app-dark.sh-shell-active .profile-sc-soft {
+  background: var(--sh-surface-bp) !important;
+  border-color: var(--sh-border) !important;
+}
+body.app-dark.sh-shell-active .profile-app-tile {
+  background: var(--sh-surface-bp) !important;
+  border-color: var(--sh-border) !important;
+}
+body.app-dark.sh-shell-active .profile-app-tile:hover {
+  background: var(--sh-surface-warm) !important;
+}
+body.app-dark.sh-shell-active .profile-btn-ghost {
+  background: var(--sh-surface-warm) !important;
+  border-color: var(--sh-border) !important;
+  color: var(--jubly-purple) !important;
+}
+body.app-dark.sh-shell-active .profile-identity-row {
+  border-bottom-color: var(--sh-divider) !important;
+}
+body.app-dark.sh-shell-active .profile-rail-divider {
+  border-top-color: var(--sh-divider) !important;
+}
+body.app-dark.sh-shell-active .profile-form-row {
+  border-top-color: var(--sh-divider) !important;
+}
