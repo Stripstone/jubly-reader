@@ -3514,3 +3514,361 @@ body.app-dark.sh-shell-active #dashboard .border-slate-200,
 body.app-dark.sh-shell-active #profile-auth-content .border-slate-200 {
   border-color: var(--sh-border) !important;
 }
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+   1E PROFILE + HISTORY + FOOTER COHESION
+   Appended to the existing sh-shell-active canonical block.
+   Scope: body.sh-shell-active only. Signed-out surfaces (Tailwind) untouched.
+   Dark mode: body.app-dark.sh-shell-active overrides at section 38.
+   Option B: Tailwind stays on signed-out surfaces only.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 19. Profile auth card — warm parchment surface ────────────────────────
+   DOM owner: #profile-auth-card */
+body.sh-shell-active #profile-auth-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  border-radius: 22px !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+}
+body.sh-shell-active #profile-auth-card .flex.items-center.gap-4.mb-4 {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--sh-divider);
+  margin-bottom: 10px;
+}
+
+/* ── 20. Profile tab buttons — full 1E nav material language ───────────────
+   DOM owner: .profile-tab-btn inside #profile-auth-card nav */
+body.sh-shell-active #profile-auth-card nav button.profile-tab-btn {
+  border-radius: 14px !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  color: var(--sh-muted) !important;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease !important;
+  padding: 0 14px !important;
+  min-height: 42px !important;
+  display: flex !important;
+  align-items: center !important;
+  text-align: left !important;
+  width: 100% !important;
+}
+body.sh-shell-active #profile-auth-card nav button.profile-tab-btn:hover {
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
+}
+body.sh-shell-active #profile-auth-card nav button.profile-tab-btn.active {
+  background: var(--sh-surface-warm) !important;
+  color: var(--jubly-purple) !important;
+  box-shadow: inset 0 0 0 1px var(--sh-border), var(--sh-btn-warm) !important;
+}
+body.sh-shell-active #profile-auth-card nav hr {
+  border-color: var(--sh-divider) !important;
+}
+
+/* ── 21. Profile content section cards — parchment surface ─────────────────
+   DOM owner: #profile-auth-content .section-card */
+body.sh-shell-active #profile-auth-content .section-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--sh-shadow-ground) !important;
+}
+
+/* ── 22. Subscription hero — purple gradient card ──────────────────────────
+   DOM owner: .sub-hero inside #tab-subscription */
+body.sh-shell-active .sub-hero {
+  background: linear-gradient(135deg, var(--jubly-purple), #5236d9) !important;
+  border-radius: 20px !important;
+  padding: 24px !important;
+  box-shadow: var(--sh-btn-primary) !important;
+  color: #fff !important;
+}
+body.sh-shell-active .sub-hero h3 { color: #fff !important; }
+body.sh-shell-active .sub-hero #subscription-status-copy { color: rgba(255,255,255,.72) !important; }
+body.sh-shell-active #subscription-primary-btn {
+  background: #fff !important; color: var(--jubly-purple) !important;
+  border: none !important; border-radius: 12px !important;
+  font-weight: 800 !important; font-size: 13px !important; padding: 10px 18px !important;
+  box-shadow: none !important; transition: background .15s ease, transform .12s ease !important;
+}
+body.sh-shell-active #subscription-primary-btn:hover { background: #f5f3ff !important; transform: translateY(-1px) !important; }
+body.sh-shell-active #subscription-secondary-btn {
+  background: rgba(255,255,255,.18) !important; color: #fff !important;
+  border: 1px solid rgba(255,255,255,.34) !important; border-radius: 12px !important;
+  font-weight: 800 !important; font-size: 13px !important; padding: 10px 18px !important;
+  box-shadow: none !important; transition: background .15s ease !important;
+}
+body.sh-shell-active #subscription-secondary-btn:hover { background: rgba(255,255,255,.30) !important; }
+
+/* ── 23. Content-area buttons — zero inactive shadow ───────────────────────
+   Contract: elevation belongs to containers; inactive content buttons = no shadow */
+body.sh-shell-active #profile-auth-content button:not(.profile-tab-btn):not(#subscription-primary-btn):not(#subscription-secondary-btn) {
+  box-shadow: none !important;
+}
+/* Start Chat — primary CTA. DOM owner: #profile-help-chat-btn */
+body.sh-shell-active #profile-help-chat-btn {
+  background: var(--jubly-purple) !important; color: #fff !important;
+  border: none !important; border-radius: 12px !important; font-weight: 800 !important;
+  padding: 11px 18px !important; box-shadow: var(--sh-btn-primary) !important;
+  transition: filter .15s ease !important;
+}
+body.sh-shell-active #profile-help-chat-btn:hover { filter: brightness(1.06) !important; }
+
+/* ── 24. App tiles — coming soon surface ───────────────────────────────────*/
+body.sh-shell-active #profile-auth-content .bg-slate-50.border.border-slate-100 {
+  background: var(--sh-surface-bp) !important; border-color: var(--sh-border) !important;
+  border-radius: 16px !important; box-shadow: none !important;
+  opacity: .86; cursor: default !important;
+}
+
+/* ── 25. Profile dividers and text tokens ──────────────────────────────────*/
+body.sh-shell-active #profile-auth-content .border-b,
+body.sh-shell-active #profile-auth-content .border-t,
+body.sh-shell-active #profile-auth-content .border-slate-100,
+body.sh-shell-active #profile-auth-content hr { border-color: var(--sh-divider) !important; }
+body.sh-shell-active #profile-auth-content .text-slate-900,
+body.sh-shell-active #profile-auth-content .text-slate-800,
+body.sh-shell-active #profile-auth-content .text-slate-700,
+body.sh-shell-active #profile-auth-card .text-slate-900,
+body.sh-shell-active #profile-auth-card .text-slate-800 { color: var(--sh-ink) !important; }
+body.sh-shell-active #profile-auth-content .text-slate-600,
+body.sh-shell-active #profile-auth-content .text-slate-500,
+body.sh-shell-active #profile-auth-content .text-slate-400,
+body.sh-shell-active #profile-auth-card .text-slate-600,
+body.sh-shell-active #profile-auth-card .text-slate-400 { color: var(--sh-muted) !important; }
+
+/* ── 26. Goal ring — 1E token colors ───────────────────────────────────────
+   DOM owners: #profile-goal-ring, #analytics-goal-ring */
+body.sh-shell-active #profile-goal-ring,
+body.sh-shell-active #analytics-goal-ring {
+  background: conic-gradient(var(--jubly-purple) var(--goal-progress, 0%), var(--sh-border) 0) !important;
+}
+body.sh-shell-active .profile-goal-ring-inner { background: var(--sh-surface-parch) !important; }
+
+/* ── 27. Profile guest card ─────────────────────────────────────────────────*/
+body.sh-shell-active #profile-guest-card {
+  background: var(--sh-surface-parch) !important;
+  border: 1px solid var(--sh-border-warm) !important;
+  border-radius: 22px !important; box-shadow: var(--sh-shadow-ground) !important;
+}
+
+/* ── 28. History surface CSS ────────────────────────────────────────────────
+   New surface per blueprint. Uses --sh-* tokens exclusively.
+   DOM owner: #sh-history-surface (added to index.html in this patch) */
+.sh-history-surface {
+  display: none;
+}
+.sh-history-surface.active {
+  display: block;
+}
+.history-shell {
+  background: var(--sh-surface-parch);
+  border: 1px solid var(--sh-border-warm);
+  border-radius: 24px;
+  padding: 26px;
+  box-shadow: var(--sh-shadow-ground);
+}
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 22px;
+}
+.history-title {
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: -.05em;
+  color: var(--sh-ink);
+  line-height: 1;
+  margin: 0;
+}
+.history-subtitle {
+  margin-top: 8px;
+  font-size: 16px;
+  font-style: italic;
+  color: var(--sh-warm-muted);
+}
+.history-actions { display: flex; justify-content: flex-end; }
+.history-filter-group {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--sh-surface-warm); border: 1px solid var(--sh-border);
+  border-radius: 999px; padding: 6px 8px 6px 16px; box-shadow: var(--sh-shadow-panel);
+}
+.history-filter-label {
+  font-size: 11px; font-weight: 900; letter-spacing: .12em;
+  color: var(--sh-warm-muted); text-transform: uppercase; padding-right: 4px; user-select: none;
+}
+.history-filter-options { display: flex; gap: 6px; }
+.history-filter-input { position: absolute; opacity: 0; pointer-events: none; }
+.history-filter-chip {
+  display: inline-flex; align-items: center; gap: 8px; border-radius: 14px;
+  padding: 9px 14px; font-size: 13px; font-weight: 900; color: var(--sh-warm-muted);
+  cursor: pointer; user-select: none;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+.history-filter-dot {
+  width: 8px; height: 8px; border-radius: 999px; background: var(--sh-border);
+  transition: background .15s ease, transform .15s ease;
+}
+.history-filter-chip:hover { background: var(--sh-surface); color: var(--sh-ink); }
+.history-filter-chip:hover .history-filter-dot { background: var(--sh-warm-muted); }
+.history-filter-input:checked + .history-filter-chip {
+  background: var(--sh-surface); color: var(--jubly-purple);
+  box-shadow: 0 1px 2px rgba(15,23,42,.08);
+}
+.history-filter-input:checked + .history-filter-chip .history-filter-dot {
+  background: var(--jubly-purple); transform: scale(1.08);
+}
+.history-filter-input:focus-visible + .history-filter-chip {
+  outline: 2px solid var(--jubly-purple); outline-offset: 2px;
+}
+.history-filter-chip:active { transform: translateY(1px); }
+.history-group {
+  background: var(--sh-surface-bp); border: 1px solid var(--sh-border);
+  border-radius: 18px; overflow: hidden;
+}
+.history-group + .history-group { margin-top: 16px; }
+.history-group-label {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 13px 18px; background: var(--sh-surface-warm);
+  border-bottom: 1px solid var(--sh-divider);
+  font-size: 11px; font-weight: 900; letter-spacing: .12em;
+  color: var(--sh-warm-muted); text-transform: uppercase;
+}
+.history-row {
+  display: grid; grid-template-columns: minmax(0,1fr) auto;
+  gap: 16px; align-items: center; padding: 16px 18px; position: relative;
+}
+.history-row + .history-row { border-top: 1px solid var(--sh-divider); }
+.history-book-title {
+  font-size: 17px; font-weight: 900; color: var(--sh-ink); letter-spacing: -.02em;
+}
+.history-book-meta { margin-top: 4px; color: var(--sh-warm-muted); line-height: 1.35; font-size: 13px; }
+.history-resume-btn {
+  border: 1px solid var(--sh-border); background: var(--sh-surface);
+  color: var(--jubly-purple); border-radius: 12px; padding: 8px 12px;
+  font-size: 12px; font-weight: 900; cursor: pointer; box-shadow: none;
+  text-transform: uppercase; letter-spacing: .04em;
+  transition: border-color .15s ease, color .15s ease, transform .12s ease;
+}
+.history-resume-btn:hover { border-color: var(--sh-border-warm); color: var(--sh-ink); }
+.history-resume-btn:active { transform: translateY(1px); }
+
+/* Dark mode — history surface */
+body.app-dark.sh-shell-active .history-shell {
+  background: var(--sh-surface-parch) !important;
+  border-color: var(--sh-border-warm) !important;
+}
+body.app-dark.sh-shell-active .history-group {
+  background: var(--sh-surface-bp) !important;
+  border-color: var(--sh-border) !important;
+}
+body.app-dark.sh-shell-active .history-group-label {
+  background: var(--sh-surface-warm) !important;
+  border-bottom-color: var(--sh-divider) !important;
+}
+body.app-dark.sh-shell-active .history-filter-group {
+  background: var(--sh-surface-warm) !important;
+  border-color: var(--sh-border) !important;
+}
+
+/* ── 29. Footer — shell surface classes ─────────────────────────────────────
+   DOM owner: #supportFooter
+   display controlled by syncShellAuthPresentation() — not touched.
+   Inline styles stripped from index.html; CSS owns appearance. */
+body.sh-shell-active #supportFooter {
+  background: var(--sh-surface-warm) !important;
+  border-top: 1px solid var(--sh-border) !important;
+  color: var(--sh-warm-muted) !important;
+  padding: 10px 16px 8px !important;
+  text-align: center !important;
+  box-sizing: border-box !important;
+}
+.shell-footer-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.shell-footer-row {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; flex-wrap: wrap; gap: 6px; text-align: center;
+}
+.shell-footer-row.main-cta { gap: 8px; }
+.shell-footer-row.legal-links {
+  font-size: 0.68rem; font-weight: 700; color: var(--sh-warm-muted); gap: 7px;
+}
+.support-cta { color: var(--sh-warm-muted); font-size: 0.82rem; line-height: 1.15; }
+.bmc-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #ffdd00; color: #000; padding: 6px 12px; border-radius: 8px;
+  font-weight: 700; font-size: 0.78rem; text-decoration: none;
+  box-shadow: 0 2px 6px rgba(0,0,0,.09); font-family: inherit;
+  transition: opacity .15s ease;
+}
+.bmc-btn:hover { opacity: .88; }
+.footer-dot-sep { color: var(--sh-muted); user-select: none; font-weight: 900; }
+.policy-link-btn {
+  background: none; border: none; padding: 0; margin: 0;
+  font-size: 0.68rem; font-weight: 600; color: var(--sh-warm-muted);
+  text-decoration: underline; text-underline-offset: 3px;
+  cursor: pointer; font-family: inherit; transition: color .15s ease;
+}
+.policy-link-btn:hover { color: var(--sh-ink); }
+
+/* ── 30. Mobile — profile and history stacks ────────────────────────────────*/
+@media (max-width: 640px) {
+  body.sh-shell-active #profile-sidebar { width: 100% !important; }
+  body.sh-shell-active #profile-auth-card { border-radius: 18px !important; padding: 14px !important; }
+  body.sh-shell-active #profile-auth-card nav {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+    gap: 8px !important;
+  }
+  body.sh-shell-active #profile-auth-card nav button.profile-tab-btn {
+    min-height: 40px !important; justify-content: center !important; font-size: 12px !important;
+  }
+  body.sh-shell-active #profile-auth-content .section-card { border-radius: 18px !important; padding: 16px !important; }
+  body.sh-shell-active .sub-hero { border-radius: 18px !important; }
+  body.sh-shell-active #supportFooter { padding: 9px 10px 7px !important; }
+  .history-shell { padding: 16px !important; border-radius: 18px !important; }
+  .history-header { flex-direction: column; }
+  .history-actions { justify-content: flex-start; }
+  .history-filter-group { width: 100%; justify-content: space-between; }
+  .history-filter-options { display: flex; flex: 1; }
+  .history-filter-chip { flex: 1; justify-content: center; }
+  .history-row { grid-template-columns: 1fr; gap: 8px; }
+  .history-resume-btn { justify-content: flex-start; }
+}
+
+/* ── 31. Dark mode — all profile and footer surfaces ───────────────────────
+   Specificity 0,3,1 beats existing body.app-dark rules at 0,2,1 by position. */
+body.app-dark.sh-shell-active #profile-auth-card {
+  background: var(--sh-surface-parch) !important; border-color: var(--sh-border-warm) !important;
+}
+body.app-dark.sh-shell-active #profile-auth-content .section-card {
+  background: var(--sh-surface-parch) !important; border-color: var(--sh-border-warm) !important;
+  color: var(--sh-ink) !important;
+}
+body.app-dark.sh-shell-active .sub-hero {
+  background: linear-gradient(135deg, #8168ff, var(--jubly-purple)) !important;
+}
+body.app-dark.sh-shell-active #profile-auth-content .bg-slate-50 {
+  background-color: var(--sh-surface-bp) !important;
+}
+body.app-dark.sh-shell-active .profile-goal-ring-inner {
+  background: var(--sh-surface-parch) !important;
+}
+body.app-dark.sh-shell-active #profile-guest-card {
+  background: var(--sh-surface-parch) !important; border-color: var(--sh-border-warm) !important;
+}
+body.app-dark.sh-shell-active #supportFooter {
+  background: var(--sh-surface-warm) !important; border-top-color: var(--sh-border) !important;
+}
+body.app-dark.sh-shell-active .shell-footer-row.legal-links,
+body.app-dark.sh-shell-active .support-cta,
+body.app-dark.sh-shell-active .policy-link-btn { color: var(--sh-warm-muted) !important; }
