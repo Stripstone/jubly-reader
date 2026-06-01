@@ -2024,10 +2024,39 @@ window.rcInteraction = (function () {
             btn.classList.toggle('active', btn.dataset.tab === tabId);
         });
         if (tabId === 'tab-profile') { try { renderProfileSurface(); } catch (_) {} }
+        if (tabId === 'tab-analytics') { try { renderAnalyticsSurface(); } catch (_) {} }
         if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
     }
 
-    // ── Tier simulation (dev/localhost only, gated by canSimulateTierSelection) ──
+    // ── Analytics surface — thin bridge to same reading metrics owner ────────
+    function renderAnalyticsSurface() {
+        const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
+            ? window.rcReadingMetrics.getReadingProfileMetrics()
+            : { dailyGoalMinutes: 15, dailyMinutes: 0, weeklyMinutes: 0, sessionsCompleted: 0, progressPct: 0 };
+        const goalMinutes = Math.max(5, Number(metrics.dailyGoalMinutes || 15));
+        const displayDaily = Math.max(0, Number(metrics.displayDailyMinutes != null ? metrics.displayDailyMinutes : Math.min(Number(metrics.dailyMinutes || 0), goalMinutes)));
+        const remaining = Math.max(0, Number(metrics.remainingGoalMinutes != null ? metrics.remainingGoalMinutes : Math.max(0, goalMinutes - Number(metrics.dailyMinutes || 0))));
+        const d = (id) => document.getElementById(id);
+        if (d('analytics-daily-minutes')) d('analytics-daily-minutes').textContent = String(Math.round(displayDaily));
+        if (d('analytics-goal-minutes'))  d('analytics-goal-minutes').textContent  = String(goalMinutes);
+        if (d('analytics-weekly-minutes')) d('analytics-weekly-minutes').textContent = String(metrics.weeklyMinutes || 0);
+        if (d('analytics-sessions-completed')) d('analytics-sessions-completed').textContent = String(metrics.sessionsCompleted || 0);
+        if (d('analytics-goal-ring')) d('analytics-goal-ring').style.setProperty('--goal-progress', `${Math.max(0, Math.min(100, Number(metrics.progressPct || 0)))}%`);
+        if (d('analytics-goal-copy')) d('analytics-goal-copy').textContent = metrics.progressPct >= 100 ? 'Goal complete for today.' : `${remaining} min to go today.`;
+        // Currently reading: thin bridge to library owner
+        try {
+            if (typeof localBooksGetAll === 'function') {
+                localBooksGetAll().then(books => {
+                    if (!books || !books.length) return;
+                    books.sort((a,b) => (b.createdAt||0)-(a.createdAt||0));
+                    const el = d('analytics-currently-reading');
+                    if (el) el.textContent = books[0].title || 'Untitled';
+                }).catch(()=>{});
+            }
+        } catch (_) {}
+    }
+    // ── end renderAnalyticsSurface ────────────────────────────────────────────
+
     function canSimulateTierSelection() {
         return !!(window.rcPolicy && typeof window.rcPolicy.canSimulateTier === 'function' && window.rcPolicy.canSimulateTier());
     }
