@@ -910,8 +910,6 @@ window.rcInteraction = (function () {
         // Close mobile nav drawer on any section transition
         try { const _sid = document.getElementById('app-sidebar'); if (_sid) _sid.classList.remove('open'); } catch (_) {}
         try { const _hmb = document.getElementById('sh-hamburger'); if (_hmb) _hmb.setAttribute('aria-expanded', 'false'); } catch (_) {}
-        // Hide history surface on any section transition
-        try { const _hs = document.getElementById('sh-history-surface'); if (_hs) _hs.classList.add('hidden-section'); } catch (_) {}
 
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
@@ -1007,7 +1005,7 @@ window.rcInteraction = (function () {
         syncShellAuthPresentation(targetId);
         let _sectionRefreshPromise = null;
         if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary('show-section-dashboard');
-        if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderAnalyticsSurface(); } catch (_) {} }
+        if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
 
@@ -2026,7 +2024,6 @@ window.rcInteraction = (function () {
             btn.classList.toggle('active', btn.dataset.tab === tabId);
         });
         if (tabId === 'tab-profile') { try { renderProfileSurface(); } catch (_) {} }
-        if (tabId === 'tab-analytics') { try { renderAnalyticsSurface(); } catch (_) {} }
         if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
     }
 
@@ -2965,42 +2962,6 @@ window.rcInteraction = (function () {
         }
     }
 
-    // renderAnalyticsSurface — reads rcReadingMetrics.getReadingProfileMetrics(),
-    // the same data owner as renderProfileSurface(). Hydration-gated.
-    // Analytics tab shows daily/weekly/ring without duplicating ownership.
-    function renderAnalyticsSurface() {
-        if (isAuthedUser()) {
-            const hydrated = !!(window.rcSync && typeof window.rcSync.getHydrationState === 'function' && window.rcSync.getHydrationState().settings);
-            if (!hydrated) return;
-        }
-        const metrics = (window.rcReadingMetrics && typeof window.rcReadingMetrics.getReadingProfileMetrics === 'function')
-            ? window.rcReadingMetrics.getReadingProfileMetrics()
-            : { dailyGoalMinutes: 15, dailyMinutes: 0, weeklyMinutes: 0, sessionsCompleted: 0, progressPct: 0 };
-        const dailyEl    = document.getElementById('analytics-daily-minutes');
-        const weeklyEl   = document.getElementById('analytics-weekly-minutes');
-        const sessionsEl = document.getElementById('analytics-sessions-completed');
-        const ringEl     = document.getElementById('analytics-goal-ring');
-        const copyEl     = document.getElementById('analytics-goal-copy');
-        const currentEl  = document.getElementById('analytics-currently-reading');
-        const goalMinutes = Math.max(5, Number(metrics.dailyGoalMinutes || 15));
-        const displayDaily = Math.max(0, Math.round(Number(metrics.dailyMinutes || 0)));
-        const remaining = Math.max(0, goalMinutes - displayDaily);
-        if (dailyEl) dailyEl.textContent = String(displayDaily);
-        if (weeklyEl) weeklyEl.textContent = String(metrics.weeklyMinutes || 0);
-        if (sessionsEl) sessionsEl.textContent = String(metrics.sessionsCompleted || 0);
-        if (ringEl) ringEl.style.setProperty('--goal-progress', `${Math.max(0, Math.min(100, Number(metrics.progressPct || 0)))}%`);
-        if (copyEl) copyEl.textContent = metrics.progressPct >= 100 ? 'Daily goal complete.' : `${remaining} min to go today.`;
-        try {
-            if (currentEl && typeof localBooksGetAll === 'function') {
-                localBooksGetAll().then(books => {
-                    if (!books || books.length === 0) { if (currentEl) currentEl.textContent = 'No books in library yet.'; return; }
-                    books.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-                    if (currentEl) currentEl.textContent = books[0].title || 'Untitled';
-                }).catch(() => {});
-            }
-        } catch (_) {}
-    }
-
     async function refreshPreviewSurface(id, fallbackTitle) {
         const titleEl = document.getElementById('preview-title');
         const trioEl = document.getElementById('preview-meta-trio');
@@ -3170,37 +3131,6 @@ window.rcInteraction = (function () {
         const sbUpgrade  = document.getElementById('sb-upgrade');
         const sbFeedback = document.getElementById('sb-feedback');
         const sbWhatsnew = document.getElementById('sb-whatsnew');
-
-        // History: shows #sh-history-surface, hides dashboard and profile-page.
-        // Pending state until a dedicated history data owner is wired.
-        const sbHistory = document.getElementById('sb-history');
-        const historySurface = document.getElementById('sh-history-surface');
-        if (sbHistory) {
-            sbHistory.addEventListener('click', () => {
-                closeMobileDrawer();
-                if (!isAuthedUser()) return;
-                // Hide other main sections, show history surface
-                try {
-                    const dashboard = document.getElementById('dashboard');
-                    const profilePage = document.getElementById('profile-page');
-                    if (dashboard) dashboard.classList.add('hidden-section');
-                    if (profilePage) profilePage.classList.add('hidden-section');
-                    if (historySurface) historySurface.classList.remove('hidden-section');
-                    // Update active state on sidebar
-                    document.querySelectorAll('#app-sidebar .sidebar-btn').forEach(b => {
-                        if (!b.classList.contains('sh-secondary-btn')) b.classList.remove('active');
-                    });
-                    sbHistory.classList.add('active');
-                } catch (_) {}
-            });
-        }
-        // Ensure history surface is hidden when navigating away via showSection
-        const _origShowSection = window.showSection;
-        if (typeof _origShowSection === 'function') {
-            window._hideHistorySurface = function() {
-                try { if (historySurface) historySurface.classList.add('hidden-section'); } catch (_) {}
-            };
-        }
         if (sbUpgrade) {
             sbUpgrade.addEventListener('click', () => {
                 closeMobileDrawer();
@@ -3393,7 +3323,7 @@ window.rcInteraction = (function () {
             refreshExplorerPanel();
         });
         document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} });
-        document.addEventListener('rc:durable-data-hydrated', (e) => { const section = getCurrentVisibleSection(); const kind = e && e.detail ? String(e.detail.kind || 'sync') : 'sync'; try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (section === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderAnalyticsSurface(); } catch (_) {} } if (section === 'dashboard') { try { refreshLibrary(`durable-hydrated:${kind}`); } catch (_) {} } });
+        document.addEventListener('rc:durable-data-hydrated', (e) => { const section = getCurrentVisibleSection(); const kind = e && e.detail ? String(e.detail.kind || 'sync') : 'sync'; try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (section === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} } if (section === 'dashboard') { try { refreshLibrary(`durable-hydrated:${kind}`); } catch (_) {} } });
         window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (getCurrentVisibleSection() === 'dashboard') { try { refreshLibrary('local-library-changed'); } catch (_) {} } });
         window.addEventListener('rc:deleted-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
         window.addEventListener('rc:usage-changed', () => { try { renderUsageSurface(); } catch (_) {} });
