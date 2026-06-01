@@ -872,6 +872,7 @@
                 </div>
                 <nav class="flex flex-col gap-1">
                     <button data-tab="tab-profile"       onclick="switchTab('tab-profile')"       class="profile-tab-btn active text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Profile</button>
+                    <button data-tab="tab-analytics"     onclick="switchTab('tab-analytics')"     class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Analytics</button>
                     <button data-tab="tab-subscription"  onclick="switchTab('tab-subscription')"  class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Subscription</button>
                     <button data-tab="tab-settings"      onclick="switchTab('tab-settings')"      class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Settings</button>
                     <hr class="my-2 border-slate-200">
@@ -937,10 +938,35 @@
                 <div class="section-card shadow-sm">
                     <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400 mb-4">Get Help</h4>
                     <div class="flex gap-3 flex-wrap">
-                        <button class="flex items-center gap-2 bg-green-50 text-green-700 font-bold text-xs px-4 py-2.5 rounded-xl hover:bg-green-100 transition border border-green-100"><span>💬</span> WhatsApp</button>
                         <button id="profile-help-chat-btn" type="button" class="flex items-center gap-2 font-bold text-xs px-4 py-2.5 rounded-xl transition border text-brand hover:bg-accent-soft border-accent-soft"><span>🗨️</span> Start Chat</button>
                     </div>
                     <p class="text-xs text-slate-400 mt-4">Have an idea? <a id="profile-help-feedback-link" href="#" class="text-brand font-semibold hover:underline">Share your thoughts →</a></p>
+                </div>
+            </div>
+
+            <!-- Analytics Tab — reads from rcReadingMetrics.getReadingProfileMetrics(),
+                 the same owner as renderProfileSurface(). Shows — until hydration confirms. -->
+            <div id="tab-analytics" class="tab-content hidden-section space-y-5">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="section-card shadow-sm profile-goal-card">
+                        <div class="profile-goal-copy-block">
+                            <span class="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-2">Today</span>
+                            <div class="text-2xl font-black"><span id="analytics-daily-minutes">—</span> <span class="text-slate-300 text-lg">min</span></div>
+                            <p id="analytics-goal-copy" class="text-xs text-slate-400 mt-2">Daily reading from session data.</p>
+                        </div>
+                        <div class="profile-goal-ring" id="analytics-goal-ring" style="--goal-progress: 0%;">
+                            <div class="profile-goal-ring-inner"></div>
+                        </div>
+                    </div>
+                    <div class="section-card shadow-sm">
+                        <span class="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-2">This Week</span>
+                        <div class="text-2xl font-black text-accent"><span id="analytics-weekly-minutes">—</span> <span class="text-slate-300 text-lg">min</span></div>
+                        <p class="text-xs text-slate-400 mt-1"><span id="analytics-sessions-completed">—</span> sessions completed</p>
+                    </div>
+                </div>
+                <div class="section-card shadow-sm">
+                    <span class="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-3">Currently Reading</span>
+                    <p id="analytics-currently-reading" class="text-sm text-slate-500">Open a book to see reading activity here.</p>
                 </div>
             </div>
 
@@ -1305,11 +1331,56 @@
 <script src="js/music.js"></script>
 <script src="js/app.js"></script>
 
-<!-- Support footer — shown on Library and Profile only via showSection() -->
-<footer id="supportFooter" style="display:none; width:100%; background:#f8f7ff; border-top:1px solid #e2e8f0; padding:1rem 1.5rem; text-align:center; box-sizing:border-box;">
-    <div style="display:flex; align-items:center; justify-content:center; gap:1rem; flex-wrap:wrap;">
-        <span style="font-size:0.8rem; color:#94a3b8;">📖 If jubly helped you, consider supporting the project</span>
-        <a href="https://www.buymeacoffee.com/tristonb" target="_blank" rel="noopener" style="display:inline-block; background:#FFDD00; color:#000; font-weight:800; font-size:0.78rem; padding:6px 14px; border-radius:8px; text-decoration:none;">☕ Buy me a coffee</a>
+<!-- History surface — shown when #sb-history is clicked via initShellNav1E().
+     Pending state: displays empty groups until real session data is wired.
+     DOM owner: #sh-history-surface -->
+<div id="sh-history-surface" class="sh-history-surface hidden-section">
+    <div class="history-shell">
+        <div class="history-header">
+            <div>
+                <h2 class="history-title">Recent Reads</h2>
+                <p class="history-subtitle">Continue where you left off.</p>
+            </div>
+            <div class="history-actions">
+                <div class="history-filter-group">
+                    <span class="history-filter-label">Filters</span>
+                    <div class="history-filter-options" role="group" aria-label="History date filters">
+                        <input type="checkbox" id="history-filter-today" class="history-filter-input" checked>
+                        <label for="history-filter-today" class="history-filter-chip">Today <span class="history-filter-dot" aria-hidden="true"></span></label>
+                        <input type="checkbox" id="history-filter-week" class="history-filter-input">
+                        <label for="history-filter-week" class="history-filter-chip">This Week <span class="history-filter-dot" aria-hidden="true"></span></label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- History rows populated by shell — pending state until real data wired -->
+        <div id="sh-history-rows">
+            <div class="history-group">
+                <div class="history-group-label"><span>Today</span><span>—</span></div>
+                <div class="history-row">
+                    <div>
+                        <div class="history-book-title" style="color:var(--sh-muted)">No recent reads today</div>
+                        <div class="history-book-meta">Open a book to start reading</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Support footer — shown on Library and Profile only via syncShellAuthPresentation().
+     display:none controlled by shell.js — do not change. CSS owns appearance. -->
+<footer id="supportFooter" style="display:none;">
+    <div class="shell-footer-inner">
+        <div class="shell-footer-row main-cta">
+            <span class="support-cta">📖 If jubly helped you, consider supporting the project</span>
+            <a href="https://www.buymeacoffee.com/tristonb" target="_blank" rel="noopener" class="bmc-btn">☕ Buy me a coffee</a>
+        </div>
+        <div class="shell-footer-row legal-links">
+            <button type="button" class="policy-link-btn" onclick="openPolicyModal('/legal/terms.html','Terms of Service')">Terms of Service</button>
+            <span class="footer-dot-sep">·</span>
+            <button type="button" class="policy-link-btn" onclick="openPolicyModal('/legal/privacy.html','Privacy Policy')">Privacy Policy</button>
+        </div>
     </div>
 </footer>
 
