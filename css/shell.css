@@ -4246,3 +4246,189 @@ body.shell-signed-in .shell-footer {
     padding-bottom: 8px !important;
   }
 }
+
+/* Runtime collision/pointer correction pass — structure first, then states. */
+body.shell-signed-in #app-sidebar {
+  width: 188px !important;
+  flex: 0 0 188px !important;
+}
+@media (min-width: 781px) {
+  body.shell-signed-in #dashboard,
+  body.shell-signed-in #profile-page,
+  body.shell-signed-in .shell-pending-page {
+    width: min(1048px, calc(100vw - 188px - 32px)) !important;
+    max-width: none !important;
+    margin-left: 188px !important;
+    margin-right: auto !important;
+    padding-left: 32px !important;
+    padding-right: 32px !important;
+    min-height: 0 !important;
+    flex: 1 0 auto !important;
+  }
+  body.shell-signed-in #dashboard.with-sidebar,
+  body.shell-signed-in #profile-page.with-sidebar { padding-left: 32px !important; }
+}
+body.shell-signed-in #supportFooter,
+body.shell-signed-in .shell-footer {
+  position: static !important;
+  inset: auto !important;
+  transform: none !important;
+  min-height: 0 !important;
+  height: auto !important;
+  margin-top: auto !important;
+  box-sizing: border-box !important;
+  z-index: 1 !important;
+}
+@media (min-width: 781px) {
+  body.shell-signed-in #supportFooter,
+  body.shell-signed-in .shell-footer {
+    margin-left: 188px !important;
+    width: calc(100% - 188px) !important;
+    padding: 10px 16px 9px !important;
+  }
+}
+@media (max-width: 780px) {
+  body.shell-signed-in #dashboard,
+  body.shell-signed-in #profile-page,
+  body.shell-signed-in .shell-pending-page,
+  body.shell-signed-in #dashboard.with-sidebar,
+  body.shell-signed-in #profile-page.with-sidebar {
+    margin-left: 0 !important;
+    width: 100% !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+    min-height: 0 !important;
+    flex: 1 0 auto !important;
+  }
+  body.shell-signed-in #supportFooter,
+  body.shell-signed-in .shell-footer {
+    margin-left: 0 !important;
+    width: 100% !important;
+    padding: 9px 10px 8px !important;
+  }
+}
+body.shell-signed-in #supportFooter .legal-links,
+body.shell-signed-in .shell-footer .legal-links { display: none !important; }
+
+/* Prevent invisible/overflowing layers from stealing pointer geometry from shell controls. */
+body.shell-signed-in .profile-content-region,
+body.shell-signed-in .profile-surface-card,
+body.shell-signed-in .history-shell,
+body.shell-signed-in .history-row,
+body.shell-signed-in .history-actions,
+body.shell-signed-in .profile-policies-row,
+body.shell-signed-in .profile-policies-links,
+body.shell-signed-in .settings-row,
+body.shell-signed-in .settings-account-row {
+  position: relative !important;
+  overflow: visible !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+body.shell-signed-in .profile-policy-link,
+body.shell-signed-in .history-resume-btn,
+body.shell-signed-in #tab-settings select,
+body.shell-signed-in .appearance-mode-btn,
+body.shell-signed-in #profile-password-toggle-btn,
+body.shell-signed-in .profile-card-action,
+body.shell-signed-in .profile-help-btn,
+body.shell-signed-in #nav-shell-menu-trigger,
+body.shell-signed-in #sb-resume,
+body.shell-signed-in .sidebar-btn {
+  pointer-events: auto !important;
+  position: relative !important;
+  z-index: 30 !important;
+}
+body.shell-signed-in .profile-policies-links {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  white-space: normal !important;
+}
+body.shell-signed-in .profile-policies-row,
+body.shell-signed-in .settings-row {
+  flex-wrap: wrap !important;
+}
+body.shell-signed-in #tab-settings select {
+  width: min(100%, 220px) !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  flex: 0 1 220px !important;
+  color: var(--ink) !important;
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
+}
+html.app-dark.shell-signed-in body.shell-signed-in #tab-settings select,
+body.app-dark.shell-signed-in #tab-settings select {
+  color: #fff7ee !important;
+  background: #2e2621 !important;
+  border-color: #5a4a3d !important;
+}
+body.shell-signed-in .mobile-overlay {
+  pointer-events: none !important;
+}
+body.shell-signed-in #app-sidebar.open ~ .mobile-overlay {
+  pointer-events: auto !important;
+}
+
+/* Final avatar and usage contrast correction. */
+body.shell-signed-in #nav-avatar,
+body.shell-signed-in .shell-letter-avatar,
+body.shell-signed-in #profile-avatar-main,
+body.shell-signed-in #profile-avatar-settings,
+body.shell-signed-in .profile-letter-avatar {
+  background: var(--jubly-purple) !important;
+  background-image: none !important;
+  color: #fff !important;
+  border-color: rgba(255,255,255,.22) !important;
+}
+body.shell-signed-in #nav-usage-pill {
+  background: var(--surface-warm) !important;
+  color: var(--warm-muted) !important;
+  border-color: var(--border) !important;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04) !important;
+}
+body.shell-signed-in #nav-usage-pill #nav-usage-pill-value,
+body.shell-signed-in #nav-usage-pill .nav-usage-pill-label {
+  color: var(--warm-muted) !important;
+}
+html.app-dark.shell-signed-in body.shell-signed-in #nav-usage-pill,
+body.app-dark.shell-signed-in #nav-usage-pill {
+  background: #2e2621 !important;
+  color: #bdae9e !important;
+  border-color: #3d322a !important;
+}
+html.app-dark.shell-signed-in body.shell-signed-in #nav-usage-pill #nav-usage-pill-value,
+html.app-dark.shell-signed-in body.shell-signed-in #nav-usage-pill .nav-usage-pill-label,
+body.app-dark.shell-signed-in #nav-usage-pill #nav-usage-pill-value,
+body.app-dark.shell-signed-in #nav-usage-pill .nav-usage-pill-label {
+  color: #bdae9e !important;
+}
+
+/* Independent history filters: each chip toggles on/off without exclusive selection. */
+body.shell-signed-in .history-filter-chip {
+  border: 1px solid var(--border) !important;
+  cursor: pointer !important;
+}
+body.shell-signed-in .history-filter-chip[aria-pressed="false"] {
+  background: var(--surface) !important;
+  color: var(--warm-muted) !important;
+}
+body.shell-signed-in .history-filter-chip[aria-pressed="false"] .history-filter-dot {
+  background: var(--border) !important;
+}
+
+/* Final structural geometry fix: sidebar width is border-box so footer/main offsets match the visible rail. */
+body.shell-signed-in #app-sidebar {
+  box-sizing: border-box !important;
+  width: 188px !important;
+  max-width: 188px !important;
+}
+@media (min-width: 781px) {
+  body.shell-signed-in #supportFooter,
+  body.shell-signed-in .shell-footer {
+    margin-left: 188px !important;
+    width: calc(100% - 188px) !important;
+  }
+}

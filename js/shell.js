@@ -933,14 +933,17 @@ window.rcInteraction = (function () {
 
     function setHistoryFilter(filter) {
         const normalized = filter === 'week' ? 'week' : 'today';
-        document.querySelectorAll('[data-history-filter]').forEach((btn) => {
-            const active = btn.getAttribute('data-history-filter') === normalized;
-            btn.classList.toggle('active', active);
-            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-        });
+        const target = document.querySelector(`[data-history-filter="${normalized}"]`);
+        if (target) {
+            const next = target.getAttribute('aria-pressed') !== 'true';
+            target.classList.toggle('active', next);
+            target.setAttribute('aria-pressed', next ? 'true' : 'false');
+        }
+        const activeFilters = new Set(Array.from(document.querySelectorAll('[data-history-filter][aria-pressed="true"]')).map((btn) => btn.getAttribute('data-history-filter')));
         document.querySelectorAll('[data-history-group]').forEach((group) => {
             const key = group.getAttribute('data-history-group');
-            group.style.display = (normalized === 'week' || key === 'today') ? '' : 'none';
+            const showAll = activeFilters.size === 0 || activeFilters.size > 1;
+            group.style.display = (showAll || activeFilters.has(key)) ? '' : 'none';
         });
     }
 
