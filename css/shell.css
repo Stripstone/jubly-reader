@@ -3718,3 +3718,77 @@ body.shell-signed-in #profile-page,
 body.shell-signed-in .shell-pending-page { padding-bottom: 32px !important; }
 body.shell-signed-in #supportFooter,
 body.shell-signed-in .shell-footer { margin-top: 0 !important; }
+
+/* ── Complete visible UX surface pass: blueprint-consistent filled/wired surfaces ── */
+body.shell-signed-in .profile-row-card,
+body.shell-signed-in .settings-account-row,
+body.shell-signed-in .settings-row,
+body.shell-signed-in .profile-policies-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+}
+body.shell-signed-in .profile-help-actions,
+body.shell-signed-in .subscription-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+body.shell-signed-in .profile-grid-spaced { margin-top: 16px !important; }
+body.shell-signed-in .profile-grid-spaced-tight { margin-top: 12px !important; }
+body.shell-signed-in .profile-copy-spaced { margin-top: 14px !important; }
+body.shell-signed-in .profile-coming-soon-item { cursor: default !important; }
+body.shell-signed-in .profile-app-icon { font-size: 24px !important; line-height: 1 !important; }
+body.shell-signed-in .analytics-card-progress {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 18px !important;
+}
+body.shell-signed-in .analytics-metric-line { margin-top: 6px !important; margin-bottom: 3px !important; }
+body.shell-signed-in .profile-muted-strong { color: var(--warm-muted) !important; font-weight: 800 !important; font-size: .78em !important; }
+body.shell-signed-in .analytics-ring,
+body.shell-signed-in .profile-goal-ring {
+  width: 72px !important;
+  height: 72px !important;
+  min-width: 72px !important;
+  border-radius: 50% !important;
+  display: grid !important;
+  place-items: center !important;
+  background: conic-gradient(var(--jubly-purple) var(--goal-progress), var(--border) 0) !important;
+}
+body.shell-signed-in .analytics-ring-inner,
+body.shell-signed-in .profile-goal-ring-inner {
+  width: 52px !important;
+  height: 52px !important;
+  border-radius: 50% !important;
+  background: var(--surface) !important;
+  display: grid !important;
+  place-items: center !important;
+}
+body.shell-signed-in .profile-action-spaced { margin-top: 10px !important; }
+body.shell-signed-in #profile-help-feedback-btn { display: inline-flex !important; align-items: center !important; justify-content: center !important; }
+body.shell-signed-in #tab-profile .profile-surface-card,
+body.shell-signed-in #tab-analytics .profile-surface-card { margin-bottom: 16px !important; }
+
+@media (max-width: 780px) {
+  body.shell-signed-in .profile-row-card,
+  body.shell-signed-in .settings-account-row,
+  body.shell-signed-in .settings-row,
+  body.shell-signed-in .profile-policies-row,
+  body.shell-signed-in .analytics-card-progress {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+  body.shell-signed-in .analytics-ring,
+  body.shell-signed-in .profile-goal-ring { align-self: flex-start !important; }
+  body.shell-signed-in .profile-help-actions,
+  body.shell-signed-in .subscription-actions { width: 100% !important; }
+  body.shell-signed-in .profile-help-btn,
+  body.shell-signed-in .profile-card-action,
+  body.shell-signed-in #profile-deleted-manage-btn,
+  body.shell-signed-in #profile-help-chat-btn,
+  body.shell-signed-in #profile-help-feedback-btn { width: 100% !important; justify-content: center !important; }
+}

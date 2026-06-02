@@ -3199,22 +3199,26 @@ window.rcInteraction = (function () {
                 setInlineBusy(btn, null, null, false);
             }
         });
-        document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => {
-            e.preventDefault();
-            const btn = e.currentTarget;
-            setInlineBusy(btn, 'Opening…');
-            try {
-                if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
-                    const ok = await window.rcHelp.openFeedback();
-                    if (!ok) {
-                        try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
+        ['profile-help-feedback-link', 'profile-help-feedback-btn'].forEach((feedbackId) => {
+            document.getElementById(feedbackId)?.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const btn = e.currentTarget;
+                setInlineBusy(btn, 'Opening…');
+                try {
+                    if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
+                        const ok = await window.rcHelp.openFeedback();
+                        if (!ok) {
+                            try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
+                        }
+                    } else {
+                        try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback is not available yet.'); } catch (_) {}
                     }
+                } catch (_) {
+                    try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
+                } finally {
+                    setInlineBusy(btn, null, null, false);
                 }
-            } catch (_) {
-                try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
-            } finally {
-                setInlineBusy(btn, null, null, false);
-            }
+            });
         });
         const tierSel = document.getElementById('tierSelect');
         if (tierSel) {
