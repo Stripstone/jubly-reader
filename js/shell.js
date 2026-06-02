@@ -63,9 +63,9 @@
     // ─────────────────────────────────────────────────────────────────────────────
 
     // ── Section routing ──────────────────────────────────────────
-    const ALL_SECTIONS     = ['landing-page', 'public-onboarding', 'login-page', 'dashboard', 'profile-page', 'history-page', 'whats-new-page', 'support-page', 'reading-mode'];
+    const ALL_SECTIONS     = ['landing-page', 'public-onboarding', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
     const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
-    const SIDEBAR_SECTIONS = ['dashboard', 'profile-page', 'history-page', 'whats-new-page', 'support-page'];
+    const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
@@ -555,7 +555,7 @@ window.rcInteraction = (function () {
         const normalized = normalizeSection(id);
         if (normalized === 'login-page' && isPasswordRecoveryActive()) return 'login-page';
         if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'public-onboarding' || normalized === 'login-page')) return 'dashboard';
-        if (!isAuthedUser() && ['profile-page', 'history-page', 'whats-new-page', 'support-page'].includes(normalized)) return 'landing-page';
+        if (!isAuthedUser() && normalized === 'profile-page') return 'landing-page';
         if (!isAuthedUser() && normalized === 'dashboard' && !isIntroLibraryVisible()) return 'landing-page';
         return normalized;
     }
@@ -870,9 +870,6 @@ window.rcInteraction = (function () {
         const isLanding = id === 'landing-page';
         const dashboardEl = document.getElementById('dashboard');
         const profileEl = document.getElementById('profile-page');
-        const historyEl = document.getElementById('history-page');
-        const whatsNewEl = document.getElementById('whats-new-page');
-        const supportPageEl = document.getElementById('support-page');
 
         const navUserControls = document.getElementById('nav-user-controls');
         const navLandingControls = document.getElementById('nav-landing-controls');
@@ -902,25 +899,10 @@ window.rcInteraction = (function () {
         if (sidebar) sidebar.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
         if (dashboardEl) dashboardEl.classList.toggle('with-sidebar', authed);
         if (profileEl) profileEl.classList.toggle('with-sidebar', authed);
-        if (historyEl) historyEl.classList.toggle('with-sidebar', authed);
-        if (whatsNewEl) whatsNewEl.classList.toggle('with-sidebar', authed);
-        if (supportPageEl) supportPageEl.classList.toggle('with-sidebar', authed);
-        document.body.classList.toggle('shell-signed-in', authed && !isReading);
-        document.body.classList.toggle('shell-signed-in-section', authed && SIDEBAR_SECTIONS.includes(id));
         const supportFooter = document.getElementById('supportFooter');
         if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'block' : 'none';
         const sbLibrary = document.getElementById('sb-library');
-        const sbResume = document.getElementById('sb-resume');
-        const sbHistory = document.getElementById('sb-history');
-        const sbSettings = document.getElementById('sb-settings');
-        const sbWhatsNew = document.getElementById('sb-whats-new');
-        const sbSupport = document.getElementById('sb-support');
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
-        if (sbResume) sbResume.classList.toggle('active', false);
-        if (sbHistory) sbHistory.classList.toggle('active', id === 'history-page');
-        if (sbSettings) sbSettings.classList.toggle('active', id === 'profile-page');
-        if (sbWhatsNew) sbWhatsNew.classList.toggle('active', id === 'whats-new-page');
-        if (sbSupport) sbSupport.classList.toggle('active', id === 'support-page');
 
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
@@ -2036,7 +2018,6 @@ window.rcInteraction = (function () {
         });
         if (tabId === 'tab-profile') { try { renderProfileSurface(); } catch (_) {} }
         if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
-        if (tabId === 'tab-settings') { try { syncAppAppearanceButtons(); } catch (_) {} }
     }
 
     // ── Tier simulation (dev/localhost only, gated by canSimulateTierSelection) ──
@@ -2169,7 +2150,7 @@ window.rcInteraction = (function () {
         const canUse = !!(window.rcTheme && typeof window.rcTheme.canUseTheme === 'function' && window.rcTheme.canUseTheme('explorer'));
         if (!canUse) {
             btn.classList.add('explorer-locked');
-            btn.title = 'Upgrade to unlock Explorer theme';
+            btn.title = 'Upgrade to Pro+ to unlock Explorer theme';
             if (swatch) swatch.style.opacity = '0.6';
         } else {
             btn.classList.remove('explorer-locked');
