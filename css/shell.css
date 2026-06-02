@@ -1,16 +1,16 @@
 /* ── Early boot scrim / pre-runtime appearance settle ─────────────────────── */
 html, body { min-height: 100%; }
 html.app-light,
-html.app-light body { background: #ffffff; color: #1e293b; }
+html.app-light body { background: #f7f3ec; color: #1e293b; }
 html.app-dark,
-html.app-dark body { background: #0f172a; color: #e2e8f0; }
+html.app-dark body { background: #1a1512; color: #e2e8f0; }
 body.boot-pending > :not(#boot-scrim) { visibility: hidden !important; }
 #boot-scrim {
   position: fixed;
   inset: 0;
   z-index: 2147483647;
   pointer-events: none;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  background: linear-gradient(180deg, #fbf8f2 0%, #f7f3ec 52%, #f1eadf 100%);
   opacity: 1;
   transition: opacity 0.16s ease;
   display: flex;
@@ -41,7 +41,7 @@ body.boot-pending > :not(#boot-scrim) { visibility: hidden !important; }
   transform: translateY(0);
 }
 html.app-dark #boot-scrim {
-  background: radial-gradient(circle at top, #1e293b 0%, #0f172a 68%);
+  background: radial-gradient(circle at top, #221c18 0%, #1a1512 68%, #120e0c 100%);
 }
 html.app-dark #boot-scrim-copy {
   background: rgba(15, 23, 42, 0.78);
@@ -124,8 +124,8 @@ body:not(.boot-pending) #boot-scrim { opacity: 0; }
          * This block covers the color system bridge so app features respond correctly.
          */
 
-        body.app-light { background-color: #ffffff; color: #1e293b; }
-        body.app-dark { background: #0f172a; color: #e2e8f0; }
+        body.app-light { background-color: #f7f3ec; color: #1e293b; }
+        body.app-dark { background: #1a1512; color: #e2e8f0; }
         body.app-dark nav,
         body.app-dark #app-sidebar,
         body.app-dark .section-card,
@@ -5236,4 +5236,392 @@ body.shell-signed-in .subscription-metrics-group > .section-card .text-xl {
     margin-left: 0 !important;
     width: 100% !important;
   }
+}
+
+/* Final follow-up: subscription metric cards, library row state contract, and avatar color. */
+body.shell-signed-in #nav-avatar,
+html.app-dark.shell-signed-in body.shell-signed-in #nav-avatar,
+body.app-dark.shell-signed-in #nav-avatar {
+  background: var(--jubly-purple) !important;
+  color: #fff !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+body.shell-signed-in #nav-profile-trigger,
+html.app-dark.shell-signed-in body.shell-signed-in #nav-profile-trigger,
+body.app-dark.shell-signed-in #nav-profile-trigger {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Subscription metrics: grouped layout discipline, but three distinct sibling cards. */
+body.shell-signed-in .subscription-metrics-group {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 16px !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+body.shell-signed-in .subscription-metrics-group .subscription-metric-card,
+body.shell-signed-in .subscription-metrics-group > .section-card {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  min-height: 104px !important;
+  padding: 20px 16px !important;
+  background: var(--surface-parchment) !important;
+  border: 1px solid var(--border-warm) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--shadow-panel) !important;
+  margin: 0 !important;
+}
+body.shell-signed-in .subscription-metrics-group > :last-child,
+body.shell-signed-in .subscription-metrics-group .subscription-metric-card {
+  border-right: 1px solid var(--border-warm) !important;
+  border-bottom: 1px solid var(--border-warm) !important;
+}
+@media (max-width: 720px) {
+  body.shell-signed-in .subscription-metrics-group {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+  body.shell-signed-in .subscription-metrics-group .subscription-metric-card,
+  body.shell-signed-in .subscription-metrics-group > .section-card {
+    min-height: 86px !important;
+    padding: 18px !important;
+  }
+}
+
+/* Document Library rows: only three intended states.
+   Wide/tablet-landscape+: full columns with arrow.
+   Tablet portrait: compact row with status/time stacked on the right.
+   Mobile: compact row with data dropping under the document block. */
+body.shell-signed-in #library-rows > .library-row,
+body.shell-signed-in #library-rows > div {
+  display: grid !important;
+  grid-template-columns: minmax(260px, 1fr) 128px 128px 32px !important;
+  align-items: center !important;
+  column-gap: 0 !important;
+  row-gap: 0 !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  padding: 16px 18px !important;
+}
+body.shell-signed-in #library-rows .library-row-main,
+body.shell-signed-in #library-rows > div > div:first-child {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+  width: auto !important;
+  max-width: 100% !important;
+}
+body.shell-signed-in #library-rows .library-doc-copy,
+body.shell-signed-in #library-rows > div > div:first-child > div:last-child {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+body.shell-signed-in #library-rows .library-row-status,
+body.shell-signed-in #library-rows .library-row-time,
+body.shell-signed-in #library-rows .library-row-arrow,
+body.shell-signed-in #library-rows > div > div:nth-child(2),
+body.shell-signed-in #library-rows > div > div:nth-child(3),
+body.shell-signed-in #library-rows > div > div:nth-child(4) {
+  display: flex !important;
+  align-items: center !important;
+  width: auto !important;
+  min-width: 0 !important;
+  margin-left: 0 !important;
+}
+body.shell-signed-in #library-rows .library-row-status,
+body.shell-signed-in #library-rows > div > div:nth-child(2) { grid-column: 2 !important; grid-row: 1 !important; justify-content: flex-start !important; }
+body.shell-signed-in #library-rows .library-row-time,
+body.shell-signed-in #library-rows > div > div:nth-child(3) { grid-column: 3 !important; grid-row: 1 !important; justify-content: flex-start !important; }
+body.shell-signed-in #library-rows .library-row-arrow,
+body.shell-signed-in #library-rows > div > div:nth-child(4) { grid-column: 4 !important; grid-row: 1 !important; justify-content: center !important; }
+
+@media (max-width: 900px) {
+  body.shell-signed-in .table-head {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  body.shell-signed-in .table-head > div:not(:first-child) {
+    display: none !important;
+  }
+  body.shell-signed-in #library-rows > .library-row,
+  body.shell-signed-in #library-rows > div {
+    grid-template-columns: minmax(0, 1fr) max-content !important;
+    grid-template-rows: auto auto !important;
+    column-gap: 14px !important;
+    row-gap: 4px !important;
+    min-height: 88px !important;
+    padding: 14px 16px !important;
+  }
+  body.shell-signed-in #library-rows .library-row-main,
+  body.shell-signed-in #library-rows > div > div:first-child {
+    grid-column: 1 !important;
+    grid-row: 1 / span 2 !important;
+    align-self: center !important;
+  }
+  body.shell-signed-in #library-rows .library-row-status,
+  body.shell-signed-in #library-rows .library-row-time,
+  body.shell-signed-in #library-rows > div > div:nth-child(2),
+  body.shell-signed-in #library-rows > div > div:nth-child(3) {
+    grid-column: 2 !important;
+    width: max-content !important;
+    max-width: 132px !important;
+    justify-content: flex-start !important;
+  }
+  body.shell-signed-in #library-rows .library-row-status,
+  body.shell-signed-in #library-rows > div > div:nth-child(2) { grid-row: 1 !important; align-self: end !important; }
+  body.shell-signed-in #library-rows .library-row-time,
+  body.shell-signed-in #library-rows > div > div:nth-child(3) { grid-row: 2 !important; align-self: start !important; }
+  body.shell-signed-in #library-rows .library-row-arrow,
+  body.shell-signed-in #library-rows > div > div:nth-child(4) { display: none !important; }
+}
+@media (max-width: 520px) {
+  body.shell-signed-in #library-rows > .library-row,
+  body.shell-signed-in #library-rows > div {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto auto !important;
+    row-gap: 9px !important;
+    min-height: 104px !important;
+  }
+  body.shell-signed-in #library-rows .library-row-main,
+  body.shell-signed-in #library-rows > div > div:first-child {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+  body.shell-signed-in #library-rows .library-row-status,
+  body.shell-signed-in #library-rows .library-row-time,
+  body.shell-signed-in #library-rows > div > div:nth-child(2),
+  body.shell-signed-in #library-rows > div > div:nth-child(3) {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    display: inline-flex !important;
+    width: fit-content !important;
+    max-width: calc(100% - 44px) !important;
+    margin-left: 44px !important;
+    justify-self: start !important;
+    align-self: center !important;
+  }
+  body.shell-signed-in #library-rows .library-row-time,
+  body.shell-signed-in #library-rows > div > div:nth-child(3) {
+    margin-left: calc(44px + 92px) !important;
+  }
+}
+
+/* Final mobile library-row correction: mobile data drops beneath the document block without overlap. */
+@media (max-width: 520px) {
+  body.shell-signed-in #library-rows > .library-row,
+  body.shell-signed-in #library-rows > div {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto auto !important;
+    row-gap: 9px !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-main,
+  body.shell-signed-in #library-rows > div > div:first-child {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-status,
+  body.shell-signed-in #library-rows > div > div:nth-child(2) {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    margin-left: 44px !important;
+    justify-self: start !important;
+    align-self: center !important;
+    width: max-content !important;
+    max-width: calc(100% - 44px) !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-time,
+  body.shell-signed-in #library-rows > div > div:nth-child(3) {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    margin-left: 142px !important;
+    justify-self: start !important;
+    align-self: center !important;
+    width: max-content !important;
+    max-width: calc(100% - 142px) !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-arrow,
+  body.shell-signed-in #library-rows > div > div:nth-child(4) {
+    display: none !important;
+  }
+}
+
+/* Library rows, semantic meta wrapper version: wide / tablet-portrait / mobile only. */
+body.shell-signed-in #library-rows > .library-row {
+  display: grid !important;
+  grid-template-columns: minmax(260px, 1fr) 128px 128px 32px !important;
+  align-items: center !important;
+  column-gap: 0 !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  padding: 16px 18px !important;
+}
+body.shell-signed-in #library-rows > .library-row > .library-row-main {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  display: flex !important;
+  min-width: 0 !important;
+  width: auto !important;
+  max-width: 100% !important;
+}
+body.shell-signed-in #library-rows > .library-row > .library-row-meta {
+  display: contents !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-width: 0 !important;
+}
+body.shell-signed-in #library-rows > .library-row > .library-row-meta > .library-row-status {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  display: flex !important;
+  justify-content: flex-start !important;
+  width: auto !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+body.shell-signed-in #library-rows > .library-row > .library-row-meta > .library-row-time {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+  display: flex !important;
+  justify-content: flex-start !important;
+  width: auto !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+body.shell-signed-in #library-rows > .library-row > .library-row-arrow {
+  grid-column: 4 !important;
+  grid-row: 1 !important;
+  display: flex !important;
+  justify-content: center !important;
+  margin: 0 !important;
+}
+@media (max-width: 900px) {
+  body.shell-signed-in #library-rows > .library-row {
+    grid-template-columns: minmax(0, 1fr) max-content !important;
+    grid-template-rows: auto !important;
+    column-gap: 14px !important;
+    row-gap: 0 !important;
+    min-height: 88px !important;
+    padding: 14px 16px !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-main {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    align-self: center !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-meta {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    width: max-content !important;
+    max-width: 132px !important;
+    margin: 0 !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-meta > .library-row-status,
+  body.shell-signed-in #library-rows > .library-row > .library-row-meta > .library-row-time {
+    display: flex !important;
+    width: max-content !important;
+    max-width: 132px !important;
+    margin: 0 !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-arrow { display: none !important; }
+}
+@media (max-width: 520px) {
+  body.shell-signed-in #library-rows > .library-row {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto auto !important;
+    row-gap: 9px !important;
+    min-height: 104px !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-main {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-meta {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    margin-left: 44px !important;
+    width: auto !important;
+    max-width: calc(100% - 44px) !important;
+  }
+}
+
+
+/* Owner reconciliation correction: keep one pre-paint owner and align early CSS with it. */
+html.app-light,
+html.app-light body { background-color: #f7f3ec; }
+html.app-dark,
+html.app-dark body { background-color: #1a1512; }
+#boot-scrim { background: linear-gradient(180deg, #fbf8f2 0%, #f7f3ec 52%, #f1eadf 100%); }
+html.app-dark #boot-scrim { background: radial-gradient(circle at top, #221c18 0%, #1a1512 68%, #120e0c 100%); }
+
+/* Avatar reconciliation: restore bordered circular shell treatment; remove glow only. */
+body.shell-signed-in #nav-profile-trigger,
+html.app-dark.shell-signed-in body.shell-signed-in #nav-profile-trigger,
+body.app-dark.shell-signed-in #nav-profile-trigger {
+  width: 40px !important;
+  height: 40px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 1px solid var(--border) !important;
+  background: var(--surface) !important;
+  border-radius: 999px !important;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04) !important;
+}
+body.shell-signed-in #nav-profile-trigger:hover,
+html.app-dark.shell-signed-in body.shell-signed-in #nav-profile-trigger:hover,
+body.app-dark.shell-signed-in #nav-profile-trigger:hover {
+  background: var(--surface-warm) !important;
+}
+body.shell-signed-in #nav-avatar,
+html.app-dark.shell-signed-in body.shell-signed-in #nav-avatar,
+body.app-dark.shell-signed-in #nav-avatar {
+  width: 30px !important;
+  height: 30px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  border-radius: 999px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--jubly-purple) !important;
+  color: #fff !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+}
+
+/* Avatar specificity reconciliation: override legacy #nav-profile-trigger > div background without removing bordered trigger. */
+body.shell-signed-in #nav-profile-trigger > #nav-avatar.shell-letter-avatar,
+html.app-dark.shell-signed-in body.shell-signed-in #nav-profile-trigger > #nav-avatar.shell-letter-avatar,
+body.app-dark.shell-signed-in #nav-profile-trigger > #nav-avatar.shell-letter-avatar {
+  background: var(--jubly-purple) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+  border: 0 !important;
 }
