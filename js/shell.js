@@ -63,9 +63,9 @@
     // ─────────────────────────────────────────────────────────────────────────────
 
     // ── Section routing ──────────────────────────────────────────
-    const ALL_SECTIONS     = ['landing-page', 'public-onboarding', 'login-page', 'dashboard', 'profile-page', 'reading-mode'];
+    const ALL_SECTIONS     = ['landing-page', 'public-onboarding', 'login-page', 'dashboard', 'profile-page', 'history-page', 'whats-new-page', 'support-page', 'reading-mode'];
     const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
-    const SIDEBAR_SECTIONS = ['dashboard', 'profile-page'];
+    const SIDEBAR_SECTIONS = ['dashboard', 'profile-page', 'history-page', 'whats-new-page', 'support-page'];
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
@@ -555,7 +555,7 @@ window.rcInteraction = (function () {
         const normalized = normalizeSection(id);
         if (normalized === 'login-page' && isPasswordRecoveryActive()) return 'login-page';
         if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'public-onboarding' || normalized === 'login-page')) return 'dashboard';
-        if (!isAuthedUser() && normalized === 'profile-page') return 'landing-page';
+        if (!isAuthedUser() && (normalized === 'profile-page' || normalized === 'history-page' || normalized === 'whats-new-page' || normalized === 'support-page')) return 'landing-page';
         if (!isAuthedUser() && normalized === 'dashboard' && !isIntroLibraryVisible()) return 'landing-page';
         return normalized;
     }
@@ -862,12 +862,32 @@ window.rcInteraction = (function () {
         };
     }
 
+
+    function closeSignedInShellMenu() {
+        const sidebar = document.getElementById('app-sidebar');
+        const trigger = document.getElementById('nav-shell-menu-trigger');
+        if (sidebar) sidebar.classList.remove('open');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleSignedInShellMenu() {
+        const sidebar = document.getElementById('app-sidebar');
+        const trigger = document.getElementById('nav-shell-menu-trigger');
+        if (!sidebar) return;
+        const next = !sidebar.classList.contains('open');
+        sidebar.classList.toggle('open', next);
+        if (trigger) trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
+    }
+
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
         const id = normalizeSection(sectionId);
         const authed = isAuthedUser();
         const user = getAuthUser();
         const isReading = id === 'reading-mode';
         const isLanding = id === 'landing-page';
+        const isSignedInShellSurface = authed && !isReading && SIDEBAR_SECTIONS.includes(id);
+        document.body.classList.toggle('shell-signed-in', isSignedInShellSurface);
+        document.documentElement.classList.toggle('shell-signed-in', isSignedInShellSurface);
         const dashboardEl = document.getElementById('dashboard');
         const profileEl = document.getElementById('profile-page');
 
@@ -879,6 +899,7 @@ window.rcInteraction = (function () {
         const navAvatar = document.getElementById('nav-avatar');
         const navProfileTrigger = document.getElementById('nav-profile-trigger');
         const navUsagePill = document.getElementById('nav-usage-pill');
+        const navShellMenuTrigger = document.getElementById('nav-shell-menu-trigger');
 
         if (navUserControls) navUserControls.classList.toggle('hidden-section', !authed || isReading);
         if (navLandingControls) navLandingControls.style.display = (!authed && !isReading) ? 'flex' : 'none';
@@ -886,6 +907,7 @@ window.rcInteraction = (function () {
         if (navSignupBtn) navSignupBtn.style.display = !authed ? '' : 'none';
         if (navProfileTrigger) navProfileTrigger.style.display = authed ? '' : 'none';
         if (navUsagePill) navUsagePill.classList.toggle('hidden-section', !authed || isReading);
+        if (navShellMenuTrigger) navShellMenuTrigger.classList.toggle('hidden-section', !isSignedInShellSurface);
 
         const remoteDisplayName = (window.rcSync && typeof window.rcSync.getRemoteUsersRow === 'function') ? (window.rcSync.getRemoteUsersRow()?.display_name || '') : '';
         const displayName = remoteDisplayName || deriveDisplayName(user);
@@ -897,12 +919,28 @@ window.rcInteraction = (function () {
 
         const sidebar = document.getElementById('app-sidebar');
         if (sidebar) sidebar.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
+        if (!isSignedInShellSurface) closeSignedInShellMenu();
         if (dashboardEl) dashboardEl.classList.toggle('with-sidebar', authed);
         if (profileEl) profileEl.classList.toggle('with-sidebar', authed);
+        ['history-page', 'whats-new-page', 'support-page'].forEach((sectionId) => {
+            const sectionEl = document.getElementById(sectionId);
+            if (sectionEl) sectionEl.classList.toggle('with-sidebar', authed);
+        });
         const supportFooter = document.getElementById('supportFooter');
-        if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'block' : 'none';
+        if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
         const sbLibrary = document.getElementById('sb-library');
+        const sbHistory = document.getElementById('sb-history');
+        const sbSettings = document.getElementById('sb-settings');
+        const sbWhatsNew = document.getElementById('sb-whats-new');
+        const sbSupport = document.getElementById('sb-support');
+        const sbUpgrade = document.getElementById('sb-upgrade');
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
+        if (sbHistory) sbHistory.classList.toggle('active', id === 'history-page');
+        if (sbSettings) sbSettings.classList.toggle('active', id === 'profile-page' && document.getElementById('tab-settings') && !document.getElementById('tab-settings').classList.contains('hidden-section'));
+        if (sbWhatsNew) sbWhatsNew.classList.toggle('active', id === 'whats-new-page');
+        if (sbSupport) sbSupport.classList.toggle('active', id === 'support-page');
+        if (sbUpgrade) sbUpgrade.classList.toggle('active', id === 'profile-page' && document.getElementById('tab-subscription') && !document.getElementById('tab-subscription').classList.contains('hidden-section'));
+        if (isSignedInShellSurface) closeSignedInShellMenu();
 
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
@@ -999,6 +1037,7 @@ window.rcInteraction = (function () {
         let _sectionRefreshPromise = null;
         if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary('show-section-dashboard');
         if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
+        if (targetId === 'history-page' || targetId === 'whats-new-page' || targetId === 'support-page') closeSignedInShellMenu();
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
 
@@ -2016,8 +2055,9 @@ window.rcInteraction = (function () {
         document.querySelectorAll('.profile-tab-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tab === tabId);
         });
-        if (tabId === 'tab-profile') { try { renderProfileSurface(); } catch (_) {} }
+        if (tabId === 'tab-profile' || tabId === 'tab-analytics') { try { renderProfileSurface(); } catch (_) {} }
         if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
+        try { syncShellAuthPresentation('profile-page'); } catch (_) {}
     }
 
     // ── Tier simulation (dev/localhost only, gated by canSimulateTierSelection) ──
@@ -2150,7 +2190,7 @@ window.rcInteraction = (function () {
         const canUse = !!(window.rcTheme && typeof window.rcTheme.canUseTheme === 'function' && window.rcTheme.canUseTheme('explorer'));
         if (!canUse) {
             btn.classList.add('explorer-locked');
-            btn.title = 'Upgrade to Pro+ to unlock Explorer theme';
+            btn.title = 'Upgrade to unlock Explorer theme';
             if (swatch) swatch.style.opacity = '0.6';
         } else {
             btn.classList.remove('explorer-locked');
@@ -3447,6 +3487,24 @@ window.rcInteraction = (function () {
             publicBoundary: getVisiblePublicBoundaryFields()
         };
     }
+
+
+    async function shellOpenChat() {
+        try {
+            if (window.rcHelp && typeof window.rcHelp.openChat === 'function') await window.rcHelp.openChat();
+        } catch (_) {}
+    }
+
+    async function shellOpenFeedback() {
+        try {
+            if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') await window.rcHelp.openFeedback();
+        } catch (_) {}
+    }
+
+    window.toggleSignedInShellMenu = toggleSignedInShellMenu;
+    window.closeSignedInShellMenu = closeSignedInShellMenu;
+    window.shellOpenChat = shellOpenChat;
+    window.shellOpenFeedback = shellOpenFeedback;
 
     window.openPolicyModal = openPolicyModal;
     window.closePolicyModal = closePolicyModal;
