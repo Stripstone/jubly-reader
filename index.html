@@ -425,6 +425,10 @@
 <!-- SIDEBAR (logged-in, non-reading views only) -->
 <aside id="app-sidebar" class="fixed left-0 z-40 flex-col items-center pt-5 gap-1 bg-white border-r border-slate-200" style="top:57px; height:calc(100vh - 57px); width:68px; display:none;">
     <div class="sidebar-main">
+        <button onclick="shellResumeReading()" id="sb-resume" class="sidebar-btn sidebar-resume-btn" title="Resume">
+            <span aria-hidden="true">▶️</span>
+            <span>Resume</span>
+        </button>
         <button onclick="showSection('dashboard')" id="sb-library" class="sidebar-btn" title="Library">
             <span aria-hidden="true">📚</span>
             <span>Library</span>
@@ -863,14 +867,64 @@
         <section id="profile-auth-content" class="profile-content-region flex-grow min-w-0">
             <!-- Profile Tab -->
             <div id="tab-profile" class="tab-content space-y-5">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="profile-surface-card profile-overview-card section-card shadow-sm">
+                    <div class="profile-container-label">Profile overview</div>
+                    <div class="profile-card-title">Identity and account tools</div>
+                    <p class="profile-card-copy">Profile-owned account surfaces live here. Analytics and subscription details stay in their own tabs unless real state is available.</p>
+                    <div class="profile-safe-chip">Runtime-backed where connected</div>
+                </div>
+
+                <div class="section-card shadow-sm profile-apps-card">
+                    <div class="profile-card-heading-row">
+                        <div>
+                            <h4 class="profile-card-title small">Discover Jubly Apps</h4>
+                            <p class="profile-card-copy">Read anything from anywhere, on mobile or desktop.</p>
+                        </div>
+                    </div>
+                    <div class="profile-app-tiles">
+                        <button type="button" class="profile-app-tile" onclick="shellShowPending('iOS App', 'Coming Soon')">
+                            <span class="profile-app-icon" aria-hidden="true">📱</span>
+                            <span><strong>iOS App</strong><small>Coming Soon</small></span>
+                        </button>
+                        <button type="button" class="profile-app-tile" onclick="shellShowPending('Desktop App', 'Coming Soon')">
+                            <span class="profile-app-icon" aria-hidden="true">💻</span>
+                            <span><strong>Desktop App</strong><small>Coming Soon</small></span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="section-card shadow-sm profile-action-card">
+                    <div>
+                        <h4 class="profile-card-title small">Deleted Files</h4>
+                        <p id="profile-deleted-count" class="profile-card-copy">0 files waiting in Deleted Files</p>
+                    </div>
+                    <button id="profile-deleted-manage-btn" type="button" class="shell-mini-btn" onclick="shellManageDeletedFiles()">Manage Deleted Files</button>
+                </div>
+
+                <div class="section-card shadow-sm profile-help-card">
+                    <div>
+                        <h4 class="profile-card-title small">Get Help</h4>
+                        <p class="profile-card-copy">Profile support entrypoints route into the existing help and feedback flow.</p>
+                    </div>
+                    <div class="profile-help-actions">
+                        <button id="profile-help-chat-btn" type="button" class="profile-help-btn profile-help-primary">🗨️ Start Chat</button>
+                        <button id="profile-help-feedback-link" type="button" class="profile-help-btn">Share your thoughts →</button>
+                    </div>
+                </div>
+                <div id="profile-action-status" class="profile-action-status hidden-section" aria-live="polite"></div>
+            </div>
+
+
+            <!-- Analytics Tab -->
+            <div id="tab-analytics" class="tab-content hidden-section space-y-5">
+                <div class="profile-grid-two profile-grid-spaced-tight">
                     <div class="section-card shadow-sm profile-goal-card">
                         <div class="profile-goal-copy-block">
-                            <span class="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-2">Daily Goal</span>
-                            <div class="text-2xl font-black"><span id="profile-daily-minutes">0</span> <span class="text-slate-300 text-lg">/ <span id="profile-goal-display"><span id="profile-goal-minutes">15</span> min</span></span></div>
-                            <p id="profile-goal-copy" class="text-xs text-slate-400 mt-2">Keep reading and the goal ring will update automatically.</p>
+                            <span class="profile-container-label">Today</span>
+                            <div class="profile-metric-line"><span id="profile-daily-minutes">0</span> <span>/ <span id="profile-goal-display"><span id="profile-goal-minutes">15</span> min</span></span></div>
+                            <p id="profile-goal-copy" class="profile-card-copy">Daily goal progress updates from real reading activity.</p>
                             <div id="profile-goal-edit-inline" class="profile-goal-inline-row">
-                                <button id="profile-goal-edit-btn" type="button" class="profile-goal-edit-btn">Edit goal</button>
+                                <button id="profile-goal-edit-btn" type="button" class="profile-goal-edit-btn">Edit Goal</button>
                                 <form id="profile-goal-edit-form" class="profile-goal-edit-form hidden-section">
                                     <input id="profile-goal-input" class="profile-goal-input" type="number" min="5" max="300" step="1" inputmode="numeric" aria-label="Daily goal in minutes" />
                                     <button id="profile-goal-save-btn" type="submit" class="profile-goal-inline-btn">Save</button>
@@ -879,63 +933,26 @@
                             </div>
                         </div>
                         <div class="profile-goal-ring" id="profile-goal-ring" style="--goal-progress: 0%;">
-                            <div class="profile-goal-ring-inner">
-                                <strong id="profile-goal-progress-label" aria-hidden="true"></strong>
-                            </div>
+                            <div class="profile-goal-ring-inner"><strong id="profile-goal-progress-label" aria-hidden="true"></strong></div>
                         </div>
                     </div>
-                    <div class="section-card shadow-sm">
-                        <span class="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-2">This Week</span>
-                        <div class="text-2xl font-black text-accent"><span id="profile-weekly-minutes">0</span> min</div>
-                        <p class="text-xs text-slate-400 mt-1"><span id="profile-sessions-completed">0</span> sessions completed</p>
+                    <div class="profile-surface-card section-card shadow-sm">
+                        <div class="profile-container-label">This Week</div>
+                        <div class="profile-card-title"><span id="profile-weekly-minutes">0</span> min read</div>
+                        <p class="profile-card-copy"><span id="profile-sessions-completed">0</span> sessions completed. Weekly values remain blank/zero until backed by real reading/session data.</p>
                     </div>
                 </div>
                 <div id="profile-goal-celebration" class="profile-goal-celebration hidden-section" aria-live="polite">🎉✨ Daily goal complete ✨🎉</div>
-                <div class="section-card shadow-sm">
-                    <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400 mb-1">Discover Jubly Apps</h4>
-                    <p class="text-xs text-slate-500 mb-4">Read anything from anywhere, on mobile or desktop.</p>
-                    <div class="flex gap-3">
-                        <div class="flex-1 bg-slate-50 border border-slate-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-accent-soft transition">
-                            <div class="text-2xl">📱</div>
-                            <div><p class="font-bold text-sm">iOS App</p><p class="text-xs text-slate-400">Coming Soon</p></div>
-                        </div>
-                        <div class="flex-1 bg-slate-50 border border-slate-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-accent-soft transition">
-                            <div class="text-2xl">💻</div>
-                            <div><p class="font-bold text-sm">Desktop</p><p class="text-xs text-slate-400">Coming Soon</p></div>
-                        </div>
-                    </div>
-                </div>
-                <div class="section-card shadow-sm">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <h4 class="font-bold text-sm">Deleted Files</h4>
-                            <p id="profile-deleted-count" class="text-xs text-slate-400 mt-0.5">0 files waiting in Deleted Files</p>
-                        </div>
-                        <button id="profile-deleted-manage-btn" type="button" class="text-xs font-bold text-slate-500 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition">Manage Deleted Files</button>
-                    </div>
-                </div>
-                <div class="section-card shadow-sm">
-                    <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400 mb-4">Get Help</h4>
-                    <div class="flex gap-3 flex-wrap">
-                        <button id="profile-help-chat-btn" type="button" class="flex items-center gap-2 font-bold text-xs px-4 py-2.5 rounded-xl transition border text-brand hover:bg-accent-soft border-accent-soft"><span>🗨️</span> Start Chat</button>
-                    </div>
-                    <p class="text-xs text-slate-400 mt-4">Have an idea? <a id="profile-help-feedback-link" href="#" class="text-brand font-semibold hover:underline">Share your thoughts →</a></p>
-                </div>
-            </div>
-
-
-            <!-- Analytics Tab -->
-            <div id="tab-analytics" class="tab-content hidden-section space-y-5">
                 <div class="profile-grid-two profile-grid-spaced-tight">
                     <div class="profile-surface-card section-card shadow-sm">
-                        <div class="profile-container-label">Reading</div>
-                        <div class="profile-card-title">Analytics Pending</div>
-                        <p class="profile-card-copy">Reading analytics will appear here when a real analytics owner is connected.</p>
+                        <div class="profile-container-label">Reading Streak</div>
+                        <div class="profile-card-title">Pending</div>
+                        <p class="profile-card-copy">Streak appears here only when real streak data exists.</p>
                     </div>
                     <div class="profile-surface-card section-card shadow-sm">
                         <div class="profile-container-label">Currently Reading</div>
-                        <div class="profile-card-title">Coming Soon</div>
-                        <p class="profile-card-copy">This surface is intentionally pending and does not invent account activity.</p>
+                        <div class="profile-card-title">—</div>
+                        <p class="profile-card-copy">Current reading/library state will appear here when exposed by the runtime owner.</p>
                     </div>
                 </div>
             </div>
