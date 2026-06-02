@@ -892,12 +892,12 @@ window.rcInteraction = (function () {
         const trigger = document.getElementById('sb-resume');
         const sidebar = document.getElementById('app-sidebar');
         const mobileSidebarOpen = !!(sidebar && sidebar.classList.contains('open'));
-        if (!popout || mobileSidebarOpen || (window.matchMedia && window.matchMedia('(max-width: 640px)').matches)) {
-            const next = !popout.classList.contains('open');
-            popout.classList.toggle('open', next);
+        if (!popout) return;
+        if (mobileSidebarOpen || (window.matchMedia && window.matchMedia('(max-width: 640px)').matches)) {
+            closeResumePopout();
             if (trigger) {
-                trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
-                trigger.classList.toggle('active', next);
+                trigger.setAttribute('aria-expanded', 'false');
+                trigger.classList.remove('active');
             }
             return;
         }

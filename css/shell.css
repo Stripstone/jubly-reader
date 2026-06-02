@@ -5006,3 +5006,234 @@ body.shell-signed-in #library-rows > div span {
     margin-left: 44px !important;
   }
 }
+
+/* Final narrow runtime corrections: responsive wrapping, footer natural height, and shell contrast. */
+body.shell-signed-in {
+  --shell-sidebar-width-final: 156px;
+}
+
+/* Top-right controls: avatar is deliberately purple; usage pill remains warm/neutral like the blueprint. */
+body.shell-signed-in #nav-avatar,
+html.app-dark.shell-signed-in body.shell-signed-in #nav-avatar,
+body.app-dark.shell-signed-in #nav-avatar {
+  background: var(--jubly-purple) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+  border: 0 !important;
+}
+body.shell-signed-in #nav-profile-trigger {
+  box-shadow: none !important;
+  background: transparent !important;
+  border-color: transparent !important;
+}
+body.shell-signed-in #nav-usage-pill,
+html.app-dark.shell-signed-in body.shell-signed-in #nav-usage-pill,
+body.app-dark.shell-signed-in #nav-usage-pill {
+  background: var(--surface-warm) !important;
+  color: var(--ink) !important;
+  border-color: var(--border) !important;
+  box-shadow: 0 2px 6px rgba(32,20,12,.08) !important;
+}
+body.shell-signed-in #nav-usage-pill-value,
+body.shell-signed-in #nav-usage-pill-label { color: inherit !important; }
+
+/* Footer: keep natural flow; make it taller through real content padding only. */
+body.shell-signed-in #supportFooter,
+body.shell-signed-in .shell-footer {
+  position: static !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 10px 16px 8px !important;
+  margin-top: 0 !important;
+  flex-shrink: 0 !important;
+  box-sizing: border-box !important;
+}
+@media (min-width: 781px) {
+  body.shell-signed-in #supportFooter,
+  body.shell-signed-in .shell-footer {
+    margin-left: var(--shell-sidebar-width-final) !important;
+    width: calc(100% - var(--shell-sidebar-width-final)) !important;
+    padding-top: 12px !important;
+    padding-bottom: 10px !important;
+  }
+}
+@media (max-width: 780px) {
+  body.shell-signed-in #supportFooter,
+  body.shell-signed-in .shell-footer {
+    margin-left: 0 !important;
+    width: 100% !important;
+    padding-top: 10px !important;
+    padding-bottom: 9px !important;
+  }
+}
+
+/* Resume is desktop popout only; mobile hamburger Resume must not open a secondary panel. */
+@media (max-width: 780px) {
+  body.shell-signed-in .resume-popout,
+  body.shell-signed-in .resume-popout.open {
+    display: none !important;
+  }
+}
+
+/* Resume action labels/spacing. */
+body.shell-signed-in .resume-toast-actions { justify-content: flex-start !important; }
+body.shell-signed-in .resume-primary,
+body.shell-signed-in .resume-secondary { min-width: 0 !important; white-space: nowrap !important; }
+
+/* Password form actions right-align on desktop and remain usable on small screens. */
+body.shell-signed-in #profile-password-form .profile-inline-actions {
+  justify-content: flex-end !important;
+  align-items: center !important;
+  width: 100% !important;
+}
+@media (max-width: 640px) {
+  body.shell-signed-in #profile-password-form .profile-inline-actions {
+    justify-content: stretch !important;
+  }
+  body.shell-signed-in #profile-password-save-btn,
+  body.shell-signed-in #profile-password-cancel-btn {
+    flex: 1 1 auto !important;
+  }
+}
+
+/* Library compact state: left document block, right vertical status/time stack, arrow hidden. */
+@media (max-width: 900px) {
+  body.shell-signed-in #library-rows > div {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) max-content !important;
+    grid-template-rows: auto auto !important;
+    column-gap: 14px !important;
+    row-gap: 4px !important;
+    align-items: center !important;
+    padding: 14px 16px !important;
+    min-height: 92px !important;
+  }
+  body.shell-signed-in #library-rows > div > div:first-child {
+    grid-column: 1 !important;
+    grid-row: 1 / span 2 !important;
+    width: auto !important;
+    max-width: 100% !important;
+    flex: none !important;
+    align-self: center !important;
+  }
+  body.shell-signed-in #library-rows > div > div:nth-child(2),
+  body.shell-signed-in #library-rows > div > div:nth-child(3) {
+    grid-column: 2 !important;
+    width: max-content !important;
+    max-width: 132px !important;
+    margin-left: 0 !important;
+    justify-content: flex-start !important;
+    align-self: end !important;
+    flex: none !important;
+  }
+  body.shell-signed-in #library-rows > div > div:nth-child(2) { grid-row: 1 !important; align-self: end !important; }
+  body.shell-signed-in #library-rows > div > div:nth-child(3) { grid-row: 2 !important; align-self: start !important; }
+  body.shell-signed-in #library-rows > div > div:nth-child(4) { display: none !important; }
+}
+@media (max-width: 420px) {
+  body.shell-signed-in #library-rows > div {
+    grid-template-columns: minmax(0, 1fr) minmax(86px, max-content) !important;
+    column-gap: 10px !important;
+  }
+  body.shell-signed-in #library-rows > div > div:nth-child(2),
+  body.shell-signed-in #library-rows > div > div:nth-child(3) {
+    max-width: 104px !important;
+  }
+}
+
+/* Subscription metrics are one content group, not three detached cards. */
+body.shell-signed-in .subscription-metrics-group {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 0 !important;
+  background: var(--surface-parchment) !important;
+  border: 1px solid var(--border-warm) !important;
+  border-radius: 20px !important;
+  box-shadow: var(--shadow-panel) !important;
+  overflow: hidden !important;
+}
+body.shell-signed-in .subscription-metrics-group .subscription-metric-card,
+body.shell-signed-in .subscription-metrics-group > .section-card {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  margin: 0 !important;
+  padding: 22px 18px !important;
+  border-right: 1px solid var(--border) !important;
+}
+body.shell-signed-in .subscription-metrics-group > :last-child {
+  border-right: 0 !important;
+}
+@media (max-width: 720px) {
+  body.shell-signed-in .subscription-metrics-group {
+    grid-template-columns: 1fr !important;
+  }
+  body.shell-signed-in .subscription-metrics-group .subscription-metric-card,
+  body.shell-signed-in .subscription-metrics-group > .section-card {
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--border) !important;
+  }
+  body.shell-signed-in .subscription-metrics-group > :last-child { border-bottom: 0 !important; }
+}
+
+/* Settings medium viewport text allowance: no vertical letter wrapping. */
+body.shell-signed-in #tab-settings .section-card,
+body.shell-signed-in #tab-settings .settings-row,
+body.shell-signed-in #tab-settings .settings-account-row {
+  min-width: 0 !important;
+}
+body.shell-signed-in #tab-settings p,
+body.shell-signed-in #tab-settings h4,
+body.shell-signed-in #tab-settings .font-bold {
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+
+/* Keep subscription metrics grouped without inheriting oversized generic card heights. */
+body.shell-signed-in .subscription-metrics-group,
+body.shell-signed-in .subscription-metrics-group .subscription-metric-card,
+body.shell-signed-in .subscription-metrics-group > .section-card {
+  min-height: 0 !important;
+}
+body.shell-signed-in .subscription-metrics-group .subscription-metric-card,
+body.shell-signed-in .subscription-metrics-group > .section-card {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+@media (max-width: 720px) {
+  body.shell-signed-in .subscription-metrics-group .subscription-metric-card,
+  body.shell-signed-in .subscription-metrics-group > .section-card {
+    padding: 18px !important;
+  }
+}
+body.shell-signed-in .subscription-metrics-group .subscription-metric-card p,
+body.shell-signed-in .subscription-metrics-group > .section-card p {
+  margin: 0 !important;
+  line-height: 1.15 !important;
+}
+body.shell-signed-in .subscription-metrics-group .subscription-metric-card .text-2xl,
+body.shell-signed-in .subscription-metrics-group .subscription-metric-card .text-xl,
+body.shell-signed-in .subscription-metrics-group > .section-card .text-2xl,
+body.shell-signed-in .subscription-metrics-group > .section-card .text-xl {
+  margin-top: 2px !important;
+}
+
+/* Final footer offset must match the visible 188px desktop sidebar. */
+@media (min-width: 781px) {
+  body.shell-signed-in #supportFooter,
+  body.shell-signed-in .shell-footer {
+    margin-left: 188px !important;
+    width: calc(100% - 188px) !important;
+  }
+}
+@media (max-width: 780px) {
+  body.shell-signed-in #supportFooter,
+  body.shell-signed-in .shell-footer {
+    margin-left: 0 !important;
+    width: 100% !important;
+  }
+}
