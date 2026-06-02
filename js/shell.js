@@ -300,6 +300,11 @@ window.rcInteraction = (function () {
   }
 
   return { pending, success, error, clear, clearAll, actions: actionPresets };
+    window.closeResumePopout = closeResumePopout;
+    window.toggleResumePopout = toggleResumePopout;
+    window.closeSignedInShellMenu = closeSignedInShellMenu;
+    window.toggleSignedInShellMenu = toggleSignedInShellMenu;
+
 })();
 
 
@@ -853,6 +858,8 @@ window.rcInteraction = (function () {
         const target = document.getElementById(targetId);
         if (target) target.classList.remove('hidden-section');
         _currentSection = targetId;
+        closeResumePopout();
+        closeSignedInShellMenu();
         _lastShellRelease = {
             requestedSurface,
             releasedSurface: targetId,
@@ -863,19 +870,46 @@ window.rcInteraction = (function () {
     }
 
 
+    function closeResumePopout() {
+        const popout = document.getElementById('resumePopout');
+        const trigger = document.getElementById('sb-resume');
+        if (popout) {
+            popout.classList.remove('open');
+            popout.setAttribute('aria-hidden', 'true');
+        }
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleResumePopout(event) {
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        closeSignedInShellMenu();
+        const popout = document.getElementById('resumePopout');
+        const trigger = document.getElementById('sb-resume');
+        if (!popout) return;
+        const next = !popout.classList.contains('open');
+        popout.classList.toggle('open', next);
+        popout.setAttribute('aria-hidden', next ? 'false' : 'true');
+        if (trigger) trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
+    }
+
     function closeSignedInShellMenu() {
         const sidebar = document.getElementById('app-sidebar');
         const trigger = document.getElementById('nav-shell-menu-trigger');
+        const overlay = document.getElementById('mobileOverlay');
         if (sidebar) sidebar.classList.remove('open');
+        if (overlay) overlay.classList.remove('open');
         if (trigger) trigger.setAttribute('aria-expanded', 'false');
     }
 
     function toggleSignedInShellMenu() {
+        closeResumePopout();
         const sidebar = document.getElementById('app-sidebar');
         const trigger = document.getElementById('nav-shell-menu-trigger');
+        const overlay = document.getElementById('mobileOverlay');
         if (!sidebar) return;
         const next = !sidebar.classList.contains('open');
         sidebar.classList.toggle('open', next);
+        if (overlay) overlay.classList.toggle('open', next);
         if (trigger) trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
     }
 

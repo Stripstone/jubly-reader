@@ -425,6 +425,20 @@
 <!-- SIDEBAR (logged-in, non-reading views only) -->
 <aside id="app-sidebar" class="fixed left-0 z-40 flex-col items-center pt-5 gap-1 bg-white border-r border-slate-200" style="top:57px; height:calc(100vh - 57px); width:68px; display:none;">
     <div class="sidebar-main">
+        <div class="resume-anchor">
+            <button type="button" onclick="toggleResumePopout(event)" id="sb-resume" class="sidebar-btn" title="Resume" aria-expanded="false" aria-controls="resumePopout">
+                <span aria-hidden="true">▶️</span>
+                <span>Resume</span>
+            </button>
+            <div class="resume-popout" id="resumePopout" aria-label="Resume reading popout" role="dialog" aria-hidden="true">
+                <div class="resume-toast-label">Continue where you left off</div>
+                <div class="resume-toast-title">Resume unavailable</div>
+                <div class="resume-toast-sub">Last-read data is not connected to this shell action yet.</div>
+                <div class="resume-toast-actions">
+                    <button type="button" class="resume-secondary" onclick="closeResumePopout()">Close</button>
+                </div>
+            </div>
+        </div>
         <button onclick="showSection('dashboard')" id="sb-library" class="sidebar-btn" title="Library">
             <span aria-hidden="true">📚</span>
             <span>Library</span>
@@ -833,13 +847,6 @@
                 </div>
             </div>
             <div id="profile-auth-card" class="profile-menu-card section-card shadow-sm">
-                <!-- Mobile only: nav shortcut (sidebar hidden on small screens) -->
-                <div class="flex gap-2 mb-3 sm:hidden">
-                    <button onclick="showSection('dashboard')" class="mobile-library-tab flex items-center gap-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-lg transition">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                        Library
-                    </button>
-                </div>
                 <div class="flex items-center gap-4 mb-4">
                     <div class="w-14 h-14 bg-slate-200 rounded-2xl overflow-hidden flex-shrink-0">
                         <img id="profile-avatar-main" src="https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves" class="rounded-2xl">
@@ -854,8 +861,8 @@
                     <button data-tab="tab-analytics"     onclick="switchTab('tab-analytics')"     class="profile-tab-btn profile-tab-menu-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Analytics</button>
                     <button data-tab="tab-subscription"  onclick="switchTab('tab-subscription')"  class="profile-tab-btn profile-tab-menu-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Subscription</button>
                     <button data-tab="tab-settings"      onclick="switchTab('tab-settings')"      class="profile-tab-btn profile-tab-menu-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Settings</button>
-                    <hr class="my-2 border-slate-200">
-                    <button type="button" onclick="shellSignOut()" class="text-left px-4 py-2.5 rounded-lg font-semibold text-red-500 hover:bg-red-50 transition text-sm">Logout</button>
+                    <hr class="profile-menu-divider my-2 border-slate-200">
+                    <button type="button" onclick="shellSignOut()" class="profile-tab-btn profile-logout-btn text-left px-4 py-2.5 rounded-lg font-semibold text-red-500 hover:bg-red-50 transition text-sm">Logout</button>
                 </nav>
             </div>
         </aside>
