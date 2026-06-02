@@ -433,8 +433,8 @@
                 <div id="resume-popout-title" class="resume-toast-title">Resume unavailable</div>
                 <div id="resume-popout-sub" class="resume-toast-sub">No runtime-backed latest reading position is available yet.</div>
                 <div class="resume-toast-actions">
-                    <button id="resume-popout-primary" type="button" class="resume-primary" onclick="showSection('dashboard'); closeResumePopout()">Open Library</button>
-                    <button id="resume-popout-secondary" type="button" class="resume-secondary" onclick="closeResumePopout()">Close</button>
+                    <button id="resume-popout-primary" type="button" class="resume-primary resume-disabled-action" onclick="showPendingToast('Resume reading requires a real latest-reading owner.')" aria-disabled="true">Resume reading</button>
+                    <button id="resume-popout-secondary" type="button" class="resume-secondary resume-disabled-action" onclick="showPendingToast('Open chapter requires a real latest-reading owner.')" aria-disabled="true">Open chapter</button>
                 </div>
             </div>
         </div>
@@ -452,7 +452,7 @@
         </button>
     </div>
     <div class="sidebar-secondary">
-        <button onclick="showSection('profile-page'); switchTab('tab-subscription')" id="sb-upgrade" class="sidebar-btn secondary" title="Subscription">
+        <button onclick="showSection('profile-page'); switchTab('tab-subscription'); setShellSidebarSecondaryActive('upgrade')" id="sb-upgrade" class="sidebar-btn secondary" title="Subscription">
             <span aria-hidden="true">⚡</span>
             <span>Upgrade</span>
         </button>
@@ -460,7 +460,7 @@
             <span aria-hidden="true">🔖</span>
             <span>What's new</span>
         </button>
-        <button onclick="showSection('profile-page'); switchTab('tab-profile'); focusProfileHelp()" id="sb-support" class="sidebar-btn secondary" title="Help and feedback">
+        <button onclick="showSection('profile-page'); switchTab('tab-profile'); setShellSidebarSecondaryActive('support'); focusProfileHelp()" id="sb-support" class="sidebar-btn secondary" title="Help and feedback">
             <span aria-hidden="true">💭</span>
             <span>Help & feedback</span>
         </button>
@@ -871,14 +871,14 @@
                     <div class="profile-container-label">Discover Jubly Apps</div>
                     <p class="profile-card-copy">Read anything from anywhere, on mobile or desktop.</p>
                     <div class="profile-grid-two profile-grid-spaced">
-                        <button type="button" class="profile-app-tile profile-coming-soon-item profile-tile-action" onclick="showShellPendingNotice('iOS App', 'The Jubly iOS app is Coming Soon.')" aria-label="iOS App coming soon">
+                        <div class="profile-app-tile profile-coming-soon-item profile-inactive-tile" aria-disabled="true">
                             <span class="profile-app-icon" aria-hidden="true">📱</span>
                             <span><span class="profile-card-title" style="display:block">iOS App</span><span class="profile-card-copy" style="display:block">Coming Soon</span></span>
-                        </button>
-                        <button type="button" class="profile-app-tile profile-coming-soon-item profile-tile-action" onclick="showShellPendingNotice('Desktop App', 'The Jubly desktop app is Coming Soon.')" aria-label="Desktop App coming soon">
+                        </div>
+                        <div class="profile-app-tile profile-coming-soon-item profile-inactive-tile" aria-disabled="true">
                             <span class="profile-app-icon" aria-hidden="true">💻</span>
                             <span><span class="profile-card-title" style="display:block">Desktop</span><span class="profile-card-copy" style="display:block">Coming Soon</span></span>
-                        </button>
+                        </div>
                     </div>
                 </div>
                 <div class="profile-surface-card section-card shadow-sm">
@@ -1087,20 +1087,20 @@
                 <div class="history-filter-group">
                     <span class="history-filter-label">Filters</span>
                     <span class="history-filter-options" role="group" aria-label="History date filters">
-                        <button type="button" class="history-filter-chip active" onclick="showPendingToast('History filters are pending until a real history owner is connected.')">Today <span class="history-filter-dot" aria-hidden="true"></span></button>
-                        <button type="button" class="history-filter-chip" onclick="showPendingToast('History filters are pending until a real history owner is connected.')">This Week <span class="history-filter-dot" aria-hidden="true"></span></button>
+                        <button type="button" class="history-filter-chip active" data-history-filter="today" aria-pressed="true" onclick="setHistoryFilter('today')">Today <span class="history-filter-dot" aria-hidden="true"></span></button>
+                        <button type="button" class="history-filter-chip" data-history-filter="week" aria-pressed="false" onclick="setHistoryFilter('week')">This Week <span class="history-filter-dot" aria-hidden="true"></span></button>
                     </span>
                 </div>
             </div>
         </div>
-        <div class="history-group">
-            <div class="history-group-label"><span>Today</span><span class="pending-pill">Pending</span></div>
+        <div class="history-group" data-history-group="today">
+            <div class="history-group-label"><span>Today</span></div>
             <div class="history-row pending-history-row">
                 <div>
                     <div class="history-book-title">Reading history pending</div>
                     <div class="history-book-meta">Recent reads will appear here after a real history owner is connected.</div>
                 </div>
-                <button class="history-resume-btn" type="button" onclick="showPendingToast('Resume from history is pending until real reading history exists.')">Pending</button>
+                <button class="history-resume-btn" type="button" onclick="showPendingToast('Resume from history requires real reading history.')">Resume</button>
             </div>
             <div class="history-row pending-history-row">
                 <div>
@@ -1110,14 +1110,14 @@
                 <button class="history-resume-btn" type="button" onclick="showSection('dashboard')">Open Library</button>
             </div>
         </div>
-        <div class="history-group">
-            <div class="history-group-label"><span>Earlier this week</span><span class="pending-pill">Pending</span></div>
+        <div class="history-group" data-history-group="week">
+            <div class="history-group-label"><span>Earlier this week</span></div>
             <div class="history-row pending-history-row">
                 <div>
                     <div class="history-book-title">Weekly history unavailable</div>
                     <div class="history-book-meta">This week’s history will render here when the data owner is available.</div>
                 </div>
-                <button class="history-resume-btn" type="button" onclick="showPendingToast('Weekly reading history is pending.')">Pending</button>
+                <button class="history-resume-btn" type="button" onclick="showPendingToast('Weekly reading history requires a real history owner.')">Resume</button>
             </div>
         </div>
     </section>

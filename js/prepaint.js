@@ -41,7 +41,7 @@
             root.setAttribute('data-appearance-prepaint-applied', 'true');
             root.setAttribute('data-appearance-first-writer', 'index.html');
             root.style.colorScheme = mode;
-            root.style.backgroundColor = mode === 'dark' ? '#0f172a' : '#ffffff';
+            root.style.backgroundColor = mode === 'dark' ? '#1a1512' : '#f7f3ec';
             report.appearancePrePaintApplied = true;
             report.modeAtFirstPaint = mode;
             report.source = source;

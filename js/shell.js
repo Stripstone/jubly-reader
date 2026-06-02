@@ -66,6 +66,7 @@
     const ALL_SECTIONS     = ['landing-page', 'public-onboarding', 'login-page', 'dashboard', 'profile-page', 'history-page', 'whats-new-page', 'reading-mode'];
     const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
     const SIDEBAR_SECTIONS = ['dashboard', 'profile-page', 'history-page', 'whats-new-page'];
+    let _activeShellSecondaryNav = null;
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
@@ -923,6 +924,44 @@ window.rcInteraction = (function () {
         try { window.alert(text); } catch (_) {}
     }
 
+
+    function setShellSidebarSecondaryActive(action) {
+        const next = (action === 'upgrade' || action === 'support') ? action : null;
+        _activeShellSecondaryNav = next;
+        try { syncShellAuthPresentation('profile-page'); } catch (_) {}
+    }
+
+    function setHistoryFilter(filter) {
+        const normalized = filter === 'week' ? 'week' : 'today';
+        document.querySelectorAll('[data-history-filter]').forEach((btn) => {
+            const active = btn.getAttribute('data-history-filter') === normalized;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+        document.querySelectorAll('[data-history-group]').forEach((group) => {
+            const key = group.getAttribute('data-history-group');
+            group.style.display = (normalized === 'week' || key === 'today') ? '' : 'none';
+        });
+    }
+
+    function initShellModalCloseFallbacks() {
+        const pairs = [
+            ['manageLibraryClose', 'manageLibraryModal'],
+            ['deletedFilesClose', 'deletedFilesModal'],
+            ['importBookClose', 'importBookModal']
+        ];
+        pairs.forEach(([buttonId, modalId]) => {
+            const button = document.getElementById(buttonId);
+            const modal = document.getElementById(modalId);
+            if (!button || !modal || button.dataset.shellCloseFallbackBound === 'true') return;
+            button.dataset.shellCloseFallbackBound = 'true';
+            button.addEventListener('click', () => {
+                modal.style.display = 'none';
+                modal.setAttribute('aria-hidden', 'true');
+            });
+        });
+    }
+
     function focusProfileHelp() {
         try {
             const section = document.getElementById('profile-help-card') || document.getElementById('profile-help-chat-btn');
@@ -997,8 +1036,8 @@ window.rcInteraction = (function () {
         if (sbHistory) sbHistory.classList.toggle('active', id === 'history-page');
         if (sbSettings) sbSettings.classList.toggle('active', id === 'profile-page' && document.getElementById('tab-settings') && !document.getElementById('tab-settings').classList.contains('hidden-section'));
         if (sbWhatsNew) sbWhatsNew.classList.toggle('active', id === 'whats-new-page');
-        if (sbSupport) sbSupport.classList.toggle('active', id === 'profile-page' && !!document.getElementById('profile-help-chat-btn'));
-        if (sbUpgrade) sbUpgrade.classList.toggle('active', id === 'profile-page' && document.getElementById('tab-subscription') && !document.getElementById('tab-subscription').classList.contains('hidden-section'));
+        if (sbSupport) sbSupport.classList.toggle('active', id === 'profile-page' && _activeShellSecondaryNav === 'support');
+        if (sbUpgrade) sbUpgrade.classList.toggle('active', id === 'profile-page' && _activeShellSecondaryNav === 'upgrade');
         if (isSignedInShellSurface) closeSignedInShellMenu();
         closeResumePopout();
 
@@ -2120,6 +2159,8 @@ window.rcInteraction = (function () {
         document.querySelectorAll('.profile-tab-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tab === tabId);
         });
+        if (tabId === 'tab-subscription') _activeShellSecondaryNav = 'upgrade';
+        else if (_activeShellSecondaryNav === 'upgrade') _activeShellSecondaryNav = null;
         if (tabId === 'tab-profile' || tabId === 'tab-analytics') { try { renderProfileSurface(); } catch (_) {} }
         if (tabId === 'tab-subscription') { try { renderSubscriptionSurface(); } catch (_) {} }
         try { syncShellAuthPresentation('profile-page'); } catch (_) {}
@@ -3593,10 +3634,14 @@ window.rcInteraction = (function () {
     window.hideShellPendingNotice = hideShellPendingNotice;
     window.toggleResumePopout = toggleResumePopout;
     window.focusProfileHelp = focusProfileHelp;
+    window.setShellSidebarSecondaryActive = setShellSidebarSecondaryActive;
+    window.setHistoryFilter = setHistoryFilter;
     window.showPendingToast = showPendingToast;
     window.closeResumePopout = closeResumePopout;
     window.shellOpenChat = shellOpenChat;
     window.shellOpenFeedback = shellOpenFeedback;
+
+    try { initShellModalCloseFallbacks(); } catch (_) {}
 
     window.openPolicyModal = openPolicyModal;
     window.closePolicyModal = closePolicyModal;
