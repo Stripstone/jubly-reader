@@ -871,14 +871,14 @@
                     <div class="profile-container-label">Discover Jubly Apps</div>
                     <p class="profile-card-copy">Read anything from anywhere, on mobile or desktop.</p>
                     <div class="profile-grid-two profile-grid-spaced">
-                        <div class="profile-app-tile profile-coming-soon-item">
+                        <button type="button" class="profile-app-tile profile-coming-soon-item profile-tile-action" onclick="showShellPendingNotice('iOS App', 'The Jubly iOS app is Coming Soon.')" aria-label="iOS App coming soon">
                             <span class="profile-app-icon" aria-hidden="true">📱</span>
                             <span><span class="profile-card-title" style="display:block">iOS App</span><span class="profile-card-copy" style="display:block">Coming Soon</span></span>
-                        </div>
-                        <div class="profile-app-tile profile-coming-soon-item">
+                        </button>
+                        <button type="button" class="profile-app-tile profile-coming-soon-item profile-tile-action" onclick="showShellPendingNotice('Desktop App', 'The Jubly desktop app is Coming Soon.')" aria-label="Desktop App coming soon">
                             <span class="profile-app-icon" aria-hidden="true">💻</span>
                             <span><span class="profile-card-title" style="display:block">Desktop</span><span class="profile-card-copy" style="display:block">Coming Soon</span></span>
-                        </div>
+                        </button>
                     </div>
                 </div>
                 <div class="profile-surface-card section-card shadow-sm">
@@ -1376,6 +1376,21 @@
 <script src="js/app.js"></script>
 
 <!-- Support footer — shown on Library and Profile only via showSection() -->
+<div id="shellPendingNotice" class="modal-overlay shell-pending-notice" style="display:none;" aria-hidden="true">
+    <div class="modal shell-pending-notice-card" role="dialog" aria-modal="true" aria-labelledby="shellPendingNoticeTitle">
+        <div class="modal-header">
+            <h2 id="shellPendingNoticeTitle">Coming Soon</h2>
+            <button class="modal-close" type="button" aria-label="Close" onclick="hideShellPendingNotice()">✕</button>
+        </div>
+        <div class="modal-body">
+            <p id="shellPendingNoticeCopy" class="profile-card-copy">This feature is coming soon.</p>
+            <div class="profile-help-actions">
+                <button type="button" class="profile-help-btn profile-help-primary" onclick="hideShellPendingNotice()">Got it</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <footer id="supportFooter" class="shell-footer" style="display:none;">
     <div class="shell-footer-row main-cta">
         <span class="support-cta">📖 If jubly helped you, consider supporting the project</span>

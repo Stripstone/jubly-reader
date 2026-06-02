@@ -3554,6 +3554,27 @@ window.rcInteraction = (function () {
     }
 
 
+
+    function showShellPendingNotice(title, copy) {
+        const modal = document.getElementById('shellPendingNotice');
+        const titleEl = document.getElementById('shellPendingNoticeTitle');
+        const copyEl = document.getElementById('shellPendingNoticeCopy');
+        if (titleEl) titleEl.textContent = title || 'Coming Soon';
+        if (copyEl) copyEl.textContent = copy || 'This feature is coming soon.';
+        if (modal) {
+            modal.style.display = 'flex';
+            modal.setAttribute('aria-hidden', 'false');
+        }
+    }
+
+    function hideShellPendingNotice() {
+        const modal = document.getElementById('shellPendingNotice');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+        }
+    }
+
     async function shellOpenChat() {
         try {
             if (window.rcHelp && typeof window.rcHelp.openChat === 'function') await window.rcHelp.openChat();
@@ -3568,6 +3589,8 @@ window.rcInteraction = (function () {
 
     window.toggleSignedInShellMenu = toggleSignedInShellMenu;
     window.closeSignedInShellMenu = closeSignedInShellMenu;
+    window.showShellPendingNotice = showShellPendingNotice;
+    window.hideShellPendingNotice = hideShellPendingNotice;
     window.toggleResumePopout = toggleResumePopout;
     window.focusProfileHelp = focusProfileHelp;
     window.showPendingToast = showPendingToast;

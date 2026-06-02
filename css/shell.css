@@ -3918,3 +3918,164 @@ body.shell-signed-in #profile-auth-card button[onclick="shellSignOut()"]:hover {
     display: none !important;
   }
 }
+
+/* Button/action correction pass: planned UX stays clickable; unavailable actions surface honest pending state. */
+body.shell-signed-in .profile-tile-action,
+body.shell-signed-in .profile-policy-link,
+body.shell-signed-in .profile-card-action,
+body.shell-signed-in .profile-help-btn,
+body.shell-signed-in .resume-primary,
+body.shell-signed-in .resume-secondary,
+body.shell-signed-in .history-resume-btn,
+body.shell-signed-in #subscription-primary-btn,
+body.shell-signed-in #subscription-secondary-btn,
+body.shell-signed-in .profile-inline-save,
+body.shell-signed-in .profile-inline-cancel,
+body.shell-signed-in .appearance-mode-btn {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  transition: transform .14s ease, box-shadow .14s ease, background .14s ease, border-color .14s ease, color .14s ease, filter .14s ease !important;
+}
+body.shell-signed-in .profile-tile-action {
+  width: 100% !important;
+  border: 1px solid var(--border) !important;
+  text-align: left !important;
+  color: inherit !important;
+}
+body.shell-signed-in .profile-tile-action:hover,
+body.shell-signed-in .profile-policy-link:hover,
+body.shell-signed-in .profile-card-action:hover,
+body.shell-signed-in .profile-help-btn:not(.profile-help-primary):hover,
+body.shell-signed-in .resume-secondary:hover,
+body.shell-signed-in .history-resume-btn:hover,
+body.shell-signed-in .appearance-mode-btn:hover,
+body.shell-signed-in .profile-inline-cancel:hover {
+  background: var(--surface) !important;
+  border-color: var(--border-warm) !important;
+  color: var(--ink) !important;
+  box-shadow: var(--shadow-button-warm) !important;
+  transform: translateY(-1px) !important;
+}
+body.shell-signed-in .profile-tile-action:active,
+body.shell-signed-in .profile-policy-link:active,
+body.shell-signed-in .profile-card-action:active,
+body.shell-signed-in .profile-help-btn:active,
+body.shell-signed-in .resume-primary:active,
+body.shell-signed-in .resume-secondary:active,
+body.shell-signed-in .history-resume-btn:active,
+body.shell-signed-in #subscription-primary-btn:active,
+body.shell-signed-in #subscription-secondary-btn:active,
+body.shell-signed-in .profile-inline-save:active,
+body.shell-signed-in .profile-inline-cancel:active,
+body.shell-signed-in .appearance-mode-btn:active {
+  transform: translateY(1px) !important;
+  filter: saturate(.98) brightness(.99) !important;
+}
+body.shell-signed-in .profile-help-primary:hover,
+body.shell-signed-in .resume-primary:hover,
+body.shell-signed-in .profile-inline-save:hover {
+  background: var(--jubly-purple-dark) !important;
+  box-shadow: var(--shadow-button-primary) !important;
+  transform: translateY(-1px) !important;
+}
+body.shell-signed-in .shell-pending-notice {
+  z-index: 120 !important;
+}
+body.shell-signed-in .shell-pending-notice-card {
+  border-radius: 20px !important;
+  border: 1px solid var(--border-warm) !important;
+  background: var(--surface-parchment) !important;
+  box-shadow: var(--shadow-panel) !important;
+}
+
+/* Mobile correction: profile nav should be an appropriate vertical stack, not grid tabs. */
+@media (max-width: 780px) {
+  body.shell-signed-in .profile-tab-menu {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    overflow: visible !important;
+    padding-bottom: 0 !important;
+  }
+  body.shell-signed-in .profile-tab-menu-btn,
+  body.shell-signed-in .profile-tab-btn {
+    width: 100% !important;
+    min-width: 0 !important;
+    justify-content: flex-start !important;
+  }
+}
+
+/* Footer narrow correction: keep footer in flow and prevent short pages from adding a few-pixel overshoot. */
+body.shell-signed-in {
+  min-height: 100dvh !important;
+}
+body.shell-signed-in #dashboard,
+body.shell-signed-in #profile-page,
+body.shell-signed-in .shell-pending-page {
+  box-sizing: border-box !important;
+}
+@media (min-width: 781px) {
+  body.shell-signed-in #dashboard,
+  body.shell-signed-in #profile-page,
+  body.shell-signed-in .shell-pending-page {
+    min-height: calc(100dvh - 60px - 50px) !important;
+    padding-bottom: 18px !important;
+  }
+  body.shell-signed-in #supportFooter,
+  body.shell-signed-in .shell-footer {
+    min-height: 50px !important;
+    padding-top: 5px !important;
+    padding-bottom: 5px !important;
+    margin-top: 0 !important;
+  }
+}
+@media (max-width: 780px) {
+  body.shell-signed-in #dashboard,
+  body.shell-signed-in #profile-page,
+  body.shell-signed-in .shell-pending-page {
+    min-height: calc(100dvh - 58px - 56px) !important;
+    padding-bottom: 18px !important;
+  }
+  body.shell-signed-in #supportFooter,
+  body.shell-signed-in .shell-footer {
+    min-height: 56px !important;
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+    margin-top: 0 !important;
+  }
+}
+
+/* Final validation fixes for mobile overflow and short-page footer overshoot. */
+body.shell-signed-in .profile-menu-card,
+body.shell-signed-in #profile-auth-card,
+body.shell-signed-in #profile-sidebar,
+body.shell-signed-in .profile-shell,
+body.shell-signed-in .profile-content-region,
+body.shell-signed-in .profile-surface-card,
+body.shell-signed-in #profile-page .section-card {
+  box-sizing: border-box !important;
+  max-width: 100% !important;
+}
+@media (max-width: 780px) {
+  body.shell-signed-in #profile-auth-card,
+  body.shell-signed-in .profile-menu-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+  body.shell-signed-in .profile-tab-menu,
+  body.shell-signed-in #profile-auth-card > .flex.items-center {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+}
+@media (min-width: 781px) {
+  body.shell-signed-in #dashboard,
+  body.shell-signed-in #profile-page,
+  body.shell-signed-in .shell-pending-page {
+    min-height: calc(100dvh - 60px - 59px) !important;
+  }
+}
