@@ -4822,3 +4822,187 @@ body.shell-signed-in .shell-footer {
     display: flex !important;
   }
 }
+
+/* Final adaptation correction: settings row allowance, profile menu medium stack, and two-state library row layout. */
+body.shell-signed-in .settings-row,
+body.shell-signed-in .settings-account-row {
+  display: grid !important;
+  grid-template-columns: minmax(220px, 1fr) auto !important;
+  align-items: center !important;
+  gap: 16px !important;
+}
+body.shell-signed-in .settings-row > :first-child,
+body.shell-signed-in .settings-account-row > :first-child {
+  min-width: 220px !important;
+  max-width: 100% !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}
+body.shell-signed-in .settings-row p,
+body.shell-signed-in .settings-account-row p,
+body.shell-signed-in .settings-row h4,
+body.shell-signed-in .settings-account-row h4 {
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+  white-space: normal !important;
+}
+body.shell-signed-in #profile-password-toggle-btn,
+body.shell-signed-in #tab-settings select {
+  width: auto !important;
+  min-width: 152px !important;
+  max-width: 220px !important;
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
+  justify-content: center !important;
+}
+
+/* Medium profile adaptation: the menu becomes a full-width stacked rail before content, not a narrow island. */
+@media (max-width: 1120px) and (min-width: 781px) {
+  body.shell-signed-in .profile-shell {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 22px !important;
+    align-items: start !important;
+  }
+  body.shell-signed-in #profile-sidebar,
+  body.shell-signed-in #profile-auth-card,
+  body.shell-signed-in #profile-guest-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+  body.shell-signed-in .profile-tab-menu {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    overflow: visible !important;
+  }
+  body.shell-signed-in #profile-auth-content,
+  body.shell-signed-in .profile-content-region {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  body.shell-signed-in .settings-row,
+  body.shell-signed-in .settings-account-row {
+    grid-template-columns: minmax(260px, 1fr) auto !important;
+  }
+  body.shell-signed-in #profile-password-toggle-btn,
+  body.shell-signed-in #tab-settings select,
+  body.shell-signed-in .profile-card-action,
+  body.shell-signed-in .history-resume-btn {
+    width: auto !important;
+    min-width: 152px !important;
+    max-width: 240px !important;
+    white-space: nowrap !important;
+  }
+}
+
+/* Library rows have exactly two responsive states:
+   1) wide table row with status/time/arrow columns;
+   2) compact detail row with document, added date, status, and time visible; arrow hidden. */
+body.shell-signed-in #library-populated .glass-card,
+body.shell-signed-in #library-rows {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+body.shell-signed-in #library-rows > div {
+  display: grid !important;
+  grid-template-columns: minmax(260px, 1fr) 128px 128px 32px !important;
+  align-items: center !important;
+  gap: 0 !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+body.shell-signed-in #library-rows > div > div:first-child {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+  grid-column: auto !important;
+  grid-row: auto !important;
+}
+body.shell-signed-in #library-rows > div > div:nth-child(2),
+body.shell-signed-in #library-rows > div > div:nth-child(3),
+body.shell-signed-in #library-rows > div > div:nth-child(4) {
+  display: flex !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  width: auto !important;
+}
+body.shell-signed-in #library-rows > div > div:nth-child(2),
+body.shell-signed-in #library-rows > div > div:nth-child(3) {
+  justify-content: flex-start !important;
+}
+body.shell-signed-in #library-rows > div > div:nth-child(4) {
+  justify-content: center !important;
+}
+body.shell-signed-in #library-rows > div p,
+body.shell-signed-in #library-rows > div span {
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}
+
+@media (max-width: 900px) {
+  body.shell-signed-in .table-head {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  body.shell-signed-in .table-head > div:not(:first-child) {
+    display: none !important;
+  }
+  body.shell-signed-in #library-rows > div {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+    gap: 8px 12px !important;
+    padding: 14px 16px !important;
+    min-height: 76px !important;
+  }
+  body.shell-signed-in #library-rows > div > div:first-child {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+  body.shell-signed-in #library-rows > div > div:nth-child(2),
+  body.shell-signed-in #library-rows > div > div:nth-child(3) {
+    display: inline-flex !important;
+    flex: 0 1 auto !important;
+    width: auto !important;
+    max-width: calc(100% - 44px) !important;
+    margin-left: 44px !important;
+    justify-content: flex-start !important;
+  }
+  body.shell-signed-in #library-rows > div > div:nth-child(2) + div:nth-child(3) {
+    margin-left: 0 !important;
+  }
+  body.shell-signed-in #library-rows > div > div:nth-child(4) {
+    display: none !important;
+  }
+  body.shell-signed-in #library-rows > div > div:first-child > div:last-child {
+    min-width: 0 !important;
+  }
+}
+
+@media (max-width: 640px) {
+  body.shell-signed-in .settings-row,
+  body.shell-signed-in .settings-account-row {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+  body.shell-signed-in .settings-row > :first-child,
+  body.shell-signed-in .settings-account-row > :first-child {
+    min-width: 0 !important;
+  }
+  body.shell-signed-in #profile-password-toggle-btn,
+  body.shell-signed-in #tab-settings select {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  body.shell-signed-in #library-rows > div > div:nth-child(2),
+  body.shell-signed-in #library-rows > div > div:nth-child(3) {
+    margin-left: 44px !important;
+  }
+}
