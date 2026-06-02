@@ -3172,222 +3172,83 @@ body.sh-shell-active #dashboard .section-card {
   border-radius: 20px;
   box-shadow: var(--sh-shadow-ground);
 }
+body.sh-shell-active #profile-auth-content .section-card {
+  background: var(--sh-surface-parch);
+  border: 1px solid var(--sh-border-warm);
+  border-radius: 20px;
+  box-shadow: var(--sh-shadow-ground);
+}
 
-/* ── 11. Profile auth card (rail) ───────────────────────────────────────── */
-/* Blueprint: .profile-rail — overflow:hidden, padding:16px, border-radius:22px */
-/* Double-ID specificity beats #profile-auth-content .section-card */
+/* ── 11. Profile auth card (sidebar rail) ───────────────────────────────── */
+/* Double-ID selector (specificity 0,2,1,1) beats #profile-auth-content .section-card (0,1,2,1) */
 body.sh-shell-active #profile-page #profile-auth-card {
-  background: var(--sh-surface-parch) !important;
-  border: 1px solid var(--sh-border-warm) !important;
-  border-radius: 22px !important;
-  box-shadow: var(--sh-shadow-ground) !important;
-  overflow: hidden !important;
-  padding: 16px !important;
+  background: var(--sh-surface-parch);
+  border: 1px solid var(--sh-border-warm);
+  border-radius: 22px;
+  box-shadow: var(--sh-shadow-ground);
 }
-/* Identity row: avatar + name, bottom border */
+/* Avatar identity row border */
 body.sh-shell-active #profile-auth-card .flex.items-center.gap-4.mb-4 {
-  padding: 10px 8px 16px !important;
-  border-bottom: 1px solid var(--sh-divider) !important;
-  margin-bottom: 12px !important;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--sh-divider);
+  margin-bottom: 10px;
 }
-/* Profile tab buttons — full blueprint .ptab spec */
-/* !important required to beat: hover:bg-slate-100 (0,0,2,0), text-slate-600 (0,0,1,0) */
+/* Profile tab buttons */
 body.sh-shell-active #profile-auth-card nav button.profile-tab-btn {
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-  width: 100% !important;
-  min-height: 42px !important;
-  padding: 0 12px !important;
-  border-radius: 14px !important;
-  border: none !important;
-  background: transparent !important;
-  color: var(--sh-muted) !important;
-  font-size: 13px !important;
-  font-weight: 800 !important;
-  text-align: left !important;
-  letter-spacing: -0.01em !important;
-  transition: background .15s ease, color .15s ease, box-shadow .15s ease !important;
-  box-shadow: none !important;
+  border-radius: 14px;
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--sh-muted);
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
 }
 body.sh-shell-active #profile-auth-card nav button.profile-tab-btn:hover {
-  background: var(--sh-surface-warm) !important;
-  color: var(--jubly-purple) !important;
-  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
+  background: var(--sh-surface-warm);
+  color: var(--jubly-purple);
+  box-shadow: inset 0 0 0 1px var(--sh-border);
 }
 body.sh-shell-active #profile-auth-card nav button.profile-tab-btn.active {
-  background: var(--sh-surface-warm) !important;
-  color: var(--jubly-purple) !important;
-  box-shadow: inset 0 0 0 1px var(--sh-border) !important;
+  background: var(--sh-surface-warm);
+  color: var(--jubly-purple);
+  box-shadow: inset 0 0 0 1px var(--sh-border), var(--sh-btn-warm);
+  position: relative;
 }
-/* Logout tab: red tint, no active state */
-body.sh-shell-active #profile-auth-card nav button.profile-tab-btn-logout {
-  color: #ef4444 !important;
-}
-body.sh-shell-active #profile-auth-card nav button.profile-tab-btn-logout:hover {
-  background: #fff1f1 !important;
-  color: #dc2626 !important;
-  box-shadow: inset 0 0 0 1px #fecaca !important;
+body.sh-shell-active #profile-auth-card nav button.profile-tab-btn.active::after {
+  content: "";
+  width: 8px; height: 8px;
+  border-radius: 999px;
+  background: var(--jubly-purple);
+  margin-left: auto;
+  flex-shrink: 0;
 }
 body.sh-shell-active #profile-auth-card nav hr {
-  border-color: var(--sh-divider) !important;
-  margin: 6px 0 !important;
+  border-color: var(--sh-divider);
 }
 
 /* ── 12. Profile content ────────────────────────────────────────────────── */
-/* Tab content panels: flex column gap-16px matching blueprint .panel.active */
-body.sh-shell-active .tab-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-body.sh-shell-active .tab-content.hidden-section {
-  display: none !important;
-}
-
-/* Section cards: parchment surface, 20px padding matching blueprint .sc */
-body.sh-shell-active #profile-auth-content .section-card {
-  background: var(--sh-surface-parch) !important;
-  border: 1px solid var(--sh-border-warm) !important;
-  border-radius: 20px !important;
-  box-shadow: var(--sh-shadow-ground) !important;
-  padding: 20px !important;
-}
-/* Soft cards: blueprint .sc.soft — surface-blueprint bg, lighter shadow */
-body.sh-shell-active #profile-auth-content .profile-soft-card {
-  background: var(--sh-surface-bp) !important;
-  box-shadow: var(--sh-shadow-panel) !important;
-  border-color: var(--sh-border) !important;
-}
-
-/* Section heading labels */
-body.sh-shell-active #profile-auth-content h4 {
-  color: var(--sh-warm-muted) !important;
-}
-body.sh-shell-active #profile-auth-content h3 {
-  color: var(--sh-ink) !important;
-  font-size: 16px !important;
-  font-weight: 800 !important;
-  letter-spacing: -0.02em !important;
-}
-
-/* Dividers inside section cards */
 body.sh-shell-active #profile-auth-content .border-b,
 body.sh-shell-active #profile-auth-content .border-t,
 body.sh-shell-active #profile-auth-content hr {
-  border-color: var(--sh-divider) !important;
+  border-color: var(--sh-divider);
 }
-
-/* App tiles: blueprint .app-tile — surface-blueprint bg */
-body.sh-shell-active #profile-auth-content .bg-slate-50.border.border-slate-100 {
-  background: var(--sh-surface-bp) !important;
-  border-color: var(--sh-border) !important;
-  border-radius: 16px !important;
-}
-body.sh-shell-active #profile-auth-content .bg-slate-50.border.border-slate-100:hover {
-  background: var(--sh-surface-warm) !important;
-}
-
-/* Subscription metric cards: blueprint .metric — surface-blueprint */
-body.sh-shell-active #profile-auth-content .grid.grid-cols-3 .section-card,
-body.sh-shell-active #profile-auth-content .grid.grid-cols-3 .section-card.text-center {
-  background: var(--sh-surface-bp) !important;
-  box-shadow: var(--sh-shadow-panel) !important;
-  border-color: var(--sh-border) !important;
-  border-radius: 16px !important;
-  padding: 15px !important;
-}
-body.sh-shell-active #profile-auth-content .grid.grid-cols-3 .text-2xl.font-black,
-body.sh-shell-active #profile-auth-content .grid.grid-cols-3 .text-xl.font-black {
-  color: var(--sh-ink) !important;
-}
-
-/* ── 12a. Profile button language ───────────────────────────────────────── */
-/* Blueprint: primary = shell-btn.primary, ghost = shell-btn.ghost */
-/* .profile-btn-primary — maps to blueprint .shell-btn.primary */
-body.sh-shell-active .profile-btn-primary {
-  border: none !important;
-  background: var(--jubly-purple) !important;
-  color: #fff !important;
-  padding: 11px 18px !important;
-  font-size: 13.5px !important;
-  font-weight: 800 !important;
-  letter-spacing: -0.01em !important;
-  border-radius: 8px !important;
-  box-shadow: var(--sh-btn-primary) !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  font-family: inherit !important;
-  cursor: pointer !important;
-  white-space: nowrap !important;
-  text-decoration: none !important;
-  transition: filter .12s ease, transform .12s ease !important;
-}
-body.sh-shell-active .profile-btn-primary:hover { filter: brightness(1.04) !important; }
-body.sh-shell-active .profile-btn-primary:active { transform: translateY(1px) !important; }
-
-/* .profile-btn-ghost — maps to blueprint .shell-btn.ghost */
-body.sh-shell-active .profile-btn-ghost {
-  border: 1px solid var(--sh-border) !important;
-  background: var(--sh-surface-warm) !important;
-  color: var(--jubly-purple) !important;
-  padding: 10px 14px !important;
-  font-size: 13px !important;
-  font-weight: 800 !important;
-  border-radius: 8px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  font-family: inherit !important;
-  cursor: pointer !important;
-  white-space: nowrap !important;
-  text-decoration: none !important;
-  transition: background .12s ease, transform .12s ease !important;
-}
-body.sh-shell-active .profile-btn-ghost:hover { background: var(--sh-surface-parch) !important; }
-body.sh-shell-active .profile-btn-ghost:active { transform: translateY(1px) !important; }
-
-/* Change Password button — ghost treatment */
-body.sh-shell-active #profile-password-toggle-btn {
-  border: 1px solid var(--sh-border) !important;
-  background: var(--sh-surface-warm) !important;
-  color: var(--jubly-purple) !important;
-  font-size: 13px !important;
-  font-weight: 800 !important;
-  border-radius: 8px !important;
-  padding: 10px 14px !important;
-  transition: background .12s ease !important;
-}
-body.sh-shell-active #profile-password-toggle-btn:hover {
-  background: var(--sh-surface-parch) !important;
-}
-
-/* Policy link buttons */
-body.sh-shell-active .profile-policy-link {
-  border: 1px solid var(--sh-border) !important;
-  background: var(--sh-surface-warm) !important;
-  color: var(--jubly-purple) !important;
-  font-size: 13px !important;
-  font-weight: 800 !important;
-  border-radius: 8px !important;
-  padding: 10px 14px !important;
-  transition: background .12s ease !important;
-  cursor: pointer !important;
-  font-family: inherit !important;
-}
-body.sh-shell-active .profile-policy-link:hover {
-  background: var(--sh-surface-parch) !important;
-}
-
 /* Subscription sub-hero */
 body.sh-shell-active .sub-hero {
-  background: var(--jubly-purple) !important;
+  background: linear-gradient(135deg, var(--jubly-purple), #5236d9) !important;
   border-radius: 20px !important;
   padding: 24px !important;
   box-shadow: var(--sh-btn-primary) !important;
-  border: none !important;
+  color: #fff !important;
 }
-
+body.sh-shell-active .sub-hero h3 { color: #fff !important; }
+body.sh-shell-active .sub-hero #subscription-status-copy { color: rgba(255,255,255,.72) !important; }
+/* App tiles */
+body.sh-shell-active #profile-auth-content .bg-slate-50.border.border-slate-100 {
+  background: var(--sh-surface-bp);
+  border-color: var(--sh-border);
+  border-radius: 16px;
+}
+body.sh-shell-active #profile-auth-content .bg-slate-50.border.border-slate-100:hover {
+  background: var(--sh-surface-warm);
+}
 
 /* ── 13. Support footer ─────────────────────────────────────────────────── */
 body.sh-shell-active #supportFooter {
@@ -3618,7 +3479,8 @@ body.app-dark.sh-shell-active #library-rows > div {
 body.app-dark.sh-shell-active #library-rows > div:hover {
   background: var(--sh-surface-warm) !important;
 }
-body.app-dark.sh-shell-active #dashboard .section-card {
+body.app-dark.sh-shell-active #dashboard .section-card,
+body.app-dark.sh-shell-active #profile-auth-content .section-card {
   background: var(--sh-surface-parch) !important;
   border-color: var(--sh-border-warm) !important;
   color: var(--sh-ink) !important;
@@ -3626,31 +3488,7 @@ body.app-dark.sh-shell-active #dashboard .section-card {
 body.app-dark.sh-shell-active #profile-page #profile-auth-card {
   background: var(--sh-surface-parch) !important;
   border-color: var(--sh-border-warm) !important;
-}
-body.app-dark.sh-shell-active #profile-auth-content .section-card {
-  background: var(--sh-surface-parch) !important;
-  border-color: var(--sh-border-warm) !important;
   color: var(--sh-ink) !important;
-}
-body.app-dark.sh-shell-active #profile-auth-content .profile-soft-card {
-  background: var(--sh-surface-bp) !important;
-  border-color: var(--sh-border) !important;
-}
-body.app-dark.sh-shell-active #profile-auth-content .grid.grid-cols-3 .section-card {
-  background: var(--sh-surface-bp) !important;
-  border-color: var(--sh-border) !important;
-}
-body.app-dark.sh-shell-active .profile-btn-ghost,
-body.app-dark.sh-shell-active .profile-policy-link,
-body.app-dark.sh-shell-active #profile-password-toggle-btn {
-  background: var(--sh-surface-warm) !important;
-  border-color: var(--sh-border) !important;
-  color: var(--jubly-purple) !important;
-}
-body.app-dark.sh-shell-active .profile-btn-ghost:hover,
-body.app-dark.sh-shell-active .profile-policy-link:hover,
-body.app-dark.sh-shell-active #profile-password-toggle-btn:hover {
-  background: var(--sh-surface-parch) !important;
 }
 body.app-dark.sh-shell-active #manageLibraryBtn {
   background: var(--sh-surface-warm) !important;
@@ -3690,345 +3528,337 @@ body.app-dark.sh-shell-active #profile-auth-content .border-slate-200 {
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
-   1E Profile Structure — blueprint-matched structural classes
-   New classes used in the rebuilt profile section. Visual treatment comes
-   from the existing sh-shell-active rules above. These handle layout only.
+   1E COHESION ADDITIONS — appended after sections 1-18
+   Only rules not covered above. No duplication. --sh-* tokens only.
+   !important used where Tailwind utility classes compete on same element.
    ════════════════════════════════════════════════════════════════════════════ */
 
-/* ── Page header ────────────────────────────────────────────────────────── */
-.profile-page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 16px;
-  margin-bottom: 30px;
+/* ── 19. Subscription hero buttons ─────────────────────────────────────────
+   #subscription-primary-btn has Tailwind: bg-white text-indigo-700
+   #subscription-secondary-btn has Tailwind: bg-white/20 text-white border-white/30
+   Must use !important to beat those utility classes.                          */
+body.sh-shell-active #subscription-primary-btn {
+  background: #fff !important;
+  color: var(--jubly-purple) !important;
+  border-radius: 12px !important;
+  font-weight: 800 !important;
+  box-shadow: none !important;
+  transition: background .15s ease, transform .12s ease !important;
 }
-.profile-page-title {
-  font-size: 30px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  color: var(--sh-ink, #1e293b);
-  margin: 0;
+body.sh-shell-active #subscription-primary-btn:hover {
+  background: #f5f3ff !important;
+  transform: translateY(-1px) !important;
 }
-.profile-page-subtitle {
-  margin: 5px 0 0;
-  color: var(--sh-muted, #64748b);
-  font-size: 14px;
+body.sh-shell-active #subscription-secondary-btn {
+  background: rgba(255,255,255,.18) !important;
+  color: #fff !important;
+  border-color: rgba(255,255,255,.34) !important;
+  border-radius: 12px !important;
+  font-weight: 800 !important;
+  box-shadow: none !important;
 }
-
-/* ── Shell grid: 250px rail + content ───────────────────────────────────── */
-/* Blueprint: .profile-shell { grid-template-columns: 250px minmax(0,1fr) } */
-.profile-shell-grid {
-  display: grid;
-  grid-template-columns: 250px minmax(0,1fr);
-  gap: 18px;
-  align-items: start;
+body.sh-shell-active #subscription-secondary-btn:hover {
+  background: rgba(255,255,255,.30) !important;
 }
 
-/* ── Rail aside ─────────────────────────────────────────────────────────── */
-.profile-rail-aside {
+/* ── 20. Start Chat — primary CTA ───────────────────────────────────────────
+   #profile-help-chat-btn has Tailwind: text-brand border-accent-soft
+   Must override to purple fill.                                               */
+body.sh-shell-active #profile-help-chat-btn {
+  background: var(--jubly-purple) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+  border-radius: 12px !important;
+  font-weight: 800 !important;
+  box-shadow: var(--sh-btn-primary) !important;
+  transition: filter .15s ease !important;
+}
+body.sh-shell-active #profile-help-chat-btn:hover {
+  filter: brightness(1.06) !important;
+  box-shadow: var(--sh-btn-primary) !important;
+}
+
+/* ── 21. Content-area buttons — zero inactive shadow ───────────────────────
+   Blueprint contract: elevation belongs to containers.
+   Target by ID to avoid hitting tab buttons or hero buttons.                  */
+body.sh-shell-active #profile-deleted-manage-btn,
+body.sh-shell-active #profile-password-toggle-btn,
+body.sh-shell-active #profile-name-save-btn,
+body.sh-shell-active #profile-name-cancel-btn,
+body.sh-shell-active #profile-password-save-btn,
+body.sh-shell-active #profile-password-cancel-btn {
+  box-shadow: none !important;
+}
+
+/* ── 22. Goal ring — warm token colours ─────────────────────────────────────
+   .profile-goal-ring uses conic-gradient with hardcoded #e2e8f0.
+   Override the inner background so dark mode reads correctly.                 */
+body.sh-shell-active .profile-goal-ring-inner {
+  background: var(--sh-surface-parch) !important;
+}
+body.app-dark.sh-shell-active .profile-goal-ring {
+  background: conic-gradient(var(--jubly-purple) var(--goal-progress, 0%), var(--sh-border) 0) !important;
+}
+
+/* ── 23. Support footer — structural classes ────────────────────────────────
+   The footer HTML is being restructured in index.html to use these classes.
+   section 13 owns the #supportFooter surface; these own its inner layout.    */
+.shell-footer-inner {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-/* ── Rail card — blueprint .profile-rail ────────────────────────────────── */
-/* Visual properties (bg, border, shadow, radius) set by sh-shell-active below */
-.profile-rail-card {
-  border-radius: 22px;
-  overflow: hidden;
-  padding: 16px;
-}
-
-/* ── Identity row ───────────────────────────────────────────────────────── */
-.profile-identity-row {
-  display: flex;
-  gap: 12px;
   align-items: center;
-  padding: 10px 8px 16px;
-  border-bottom: 1px solid var(--sh-divider, #efe5d8);
-  margin-bottom: 12px;
+  justify-content: center;
+  gap: 6px;
 }
-.profile-identity-name {
-  display: block;
-  color: var(--sh-ink, #1e293b);
-  font-size: 14px;
-  font-weight: 800;
-}
-.profile-identity-sub {
-  display: block;
-  color: var(--sh-muted, #64748b);
-  font-size: 12px;
-  margin-top: 3px;
-}
-
-/* ── Tab nav ────────────────────────────────────────────────────────────── */
-.profile-tab-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.profile-rail-divider {
-  border: none;
-  border-top: 1px solid var(--sh-divider, #efe5d8);
-  margin: 6px 0;
-}
-
-/* ── Tab buttons — blueprint .ptab ─────────────────────────────────────── */
-.profile-tab-btn {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
-  border: none;
-  background: transparent;
-  color: var(--sh-muted, #64748b);
-  font-size: 13px;
-  font-weight: 800;
-  font-family: inherit;
-  letter-spacing: -0.01em;
-  border-radius: 14px;
-  text-align: left;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
-}
-.profile-tab-btn:hover {
-  background: var(--sh-surface-warm, #fbf8f2);
-  color: var(--jubly-purple, #6344f5);
-  box-shadow: inset 0 0 0 1px var(--sh-border, #e7ded3);
-}
-.profile-tab-btn.active {
-  background: var(--sh-surface-warm, #fbf8f2);
-  color: var(--jubly-purple, #6344f5);
-  box-shadow: inset 0 0 0 1px var(--sh-border, #e7ded3);
-}
-.profile-tab-btn-logout {
-  color: #ef4444 !important;
-}
-.profile-tab-btn-logout:hover {
-  background: #fff1f1 !important;
-  color: #dc2626 !important;
-  box-shadow: inset 0 0 0 1px #fecaca !important;
-}
-
-/* ── Content area ───────────────────────────────────────────────────────── */
-.profile-content-area { min-width: 0; }
-.profile-auth-content { display: flex; flex-direction: column; }
-
-/* ── Tab panels — blueprint .panel.active ───────────────────────────────── */
-.profile-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-/* tab-content hidden state wins over .profile-panel flex */
-.tab-content.hidden-section { display: none !important; }
-
-/* ── Section cards — blueprint .sc / .sc.soft ───────────────────────────── */
-.profile-sc {
-  background: var(--sh-surface-parch, rgba(251,248,242,.96));
-  border: 1px solid var(--sh-border-warm, rgba(223,212,198,.88));
-  border-radius: 20px;
-  box-shadow: var(--sh-shadow-ground);
-  padding: 20px;
-}
-.profile-sc-soft {
-  background: var(--sh-surface-bp, rgba(255,252,247,.72));
-  box-shadow: var(--sh-shadow-panel);
-  border-color: var(--sh-border, #e7ded3);
-}
-
-/* ── Card typography ────────────────────────────────────────────────────── */
-.profile-section-label {
-  display: block;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--sh-warm-muted, #8a7a69);
-  margin-bottom: 8px;
-}
-.profile-card-h3 {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--sh-ink, #1e293b);
-}
-.profile-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-/* ── App tiles — blueprint .app-tile ────────────────────────────────────── */
-.profile-app-tiles {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0,1fr));
-  gap: 12px;
-}
-.profile-app-tile {
-  border: 1px solid var(--sh-border, #e7ded3);
-  background: var(--sh-surface-bp, rgba(255,252,247,.72));
-  border-radius: 16px;
-  padding: 16px;
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  cursor: pointer;
-  transition: background .15s ease;
-}
-.profile-app-tile:hover { background: var(--sh-surface-warm, #fbf8f2); }
-.profile-tile-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  background: var(--sh-surface-warm, #fbf8f2);
-  border: 1px solid var(--sh-border, #e7ded3);
+.shell-footer-row {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  flex-shrink: 0;
-}
-
-/* ── Metric cards — blueprint .metric ───────────────────────────────────── */
-.profile-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0,1fr));
-  gap: 12px;
-}
-.profile-metric-card {
-  background: var(--sh-surface-bp, rgba(255,252,247,.72)) !important;
-  border-color: var(--sh-border, #e7ded3) !important;
-  border-radius: 16px !important;
-  padding: 15px !important;
-  box-shadow: var(--sh-shadow-panel) !important;
-}
-.profile-metric-value {
-  font-size: 24px;
-  font-weight: 900;
-  color: var(--sh-ink, #1e293b);
-  letter-spacing: -0.04em;
-}
-
-/* ── Form rows — blueprint .form-row ────────────────────────────────────── */
-.profile-form-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  border-top: 1px solid var(--sh-divider, #efe5d8);
-  padding-top: 16px;
-  margin-top: 16px;
-}
-
-/* ── Button row ─────────────────────────────────────────────────────────── */
-.profile-btn-row {
-  display: flex;
-  gap: 8px;
+  width: 100%;
   flex-wrap: wrap;
+  gap: 6px;
+  text-align: center;
 }
-
-/* ── Buttons — blueprint .shell-btn.primary / .shell-btn.ghost ─────────── */
-.profile-btn-primary {
-  border: none;
-  background: var(--jubly-purple, #6344f5);
-  color: #fff;
-  padding: 11px 18px;
-  font-size: 13.5px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  border-radius: 8px;
-  box-shadow: var(--sh-btn-primary);
+.shell-footer-row.main-cta { gap: 8px; }
+.shell-footer-row.legal-links {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--sh-warm-muted);
+  gap: 7px;
+}
+.support-cta { color: var(--sh-warm-muted); font-size: 0.82rem; line-height: 1.15; }
+.bmc-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-family: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-  text-decoration: none;
-  transition: filter .12s ease, transform .12s ease;
-}
-.profile-btn-primary:hover { filter: brightness(1.04); }
-.profile-btn-primary:active { transform: translateY(1px); }
-
-.profile-btn-ghost {
-  border: 1px solid var(--sh-border, #e7ded3);
-  background: var(--sh-surface-warm, #fbf8f2);
-  color: var(--jubly-purple, #6344f5);
-  padding: 10px 14px;
-  font-size: 13px;
-  font-weight: 800;
+  background: #ffdd00;
+  color: #000;
+  padding: 6px 12px;
   border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-decoration: none;
+  box-shadow: 0 2px 6px rgba(0,0,0,.09);
+  font-family: inherit;
+  transition: opacity .15s ease;
+}
+.bmc-btn:hover { opacity: .88; }
+.footer-dot-sep { color: var(--sh-muted); user-select: none; font-weight: 900; }
+.policy-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--sh-warm-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color .15s ease;
+}
+.policy-link-btn:hover { color: var(--sh-ink); }
+
+/* ── 24. History surface ────────────────────────────────────────────────────
+   New surface. DOM owner: #sh-history-surface (added to index.html).
+   Uses --sh-* tokens. No Tailwind on these elements.                          */
+.sh-history-surface { display: none; }
+.sh-history-surface.active { display: block; }
+
+.history-shell {
+  background: var(--sh-surface-parch);
+  border: 1px solid var(--sh-border-warm);
+  border-radius: 24px;
+  padding: 26px;
+  box-shadow: var(--sh-shadow-ground);
+}
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 22px;
+}
+.history-title {
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: -.05em;
+  color: var(--sh-ink);
+  line-height: 1;
+  margin: 0;
+}
+.history-subtitle {
+  margin-top: 8px;
+  font-size: 16px;
+  font-style: italic;
+  color: var(--sh-warm-muted);
+}
+.history-actions { display: flex; justify-content: flex-end; }
+.history-filter-group {
   display: inline-flex;
   align-items: center;
-  font-family: inherit;
+  gap: 8px;
+  background: var(--sh-surface-warm);
+  border: 1px solid var(--sh-border);
+  border-radius: 999px;
+  padding: 6px 8px 6px 16px;
+  box-shadow: var(--sh-shadow-panel);
+}
+.history-filter-label {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  color: var(--sh-warm-muted);
+  text-transform: uppercase;
+  padding-right: 4px;
+  user-select: none;
+}
+.history-filter-options { display: flex; gap: 6px; }
+.history-filter-input { position: absolute; opacity: 0; pointer-events: none; }
+.history-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 14px;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--sh-warm-muted);
   cursor: pointer;
-  white-space: nowrap;
-  text-decoration: none;
-  transition: background .12s ease, transform .12s ease;
+  user-select: none;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
-.profile-btn-ghost:hover { background: var(--sh-surface-parch, rgba(251,248,242,.96)); }
-.profile-btn-ghost:active { transform: translateY(1px); }
+.history-filter-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--sh-border);
+  transition: background .15s ease, transform .15s ease;
+}
+.history-filter-chip:hover { background: var(--sh-surface); color: var(--sh-ink); }
+.history-filter-chip:hover .history-filter-dot { background: var(--sh-warm-muted); }
+.history-filter-input:checked + .history-filter-chip {
+  background: var(--sh-surface);
+  color: var(--jubly-purple);
+  box-shadow: 0 1px 2px rgba(15,23,42,.08);
+}
+.history-filter-input:checked + .history-filter-chip .history-filter-dot {
+  background: var(--jubly-purple);
+  transform: scale(1.08);
+}
+.history-filter-input:focus-visible + .history-filter-chip {
+  outline: 2px solid var(--jubly-purple);
+  outline-offset: 2px;
+}
+.history-filter-chip:active { transform: translateY(1px); }
+.history-group {
+  background: var(--sh-surface-bp);
+  border: 1px solid var(--sh-border);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.history-group + .history-group { margin-top: 16px; }
+.history-group-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 13px 18px;
+  background: var(--sh-surface-warm);
+  border-bottom: 1px solid var(--sh-divider);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  color: var(--sh-warm-muted);
+  text-transform: uppercase;
+}
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+}
+.history-row + .history-row { border-top: 1px solid var(--sh-divider); }
+.history-book-title {
+  font-size: 17px;
+  font-weight: 900;
+  color: var(--sh-ink);
+  letter-spacing: -.02em;
+}
+.history-book-meta {
+  margin-top: 4px;
+  color: var(--sh-warm-muted);
+  line-height: 1.35;
+  font-size: 13px;
+}
+.history-resume-btn {
+  border: 1px solid var(--sh-border);
+  background: var(--sh-surface);
+  color: var(--jubly-purple);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: none;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-family: inherit;
+  transition: border-color .15s ease, color .15s ease, transform .12s ease;
+}
+.history-resume-btn:hover { border-color: var(--sh-border-warm); color: var(--sh-ink); }
+.history-resume-btn:active { transform: translateY(1px); }
 
-/* ── Mobile ─────────────────────────────────────────────────────────────── */
-@media (max-width: 760px) {
-  .profile-shell-grid {
-    grid-template-columns: 1fr;
+/* ── 25. Mobile additions ───────────────────────────────────────────────────*/
+@media (max-width: 640px) {
+  body.sh-shell-active #profile-auth-content .section-card {
+    border-radius: 18px !important;
+    padding: 16px !important;
   }
-  .profile-tab-nav {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0,1fr));
-    gap: 8px;
+  body.sh-shell-active .sub-hero {
+    border-radius: 18px !important;
   }
-  .profile-tab-btn {
-    justify-content: center;
-    text-align: center;
-    min-height: 40px;
-    font-size: 12px;
+  body.sh-shell-active #supportFooter {
+    padding: 9px 10px 7px !important;
   }
-  .profile-metric-grid { grid-template-columns: 1fr; }
-  .profile-app-tiles { grid-template-columns: 1fr; }
-  .profile-form-row { flex-direction: column; align-items: flex-start; }
-  .profile-card-head { flex-direction: column; }
+  .history-shell { padding: 16px; border-radius: 18px; }
+  .history-header { flex-direction: column; }
+  .history-actions { justify-content: flex-start; }
+  .history-filter-group { width: 100%; }
+  .history-filter-options { flex: 1; }
+  .history-filter-chip { flex: 1; justify-content: center; }
+  .history-row { grid-template-columns: 1fr; gap: 8px; }
+  .history-resume-btn { justify-content: flex-start; }
 }
 
-/* ── Dark mode ──────────────────────────────────────────────────────────── */
-body.app-dark.sh-shell-active .profile-rail-card {
+/* ── 26. Dark mode additions ────────────────────────────────────────────────
+   Specificity 0,3,1 — beats existing body.app-dark rules at 0,2,1.          */
+body.app-dark.sh-shell-active .sub-hero {
+  background: linear-gradient(135deg, #8168ff, var(--jubly-purple)) !important;
+}
+body.app-dark.sh-shell-active .history-shell {
   background: var(--sh-surface-parch) !important;
   border-color: var(--sh-border-warm) !important;
 }
-body.app-dark.sh-shell-active .profile-sc {
-  background: var(--sh-surface-parch) !important;
-  border-color: var(--sh-border-warm) !important;
-  color: var(--sh-ink) !important;
-}
-body.app-dark.sh-shell-active .profile-sc-soft {
+body.app-dark.sh-shell-active .history-group {
   background: var(--sh-surface-bp) !important;
   border-color: var(--sh-border) !important;
 }
-body.app-dark.sh-shell-active .profile-app-tile {
-  background: var(--sh-surface-bp) !important;
-  border-color: var(--sh-border) !important;
-}
-body.app-dark.sh-shell-active .profile-app-tile:hover {
+body.app-dark.sh-shell-active .history-group-label {
   background: var(--sh-surface-warm) !important;
-}
-body.app-dark.sh-shell-active .profile-btn-ghost {
-  background: var(--sh-surface-warm) !important;
-  border-color: var(--sh-border) !important;
-  color: var(--jubly-purple) !important;
-}
-body.app-dark.sh-shell-active .profile-identity-row {
   border-bottom-color: var(--sh-divider) !important;
 }
-body.app-dark.sh-shell-active .profile-rail-divider {
-  border-top-color: var(--sh-divider) !important;
+body.app-dark.sh-shell-active .history-filter-group {
+  background: var(--sh-surface-warm) !important;
+  border-color: var(--sh-border) !important;
 }
-body.app-dark.sh-shell-active .profile-form-row {
-  border-top-color: var(--sh-divider) !important;
+body.app-dark.sh-shell-active .history-resume-btn {
+  background: var(--sh-surface) !important;
+  border-color: var(--sh-border) !important;
+}
+body.app-dark.sh-shell-active .shell-footer-row.legal-links,
+body.app-dark.sh-shell-active .support-cta,
+body.app-dark.sh-shell-active .policy-link-btn {
+  color: var(--sh-warm-muted) !important;
 }
