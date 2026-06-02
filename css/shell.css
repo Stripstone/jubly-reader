@@ -5625,3 +5625,206 @@ body.app-dark.shell-signed-in #nav-profile-trigger > #nav-avatar.shell-letter-av
   box-shadow: none !important;
   border: 0 !important;
 }
+
+/* Final profile/subscription/library cleanup pass — locked structure and wrapping contracts. */
+body.shell-signed-in #profile-auth-card .profile-menu-summary.compact {
+  display: block !important;
+  padding-bottom: 14px !important;
+  margin-bottom: 14px !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+body.shell-signed-in #profile-auth-card .profile-menu-summary.compact h3 {
+  margin: 0 !important;
+  color: var(--ink) !important;
+  font-weight: 900 !important;
+}
+body.shell-signed-in #profile-auth-card .profile-menu-summary.compact p {
+  margin: 3px 0 0 !important;
+  color: var(--warm-muted) !important;
+}
+
+/* Discover tiles are action buttons again, with the same white-button discipline as profile actions. */
+body.shell-signed-in button.profile-app-tile {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 100% !important;
+  text-align: left !important;
+  cursor: pointer !important;
+  border: 1px solid var(--border) !important;
+  background: var(--surface-blueprint) !important;
+  color: var(--ink) !important;
+  border-radius: 16px !important;
+  padding: 16px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 12px !important;
+  box-shadow: none !important;
+}
+body.shell-signed-in button.profile-app-tile:hover,
+body.shell-signed-in button.profile-app-tile:focus-visible {
+  background: var(--surface) !important;
+  border-color: var(--border-warm) !important;
+  box-shadow: 0 2px 4px rgba(139,126,99,.14) !important;
+}
+body.shell-signed-in button.profile-app-tile:active { transform: translateY(1px); }
+
+/* Resume buttons: darker purple in light mode; brighter shell purple in dark mode. */
+body.shell-signed-in .resume-primary {
+  background: var(--jubly-purple-dark) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+}
+html.app-dark.shell-signed-in body.shell-signed-in .resume-primary,
+body.app-dark.shell-signed-in .resume-primary {
+  background: var(--jubly-purple) !important;
+  color: #fff !important;
+}
+
+/* Subscription metrics: three distinct cards inside one responsive metric group. */
+body.shell-signed-in .subscription-metrics-group {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 16px !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+body.shell-signed-in .subscription-metrics-group .subscription-metric-card {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  min-height: 104px !important;
+  padding: 20px 16px !important;
+  border: 1px solid var(--border-warm) !important;
+  border-radius: 20px !important;
+  background: var(--surface-parchment) !important;
+  box-shadow: var(--shadow-panel) !important;
+}
+@media (max-width: 720px) {
+  body.shell-signed-in .subscription-metrics-group {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+  body.shell-signed-in .subscription-metrics-group .subscription-metric-card {
+    min-height: 86px !important;
+    padding: 18px !important;
+  }
+}
+
+/* Definitive Library row contract. Keep toolbar unchanged. */
+body.shell-signed-in #library-rows > .library-row {
+  display: grid !important;
+  grid-template-columns: minmax(260px, 1fr) 128px 128px 32px !important;
+  grid-template-rows: auto !important;
+  align-items: center !important;
+  gap: 0 !important;
+  padding: 16px 18px !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+body.shell-signed-in #library-rows > .library-row > .library-row-main {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+}
+body.shell-signed-in #library-rows > .library-row > .library-row-meta {
+  display: contents !important;
+}
+body.shell-signed-in #library-rows > .library-row > .library-row-meta > .library-row-status {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  margin: 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
+body.shell-signed-in #library-rows > .library-row > .library-row-meta > .library-row-time {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  margin: 0 !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
+body.shell-signed-in #library-rows > .library-row > .library-row-arrow {
+  grid-column: 4 !important;
+  grid-row: 1 !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+@media (max-width: 900px) {
+  body.shell-signed-in #library-rows > .library-row {
+    grid-template-columns: minmax(0, 1fr) max-content !important;
+    grid-template-rows: auto !important;
+    column-gap: 14px !important;
+    row-gap: 0 !important;
+    min-height: 88px !important;
+    padding: 14px 16px !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-main {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    align-self: center !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-meta {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    gap: 5px !important;
+    width: max-content !important;
+    max-width: 132px !important;
+    margin: 0 !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-meta > .library-row-status,
+  body.shell-signed-in #library-rows > .library-row > .library-row-meta > .library-row-time {
+    display: flex !important;
+    width: max-content !important;
+    max-width: 132px !important;
+    margin: 0 !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-arrow { display: none !important; }
+}
+@media (max-width: 520px) {
+  body.shell-signed-in #library-rows > .library-row {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto auto !important;
+    row-gap: 9px !important;
+    min-height: 118px !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-main {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-meta {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    gap: 6px !important;
+    margin-left: 44px !important;
+    width: auto !important;
+    max-width: calc(100% - 44px) !important;
+  }
+  body.shell-signed-in #library-rows > .library-row > .library-row-meta > .library-row-status,
+  body.shell-signed-in #library-rows > .library-row > .library-row-meta > .library-row-time {
+    width: auto !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+}

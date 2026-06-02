@@ -1076,7 +1076,7 @@ window.rcInteraction = (function () {
         if (profileNameMain) profileNameMain.textContent = authed ? displayName : 'Your account';
         if (profileEmailMain) profileEmailMain.textContent = authed ? 'Signed-in account' : 'Account settings';
         if (profileNameSettings) profileNameSettings.textContent = authed ? displayName : 'Your account';
-        if (profileEmailSettings) profileEmailSettings.textContent = authed ? 'Signed-in account' : 'Account settings';
+        if (profileEmailSettings) profileEmailSettings.textContent = authed ? (String((user && user.email) || '').trim() || 'Signed-in account') : 'Account settings';
         if (profileAvatarMain) {
             profileAvatarMain.textContent = profileInitial;
             profileAvatarMain.setAttribute('aria-label', `${profileInitial} profile initial`);
@@ -2946,11 +2946,10 @@ window.rcInteraction = (function () {
             const date = new Date(b.createdAt||Date.now()).toLocaleDateString();
             const id = ('local:' + String(b.id)).replace(/'/g,"\\'");
             const title = escHtml(b.title||'Untitled');
-            return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
-                <div class="flex-grow flex items-center gap-3"><div class="w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">Added ${date}</p></div></div>
-                <div class="w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div>
-                <div class="w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div>
-                <div class="w-8 text-slate-300">→</div></div>`;
+            return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\'")}')" class="library-row px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
+                <div class="library-row-main flex-grow flex items-center gap-3"><div class="library-doc-icon w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div class="library-doc-copy"><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">Added ${date}</p></div></div>
+                <div class="library-row-meta"><div class="library-row-status w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div><div class="library-row-time w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div></div>
+                <div class="library-row-arrow w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
         setLibrarySurfaceState('populated', reason);

@@ -428,12 +428,12 @@
                 <span aria-hidden="true">▶️</span>
                 <span>Resume</span>
             </button>
-            <div class="resume-popout" id="resumePopout" aria-label="Resume reading popout">
+            <div class="resume-popout" id="resumePopout" aria-label="Resume Reading popout">
                 <div class="resume-toast-label">Continue where you left off</div>
                 <div id="resume-popout-title" class="resume-toast-title">Resume unavailable</div>
                 <div id="resume-popout-sub" class="resume-toast-sub">No runtime-backed latest reading position is available yet.</div>
                 <div class="resume-toast-actions">
-                    <button id="resume-popout-primary" type="button" class="resume-primary resume-disabled-action" onclick="showPendingToast('Resume reading requires a real latest-reading owner.')" aria-disabled="true">Resume Reading</button>
+                    <button id="resume-popout-primary" type="button" class="resume-primary resume-disabled-action" onclick="showPendingToast('Resume Reading requires a real latest-reading owner.')" aria-disabled="true">Resume Reading</button>
                     <button id="resume-popout-secondary" type="button" class="resume-secondary resume-disabled-action" onclick="closeResumePopout()">Cancel</button>
                 </div>
             </div>
@@ -846,11 +846,10 @@
                 </div>
             </div>
             <div id="profile-auth-card" class="profile-menu-card section-card shadow-sm">
-                <div class="flex items-center gap-4 mb-4">
-                    <div id="profile-avatar-main" class="profile-letter-avatar" aria-label="User initial">J</div>
+                <div class="profile-menu-summary compact mb-4">
                     <div>
                         <h3 id="profile-name-main" class="font-bold text-base leading-tight">Your account</h3>
-                        <p id="profile-email-main" class="text-xs text-slate-400 mt-0.5">Account settings</p>
+                        <p id="profile-email-main" class="text-xs text-slate-400 mt-0.5">Signed-in account</p>
                     </div>
                 </div>
                 <nav class="profile-tab-menu flex flex-col gap-1" aria-label="Profile sections">
@@ -871,14 +870,14 @@
                     <div class="profile-container-label">Discover Jubly Apps</div>
                     <p class="profile-card-copy">Read anything from anywhere, on mobile or desktop.</p>
                     <div class="profile-grid-two profile-grid-spaced">
-                        <div class="profile-app-tile profile-coming-soon-item profile-inactive-tile" aria-disabled="true">
+                        <button type="button" class="profile-app-tile profile-coming-soon-item profile-card-action" onclick="showShellPendingNotice('iOS App', 'The iOS app is coming soon.')">
                             <span class="profile-app-icon" aria-hidden="true">📱</span>
                             <span><span class="profile-card-title" style="display:block">iOS App</span><span class="profile-card-copy" style="display:block">Coming Soon</span></span>
-                        </div>
-                        <div class="profile-app-tile profile-coming-soon-item profile-inactive-tile" aria-disabled="true">
+                        </button>
+                        <button type="button" class="profile-app-tile profile-coming-soon-item profile-card-action" onclick="showShellPendingNotice('Desktop App', 'The desktop app is coming soon.')">
                             <span class="profile-app-icon" aria-hidden="true">💻</span>
                             <span><span class="profile-card-title" style="display:block">Desktop</span><span class="profile-card-copy" style="display:block">Coming Soon</span></span>
-                        </div>
+                        </button>
                     </div>
                 </div>
                 <div class="profile-surface-card section-card shadow-sm">
