@@ -63,9 +63,9 @@
     // ─────────────────────────────────────────────────────────────────────────────
 
     // ── Section routing ──────────────────────────────────────────
-    const ALL_SECTIONS     = ['landing-page', 'public-onboarding', 'login-page', 'dashboard', 'profile-page', 'history-page', 'whats-new-page', 'support-page', 'reading-mode'];
+    const ALL_SECTIONS     = ['landing-page', 'public-onboarding', 'login-page', 'dashboard', 'profile-page', 'history-page', 'whats-new-page', 'reading-mode'];
     const PUBLIC_SAMPLE_BOOK_ID = 'BOOK_ReadingTraining';
-    const SIDEBAR_SECTIONS = ['dashboard', 'profile-page', 'history-page', 'whats-new-page', 'support-page'];
+    const SIDEBAR_SECTIONS = ['dashboard', 'profile-page', 'history-page', 'whats-new-page'];
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
@@ -300,11 +300,6 @@ window.rcInteraction = (function () {
   }
 
   return { pending, success, error, clear, clearAll, actions: actionPresets };
-    window.closeResumePopout = closeResumePopout;
-    window.toggleResumePopout = toggleResumePopout;
-    window.closeSignedInShellMenu = closeSignedInShellMenu;
-    window.toggleSignedInShellMenu = toggleSignedInShellMenu;
-
 })();
 
 
@@ -560,7 +555,7 @@ window.rcInteraction = (function () {
         const normalized = normalizeSection(id);
         if (normalized === 'login-page' && isPasswordRecoveryActive()) return 'login-page';
         if (isAuthedUser() && (normalized === 'landing-page' || normalized === 'public-onboarding' || normalized === 'login-page')) return 'dashboard';
-        if (!isAuthedUser() && (normalized === 'profile-page' || normalized === 'history-page' || normalized === 'whats-new-page' || normalized === 'support-page')) return 'landing-page';
+        if (!isAuthedUser() && (normalized === 'profile-page' || normalized === 'history-page' || normalized === 'whats-new-page')) return 'landing-page';
         if (!isAuthedUser() && normalized === 'dashboard' && !isIntroLibraryVisible()) return 'landing-page';
         return normalized;
     }
@@ -858,8 +853,6 @@ window.rcInteraction = (function () {
         const target = document.getElementById(targetId);
         if (target) target.classList.remove('hidden-section');
         _currentSection = targetId;
-        closeResumePopout();
-        closeSignedInShellMenu();
         _lastShellRelease = {
             requestedSurface,
             releasedSurface: targetId,
@@ -870,47 +863,73 @@ window.rcInteraction = (function () {
     }
 
 
-    function closeResumePopout() {
-        const popout = document.getElementById('resumePopout');
-        const trigger = document.getElementById('sb-resume');
-        if (popout) {
-            popout.classList.remove('open');
-            popout.setAttribute('aria-hidden', 'true');
-        }
-        if (trigger) trigger.setAttribute('aria-expanded', 'false');
-    }
-
-    function toggleResumePopout(event) {
-        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-        closeSignedInShellMenu();
-        const popout = document.getElementById('resumePopout');
-        const trigger = document.getElementById('sb-resume');
-        if (!popout) return;
-        const next = !popout.classList.contains('open');
-        popout.classList.toggle('open', next);
-        popout.setAttribute('aria-hidden', next ? 'false' : 'true');
-        if (trigger) trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
-    }
-
     function closeSignedInShellMenu() {
         const sidebar = document.getElementById('app-sidebar');
         const trigger = document.getElementById('nav-shell-menu-trigger');
-        const overlay = document.getElementById('mobileOverlay');
         if (sidebar) sidebar.classList.remove('open');
-        if (overlay) overlay.classList.remove('open');
         if (trigger) trigger.setAttribute('aria-expanded', 'false');
     }
 
     function toggleSignedInShellMenu() {
-        closeResumePopout();
         const sidebar = document.getElementById('app-sidebar');
         const trigger = document.getElementById('nav-shell-menu-trigger');
-        const overlay = document.getElementById('mobileOverlay');
         if (!sidebar) return;
         const next = !sidebar.classList.contains('open');
         sidebar.classList.toggle('open', next);
-        if (overlay) overlay.classList.toggle('open', next);
         if (trigger) trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
+    }
+    function closeResumePopout() {
+        const popout = document.getElementById('resumePopout');
+        const trigger = document.getElementById('sb-resume');
+        if (popout) popout.classList.remove('open');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleResumePopout(event) {
+        try { if (event && typeof event.preventDefault === 'function') event.preventDefault(); } catch (_) {}
+        const popout = document.getElementById('resumePopout');
+        const trigger = document.getElementById('sb-resume');
+        const sidebar = document.getElementById('app-sidebar');
+        const mobileSidebarOpen = !!(sidebar && sidebar.classList.contains('open'));
+        if (!popout || mobileSidebarOpen || (window.matchMedia && window.matchMedia('(max-width: 640px)').matches)) {
+            const next = !popout.classList.contains('open');
+            popout.classList.toggle('open', next);
+            if (trigger) {
+                trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
+                trigger.classList.toggle('active', next);
+            }
+            return;
+        }
+        const next = !popout.classList.contains('open');
+        popout.classList.toggle('open', next);
+        if (trigger) trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
+    }
+
+
+    function deriveShellInitial(name) {
+        const cleaned = String(name || '').trim();
+        const first = cleaned ? cleaned.charAt(0) : 'J';
+        return first.toUpperCase();
+    }
+
+    function showPendingToast(message) {
+        const text = String(message || 'This action is pending.').trim();
+        try {
+            if (window.rcInteraction && typeof window.rcInteraction.info === 'function') {
+                window.rcInteraction.info('shell:pending', text);
+                return;
+            }
+        } catch (_) {}
+        try { window.alert(text); } catch (_) {}
+    }
+
+    function focusProfileHelp() {
+        try {
+            const section = document.getElementById('profile-help-card') || document.getElementById('profile-help-chat-btn');
+            if (section && typeof section.scrollIntoView === 'function') section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const chat = document.getElementById('profile-help-chat-btn');
+            if (chat && typeof chat.focus === 'function') chat.focus({ preventScroll: true });
+        } catch (_) {}
     }
 
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
@@ -949,32 +968,39 @@ window.rcInteraction = (function () {
             navUserName.textContent = authed ? displayName : '';
             navUserName.classList.toggle('hidden-section', !authed);
         }
-        if (navAvatar) navAvatar.src = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
+        const profileInitial = deriveShellInitial(displayName);
+        if (navAvatar) {
+            navAvatar.textContent = profileInitial;
+            navAvatar.setAttribute('aria-label', `${profileInitial} profile initial`);
+        }
 
         const sidebar = document.getElementById('app-sidebar');
         if (sidebar) sidebar.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
         if (!isSignedInShellSurface) closeSignedInShellMenu();
         if (dashboardEl) dashboardEl.classList.toggle('with-sidebar', authed);
         if (profileEl) profileEl.classList.toggle('with-sidebar', authed);
-        ['history-page', 'whats-new-page', 'support-page'].forEach((sectionId) => {
+        ['history-page', 'whats-new-page'].forEach((sectionId) => {
             const sectionEl = document.getElementById(sectionId);
             if (sectionEl) sectionEl.classList.toggle('with-sidebar', authed);
         });
         const supportFooter = document.getElementById('supportFooter');
         if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
+        const sbResume = document.getElementById('sb-resume');
         const sbLibrary = document.getElementById('sb-library');
         const sbHistory = document.getElementById('sb-history');
         const sbSettings = document.getElementById('sb-settings');
         const sbWhatsNew = document.getElementById('sb-whats-new');
         const sbSupport = document.getElementById('sb-support');
         const sbUpgrade = document.getElementById('sb-upgrade');
+        if (sbResume) sbResume.classList.toggle('active', !!(document.getElementById('resumePopout') && document.getElementById('resumePopout').classList.contains('open')));
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
         if (sbHistory) sbHistory.classList.toggle('active', id === 'history-page');
         if (sbSettings) sbSettings.classList.toggle('active', id === 'profile-page' && document.getElementById('tab-settings') && !document.getElementById('tab-settings').classList.contains('hidden-section'));
         if (sbWhatsNew) sbWhatsNew.classList.toggle('active', id === 'whats-new-page');
-        if (sbSupport) sbSupport.classList.toggle('active', id === 'support-page');
+        if (sbSupport) sbSupport.classList.toggle('active', id === 'profile-page' && !!document.getElementById('profile-help-chat-btn'));
         if (sbUpgrade) sbUpgrade.classList.toggle('active', id === 'profile-page' && document.getElementById('tab-subscription') && !document.getElementById('tab-subscription').classList.contains('hidden-section'));
         if (isSignedInShellSurface) closeSignedInShellMenu();
+        closeResumePopout();
 
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
@@ -1009,9 +1035,14 @@ window.rcInteraction = (function () {
         if (profileEmailMain) profileEmailMain.textContent = authed ? 'Signed-in account' : 'Account settings';
         if (profileNameSettings) profileNameSettings.textContent = authed ? displayName : 'Your account';
         if (profileEmailSettings) profileEmailSettings.textContent = authed ? 'Signed-in account' : 'Account settings';
-        const avatarSrc = 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeeves';
-        if (profileAvatarMain) profileAvatarMain.src = avatarSrc;
-        if (profileAvatarSettings) profileAvatarSettings.src = avatarSrc;
+        if (profileAvatarMain) {
+            profileAvatarMain.textContent = profileInitial;
+            profileAvatarMain.setAttribute('aria-label', `${profileInitial} profile initial`);
+        }
+        if (profileAvatarSettings) {
+            profileAvatarSettings.textContent = profileInitial;
+            profileAvatarSettings.setAttribute('aria-label', `${profileInitial} profile initial`);
+        }
         // One shared account-control readiness writer owns Logout/Profile
         // disabled state across dashboard, profile, refresh, and auth cycling.
         applySignedInAccountControlReadiness('sync-auth-presentation:' + id);
@@ -1071,7 +1102,7 @@ window.rcInteraction = (function () {
         let _sectionRefreshPromise = null;
         if (targetId === 'dashboard') _sectionRefreshPromise = refreshLibrary('show-section-dashboard');
         if (targetId === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} }
-        if (targetId === 'history-page' || targetId === 'whats-new-page' || targetId === 'support-page') closeSignedInShellMenu();
+        if (targetId === 'history-page' || targetId === 'whats-new-page') closeSignedInShellMenu();
         try { if (typeof window.syncDiagnosticsVisibility === 'function') window.syncDiagnosticsVisibility(); } catch (_) {}
         if (options.historyMode !== 'none') syncHistoryForSection(targetId, options.historyMode === 'replace' ? 'replace' : 'push');
 
@@ -3199,26 +3230,22 @@ window.rcInteraction = (function () {
                 setInlineBusy(btn, null, null, false);
             }
         });
-        ['profile-help-feedback-link', 'profile-help-feedback-btn'].forEach((feedbackId) => {
-            document.getElementById(feedbackId)?.addEventListener('click', async (e) => {
-                e.preventDefault();
-                const btn = e.currentTarget;
-                setInlineBusy(btn, 'Opening…');
-                try {
-                    if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
-                        const ok = await window.rcHelp.openFeedback();
-                        if (!ok) {
-                            try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
-                        }
-                    } else {
-                        try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback is not available yet.'); } catch (_) {}
+        document.getElementById('profile-help-feedback-link')?.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const btn = e.currentTarget;
+            setInlineBusy(btn, 'Opening…');
+            try {
+                if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
+                    const ok = await window.rcHelp.openFeedback();
+                    if (!ok) {
+                        try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
                     }
-                } catch (_) {
-                    try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
-                } finally {
-                    setInlineBusy(btn, null, null, false);
                 }
-            });
+            } catch (_) {
+                try { window.rcInteraction && window.rcInteraction.error('help:feedback', 'Feedback couldn\'t be opened right now.'); } catch (_) {}
+            } finally {
+                setInlineBusy(btn, null, null, false);
+            }
         });
         const tierSel = document.getElementById('tierSelect');
         if (tierSel) {
@@ -3541,6 +3568,10 @@ window.rcInteraction = (function () {
 
     window.toggleSignedInShellMenu = toggleSignedInShellMenu;
     window.closeSignedInShellMenu = closeSignedInShellMenu;
+    window.toggleResumePopout = toggleResumePopout;
+    window.focusProfileHelp = focusProfileHelp;
+    window.showPendingToast = showPendingToast;
+    window.closeResumePopout = closeResumePopout;
     window.shellOpenChat = shellOpenChat;
     window.shellOpenFeedback = shellOpenFeedback;
 
