@@ -117,7 +117,7 @@
                         <div class="theme-swatch" style="background: linear-gradient(135deg, #a78bfa, #ddd6fe);"></div>
                         <span class="text-xs font-semibold text-slate-500">Light Purple</span>
                     </button>
-                    <button id="explorer-swatch-btn" data-theme="explorer" onclick="handleExplorerSwatch()" class="rs-theme-btn flex flex-col items-center gap-2 explorer-locked" title="Upgrade to Pro+ to unlock Explorer theme">
+                    <button id="explorer-swatch-btn" data-theme="explorer" onclick="handleExplorerSwatch()" class="rs-theme-btn flex flex-col items-center gap-2 explorer-locked" title="Upgrade to unlock Explorer theme">
                         <div class="theme-swatch flex items-center justify-center text-xl" style="background: linear-gradient(135deg, #c17d4a, #e8d9c4); opacity: 0.6;">🧭</div>
                         <span class="text-xs font-semibold text-slate-400">Explorer</span>
                     </button>
@@ -423,10 +423,20 @@
 
 <!-- SIDEBAR (logged-in, non-reading views only) -->
 <aside id="app-sidebar" class="fixed left-0 z-40 flex-col items-center pt-5 gap-1 bg-white border-r border-slate-200" style="top:57px; height:calc(100vh - 57px); width:68px; display:none;">
-    <button onclick="showSection('dashboard')" id="sb-library" class="sidebar-btn" title="Library">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-        Library
-    </button>
+    <div class="sidebar-main">
+        <button onclick="showSection('dashboard')" id="sb-resume" class="sidebar-btn" title="Resume"><span aria-hidden="true">▶️</span>Resume</button>
+        <button onclick="showSection('dashboard')" id="sb-library" class="sidebar-btn" title="Library">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            Library
+        </button>
+        <button onclick="showSection('history-page')" id="sb-history" class="sidebar-btn" title="History"><span aria-hidden="true">🧾</span>History</button>
+        <button onclick="showSection('profile-page'); switchTab('tab-settings')" id="sb-settings" class="sidebar-btn" title="Settings"><span aria-hidden="true">⚙️</span>Settings</button>
+    </div>
+    <div class="sidebar-secondary">
+        <button onclick="openModal('pricing-modal')" id="sb-upgrade" class="sidebar-btn secondary" title="Upgrade"><span aria-hidden="true">⚡</span>Upgrade</button>
+        <button onclick="showSection('whats-new-page')" id="sb-whats-new" class="sidebar-btn secondary active-dot" title="What's new"><span aria-hidden="true">🔖</span>What's new</button>
+        <button onclick="showSection('support-page')" id="sb-support" class="sidebar-btn secondary" title="Help and feedback"><span aria-hidden="true">💭</span>Help & feedback</button>
+    </div>
 </aside>
 <div id="landing-page" class="min-h-[88vh] flex flex-col md:flex-row items-center justify-center max-w-6xl mx-auto px-6 gap-10 py-16">
     <div class="w-full md:w-1/2 flex justify-center order-1 md:order-1">
@@ -686,12 +696,12 @@
 <main id="dashboard" class="hidden-section max-w-5xl mx-auto py-12 px-6 with-sidebar">
     <header class="library-header flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
         <div>
-            <h2 class="text-3xl font-extrabold text-slate-900 tracking-tight">Library</h2>
-            <p id="dashboard-subtitle" class="text-slate-500 text-sm mt-1"></p>
+            <h2 class="text-3xl font-extrabold text-slate-900 tracking-tight">Document Library</h2>
+            <p id="dashboard-subtitle" class="text-slate-500 text-sm mt-1">Your saved books and reading sessions.</p>
         </div>
         <div id="library-toolbar" class="library-toolbar flex items-center gap-2">
-            <button id="manageLibraryBtn" class="px-4 py-2.5 rounded-lg font-bold text-sm border-2 border-slate-200 text-slate-500 hover:bg-slate-50 transition">🗂️ Manage</button>
-            <button id="importBookBtn"    class="btn-jubly px-6 py-2.5 rounded-lg font-bold text-sm shadow-sm">+ Import Book</button>
+            <button id="manageLibraryBtn" class="shell-btn manage px-4 py-2.5 rounded-lg font-bold text-sm border-2 border-slate-200 text-slate-500 hover:bg-slate-50 transition">🗂️ Manage</button>
+            <button id="importBookBtn"    class="shell-btn import btn-jubly px-6 py-2.5 rounded-lg font-bold text-sm shadow-sm">+ Import Book</button>
         </div>
     </header>
 
@@ -790,7 +800,13 @@
 
 <!-- PROFILE PAGE -->
 <main id="profile-page" class="hidden-section max-w-5xl mx-auto py-12 px-6 with-sidebar">
-    <div class="flex flex-col md:flex-row gap-10">
+    <header class="profile-header">
+        <div>
+            <h2 class="text-3xl font-extrabold text-slate-900 tracking-tight">Profile</h2>
+            <p class="text-slate-500 text-sm mt-1">Account, reading analytics, subscription, settings, and support.</p>
+        </div>
+    </header>
+    <div class="profile-shell flex flex-col md:flex-row gap-10">
         <aside id="profile-sidebar" class="w-full md:w-64 flex-shrink-0">
             <div id="profile-guest-card" class="hidden-section section-card shadow-sm">
                 <div class="text-center space-y-4">
@@ -824,11 +840,12 @@
                     </div>
                 </div>
                 <nav class="flex flex-col gap-1">
-                    <button data-tab="tab-profile"       onclick="switchTab('tab-profile')"       class="profile-tab-btn active text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Profile</button>
-                    <button data-tab="tab-subscription"  onclick="switchTab('tab-subscription')"  class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Subscription</button>
-                    <button data-tab="tab-settings"      onclick="switchTab('tab-settings')"      class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">Settings</button>
+                    <button data-tab="tab-profile"       onclick="switchTab('tab-profile')"       class="profile-tab-btn active text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">👤 Profile</button>
+                    <button data-tab="tab-analytics"     onclick="switchTab('tab-analytics')"     class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">📊 Analytics</button>
+                    <button data-tab="tab-subscription"  onclick="switchTab('tab-subscription')"  class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">💳 Subscription</button>
+                    <button data-tab="tab-settings"      onclick="switchTab('tab-settings')"      class="profile-tab-btn text-left px-4 py-2.5 rounded-lg font-semibold text-slate-600 hover:bg-slate-100 transition text-sm">⚙️ Settings</button>
                     <hr class="my-2 border-slate-200">
-                    <button type="button" onclick="shellSignOut()" class="text-left px-4 py-2.5 rounded-lg font-semibold text-red-500 hover:bg-red-50 transition text-sm">Logout</button>
+                    <button type="button" onclick="shellSignOut()" class="profile-tab-btn danger text-left px-4 py-2.5 rounded-lg font-semibold text-red-500 hover:bg-red-50 transition text-sm">Logout</button>
                 </nav>
             </div>
         </aside>
@@ -870,11 +887,11 @@
                     <div class="flex gap-3">
                         <div class="flex-1 bg-slate-50 border border-slate-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-accent-soft transition">
                             <div class="text-2xl">📱</div>
-                            <div><p class="font-bold text-sm">iOS App</p><p class="text-xs text-slate-400">Read on the go</p></div>
+                            <div><p class="font-bold text-sm">iOS App</p><p class="text-xs text-slate-400">Coming Soon</p></div>
                         </div>
                         <div class="flex-1 bg-slate-50 border border-slate-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:bg-accent-soft transition">
                             <div class="text-2xl">💻</div>
-                            <div><p class="font-bold text-sm">Desktop</p><p class="text-xs text-slate-400">Native focus mode</p></div>
+                            <div><p class="font-bold text-sm">Desktop App</p><p class="text-xs text-slate-400">Coming Soon</p></div>
                         </div>
                     </div>
                 </div>
@@ -890,10 +907,27 @@
                 <div class="section-card shadow-sm">
                     <h4 class="font-bold text-xs uppercase tracking-wider text-slate-400 mb-4">Get Help</h4>
                     <div class="flex gap-3 flex-wrap">
-                        <button class="flex items-center gap-2 bg-green-50 text-green-700 font-bold text-xs px-4 py-2.5 rounded-xl hover:bg-green-100 transition border border-green-100"><span>💬</span> WhatsApp</button>
                         <button id="profile-help-chat-btn" type="button" class="flex items-center gap-2 font-bold text-xs px-4 py-2.5 rounded-xl transition border text-brand hover:bg-accent-soft border-accent-soft"><span>🗨️</span> Start Chat</button>
                     </div>
                     <p class="text-xs text-slate-400 mt-4">Have an idea? <a id="profile-help-feedback-link" href="#" class="text-brand font-semibold hover:underline">Share your thoughts →</a></p>
+                </div>
+            </div>
+
+            <!-- Analytics Tab -->
+            <div id="tab-analytics" class="tab-content hidden-section space-y-5">
+                <div class="section-card shadow-sm">
+                    <div class="card-title-row">
+                        <div>
+                            <h3 class="text-2xl font-extrabold mb-1">Analytics</h3>
+                            <p class="text-sm text-slate-500">Reading progress surfaces stay empty unless backed by real reading metrics.</p>
+                        </div>
+                        <span class="status-pill">Pending</span>
+                    </div>
+                    <div class="mini-grid">
+                        <div class="metric-card"><span class="metric-label">Today</span><div class="metric-value">—</div><p class="metric-copy">Daily progress will appear when the runtime owner provides it.</p></div>
+                        <div class="metric-card"><span class="metric-label">This Week</span><div class="metric-value">—</div><p class="metric-copy">Weekly minutes and sessions remain pending.</p></div>
+                        <div class="metric-card"><span class="metric-label">Streak</span><div class="metric-value">—</div><p class="metric-copy">Coming Soon</p></div>
+                    </div>
                 </div>
             </div>
 
@@ -1014,6 +1048,32 @@
             </div>
         </section>
     </div>
+</main>
+
+<!-- HISTORY / SUPPORT PENDING SHELL ROUTES -->
+<main id="history-page" class="hidden-section shell-pending-page with-sidebar">
+    <section class="shell-pending-card">
+        <p class="shell-eyebrow">History</p>
+        <h2>Recent Reads</h2>
+        <p>History will show reading sessions when a real history owner is connected.</p>
+        <span class="status-pill">Coming Soon</span>
+    </section>
+</main>
+<main id="whats-new-page" class="hidden-section shell-pending-page with-sidebar">
+    <section class="shell-pending-card">
+        <p class="shell-eyebrow">What's new</p>
+        <h2>Updates</h2>
+        <p>Release notes are pending. This surface is intentionally placeholder-only for now.</p>
+        <span class="status-pill">Pending</span>
+    </section>
+</main>
+<main id="support-page" class="hidden-section shell-pending-page with-sidebar">
+    <section class="shell-pending-card">
+        <p class="shell-eyebrow">Help & feedback</p>
+        <h2>Support</h2>
+        <p>Use the Profile support actions for the existing support/chat flow. A dedicated support route is Coming Soon.</p>
+        <div class="button-row"><button type="button" onclick="showSection('profile-page')" class="shell-btn primary">Open Profile Support</button></div>
+    </section>
 </main>
 
 <!-- READING MODE — Focus UI -->
@@ -1259,10 +1319,10 @@
 <script src="js/app.js"></script>
 
 <!-- Support footer — shown on Library and Profile only via showSection() -->
-<footer id="supportFooter" style="display:none; width:100%; background:#f8f7ff; border-top:1px solid #e2e8f0; padding:1rem 1.5rem; text-align:center; box-sizing:border-box;">
-    <div style="display:flex; align-items:center; justify-content:center; gap:1rem; flex-wrap:wrap;">
-        <span style="font-size:0.8rem; color:#94a3b8;">📖 If jubly helped you, consider supporting the project</span>
-        <a href="https://www.buymeacoffee.com/tristonb" target="_blank" rel="noopener" style="display:inline-block; background:#FFDD00; color:#000; font-weight:800; font-size:0.78rem; padding:6px 14px; border-radius:8px; text-decoration:none;">☕ Buy me a coffee</a>
+<footer id="supportFooter" class="support-footer" style="display:none;">
+    <div class="support-footer-inner">
+        <span class="support-footer-text">📖 If jubly helped you, consider supporting the project</span>
+        <a class="support-footer-button" href="https://www.buymeacoffee.com/tristonb" target="_blank" rel="noopener">☕ Buy me a coffee</a>
     </div>
 </footer>
 
