@@ -3489,72 +3489,22 @@ window.rcInteraction = (function () {
     }
 
 
-    function setProfileActionStatus(message, kind = 'info') {
-        const status = document.getElementById('profile-action-status') || document.getElementById('billing-message');
-        if (!status) return;
-        status.textContent = message || '';
-        status.classList.toggle('hidden-section', !message);
-        status.dataset.kind = message ? kind : '';
-    }
-
-    function shellShowPending(label, state = 'Coming Soon') {
-        const title = String(label || 'This surface');
-        const copy = `${title} is ${String(state || 'pending').toLowerCase()}.`;
-        setProfileActionStatus(copy, 'pending');
-    }
-
-    function shellManageDeletedFiles() {
-        // Deleted-file ownership is not implemented in shell. Surface an honest
-        // UX response instead of a dead button or fabricated deleted-file owner.
-        setProfileActionStatus('Deleted Files management is pending until the real file owner exposes this surface.', 'pending');
-    }
-
     async function shellOpenChat() {
         try {
-            if (window.rcHelp && typeof window.rcHelp.openChat === 'function') {
-                await window.rcHelp.openChat();
-                setProfileActionStatus('', 'info');
-                return;
-            }
+            if (window.rcHelp && typeof window.rcHelp.openChat === 'function') await window.rcHelp.openChat();
         } catch (_) {}
-        setProfileActionStatus('Chat support is pending in this runtime.', 'pending');
     }
 
     async function shellOpenFeedback() {
         try {
-            if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
-                await window.rcHelp.openFeedback();
-                setProfileActionStatus('', 'info');
-                return;
-            }
+            if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') await window.rcHelp.openFeedback();
         } catch (_) {}
-        setProfileActionStatus('Feedback capture is pending in this runtime.', 'pending');
-    }
-
-    function shellResumeReading() {
-        try {
-            if (typeof hasActiveReadingCards === 'function' && hasActiveReadingCards()) {
-                showSection('reading-mode');
-                return;
-            }
-        } catch (_) {}
-        try {
-            if (typeof startReading === 'function') {
-                startReading();
-                return;
-            }
-        } catch (_) {}
-        showSection('dashboard');
-        try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {}
     }
 
     window.toggleSignedInShellMenu = toggleSignedInShellMenu;
     window.closeSignedInShellMenu = closeSignedInShellMenu;
     window.shellOpenChat = shellOpenChat;
     window.shellOpenFeedback = shellOpenFeedback;
-    window.shellShowPending = shellShowPending;
-    window.shellManageDeletedFiles = shellManageDeletedFiles;
-    window.shellResumeReading = shellResumeReading;
 
     window.openPolicyModal = openPolicyModal;
     window.closePolicyModal = closePolicyModal;
