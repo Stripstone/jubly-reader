@@ -878,32 +878,6 @@ window.rcInteraction = (function () {
         sidebar.classList.toggle('open', next);
         if (trigger) trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
     }
-    function closeResumePopout() {
-        const popout = document.getElementById('resumePopout');
-        const trigger = document.getElementById('sb-resume');
-        if (popout) popout.classList.remove('open');
-        if (trigger) trigger.setAttribute('aria-expanded', 'false');
-    }
-
-    function toggleResumePopout(event) {
-        try { if (event && typeof event.preventDefault === 'function') event.preventDefault(); } catch (_) {}
-        const popout = document.getElementById('resumePopout');
-        const trigger = document.getElementById('sb-resume');
-        const sidebar = document.getElementById('app-sidebar');
-        const mobileSidebarOpen = !!(sidebar && sidebar.classList.contains('open'));
-        if (!popout || mobileSidebarOpen || (window.matchMedia && window.matchMedia('(max-width: 640px)').matches)) {
-            const next = !popout.classList.contains('open');
-            popout.classList.toggle('open', next);
-            if (trigger) {
-                trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
-                trigger.classList.toggle('active', next);
-            }
-            return;
-        }
-        const next = !popout.classList.contains('open');
-        popout.classList.toggle('open', next);
-        if (trigger) trigger.setAttribute('aria-expanded', next ? 'true' : 'false');
-    }
 
     function syncShellAuthPresentation(sectionId = getCurrentVisibleSection()) {
         const id = normalizeSection(sectionId);
@@ -954,14 +928,12 @@ window.rcInteraction = (function () {
         });
         const supportFooter = document.getElementById('supportFooter');
         if (supportFooter) supportFooter.style.display = authed && SIDEBAR_SECTIONS.includes(id) ? 'flex' : 'none';
-        const sbResume = document.getElementById('sb-resume');
         const sbLibrary = document.getElementById('sb-library');
         const sbHistory = document.getElementById('sb-history');
         const sbSettings = document.getElementById('sb-settings');
         const sbWhatsNew = document.getElementById('sb-whats-new');
         const sbSupport = document.getElementById('sb-support');
         const sbUpgrade = document.getElementById('sb-upgrade');
-        if (sbResume) sbResume.classList.toggle('active', !!(document.getElementById('resumePopout') && document.getElementById('resumePopout').classList.contains('open')));
         if (sbLibrary) sbLibrary.classList.toggle('active', id === 'dashboard');
         if (sbHistory) sbHistory.classList.toggle('active', id === 'history-page');
         if (sbSettings) sbSettings.classList.toggle('active', id === 'profile-page' && document.getElementById('tab-settings') && !document.getElementById('tab-settings').classList.contains('hidden-section'));
@@ -969,7 +941,6 @@ window.rcInteraction = (function () {
         if (sbSupport) sbSupport.classList.toggle('active', id === 'support-page');
         if (sbUpgrade) sbUpgrade.classList.toggle('active', id === 'profile-page' && document.getElementById('tab-subscription') && !document.getElementById('tab-subscription').classList.contains('hidden-section'));
         if (isSignedInShellSurface) closeSignedInShellMenu();
-        closeResumePopout();
 
         const libraryToolbar = document.getElementById('library-toolbar');
         const librarySample = document.getElementById('library-public-sample');
@@ -3518,24 +3489,72 @@ window.rcInteraction = (function () {
     }
 
 
+    function setProfileActionStatus(message, kind = 'info') {
+        const status = document.getElementById('profile-action-status') || document.getElementById('billing-message');
+        if (!status) return;
+        status.textContent = message || '';
+        status.classList.toggle('hidden-section', !message);
+        status.dataset.kind = message ? kind : '';
+    }
+
+    function shellShowPending(label, state = 'Coming Soon') {
+        const title = String(label || 'This surface');
+        const copy = `${title} is ${String(state || 'pending').toLowerCase()}.`;
+        setProfileActionStatus(copy, 'pending');
+    }
+
+    function shellManageDeletedFiles() {
+        // Deleted-file ownership is not implemented in shell. Surface an honest
+        // UX response instead of a dead button or fabricated deleted-file owner.
+        setProfileActionStatus('Deleted Files management is pending until the real file owner exposes this surface.', 'pending');
+    }
+
     async function shellOpenChat() {
         try {
-            if (window.rcHelp && typeof window.rcHelp.openChat === 'function') await window.rcHelp.openChat();
+            if (window.rcHelp && typeof window.rcHelp.openChat === 'function') {
+                await window.rcHelp.openChat();
+                setProfileActionStatus('', 'info');
+                return;
+            }
         } catch (_) {}
+        setProfileActionStatus('Chat support is pending in this runtime.', 'pending');
     }
 
     async function shellOpenFeedback() {
         try {
-            if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') await window.rcHelp.openFeedback();
+            if (window.rcHelp && typeof window.rcHelp.openFeedback === 'function') {
+                await window.rcHelp.openFeedback();
+                setProfileActionStatus('', 'info');
+                return;
+            }
         } catch (_) {}
+        setProfileActionStatus('Feedback capture is pending in this runtime.', 'pending');
+    }
+
+    function shellResumeReading() {
+        try {
+            if (typeof hasActiveReadingCards === 'function' && hasActiveReadingCards()) {
+                showSection('reading-mode');
+                return;
+            }
+        } catch (_) {}
+        try {
+            if (typeof startReading === 'function') {
+                startReading();
+                return;
+            }
+        } catch (_) {}
+        showSection('dashboard');
+        try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {}
     }
 
     window.toggleSignedInShellMenu = toggleSignedInShellMenu;
     window.closeSignedInShellMenu = closeSignedInShellMenu;
-    window.toggleResumePopout = toggleResumePopout;
-    window.closeResumePopout = closeResumePopout;
     window.shellOpenChat = shellOpenChat;
     window.shellOpenFeedback = shellOpenFeedback;
+    window.shellShowPending = shellShowPending;
+    window.shellManageDeletedFiles = shellManageDeletedFiles;
+    window.shellResumeReading = shellResumeReading;
 
     window.openPolicyModal = openPolicyModal;
     window.closePolicyModal = closePolicyModal;
