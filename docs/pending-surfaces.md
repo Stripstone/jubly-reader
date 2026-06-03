@@ -80,10 +80,10 @@ Maintenance rule:
 
 | Surface | What it does | Status |
 |---|---|---|
-| Nav → **Usage pill** (renders on auth) | Usage snapshot hydration | ✅ Inline neutral pending: `Checking…` until truth is authoritative |
+| Nav → **Usage pill** (renders on auth) | Usage snapshot hydration and post-consume refresh | ✅ Inline neutral pending: `Checking…` until truth is authoritative. `rcUsage.check()` and `rcUsage.consume()` own their auth headers through `window.rcAuth.getAccessToken()` and dispatch `rc:usage-changed` with action, cost, remaining, allowance, allowed, and reason so Import/TTS consumption can refresh the pill from server truth. |
 
 | Onboarding / reading settings → **voice selection preview** | Local `speechSynthesis` one-word preview | — 1A lightweight preview only. Selecting Sara/Jenny/William/Davis in onboarding, or changing voice in reading settings, may utter `Hey` through browser speech synthesis. It does not call cloud TTS, does not consume usage, does not enter the Read Aloud queue, and fails silently. Basic/browser contexts must not carry dead cloud selections into runtime playback. |
-| Reader → protected cloud **Read page** usage gate | `rcUsage.check('tts')` before protected cloud request, then `rcUsage.consume('tts')` only after runtime playback commit | ◐ Runtime-owned TTS seam. Reading settings surfaces the commitment cost as `Uses ✨ 2`; replay-window covered pages skip check/consume; browser/basic/public/nonprotected paths do not consume. Consumption diagnostics distinguish `usage-check`, `usage-consume-after-playback-commit`, `usage-consume-skipped-replay-window`, and `usage-consume-skipped-nonprotected-path`. |
+| Reader → protected cloud **Read page** usage gate | `rcUsage.check('tts')` before protected cloud request, then `rcUsage.consume('tts')` only after runtime playback commit | ◐ Runtime-owned TTS seam. Reading settings surfaces the commitment cost as `Uses ✨ 2`; replay-window covered pages skip check/consume; browser/basic/demo/public/nonprotected paths do not consume. Consumption diagnostics distinguish `usage-check`, `usage-consume-after-playback-commit`, `usage-consume-skipped-replay-window`, `usage-consume-skipped-nonprotected-path`, and `usage-consume-fetch-result/error`. |
 
 ---
 
@@ -92,9 +92,9 @@ Maintenance rule:
 | Surface | What it does | Status |
 |---|---|---|
 | Importer → **Scan Contents** button | EPUB parse via JSZip | ✅ Inline button state: `Scanning…` + existing inline step text such as `Reading book…` |
-| Importer → **Import** button (post-scan) | `POST /api/content?action=page-break` then IndexedDB write | ✅ Final import commit button surfaces `Uses ✨ 6`; inline progress stage includes explicit page-builder step before save |
+| Importer → **Import** button (post-scan) | `POST /api/content?action=page-break` then IndexedDB write then `rcUsage.consume('book_import')` | ✅ Final import commit button surfaces `Uses ✨ 6`; inline progress stage includes explicit page-builder step before save. Durable consume uses the action key `book_import` after successful commit and must refresh the usage pill from the server consume result. |
 | Importer → **Import** button (non-EPUB file) | Upload → FreeConvert → poll → fetch EPUB → parse | ✅ Existing inline multi-step copy retained (`Preparing upload…`, `Uploading…`, `Converting…`, `Reading book…`) |
-| Importer → **Import Text** button | Markdown chapter parse + IndexedDB write | ✅ Final text import button surfaces `Uses ✨ 6`; inline button state: `Importing…` + progress stage appears before page-break await |
+| Importer → **Import Text** button | Markdown chapter parse + IndexedDB write then `rcUsage.consume('book_import')` | ✅ Final text import button surfaces `Uses ✨ 6`; inline button state: `Importing…` + progress stage appears before page-break await. Durable consume uses the action key `book_import` after successful commit and must refresh the usage pill from the server consume result. |
 | Importer capacity gate (Import Text / Scan Contents / final save) | `POST /api/app?kind=import-capacity` | ◐ Server-backed action gate. The importer opens normally; selecting or dropping a file is not the capacity gate. Import Text and Scan Contents run the shared gate before parsing/import work. `library_full` at those user action gates keeps the importer surface open and shows `Your library is full. See plans for more options.`; the See plans link is explicit user intent for opening billing. |
 
 ---

@@ -944,7 +944,8 @@ function getSelectedVoicePreference() {
   const rawType = stored.startsWith('cloud:') || stored.startsWith('polly:') || stored.startsWith('azure:') ? 'cloud' : (stored ? 'browser' : 'auto');
   let cloudAllowed = false;
   try {
-    cloudAllowed = !!(window.rcPolicy && typeof window.rcPolicy.canUseCloudVoices === 'function' && window.rcPolicy.canUseCloudVoices());
+    const voiceRole = window.rcPolicy && typeof window.rcPolicy.getVoiceRole === 'function' ? window.rcPolicy.getVoiceRole() : '';
+    cloudAllowed = voiceRole === 'pro' && !!(window.rcPolicy && typeof window.rcPolicy.canUseCloudVoices === 'function' && window.rcPolicy.canUseCloudVoices());
   } catch (_) { cloudAllowed = false; }
   // 1A safety: preserve a premium preference for future Pro contexts, but do
   // not let a Basic/browser-only runtime carry a dead cloud voice into Read Aloud.

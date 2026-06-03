@@ -258,7 +258,8 @@
       function buildVoiceSelect(selectEl, gender) {
         if (!selectEl) return;
         const resolvedPolicy = (window.rcPolicy && typeof window.rcPolicy.get === 'function') ? window.rcPolicy.get() : null;
-        const cloudVoicesAllowed = !!resolvedPolicy?.features?.cloudVoices;
+        const voiceRole = (window.rcPolicy && typeof window.rcPolicy.getVoiceRole === 'function') ? window.rcPolicy.getVoiceRole() : '';
+        const cloudVoicesAllowed = voiceRole === 'pro' && !!resolvedPolicy?.features?.cloudVoices;
         const isFree      = !cloudVoicesAllowed;
         const isActive    = String(TTS_STATE?.voiceVariant || 'female').toLowerCase() === gender;
         const rawSavedVoice = (() => { try { return (typeof getStoredSelectedVoice === 'function' ? getStoredSelectedVoice() : (window.__rcSessionVoiceSelection || '')) || ''; } catch(_) { return ''; } })();

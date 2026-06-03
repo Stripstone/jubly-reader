@@ -2221,8 +2221,13 @@ window.rcInteraction = (function () {
 
     function updateTierPill() {
         const tier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
+        const voiceRole = (window.rcPolicy && typeof window.rcPolicy.getVoiceRole === 'function') ? window.rcPolicy.getVoiceRole() : '';
         const pill = document.getElementById('reading-tier-pill');
-        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Pro' }; pill.textContent = map[tier] || 'Basic'; }
+        if (pill) {
+            const map = { basic: 'Basic', pro: 'Pro', premium: 'Pro', demo: 'Demo' };
+            const key = voiceRole === 'demo' ? 'demo' : tier;
+            pill.textContent = map[key] || 'Basic';
+        }
     }
 
     function getCurrentTier() {

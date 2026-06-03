@@ -243,6 +243,38 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     }
   }
 
+
+  function getAuthHeaders() {
+    try {
+      const token = window.rcAuth && typeof window.rcAuth.getAccessToken === 'function'
+        ? String(window.rcAuth.getAccessToken() || '').trim()
+        : '';
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function getRuntimeVoiceRole() {
+    try {
+      const signedIn = !!(window.rcAuth && typeof window.rcAuth.isSignedIn === 'function' && window.rcAuth.isSignedIn());
+      if (!signedIn) return 'demo';
+    } catch (_) {
+      return 'demo';
+    }
+    return canUseCloudVoices() ? 'pro' : 'basic';
+  }
+
+  function rcUsageDiagPush(event, detail) {
+    try {
+      if (!Array.isArray(window.__rcUsageDiagnostics)) window.__rcUsageDiagnostics = [];
+      const item = Object.assign({ t: new Date().toISOString(), event }, detail || {});
+      window.__rcUsageDiagnostics.push(item);
+      if (window.__rcUsageDiagnostics.length > 80) window.__rcUsageDiagnostics.shift();
+      try { window.dispatchEvent(new CustomEvent('rc:usage-diagnostic', { detail: item })); } catch (_) {}
+    } catch (_) {}
+  }
+
   function isNonPublicRuntimePolicy(policy) {
     const normalized = normalizeRuntimePolicy(policy, policy && policy.tier ? policy.tier : 'basic');
     return normalized.tier !== 'basic' ||
@@ -1612,6 +1644,7 @@ window.rcPolicy = {
   apply: applyResolvedRuntimePolicy,
   canSimulateTier: canSimulateTierSelection,
   getTier: getRuntimeTier,
+  getVoiceRole: getRuntimeVoiceRole,
   getUsageDailyLimit: getRuntimeUsageAllowance,
   getImportSlotLimit: getRuntimeImportSlotLimit,
   hasImportCapacity: hasRuntimeImportCapacity,
@@ -1635,13 +1668,18 @@ window.rcUsage = {
   // after a successful action commit for the actual durable write.
   check: async function rcUsageCheck(category) {
     const spent = sessionTokens?.spent || {};
+    const action = String(category || '');
+    const headers = { 'Content-Type': 'application/json', ...getAuthHeaders() };
+    const authAvailable = !!headers.Authorization;
+    const url = (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=usage-check') : '/api/app?kind=usage-check');
+    rcUsageDiagPush('usage-check-fetch-start', { action, cost: TOKEN_COSTS[action] || 0, authAvailable, fetchAttempted: true });
     try {
       const resp = await fetch(
-        (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=usage-check') : '/api/app?kind=usage-check'),
+        url,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ action: category, spent }),
+          headers,
+          body: JSON.stringify({ action, spent }),
           cache: 'no-store',
         }
       );
@@ -1653,7 +1691,9 @@ window.rcUsage = {
         sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
         sessionTokens.authoritative = Number.isFinite(remaining);
         sessionTokens.source = 'server';
-        try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: data.remaining, allowance: data.limit, source: 'server' } })); } catch (_) {}
+        const detail = { action, remaining: data.remaining, allowance: data.limit, source: 'server', cost: data.cost, allowed: !!data.allowed, reason: data.meta?.reason || (data.allowed ? 'ok' : 'denied') };
+        rcUsageDiagPush('usage-check-fetch-result', Object.assign({ status: resp.status, authAvailable, fetchAttempted: true }, detail));
+        try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail })); } catch (_) {}
         return {
           allowed: !!data.allowed,
           cost: data.cost,
@@ -1663,30 +1703,38 @@ window.rcUsage = {
           meta: data.meta || {},
         };
       }
-    } catch (_) {}
-    const cost = TOKEN_COSTS[category] || 0;
+      rcUsageDiagPush('usage-check-fetch-denied', { action, status: resp.status, authAvailable, fetchAttempted: true, cost: TOKEN_COSTS[action] || 0 });
+    } catch (err) {
+      rcUsageDiagPush('usage-check-fetch-error', { action, authAvailable, fetchAttempted: true, cost: TOKEN_COSTS[action] || 0, error: String(err?.message || err) });
+    }
+    const cost = TOKEN_COSTS[action] || 0;
     sessionTokens.authoritative = false;
     sessionTokens.source = 'server-unavailable';
-    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: null, allowance: sessionTokens.allowance, source: 'server-unavailable' } })); } catch (_) {}
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { action, remaining: null, allowance: sessionTokens.allowance, source: 'server-unavailable', cost, allowed: true, reason: 'server_unavailable' } })); } catch (_) {}
     return {
       allowed: true,
       cost,
       remaining: null,
       limit: sessionTokens.allowance,
       reason: 'server_unavailable',
-      meta: { policySource: 'server-unavailable' },
+      meta: { policySource: 'server-unavailable', authAvailable },
     };
   },
   // Durable consume. Call this AFTER a successful action commit (e.g. after
   // localBookPut succeeds). This is the only path that writes durable usage.
   consume: async function rcUsageConsume(category) {
+    const action = String(category || '');
+    const headers = { 'Content-Type': 'application/json', ...getAuthHeaders() };
+    const authAvailable = !!headers.Authorization;
+    const url = (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=usage-consume') : '/api/app?kind=usage-consume');
+    rcUsageDiagPush('usage-consume-fetch-start', { action, cost: TOKEN_COSTS[action] || 0, authAvailable, fetchAttempted: true });
     try {
       const resp = await fetch(
-        (typeof apiUrl === 'function' ? apiUrl('/api/app?kind=usage-consume') : '/api/app?kind=usage-consume'),
+        url,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ action: category }),
+          headers,
+          body: JSON.stringify({ action }),
           cache: 'no-store',
         }
       );
@@ -1698,7 +1746,9 @@ window.rcUsage = {
         sessionTokens.remaining = Number.isFinite(remaining) ? Math.max(0, remaining) : null;
         sessionTokens.authoritative = Number.isFinite(remaining);
         sessionTokens.source = 'server';
-        try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: data.remaining, allowance: data.limit, source: 'server' } })); } catch (_) {}
+        const detail = { action, remaining: data.remaining, allowance: data.limit, source: 'server', cost: data.cost, allowed: !!data.allowed, reason: data.meta?.reason || (data.allowed ? 'ok' : 'denied') };
+        rcUsageDiagPush('usage-consume-fetch-result', Object.assign({ status: resp.status, authAvailable, fetchAttempted: true }, detail));
+        try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail })); } catch (_) {}
         return {
           allowed: !!data.allowed,
           cost: data.cost,
@@ -1708,21 +1758,26 @@ window.rcUsage = {
           meta: data.meta || {},
         };
       }
-    } catch (_) {}
+      rcUsageDiagPush('usage-consume-fetch-denied', { action, status: resp.status, authAvailable, fetchAttempted: true, cost: TOKEN_COSTS[action] || 0 });
+    } catch (err) {
+      rcUsageDiagPush('usage-consume-fetch-error', { action, authAvailable, fetchAttempted: true, cost: TOKEN_COSTS[action] || 0, error: String(err?.message || err) });
+    }
     sessionTokens.authoritative = false;
     sessionTokens.source = 'server-unavailable';
+    const detail = { action, remaining: null, allowance: sessionTokens.allowance, source: 'server-unavailable', cost: TOKEN_COSTS[action] || 0, allowed: true, reason: 'server_unavailable' };
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail })); } catch (_) {}
     return {
       allowed: true,
-      cost: TOKEN_COSTS[category] || 0,
+      cost: TOKEN_COSTS[action] || 0,
       remaining: null,
       limit: sessionTokens.allowance,
       reason: 'server_unavailable',
-      meta: { policySource: 'server-unavailable' },
+      meta: { policySource: 'server-unavailable', authAvailable },
     };
   },
   spend: function rcUsageSpend(category) {
     try { if (typeof tokenSpend === 'function') tokenSpend(category); } catch (_) {}
-    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: sessionTokens.source || 'client' } })); } catch (_) {}
+    try { window.dispatchEvent(new CustomEvent('rc:usage-changed', { detail: { action: category, remaining: sessionTokens.remaining, allowance: sessionTokens.allowance, source: sessionTokens.source || 'client', cost: TOKEN_COSTS[category] || 0 } })); } catch (_) {}
   },
   getSnapshot: function rcUsageGetSnapshot() {
     const remaining = normalizeUsageValue(sessionTokens?.remaining);
@@ -1734,7 +1789,11 @@ window.rcUsage = {
       authoritative: typeof sessionTokens?.authoritative === 'boolean' ? (!!sessionTokens.authoritative && hasValue) : hasValue,
       source: sessionTokens?.source || null,
       spent: { ...(sessionTokens?.spent || {}) },
+      diagnostics: Array.isArray(window.__rcUsageDiagnostics) ? window.__rcUsageDiagnostics.slice(-20) : [],
     };
+  },
+  getDiagnostics: function rcUsageGetDiagnostics() {
+    return Array.isArray(window.__rcUsageDiagnostics) ? window.__rcUsageDiagnostics.slice() : [];
   },
   applySnapshot: function rcUsageApplySnapshot(snapshot) {
     const remaining = normalizeUsageValue(snapshot?.remaining);
