@@ -2018,6 +2018,32 @@
         }
       }
 
+      // Cloud library: readable access from Supabase Storage through the
+      // server-owned restore endpoint. This does not create a permanent device
+      // copy; Move/Remove in Manage Library controls storage location.
+      if (isCloudBookSelectId(id)) {
+        const cloudId = stripCloudPrefix(id);
+        try {
+          const result = await (window.rcSync && typeof window.rcSync.restoreCloudBook === 'function'
+            ? window.rcSync.restoreCloudBook(cloudId)
+            : Promise.resolve({ ok: false, reason: 'sync_unavailable' }));
+          if (!result || result.ok === false || !result.book || typeof result.book.markdown !== 'string') {
+            throw new Error(result?.reason || 'cloud book restore failed');
+          }
+          currentBookRaw = result.book.markdown;
+          hasExplicitChapters = countExplicitH1(currentBookRaw) > 0;
+          if (hasExplicitChapters) chapterList = parseChaptersFromMarkdown(currentBookRaw);
+          await refreshChapterAndPagesUI(options);
+          return;
+        } catch (e) {
+          setSelectOptions(chapterSelect, [], "Failed to load cloud book");
+          setSelectOptions(pageStart, [], "Failed to load cloud book");
+          setSelectOptions(pageEnd, [], "Failed to load cloud book");
+          console.error('Cloud book load error:', e);
+          return;
+        }
+      }
+
       const entry = manifest.find(b => b.id === id);
       if (!entry) {
         setSelectOptions(chapterSelect, [], "Select a book first");
@@ -2132,6 +2158,18 @@
       applySelectionToBulkInput(slice.join("\n---\n"), { append: true, pageMeta: pageSlice });
     });
 
+    function isCloudBookSelectId(id) { return String(id || '').startsWith('cloud:'); }
+    function stripCloudPrefix(id) { return String(id || '').replace(/^cloud:/, ''); }
+    function getReadableCloudBooks() {
+      try {
+        const items = (window.rcSync && typeof window.rcSync.getRemoteLibraryItems === 'function') ? window.rcSync.getRemoteLibraryItems() : [];
+        return (Array.isArray(items) ? items : [])
+          .filter((item) => String(item.status || 'active') === 'active')
+          .filter((item) => String(item.storage_kind || '') === 'supabase_storage')
+          .filter((item) => !!String(item.storage_ref || '').trim());
+      } catch (_) { return []; }
+    }
+
     async function populateBookSelectWithLocal() {
       // Populate server + local books in one dropdown.
       bookSelect.innerHTML = "";
@@ -2159,6 +2197,25 @@
         bookSelect.appendChild(og);
       }
 
+      // Cloud books remain readable in Document Library even when their
+      // storage location is Cloud rather than this device. Manage Library owns
+      // storage movement; this selector owns readable access.
+      const cloudBooks = getReadableCloudBooks();
+      if (cloudBooks.length) {
+        const og = document.createElement('optgroup');
+        og.label = 'Saved to Cloud';
+        cloudBooks
+          .slice()
+          .sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')))
+          .forEach((b) => {
+            const opt = document.createElement('option');
+            opt.value = `cloud:${b.id}`;
+            opt.textContent = b.title || 'Untitled (Cloud)';
+            og.appendChild(opt);
+          });
+        bookSelect.appendChild(og);
+      }
+
       // Server books
       if (manifest.length) {
         const og = document.createElement('optgroup');
@@ -2172,7 +2229,7 @@
         bookSelect.appendChild(og);
       }
 
-      if (!locals.length && !manifest.length) {
+      if (!locals.length && !cloudBooks.length && !manifest.length) {
         const opt = document.createElement('option');
         opt.value = '';
         opt.textContent = 'No books found';
@@ -2194,6 +2251,8 @@
     window.__rcRefreshBookSelect = async () => {
       try { await populateBookSelectWithLocal(); } catch (_) {}
     };
+    window.addEventListener('rc:remote-library-changed', () => { populateBookSelectWithLocal().catch(() => {}); });
+    document.addEventListener('rc:durable-data-hydrated', () => { populateBookSelectWithLocal().catch(() => {}); });
     // Expose context helper so out-of-closure callers (startFocusedPageTts,
     // focusReadingPage, _installScrollPageTracker) can reach it.
     window.getReadingTargetContext = getReadingTargetContext;
