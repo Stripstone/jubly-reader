@@ -2477,7 +2477,10 @@ function getTtsSupportStatus() {
   const blockedReason = String(TTS_STATE.playbackBlockedReason || '');
   const playable = (!blockedReason) && basePlayable;
   return {
-    tier, cloudVoiceAccess: !!resolved.cloudVoiceAccess, browserSupported, browserVoices,
+    tier,
+    voiceRole: resolved.voiceRole || '',
+    protectedCloudUsage: !!resolved.protectedCloudUsage,
+    cloudVoiceAccess: !!resolved.cloudVoiceAccess, browserSupported, browserVoices,
     browserVoiceAvailable: !!browserVoice,
     browserVoiceName: browserVoice ? (browserVoice.name || null) : null,
     freePlayable, playable,
@@ -4815,6 +4818,7 @@ window.getCountdownStatus       = getCountdownStatus;
 window.getTtsSupportStatus      = getTtsSupportStatus;
 window.getTtsCapabilityStatus   = getTtsCapabilityStatus;
 window.getTtsDiagnosticsSnapshot = getTtsDiagnosticsSnapshot;
+window.__rcGetTtsDebugSnapshot  = getTtsDiagnosticsSnapshot;
 window.pauseOrResumeReading     = pauseOrResumeReading;
 window.toggleAutoplay           = toggleAutoplay;
 window.setPlaybackRate          = setPlaybackRate;
