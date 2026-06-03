@@ -67,9 +67,9 @@ Maintenance rule:
 | Surface | What it does | Status |
 |---|---|---|
 | Login / Create account surface with pending paid intent | Email step resolves, account state is checked, auth settles, then paid checkout handoff begins | ✅ Inline auth copy stays honest: step-one email fully settles before account creation continues, existing-account emails are steered to `Log In`, signup success uses `Check your email to verify your account`, backing out clears stale paid-intent markers, verified returns land on login, and successful paid auth communicates `Redirecting to … checkout…` while checkout starts |
-| Pricing modal → **Continue for free / Choose Pro / Choose Premium** buttons | `fetchPublicConfig` + `fetchRuntimeSnapshot` + Pro trial eligibility check | ✅ Settled modal entry: config/snapshot/trial-eligibility resolve before the modal appears so button text does not visibly mutate; signed-in users only see trial copy when server eligibility says a trial is available; buttons remain disabled while the hidden settle completes |
+| Pricing modal → **Continue for free / Choose Pro** buttons | `fetchPublicConfig` + `fetchRuntimeSnapshot` + Pro trial eligibility check | ✅ Settled modal entry remains required before the Basic/Pro modal appears. Premium is no longer customer-facing in launch pricing; any internal Premium state must map to Pro-facing language rather than a third visible card. Buttons remain disabled while the hidden settle completes. |
 | Profile → Subscription tab (renders on open) | `fetchRuntimeSnapshot` | ✅ Inline copy: `Checking your account…` / `—` while in flight |
-| Pricing modal → **Choose Pro / Choose Premium** (signed in) | `POST /api/billing?action=checkout` | ✅ Inline clicked-button state: `Preparing…` + banner: `Preparing checkout…`; error resolves to `Try again` or `Open login` if auth expired |
+| Pricing modal → **Choose Pro** (signed in) | `POST /api/billing?action=checkout` | ✅ Inline clicked-button state: `Preparing…` + banner: `Preparing checkout…`; error resolves to `Try again` or `Open login` if auth expired |
 | Profile → Subscription → **Manage Billing** button | `POST /api/billing?action=portal` | ✅ Inline clicked-button state: `Opening…` + banner: `Opening billing…`; error resolves to `Try again` or `Open login` if auth expired |
 | App returns from Stripe checkout (no button) | Entitlement re-hydration after redirect | ✅ Banner: `Updating your plan…` while policy truth settles; checkout success polls resolved entitlement briefly before showing the subscription surface as settled, so a just-created trial is not presented as Basic unless the server still has no paid entitlement truth. Failure resolves to `Refresh` |
 | App returns from billing portal (no button) | Billing-status re-hydration after redirect | ✅ Banner: `Refreshing billing status…` while policy truth settles; failure resolves to `Refresh` |
@@ -81,6 +81,7 @@ Maintenance rule:
 | Surface | What it does | Status |
 |---|---|---|
 | Nav → **Usage pill** (renders on auth) | Usage snapshot hydration | ✅ Inline neutral pending: `Checking…` until truth is authoritative |
+| Reader → protected cloud **Read page** usage gate | `rcUsage.check('tts')` before protected cloud request, then `rcUsage.consume('tts')` only after runtime playback commit | ◐ Runtime-owned TTS seam. Replay-window covered pages skip check/consume; browser/basic/public/nonprotected paths do not consume. Consumption diagnostics distinguish `usage-check`, `usage-consume-after-playback-commit`, `usage-consume-skipped-replay-window`, and `usage-consume-skipped-nonprotected-path`. |
 
 ---
 

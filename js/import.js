@@ -578,7 +578,7 @@ async function requestServerPageBreak(payload) {
     function _describeUsageConsumeVerdict(verdict) {
       if (!verdict || verdict.allowed) return null;
       const reason = String(verdict.reason || '');
-      if (reason === 'daily_limit_reached') return 'Daily import limit reached — resets at midnight UTC.';
+      if (reason === 'daily_limit_reached') return 'You’ve reached today’s import limit. Resets tomorrow.';
       if (reason === 'auth_required') return 'Sign in to track your import usage.';
       return null;
     }

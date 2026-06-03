@@ -186,14 +186,14 @@ window.rcBilling = (function () {
 
   function planDisplayLabel(plan) {
     const normalized = normalizePlan(plan);
-    if (normalized === 'premium') return 'Premium';
+    if (normalized === 'premium') return 'Pro';
     if (normalized === 'pro') return 'Pro';
     return 'Basic';
   }
 
   function getPlanTrialDays(plans, plan) {
     const normalized = normalizePlan(plan);
-    const raw = normalized === 'premium' ? plans?.premium?.trialDays : normalized === 'pro' ? plans?.pro?.trialDays : 0;
+    const raw = normalized === 'pro' || normalized === 'premium' ? plans?.pro?.trialDays : 0;
     const days = Number(raw);
     return Number.isFinite(days) && days > 0 ? Math.trunc(days) : 0;
   }
@@ -252,7 +252,7 @@ window.rcBilling = (function () {
     if (status !== 'active' && status !== 'trialing') return false;
     const tier = normalizeRuntimeTier(entitlement.tier);
     const expected = normalizePlan(expectedPlan);
-    if (expected === 'pro' || expected === 'premium') return tier === expected;
+    if (expected === 'pro' || expected === 'premium') return tier === 'pro' || tier === 'premium';
     return tier === 'pro' || tier === 'premium';
   }
 
@@ -315,12 +315,12 @@ window.rcBilling = (function () {
     if (signedIn) {
       applyPlanButtonState(freeBtn, 'Basic', null, true);
       applyPlanButtonState(proBtn, 'Pro', null, true);
-      applyPlanButtonState(premiumBtn, 'Premium', null, true);
+      applyPlanButtonState(premiumBtn, 'Pro', null, true);
       return;
     }
     applyPlanButtonState(freeBtn, 'Continue for free', null, true);
     applyPlanButtonState(proBtn, 'Choose Pro', null, true);
-    applyPlanButtonState(premiumBtn, 'Choose Premium', null, true);
+    applyPlanButtonState(premiumBtn, 'Choose Pro', null, true);
   }
 
   function clearPricingModalSettling() {
@@ -330,23 +330,22 @@ window.rcBilling = (function () {
 
   function getSignedInPlanButtonModel(currentTier, plans, proTrialEligibility = null) {
     const tier = normalizeRuntimeTier(currentTier || 'basic');
-    const isBasicLocked = tier === 'pro' || tier === 'premium';
-    const isProLocked = tier === 'premium';
+    const proLike = tier === 'pro' || tier === 'premium';
     return {
       free: {
-        label: tier === 'basic' ? 'Current Plan' : 'Basic',
-        disabled: tier === 'basic' || isBasicLocked,
+        label: tier === 'basic' ? 'Current plan' : 'Basic',
+        disabled: tier === 'basic' || proLike,
         onclick: tier === 'basic' ? () => { if (typeof closeModal === 'function') closeModal('pricing-modal'); } : null,
       },
       pro: {
-        label: tier === 'pro' ? 'Current Plan' : trialCtaLabel('pro', 'Upgrade to Pro', plans, proTrialEligibility, true),
-        disabled: !plans?.pro?.available || tier === 'pro' || isProLocked,
-        onclick: tier === 'pro' || isProLocked ? null : () => startCheckout('pro'),
+        label: proLike ? 'Current plan' : trialCtaLabel('pro', 'Choose Pro', plans, proTrialEligibility, true),
+        disabled: !plans?.pro?.available || proLike,
+        onclick: proLike ? null : () => startCheckout('pro'),
       },
       premium: {
-        label: tier === 'premium' ? 'Current Plan' : 'Upgrade to Premium',
-        disabled: !plans?.premium?.available || tier === 'premium',
-        onclick: tier === 'premium' ? null : () => startCheckout('premium'),
+        label: 'Choose Pro',
+        disabled: true,
+        onclick: null,
       },
     };
   }
@@ -373,15 +372,15 @@ window.rcBilling = (function () {
       : null;
     if (token !== _pricingRenderToken) return;
 
-    if (proAmount) proAmount.textContent = plans?.pro?.amountLabel || 'Configured in Stripe';
-    if (proInterval) proInterval.textContent = plans?.pro?.intervalLabel || '';
+    if (proAmount) proAmount.textContent = plans?.pro?.amountLabel || '$17';
+    if (proInterval) proInterval.textContent = plans?.pro?.intervalLabel || '/mo';
     if (premiumAmount) premiumAmount.textContent = plans?.premium?.amountLabel || 'Configured in Stripe';
     if (premiumInterval) premiumInterval.textContent = plans?.premium?.intervalLabel || '';
 
     if (!signedIn) {
       applyPlanButtonState(freeBtn, 'Continue for free', () => rememberPlanAndOpenSignup('free'));
       applyPlanButtonState(proBtn, trialCtaLabel('pro', 'Choose Pro', plans, proTrialEligibility, false), () => rememberPlanAndOpenSignup('pro'), !plans?.pro?.available);
-      applyPlanButtonState(premiumBtn, 'Choose Premium', () => rememberPlanAndOpenSignup('premium'), !plans?.premium?.available);
+      applyPlanButtonState(premiumBtn, 'Choose Pro', null, true);
       clearPricingModalSettling();
       return;
     }
@@ -389,7 +388,7 @@ window.rcBilling = (function () {
     const buttonModel = getSignedInPlanButtonModel(currentTier, plans, proTrialEligibility);
     applyPlanButtonState(freeBtn, buttonModel.free.label, buttonModel.free.onclick, buttonModel.free.disabled);
     applyPlanButtonState(proBtn, buttonModel.pro.label, buttonModel.pro.onclick, buttonModel.pro.disabled);
-    applyPlanButtonState(premiumBtn, buttonModel.premium.label, buttonModel.premium.onclick, buttonModel.premium.disabled);
+    applyPlanButtonState(premiumBtn, buttonModel.premium.label, buttonModel.premium.onclick, true);
     clearPricingModalSettling();
   }
 
@@ -466,7 +465,7 @@ window.rcBilling = (function () {
 
     if (entitlement && (entitlement.status === 'active' || entitlement.status === 'trialing')) {
       const resolvedTier = normalizeRuntimeTier(entitlement?.tier);
-      const tierLabel = resolvedTier === 'premium' ? 'Premium' : resolvedTier === 'pro' ? 'Pro' : 'Free';
+      const tierLabel = (resolvedTier === 'premium' || resolvedTier === 'pro') ? 'Pro' : 'Free';
       const status = String(entitlement.status || '').trim().toLowerCase();
       const renewsAt = entitlement.renewsAt || entitlement.periodEnd || null;
       const renewsLabel = renewsAt

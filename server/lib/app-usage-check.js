@@ -15,7 +15,15 @@ import { getAllowedBrowserOrigins } from "./origins.js";
 import { getResolvedRuntimePolicyForRequest } from "./runtime-policy.js";
 import { getUserFromAccessToken, getUsageRow } from "./supabase.js";
 
-const COST_PER_ACTION = 2;
+const ACTION_COSTS = Object.freeze({
+  tts: 2,
+  book_import: 6,
+  import: 6,
+});
+function getActionCost(action) {
+  const key = String(action || '').trim().toLowerCase();
+  return Number.isFinite(Number(ACTION_COSTS[key])) ? Number(ACTION_COSTS[key]) : 2;
+}
 const VALID_ACTIONS = new Set([
   'book_import', 'tts', 'ai', 'summary', 'anchors', 'evaluate',
   'import', 'research', 'other_protected_backend_action',
@@ -79,7 +87,7 @@ export default async function handler(req, res) {
 
   const resolved = await getResolvedRuntimePolicyForRequest(req);
   const { usageDailyLimit } = resolved.policy;
-  const cost = COST_PER_ACTION;
+  const cost = getActionCost(action);
 
   if (usageDailyLimit == null) {
     return json(res, 200, {

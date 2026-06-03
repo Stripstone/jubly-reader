@@ -70,8 +70,8 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     research: 2,
     ai: 2,
     summary: 2,
-    book_import: 2,
-    import: 2,
+    book_import: 6,
+    import: 6,
     other_protected_backend_action: 2,
   };
 
@@ -1181,7 +1181,7 @@ function canUseCustomMusic() {
 
 function applyThemeClass(themeName) {
   const theme = String(themeName || 'default');
-  document.body.classList.remove('theme-green', 'theme-purple', 'theme-explorer');
+  document.body.classList.remove('theme-green', 'theme-blue', 'theme-purple', 'theme-explorer');
   if (theme !== 'default') document.body.classList.add('theme-' + theme);
 }
 
@@ -1253,7 +1253,8 @@ function persistThemeState() {
 }
 
 function setThemeRuntime(themeName) {
-  const requestedTheme = String(themeName || 'default');
+  const rawTheme = String(themeName || 'default');
+  const requestedTheme = rawTheme === 'purple' ? 'blue' : rawTheme;
   const nextTheme = canUseTheme(requestedTheme) ? requestedTheme : 'default';
   appTheme = nextTheme;
   persistThemeState();
@@ -1373,6 +1374,7 @@ function loadTheme() {
   const storedDiagPrefs = loadDiagnosticsPrefs() || {};
   const themeDiagPrefs = {};
   appTheme = String(stored.theme_id || 'default');
+  if (appTheme === 'purple') appTheme = 'blue';
   appThemeSettings = (stored.theme_settings && typeof stored.theme_settings === 'object') ? stored.theme_settings : {};
   if (typeof stored.diagnostics_enabled === 'boolean') themeDiagPrefs.enabled = stored.diagnostics_enabled;
   if (typeof stored.diagnostics_mode === 'string') themeDiagPrefs.mode = stored.diagnostics_mode;

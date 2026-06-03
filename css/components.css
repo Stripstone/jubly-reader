@@ -2199,3 +2199,5 @@ body {
   #reading-top-bar .reading-top-settings-btn,
   #reading-top-bar .reading-top-exit { min-height: 34px; }
 }
+
+.import-cost-note { align-self: center; color: #64748b; font-size: 0.76rem; font-weight: 800; white-space: nowrap; }

@@ -151,6 +151,17 @@ const TTS_CLOUD_RESTART_PENDING_KEY = 'tts:cloud-restart';
 const TTS_CLOUD_RESTART_SLOW_MS = 5000;
 const TTS_CLOUD_RESTART_VERY_SLOW_MS = 30000;
 
+// 1F runtime-local replay forgiveness. This is intentionally not durable
+// billing state: after protected cloud playback consumes for page N, replay of
+// page N and the immediately previous page N-1 in the same source/book/chapter
+// window skips an additional consume. Any new uncovered consumed page rolls the
+// window to that page and its immediate predecessor.
+const TTS_USAGE_REPLAY_WINDOW = {
+  consumedKey: null,
+  target: null,
+  consumedAt: 0,
+};
+
 const TTS_CLOUD_RESTART_PENDING = {
   requestId: 0,
   sessionId: 0,
@@ -163,6 +174,75 @@ const TTS_CLOUD_RESTART_PENDING = {
   verySlowTimerId: 0,
   message: '',
 };
+
+function getTtsUsageReplayTarget(key) {
+  const value = String(key || '');
+  try {
+    if (typeof readingTargetFromKey === 'function') {
+      const target = readingTargetFromKey(value);
+      if (target && Number.isFinite(Number(target.pageIndex))) {
+        return {
+          key: value,
+          sourceType: String(target.sourceType || ''),
+          bookId: String(target.bookId || ''),
+          chapterIndex: Number.isFinite(Number(target.chapterIndex)) ? Number(target.chapterIndex) : -1,
+          pageIndex: Number(target.pageIndex),
+        };
+      }
+    }
+  } catch (_) {}
+  const legacy = value.match(/^page-(\d+)$/);
+  if (legacy) {
+    return { key: value, sourceType: '', bookId: '', chapterIndex: -1, pageIndex: Number(legacy[1]) };
+  }
+  return { key: value, sourceType: '', bookId: '', chapterIndex: -1, pageIndex: null };
+}
+
+function isSameTtsUsageReplayScope(a, b) {
+  if (!a || !b) return false;
+  return String(a.sourceType || '') === String(b.sourceType || '') &&
+    String(a.bookId || '') === String(b.bookId || '') &&
+    Number(a.chapterIndex ?? -1) === Number(b.chapterIndex ?? -1);
+}
+
+function getTtsUsageReplayCoverage(key) {
+  const target = getTtsUsageReplayTarget(key);
+  const prior = TTS_USAGE_REPLAY_WINDOW.target;
+  if (!prior) return { covered: false, reason: 'no-replay-window', target, prior: null };
+  if (target.pageIndex == null || prior.pageIndex == null) {
+    const covered = !!target.key && String(target.key) === String(TTS_USAGE_REPLAY_WINDOW.consumedKey || '');
+    return { covered, reason: covered ? 'exact-key-replay-window' : 'unknown-page-outside-replay-window', target, prior };
+  }
+  if (!isSameTtsUsageReplayScope(target, prior)) {
+    return { covered: false, reason: 'different-source-outside-replay-window', target, prior };
+  }
+  const currentPage = Number(target.pageIndex);
+  const consumedPage = Number(prior.pageIndex);
+  const covered = currentPage === consumedPage || currentPage === consumedPage - 1;
+  return {
+    covered,
+    reason: covered ? (currentPage === consumedPage ? 'same-page-replay-window' : 'previous-page-replay-window') : 'page-outside-replay-window',
+    target,
+    prior,
+  };
+}
+
+function markTtsUsageReplayWindowConsumed(key, reason = 'usage-consumed') {
+  const target = getTtsUsageReplayTarget(key);
+  TTS_USAGE_REPLAY_WINDOW.consumedKey = String(key || '');
+  TTS_USAGE_REPLAY_WINDOW.target = target;
+  TTS_USAGE_REPLAY_WINDOW.consumedAt = Date.now();
+  ttsDiagPush('usage-replay-window-updated', {
+    key: String(key || ''),
+    reason,
+    sourceType: target.sourceType,
+    bookId: target.bookId,
+    chapterIndex: target.chapterIndex,
+    consumedPageIndex: target.pageIndex,
+    coversPageIndex: target.pageIndex == null ? null : Math.max(0, Number(target.pageIndex) - 1),
+    durable: false,
+  });
+}
 
 function clearCloudRestartPendingTimers() {
   if (TTS_CLOUD_RESTART_PENDING.slowTimerId) {
@@ -3559,6 +3639,13 @@ async function ttsSpeakQueue(key, parts) {
 
   // Free tier, or explicit browser voice selection regardless of cloud capability.
   if (!routeInfo.cloudCapable || routeInfo.requestedPath === 'browser-selected') {
+    ttsDiagPush('usage-consume-skipped-nonprotected-path', {
+      key,
+      reason: !routeInfo.cloudCapable ? 'not-cloud-capable' : 'browser-selected',
+      requestedPath: routeInfo.requestedPath || null,
+      cloudCapable: !!routeInfo.cloudCapable,
+      durable: false,
+    });
     browserSpeakQueue(key, parts);
     ttsDiagPush('speak-action', { action: 'started', route: 'browser', key, before, after: ttsBlockSnapshot() });
     return;
@@ -3594,6 +3681,61 @@ async function ttsSpeakQueue(key, parts) {
   const wantMarksForPage = optsForKeySentenceMarks(key);
   let useWindowMode = false;
   let chunkAText = pageText;
+  let cloudUsageConsumedForSession = false;
+  async function consumeCloudTtsAfterPlaybackCommit(reason) {
+    const commitReason = reason || 'playback-commit';
+    if (!wantMarksForPage) {
+      ttsDiagPush('usage-consume-skipped-nonprotected-path', { key, sessionId, reason: commitReason, path: 'cloud-without-page-marks', durable: false });
+      return;
+    }
+    if (cloudUsageConsumedForSession) {
+      ttsDiagPush('usage-consume-skipped-session-duplicate', { key, sessionId, reason: commitReason, durable: false });
+      return;
+    }
+
+    const replay = getTtsUsageReplayCoverage(key);
+    if (replay.covered) {
+      cloudUsageConsumedForSession = true;
+      ttsDiagPush('usage-consume-skipped-replay-window', {
+        key, sessionId,
+        reason: commitReason,
+        replayReason: replay.reason,
+        pageIndex: replay.target?.pageIndex ?? null,
+        coveredByPageIndex: replay.prior?.pageIndex ?? null,
+        durable: false,
+      });
+      return;
+    }
+
+    cloudUsageConsumedForSession = true;
+    try {
+      if (window.rcUsage && typeof window.rcUsage.consume === 'function') {
+        const verdict = await window.rcUsage.consume('tts');
+        const allowed = verdict?.allowed !== false;
+        ttsDiagPush('usage-consume-after-playback-commit', {
+          key, sessionId,
+          reason: commitReason,
+          replayReason: replay.reason,
+          allowed,
+          remaining: verdict?.remaining ?? null,
+          limit: verdict?.limit ?? null,
+          cost: verdict?.cost ?? null,
+          verdictReason: verdict?.reason || null,
+        });
+        if (allowed) markTtsUsageReplayWindowConsumed(key, commitReason);
+      } else if (window.rcUsage && typeof window.rcUsage.spend === 'function') {
+        window.rcUsage.spend('tts');
+        markTtsUsageReplayWindowConsumed(key, `${commitReason}:legacy-spend`);
+      } else if (typeof tokenSpend === 'function') {
+        tokenSpend('tts');
+        markTtsUsageReplayWindowConsumed(key, `${commitReason}:legacy-tokenSpend`);
+      } else {
+        ttsDiagPush('usage-consume-skipped-nonprotected-path', { key, sessionId, reason: 'no-usage-consume-owner', commitReason, durable: false });
+      }
+    } catch (err) {
+      ttsDiagPush('usage-consume-after-playback-commit-error', { key, sessionId, reason: commitReason, error: String(err?.message || err) });
+    }
+  }
 
   if (wantMarksForPage && queue.length === 1) {
     const sentences = ttsWindowSplitSentences(pageText);
@@ -3638,19 +3780,43 @@ async function ttsSpeakQueue(key, parts) {
     // Pre-flight usage check (runs once before any cloud request).
     // Pass 3: server verdict gates the action; client counter is display-only.
     if (wantMarksForPage) {
-      if (window.rcUsage && typeof window.rcUsage.check === 'function') {
+      const replay = getTtsUsageReplayCoverage(key);
+      if (replay.covered) {
+        ttsDiagPush('usage-check-skipped-replay-window', {
+          key, sessionId,
+          replayReason: replay.reason,
+          pageIndex: replay.target?.pageIndex ?? null,
+          coveredByPageIndex: replay.prior?.pageIndex ?? null,
+          durable: false,
+        });
+      } else if (window.rcUsage && typeof window.rcUsage.check === 'function') {
         try {
           const verdict = await window.rcUsage.check('tts');
-          if (!verdict.allowed) {
+          const allowed = !!verdict.allowed;
+          ttsDiagPush('usage-check', {
+            key, sessionId,
+            allowed,
+            remaining: verdict?.remaining ?? null,
+            limit: verdict?.limit ?? null,
+            cost: verdict?.cost ?? null,
+            verdictReason: verdict?.reason || null,
+            replayReason: replay.reason,
+          });
+          if (!allowed) {
             try { TTS_STATE.playbackBlockedReason = 'usage-limit'; } catch (_) {}
             ttsSetButtonActive(key, false);
             ttsSetHintButton(key, false);
             clearTtsCloudWindow();
             return;
           }
-        } catch (_) {} // server unreachable: proceed (safe degraded behavior)
+        } catch (err) {
+          ttsDiagPush('usage-check', { key, sessionId, allowed: true, reason: 'usage-check-error-proceed', error: String(err?.message || err), replayReason: replay.reason });
+        } // server unreachable: proceed (safe degraded behavior)
+      } else {
+        ttsDiagPush('usage-check', { key, sessionId, allowed: true, reason: 'no-usage-check-owner', replayReason: replay.reason });
       }
-      try { if (window.rcUsage && typeof window.rcUsage.spend === 'function') window.rcUsage.spend('tts'); else if (typeof tokenSpend === 'function') tokenSpend('tts'); } catch (_) {}
+      // 1F: do not consume on preflight or cloud fetch. Durable TTS usage is
+      // consumed only after protected cloud playback successfully commits.
     }
 
     for (let i = 0; i < queue.length; i++) {
@@ -3717,6 +3883,7 @@ async function ttsSpeakQueue(key, parts) {
         audio.play().then(() => {
           clearTtsStartupBanner();
           applyPending('play-start');
+          consumeCloudTtsAfterPlaybackCommit('play-start').catch(() => {});
         }).catch(reject);
       });
 
@@ -3943,6 +4110,7 @@ async function ttsSpeakQueue(key, parts) {
             audio.play().then(() => {
               clearTtsStartupBanner();
               applyPending('play-start');
+              consumeCloudTtsAfterPlaybackCommit('case-b-play-start').catch(() => {});
               ttsStartHighlightLoop(audio);
               clearCloudRestartTransition({ invalidateRequest: false, unmute: true });
             }).catch(err => {

@@ -236,18 +236,18 @@
 
           const AZURE_VOICES = gender === 'female'
             ? [
-                { id: 'en-US-AriaNeural',     label: 'Aria (US)' },
-                { id: 'en-US-JennyNeural',    label: 'Jenny (US)' },
                 { id: 'en-US-SaraNeural',     label: 'Sara (US)' },
+                { id: 'en-US-JennyNeural',    label: 'Jenny (US)' },
+                { id: 'en-US-AriaNeural',     label: 'Aria (US)' },
                 { id: 'en-GB-SoniaNeural',    label: 'Sonia (UK)' },
                 { id: 'en-AU-NatashaNeural',  label: 'Natasha (AU)' },
               ]
             : [
-                { id: 'en-US-RyanNeural',     label: 'Ryan (US)' },
-                { id: 'en-US-GuyNeural',      label: 'Guy (US)' },
-                { id: 'en-US-DavisNeural',    label: 'Davis (US)' },
-                { id: 'en-GB-RyanNeural',     label: 'Ryan (UK)' },
                 { id: 'en-AU-WilliamNeural',  label: 'William (AU)' },
+                { id: 'en-US-DavisNeural',    label: 'Davis (US)' },
+                { id: 'en-US-GuyNeural',      label: 'Guy (US)' },
+                { id: 'en-US-RyanNeural',     label: 'Ryan (US)' },
+                { id: 'en-GB-RyanNeural',     label: 'Ryan (UK)' },
               ];
 
           AZURE_VOICES.forEach(v => {

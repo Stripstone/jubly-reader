@@ -1362,8 +1362,9 @@ window.rcInteraction = (function () {
     }
 
     function applyPublicOnboardingTheme(theme) {
-        const safeTheme = ['default', 'green', 'purple'].includes(String(theme || 'default')) ? String(theme || 'default') : 'default';
-        document.body.classList.remove('theme-green', 'theme-purple');
+        let safeTheme = ['default', 'green', 'blue', 'purple'].includes(String(theme || 'default')) ? String(theme || 'default') : 'default';
+        if (safeTheme === 'purple') safeTheme = 'blue';
+        document.body.classList.remove('theme-green', 'theme-blue', 'theme-purple');
         if (safeTheme !== 'default') document.body.classList.add('theme-' + safeTheme);
         return safeTheme;
     }
@@ -1738,7 +1739,7 @@ window.rcInteraction = (function () {
 
     function _existingAccountSteerMessage(pendingPlan) {
         return pendingPlan && pendingPlan !== 'free'
-            ? `An account with this email already exists. Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.`
+            ? `An account with this email already exists. Log In to continue with ${'Pro'} checkout.`
             : 'An account with this email already exists. Log In to continue.';
     }
 
@@ -1988,10 +1989,10 @@ window.rcInteraction = (function () {
                     _steerExistingAccountToSignin(email, pendingPlan);
                 } else if (result?.data?.session) {
                     _authShowSuccess(pendingPlan && pendingPlan !== 'free'
-                        ? `Account created. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`
+                        ? `Account created. Redirecting to ${'Pro'} checkout…`
                         : 'Account created. Continuing to your library…');
                 } else {
-                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout.` : 'Check your email to verify your account.');
+                    _authShowSuccess(pendingPlan && pendingPlan !== 'free' ? `Check your email to verify your account. After verification, Log In to continue with ${'Pro'} checkout.` : 'Check your email to verify your account.');
                 }
             } else {
                 const { error } = await window.rcAuth.signIn(email, password);
@@ -2005,7 +2006,7 @@ window.rcInteraction = (function () {
                 } else {
                     const pendingPlan = window.rcBilling && typeof window.rcBilling.readPendingPlan === 'function' ? String(window.rcBilling.readPendingPlan() || '').trim().toLowerCase() : '';
                     if (pendingPlan === 'pro' || pendingPlan === 'premium') {
-                        _authShowSuccess(`Signed in. Redirecting to ${pendingPlan === 'premium' ? 'Premium' : 'Pro'} checkout…`);
+                        _authShowSuccess(`Signed in. Redirecting to ${'Pro'} checkout…`);
                     }
                 }
             }
@@ -2178,7 +2179,7 @@ window.rcInteraction = (function () {
         const current = (window.rcEntitlements && typeof window.rcEntitlements.getTier === 'function')
             ? window.rcEntitlements.getTier()
             : ((window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic');
-        const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' };
+        const map = { basic: 'Basic', pro: 'Pro', premium: 'Pro' };
         document.querySelectorAll('.tier-btn').forEach((btn) => {
             const next = map[current] || 'Basic';
             btn.classList.toggle('active', btn.textContent.trim() === next);
@@ -2193,7 +2194,7 @@ window.rcInteraction = (function () {
         if (!canSimulateTierSelection()) return;
         document.querySelectorAll('.tier-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        const map = { 'Basic': 'basic', 'Pro': 'pro', 'Premium': 'premium' };
+        const map = { 'Basic': 'basic', 'Pro': 'pro', 'Premium': 'pro' };
         const value = map[btn.textContent.trim()] || 'basic';
         // Call the runtime policy API directly — do not dispatch through #tierSelect DOM element.
         if (window.rcPolicy && typeof window.rcPolicy.refreshForTier === 'function') {
@@ -2206,7 +2207,7 @@ window.rcInteraction = (function () {
     function updateTierPill() {
         const tier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? window.rcPolicy.getTier() : 'basic';
         const pill = document.getElementById('reading-tier-pill');
-        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Premium' }; pill.textContent = map[tier] || 'Basic'; }
+        if (pill) { const map = { basic: 'Basic', pro: 'Pro', premium: 'Pro' }; pill.textContent = map[tier] || 'Basic'; }
     }
 
     function getCurrentTier() {
