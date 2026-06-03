@@ -93,9 +93,11 @@
   })();
 
 
-  // 1A: lightweight voice preview. This intentionally uses browser speech
-  // synthesis only; it does not call cloud TTS, consume usage, or enter the
-  // Read Aloud queue. Preview failure stays silent.
+  // 1A: voice preview is lightweight and non-stateful. Demo/Pro cloud
+  // selections may preview the real selected cloud voice through the existing
+  // TTS endpoint for the single word "Hey". Basic/browser selections use
+  // browser speech synthesis. Preview never consumes usage, never enters the
+  // Read Aloud queue, and failure remains silent.
   (function initJublyVoicePreview() {
     if (window.rcVoicePreview && typeof window.rcVoicePreview.sayHey === 'function') return;
     const PREMIUM_NAME_HINTS = Object.freeze({
@@ -104,12 +106,53 @@
       william: ['william','guy','daniel','david','alex'],
       davis: ['davis','guy','david','alex','daniel'],
     });
+    const PREMIUM_CLOUD_VOICE_IDS = Object.freeze({
+      sara: 'en-US-SaraNeural',
+      jenny: 'en-US-JennyNeural',
+      william: 'en-AU-WilliamNeural',
+      davis: 'en-US-DavisNeural',
+      aria: 'en-US-AriaNeural',
+      guy: 'en-US-GuyNeural',
+    });
+    function normalizePremiumName(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      const cleaned = raw
+        .replace(/^(cloud:|polly:|azure:)/i, '')
+        .replace(/^en-[A-Z]{2}-/i, '')
+        .replace(/Neural$/i, '')
+        .replace(/\s*\([^)]*\)\s*$/g, '')
+        .toLowerCase();
+      if (cleaned.includes('sara')) return 'sara';
+      if (cleaned.includes('jenny')) return 'jenny';
+      if (cleaned.includes('william')) return 'william';
+      if (cleaned.includes('davis')) return 'davis';
+      if (cleaned.includes('aria')) return 'aria';
+      if (cleaned.includes('guy')) return 'guy';
+      return cleaned;
+    }
+    function voiceIdForName(nameOrId) {
+      const raw = String(nameOrId || '').trim();
+      if (/^cloud:/i.test(raw)) return raw.replace(/^cloud:/i, '');
+      if (/^azure:/i.test(raw)) return raw.replace(/^azure:/i, '');
+      if (/^en-[A-Z]{2}-.+Neural$/i.test(raw)) return raw;
+      const key = normalizePremiumName(raw);
+      return PREMIUM_CLOUD_VOICE_IDS[key] || '';
+    }
+    function getVoiceRole() {
+      try { return String(window.rcPolicy && typeof window.rcPolicy.getVoiceRole === 'function' ? window.rcPolicy.getVoiceRole() : '').toLowerCase(); } catch (_) { return ''; }
+    }
+    function canCloudPreview(nameOrId) {
+      const role = getVoiceRole();
+      const voiceId = voiceIdForName(nameOrId);
+      return !!voiceId && (role === 'demo' || role === 'pro');
+    }
     function pickPreviewVoice(name) {
       try {
         const voices = (window.speechSynthesis && window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [])
           .filter(v => String(v.lang || '').toLowerCase().startsWith('en'));
         if (!voices.length) return null;
-        const key = String(name || '').trim().toLowerCase();
+        const key = normalizePremiumName(name);
         const hints = PREMIUM_NAME_HINTS[key] || [key];
         for (const hint of hints) {
           const found = voices.find(v => String(v.name || '').toLowerCase().includes(hint));
@@ -118,21 +161,54 @@
         return voices[0] || null;
       } catch (_) { return null; }
     }
+    async function playCloudHey(nameOrId, context) {
+      const voiceId = voiceIdForName(nameOrId);
+      if (!voiceId) return false;
+      try {
+        const endpoint = typeof apiUrl === 'function' ? apiUrl('/api/ai?action=tts') : '/api/ai?action=tts';
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: 'Hey', voiceId, requestMode: 'voice-preview' }),
+          cache: 'no-store',
+        });
+        let data = null;
+        try { data = await response.json(); } catch (_) {}
+        if (!response.ok || !data || !data.url) return false;
+        const audio = new Audio(data.url);
+        audio.volume = 0.85;
+        await audio.play();
+        try { window.__rcLastVoicePreview = { name: normalizePremiumName(nameOrId), voiceId, context: context || null, text: 'Hey', at: Date.now(), path: 'cloud-preview', localOnly: false, consumesUsage: false }; } catch (_) {}
+        return true;
+      } catch (_) { return false; }
+    }
+    function playBrowserHey(name, context) {
+      try {
+        if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') return false;
+        try { window.speechSynthesis.cancel(); } catch (_) {}
+        const utterance = new SpeechSynthesisUtterance('Hey');
+        const voice = pickPreviewVoice(name);
+        if (voice) utterance.voice = voice;
+        utterance.volume = 0.85;
+        utterance.rate = 1;
+        utterance.pitch = 1;
+        window.speechSynthesis.speak(utterance);
+        try { window.__rcLastVoicePreview = { name: String(name || ''), context: context || null, text: 'Hey', at: Date.now(), path: 'browser-preview', localOnly: true, consumesUsage: false }; } catch (_) {}
+        return true;
+      } catch (_) { return false; }
+    }
     window.rcVoicePreview = {
+      PREMIUM_CLOUD_VOICE_IDS,
+      voiceIdForName,
+      canCloudPreview,
       sayHey(name, context) {
-        try {
-          if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') return false;
-          try { window.speechSynthesis.cancel(); } catch (_) {}
-          const utterance = new SpeechSynthesisUtterance('Hey');
-          const voice = pickPreviewVoice(name);
-          if (voice) utterance.voice = voice;
-          utterance.volume = 0.85;
-          utterance.rate = 1;
-          utterance.pitch = 1;
-          window.speechSynthesis.speak(utterance);
-          try { window.__rcLastVoicePreview = { name: String(name || ''), context: context || null, text: 'Hey', at: Date.now(), localOnly: true }; } catch (_) {}
+        const ctx = context && typeof context === 'object' ? context : { context: context || 'unknown' };
+        const requested = ctx.voiceValue || ctx.voiceId || name;
+        if (canCloudPreview(requested)) {
+          playCloudHey(requested, ctx.context || 'voice-preview').catch(() => {});
           return true;
-        } catch (_) { return false; }
+        }
+        return playBrowserHey(name, ctx.context || context || 'voice-preview');
       }
     };
   })();
@@ -234,15 +310,17 @@
           if (!(window.rcVoicePreview && typeof window.rcVoicePreview.sayHey === 'function')) return;
           const raw = String(value || '').trim();
           if (!raw) return;
+          const ctx = context && typeof context === 'object' ? context : { context: context || 'reading-settings' };
+          const voiceValue = ctx.voiceValue || raw;
           const cleaned = raw.replace(/^(cloud:|polly:|azure:)/, '').replace(/^en-[A-Z]{2}-/i, '').replace(/Neural$/i, '');
-          window.rcVoicePreview.sayHey(cleaned, { context: context || 'reading-settings' });
+          window.rcVoicePreview.sayHey(cleaned, Object.assign({}, ctx, { voiceValue }));
         } catch (_) {}
       }
 
       // Voice selects — two dropdowns, one per gender.
       // Selecting from either dropdown sets both the active variant and specific voice.
-      // Free tier: browser voices only.
-      // Paid/Premium: server-backed cloud voices at the top, browser voices below.
+      // Basic tier: browser voices only.
+      // Demo/Pro: server-backed cloud voices at the top, browser voices below.
       const voiceFemaleSelect = document.getElementById('voiceFemaleSelect');
       const voiceMaleSelect   = document.getElementById('voiceMaleSelect');
 
@@ -259,7 +337,7 @@
         if (!selectEl) return;
         const resolvedPolicy = (window.rcPolicy && typeof window.rcPolicy.get === 'function') ? window.rcPolicy.get() : null;
         const voiceRole = (window.rcPolicy && typeof window.rcPolicy.getVoiceRole === 'function') ? window.rcPolicy.getVoiceRole() : '';
-        const cloudVoicesAllowed = voiceRole === 'pro' && !!resolvedPolicy?.features?.cloudVoices;
+        const cloudVoicesAllowed = voiceRole === 'demo' || (voiceRole === 'pro' && !!resolvedPolicy?.features?.cloudVoices);
         const isFree      = !cloudVoicesAllowed;
         const isActive    = String(TTS_STATE?.voiceVariant || 'female').toLowerCase() === gender;
         const rawSavedVoice = (() => { try { return (typeof getStoredSelectedVoice === 'function' ? getStoredSelectedVoice() : (window.__rcSessionVoiceSelection || '')) || ''; } catch(_) { return ''; } })();
@@ -294,7 +372,7 @@
         placeholder.selected = !isThisVoiceActive || (!savedBrowser && savedVariant !== gender && isFree);
         selectEl.appendChild(placeholder);
 
-        // Cloud voices for Paid/Premium — Azure Neural voice catalogue
+        // Cloud voices for Demo/Pro — Azure Neural voice catalogue
         // Voices match what Edge browser exposes natively, so Edge users
         // may get these for free via browserSpeakQueue (see tts.js Edge optimisation).
         if (!isFree) {
@@ -382,7 +460,7 @@
             try { window.__rcSessionVoiceSelection = val; } catch(_) {}
           }
           const selectedOption = selectEl.options && selectEl.selectedIndex >= 0 ? selectEl.options[selectEl.selectedIndex] : null;
-          previewSelectedVoice((selectedOption && selectedOption.dataset && selectedOption.dataset.previewName) || val, 'reading-settings');
+          previewSelectedVoice((selectedOption && selectedOption.dataset && selectedOption.dataset.previewName) || val, { context: 'reading-settings', voiceValue: val });
           populateBrowserVoicePicker();
         });
       }

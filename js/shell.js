@@ -1407,14 +1407,15 @@ window.rcInteraction = (function () {
 
 
     function previewJublyVoiceHey(voiceName, context) {
-        // 1A: lightweight/non-stateful preview only. Do not call cloud TTS,
-        // queue ownership, or usage consume. Failure stays silent.
+        // 1A: lightweight/non-stateful preview. Demo/Pro can use the existing
+        // cloud TTS endpoint for the one-word 'Hey' preview; Basic falls back
+        // to browser speech. Preview never consumes usage or enters Read Aloud.
         const name = String(voiceName || '').trim();
         try { window.__rcPreferredPremiumVoice = name ? name.toLowerCase() : ''; } catch (_) {}
         try { if (name) localStorage.setItem('rc_preferred_premium_voice', name.toLowerCase()); } catch (_) {}
         try {
             if (window.rcVoicePreview && typeof window.rcVoicePreview.sayHey === 'function') {
-                window.rcVoicePreview.sayHey(name, { context: context || 'unknown' });
+                window.rcVoicePreview.sayHey(name, { context: context || 'unknown', voiceValue: name });
             }
         } catch (_) {}
     }

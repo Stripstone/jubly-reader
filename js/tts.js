@@ -945,7 +945,7 @@ function getSelectedVoicePreference() {
   let cloudAllowed = false;
   try {
     const voiceRole = window.rcPolicy && typeof window.rcPolicy.getVoiceRole === 'function' ? window.rcPolicy.getVoiceRole() : '';
-    cloudAllowed = voiceRole === 'pro' && !!(window.rcPolicy && typeof window.rcPolicy.canUseCloudVoices === 'function' && window.rcPolicy.canUseCloudVoices());
+    cloudAllowed = voiceRole === 'demo' || (voiceRole === 'pro' && !!(window.rcPolicy && typeof window.rcPolicy.canUseCloudVoices === 'function' && window.rcPolicy.canUseCloudVoices()));
   } catch (_) { cloudAllowed = false; }
   // 1A safety: preserve a premium preference for future Pro contexts, but do
   // not let a Basic/browser-only runtime carry a dead cloud voice into Read Aloud.
@@ -2455,10 +2455,14 @@ function getResolvedTtsPolicy() {
   const tier = typeof policyApi.getTier === 'function'
     ? String(policyApi.getTier())
     : ((policy && policy.tier) ? String(policy.tier) : ((typeof appTier !== 'undefined' && appTier) ? String(appTier) : 'basic'));
-  const cloudVoiceAccess = typeof policyApi.canUseCloudVoices === 'function'
+  const voiceRole = typeof policyApi.getVoiceRole === 'function'
+    ? String(policyApi.getVoiceRole() || '').toLowerCase()
+    : '';
+  const proCloudAccess = typeof policyApi.canUseCloudVoices === 'function'
     ? !!policyApi.canUseCloudVoices()
     : !!policy?.features?.cloudVoices;
-  return { tier, cloudVoiceAccess, policy };
+  const cloudVoiceAccess = voiceRole === 'demo' || (voiceRole === 'pro' && proCloudAccess);
+  return { tier, voiceRole, cloudVoiceAccess, protectedCloudUsage: voiceRole === 'pro' && proCloudAccess, policy };
 }
 
 function getTtsSupportStatus() {
@@ -2508,7 +2512,7 @@ function getPreferredTtsRouteInfo() {
     reason = 'cloud-selection-blocked-by-tier';
   }
 
-  return { tier, cloudCapable, requestedPath, reason, selected, support };
+  return { tier, voiceRole: support.voiceRole || '', protectedCloudUsage: !!support.protectedCloudUsage, cloudCapable, requestedPath, reason, selected, support };
 }
 
 // ─── Status ────────────────────────────────────────────────────────────────────
@@ -3701,6 +3705,10 @@ async function ttsSpeakQueue(key, parts) {
       ttsDiagPush('usage-consume-skipped-nonprotected-path', { key, sessionId, reason: commitReason, path: 'cloud-without-page-marks', durable: false });
       return;
     }
+    if (!routeInfo.protectedCloudUsage) {
+      ttsDiagPush('usage-consume-skipped-nonprotected-path', { key, sessionId, reason: routeInfo.voiceRole === 'demo' ? 'demo-cloud-playback' : 'not-protected-cloud-usage', commitReason, voiceRole: routeInfo.voiceRole || '', durable: false });
+      return;
+    }
     if (cloudUsageConsumedForSession) {
       ttsDiagPush('usage-consume-skipped-session-duplicate', { key, sessionId, reason: commitReason, durable: false });
       return;
@@ -3792,7 +3800,7 @@ async function ttsSpeakQueue(key, parts) {
   try {
     // Pre-flight usage check (runs once before any cloud request).
     // Pass 3: server verdict gates the action; client counter is display-only.
-    if (wantMarksForPage) {
+    if (wantMarksForPage && routeInfo.protectedCloudUsage) {
       const replay = getTtsUsageReplayCoverage(key);
       if (replay.covered) {
         ttsDiagPush('usage-check-skipped-replay-window', {
@@ -3830,6 +3838,8 @@ async function ttsSpeakQueue(key, parts) {
       }
       // 1F: do not consume on preflight or cloud fetch. Durable TTS usage is
       // consumed only after protected cloud playback successfully commits.
+    } else if (wantMarksForPage) {
+      ttsDiagPush('usage-check-skipped-nonprotected-path', { key, sessionId, reason: routeInfo.voiceRole === 'demo' ? 'demo-cloud-preview-path' : 'not-protected-cloud-usage', voiceRole: routeInfo.voiceRole || '', durable: false });
     }
 
     for (let i = 0; i < queue.length; i++) {
