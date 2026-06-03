@@ -31,6 +31,7 @@ window.rcSync = (function () {
   let _remoteUsersRow = null;
   let _remoteSettingsRow = null;
   let _remoteLibraryItems = [];
+  let _remoteCloudLibrarySummary = null;
   let _remoteProgressRows = [];
   let _remoteBookMetricsRows = [];
   let _remoteDailyStatsRows = [];
@@ -649,6 +650,7 @@ window.rcSync = (function () {
     _remoteUsersRow = snap.usersRow || null;
     _remoteSettingsRow = snap.settingsRow || null;
     _remoteLibraryItems = Array.isArray(snap.libraryItems) ? snap.libraryItems.slice() : [];
+    _remoteCloudLibrarySummary = snap.cloudLibrarySummary || null;
     _remoteProgressRows = Array.isArray(snap.progressRows) ? snap.progressRows.slice() : [];
     _remoteBookMetricsRows = Array.isArray(snap.bookMetricsRows) ? snap.bookMetricsRows.slice() : [];
     _remoteDailyStatsRows = Array.isArray(snap.dailyStatsRows) ? snap.dailyStatsRows.slice() : [];
@@ -1070,6 +1072,7 @@ window.rcSync = (function () {
             usersRow: _remoteUsersRow,
             settingsRow: _remoteSettingsRow,
             libraryItems: _remoteLibraryItems,
+            cloudLibrarySummary: _remoteCloudLibrarySummary,
             progressRows: _remoteProgressRows,
             bookMetricsRows: _remoteBookMetricsRows,
             dailyStatsRows: _remoteDailyStatsRows,
@@ -1284,6 +1287,7 @@ window.rcSync = (function () {
       usage: _remoteUsageSummary,
       resolvedUsage: _getResolvedUsageSummary(),
       libraryItemCount: (_remoteLibraryItems || []).length,
+      cloudLibrarySummary: _remoteCloudLibrarySummary,
       progressCount: (_remoteProgressRows || []).length,
       bookMetricsCount: (_remoteBookMetricsRows || []).length,
       dailyStatCount: (_remoteDailyStatsRows || []).length,
@@ -1291,6 +1295,59 @@ window.rcSync = (function () {
       eventTrail: Array.isArray(window.__rcEventTrail) ? window.__rcEventTrail.slice() : [],
       publicRuntime: _getPublicRuntimeBoundaryReport(),
     }),
+    getRemoteLibraryItems: () => Array.isArray(_remoteLibraryItems) ? _remoteLibraryItems.slice() : [],
+    getCloudLibrarySummary: () => _remoteCloudLibrarySummary ? { ..._remoteCloudLibrarySummary } : null,
+    saveBookToCloud: async (localBook) => {
+      if (!_ready() || !localBook) return { ok: false, reason: 'auth_required' };
+      const payload = {
+        local_id: String(localBook.id || '').trim(),
+        title: String(localBook.title || 'Untitled'),
+        markdown: String(localBook.markdown || ''),
+        source_name: String(localBook.sourceName || localBook.title || '').trim() || null,
+        import_kind: String(localBook.importKind || 'text'),
+        byte_size: Math.max(0, Number(localBook.byteSize) || String(localBook.markdown || '').length || 0),
+        page_count: Math.max(0, Number(localBook.pageCount) || 0),
+        content_fingerprint: String(localBook.contentFingerprint || '').trim() || null,
+        created_at: localBook.createdAt || null,
+      };
+      _recordSync('cloud-books', 'save-pending', { title: payload.title, byteSize: payload.byte_size });
+      try {
+        const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'save_book_to_cloud', payload } });
+        if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+        _recordSync('cloud-books', 'save-success', { row: data && data.row ? data.row : null });
+        return { ok: true, row: data && data.row ? data.row : null, snapshot: data && data.snapshot ? data.snapshot : null };
+      } catch (error) {
+        _recordSync('cloud-books', 'save-error', { message: String(error?.message || error || 'save to cloud failed') });
+        return { ok: false, reason: String(error?.message || error || 'save_to_cloud_failed') };
+      }
+    },
+    removeBookFromCloud: async (libraryItemId) => {
+      if (!_ready()) return { ok: false, reason: 'auth_required' };
+      const payload = { library_item_id: String(libraryItemId || '').trim() };
+      _recordSync('cloud-books', 'remove-pending', payload);
+      try {
+        const { seq, data } = await _serverSync('snapshot', { method: 'POST', body: { action: 'remove_book_from_cloud', payload } });
+        if (data && data.snapshot) _applySnapshot(data.snapshot, { seq, persist: true });
+        _recordSync('cloud-books', 'remove-success', { row: data && data.row ? data.row : null });
+        return { ok: true, row: data && data.row ? data.row : null, snapshot: data && data.snapshot ? data.snapshot : null };
+      } catch (error) {
+        _recordSync('cloud-books', 'remove-error', { message: String(error?.message || error || 'remove from cloud failed') });
+        return { ok: false, reason: String(error?.message || error || 'remove_from_cloud_failed') };
+      }
+    },
+    restoreCloudBook: async (libraryItemId) => {
+      if (!_ready()) return { ok: false, reason: 'auth_required' };
+      const id = String(libraryItemId || '').trim();
+      _recordSync('cloud-books', 'restore-pending', { id });
+      try {
+        const { data } = await _serverSync('cloud-book', { params: { library_item_id: id } });
+        _recordSync('cloud-books', 'restore-success', { row: data && data.row ? data.row : null });
+        return { ok: true, row: data && data.row ? data.row : null, book: data && data.book ? data.book : null };
+      } catch (error) {
+        _recordSync('cloud-books', 'restore-error', { message: String(error?.message || error || 'restore cloud book failed') });
+        return { ok: false, reason: String(error?.message || error || 'restore_cloud_book_failed') };
+      }
+    },
     deleteLibraryItem: async (bookId, options = {}) => {
       if (!_ready()) return null;
       const payload = { book_id: _normalizeBookId(bookId), purge: !!options.purge };

@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { json, withCors, readJsonBody } from './http.js';
 import { getAllowedBrowserOrigins } from './origins.js';
 import { getResolvedRuntimePolicyForRequest } from './runtime-policy.js';
-import { getUserFromAccessToken, getUsageRow, supabaseRest, upsertUsageRow } from './supabase.js';
+import { getUserFromAccessToken, getUsageRow, supabaseRest, supabaseStorageObject, upsertUsageRow } from './supabase.js';
 
 function getBearerToken(req) {
   try {
@@ -23,6 +23,12 @@ async function getAuthorizedUser(req) {
 }
 
 const ANNOTATION_SCOPE_VERSION = 'ann-scope-v1';
+const CLOUD_BOOK_BUCKET = 'jubly-book-content';
+const CLOUD_STORAGE_KIND = 'supabase_storage';
+const CLOUD_LIMITS = Object.freeze({
+  basic: Object.freeze({ deviceBooks: 20, cloudBooks: 3, cloudStorageBytes: 22 * 1024 * 1024, maxUploadBytes: 10 * 1024 * 1024 }),
+  pro: Object.freeze({ deviceBooks: 50, cloudBooks: 20, cloudStorageBytes: 200 * 1024 * 1024, maxUploadBytes: 25 * 1024 * 1024 }),
+});
 
 function getAnnotationScopeSecret() {
   return String(process.env.ANNOTATION_SCOPE_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || 'jubly-annotation-scope-dev').trim();
@@ -105,6 +111,206 @@ function toBool(value, fallback = false) {
   if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
   if (['0', 'false', 'no', 'off'].includes(raw)) return false;
   return fallback;
+}
+
+
+function normalizeCloudTier(value) {
+  const tier = String(value || '').trim().toLowerCase();
+  return tier === 'pro' || tier === 'premium' ? 'pro' : 'basic';
+}
+
+function getCloudLimitsForTier(tier) {
+  return CLOUD_LIMITS[normalizeCloudTier(tier)] || CLOUD_LIMITS.basic;
+}
+
+function isActiveCloudLibraryItem(row) {
+  return !!row && String(row.status || 'active') === 'active' && String(row.storage_kind || '').trim() === CLOUD_STORAGE_KIND && !!String(row.storage_ref || '').trim();
+}
+
+function getCloudStorageSummary(rows = [], tier = 'basic') {
+  const limits = getCloudLimitsForTier(tier);
+  const active = (Array.isArray(rows) ? rows : []).filter(isActiveCloudLibraryItem);
+  const usedBytes = active.reduce((sum, row) => sum + Math.max(0, toInt(row.byte_size, 0)), 0);
+  return {
+    bucket: CLOUD_BOOK_BUCKET,
+    tier: normalizeCloudTier(tier),
+    cloudBooks: active.length,
+    cloudBookLimit: limits.cloudBooks,
+    cloudStorageBytes: usedBytes,
+    cloudStorageLimitBytes: limits.cloudStorageBytes,
+    maxUploadBytes: limits.maxUploadBytes,
+    deviceBookLimit: limits.deviceBooks,
+  };
+}
+
+function normalizeCloudBookPayload(payload = {}) {
+  const localId = toText(payload.local_id || payload.localId || payload.id, null);
+  const title = toText(payload.title, 'Untitled');
+  const markdown = String(payload.markdown || '');
+  const sourceName = toText(payload.source_name || payload.sourceName, null);
+  const importKind = toText(payload.import_kind || payload.importKind, 'text');
+  const contentFingerprint = toText(payload.content_fingerprint || payload.contentFingerprint, null);
+  const pageCount = Math.max(0, toInt(payload.page_count ?? payload.pageCount, 0));
+  const createdAt = toText(payload.created_at || payload.createdAt, null);
+  const byteSize = Math.max(0, toInt(payload.byte_size ?? payload.byteSize, Buffer.byteLength(markdown, 'utf8')));
+  if (!localId) throw new Error('local_book_id_required');
+  if (!markdown.trim()) throw new Error('cloud_book_content_required');
+  return { localId, title, markdown, sourceName, importKind, contentFingerprint, pageCount, createdAt, byteSize };
+}
+
+function buildCloudStoragePath(userId, libraryItemId, importKind = 'text') {
+  const kind = String(importKind || '').trim().toLowerCase();
+  const ext = kind === 'epub' ? 'json' : 'json';
+  return `${String(userId || '').trim()}/${String(libraryItemId || '').trim()}/original.${ext}`;
+}
+
+function serializeCloudBookContent(book, row) {
+  return JSON.stringify({
+    schema: 'jubly-cloud-book-v1',
+    libraryItemId: row?.id || null,
+    title: book.title || 'Untitled',
+    markdown: book.markdown || '',
+    sourceName: book.sourceName || null,
+    importKind: book.importKind || 'text',
+    byteSize: Math.max(0, toInt(book.byteSize, 0)),
+    pageCount: Math.max(0, toInt(book.pageCount, 0)),
+    contentFingerprint: book.contentFingerprint || null,
+    createdAt: book.createdAt || null,
+    storedAt: new Date().toISOString(),
+  });
+}
+
+async function findCloudLibraryItemForBook(userId, book) {
+  if (book.contentFingerprint) {
+    const data = await supabaseRest(`/rest/v1/user_library_items?user_id=eq.${encodeURIComponent(userId)}&storage_kind=eq.${encodeURIComponent(CLOUD_STORAGE_KIND)}&content_fingerprint=eq.${encodeURIComponent(book.contentFingerprint)}&status=eq.active&select=*&order=updated_at.desc&limit=1`, {
+      method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
+    }).catch(() => null);
+    if (Array.isArray(data) && data[0]) return data[0];
+  }
+  const sourceName = String(book.sourceName || book.title || '').trim();
+  if (sourceName) {
+    const data = await supabaseRest(`/rest/v1/user_library_items?user_id=eq.${encodeURIComponent(userId)}&storage_kind=eq.${encodeURIComponent(CLOUD_STORAGE_KIND)}&source_name=eq.${encodeURIComponent(sourceName)}&byte_size=eq.${encodeURIComponent(String(book.byteSize || 0))}&status=eq.active&select=*&order=updated_at.desc&limit=1`, {
+      method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
+    }).catch(() => null);
+    if (Array.isArray(data) && data[0]) return data[0];
+  }
+  return null;
+}
+
+async function saveBookToCloud(userId, payload = {}, resolvedPolicy = null) {
+  const book = normalizeCloudBookPayload(payload);
+  const tier = normalizeCloudTier(resolvedPolicy?.policy?.tier || resolvedPolicy?.entitlementSnapshot?.tier || 'basic');
+  const limits = getCloudLimitsForTier(tier);
+  if (book.byteSize > limits.maxUploadBytes) {
+    const err = new Error('cloud_book_upload_too_large');
+    err.code = 'cloud_book_upload_too_large';
+    err.details = { byteSize: book.byteSize, maxUploadBytes: limits.maxUploadBytes };
+    throw err;
+  }
+  const existingRows = await getLibraryItemsRows(userId, { includeDeleted: false, limit: 500 });
+  const existingCloud = await findCloudLibraryItemForBook(userId, book).catch(() => null);
+  const summary = getCloudStorageSummary(existingRows, tier);
+  const nextCloudCount = summary.cloudBooks + (existingCloud ? 0 : 1);
+  const existingBytes = existingCloud ? Math.max(0, toInt(existingCloud.byte_size, 0)) : 0;
+  const nextStorageBytes = summary.cloudStorageBytes - existingBytes + book.byteSize;
+  if (nextCloudCount > limits.cloudBooks) {
+    const err = new Error('cloud_book_slot_limit');
+    err.code = 'cloud_book_slot_limit';
+    err.details = { cloudBooks: summary.cloudBooks, cloudBookLimit: limits.cloudBooks };
+    throw err;
+  }
+  if (nextStorageBytes > limits.cloudStorageBytes) {
+    const err = new Error('cloud_book_storage_limit');
+    err.code = 'cloud_book_storage_limit';
+    err.details = { cloudStorageBytes: summary.cloudStorageBytes, cloudStorageLimitBytes: limits.cloudStorageBytes, byteSize: book.byteSize };
+    throw err;
+  }
+  const libraryItemId = String(existingCloud?.id || crypto.randomUUID());
+  const objectPath = String(existingCloud?.storage_ref || buildCloudStoragePath(userId, libraryItemId, book.importKind));
+  const payloadRow = {
+    id: libraryItemId,
+    user_id: userId,
+    title: book.title || 'Untitled',
+    source_kind: 'cloud_book',
+    source_name: book.sourceName || book.title || null,
+    content_fingerprint: book.contentFingerprint || null,
+    storage_kind: CLOUD_STORAGE_KIND,
+    storage_ref: objectPath,
+    import_kind: book.importKind || 'text',
+    byte_size: book.byteSize,
+    page_count: book.pageCount,
+    status: 'active',
+    deleted_at: null,
+    purge_after: null,
+    updated_at: new Date().toISOString(),
+  };
+  const body = serializeCloudBookContent(book, payloadRow);
+  await supabaseStorageObject(CLOUD_BOOK_BUCKET, objectPath, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-store' },
+    body,
+  });
+  let row = null;
+  if (existingCloud?.id) {
+    const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(existingCloud.id)}&user_id=eq.${encodeURIComponent(userId)}&select=*`, {
+      method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: payloadRow,
+    }).catch(() => null);
+    row = Array.isArray(data) && data[0] ? data[0] : { ...existingCloud, ...payloadRow };
+  } else {
+    const data = await supabaseRest('/rest/v1/user_library_items', {
+      method: 'POST', asService: true, headers: { Prefer: 'return=representation' }, body: payloadRow,
+    }).catch(() => null);
+    row = Array.isArray(data) && data[0] ? data[0] : payloadRow;
+  }
+  return { row: serializeLibraryItemRow(row), cloudSummary: getCloudStorageSummary(await getLibraryItemsRows(userId, { includeDeleted: false, limit: 500 }), tier) };
+}
+
+async function removeBookFromCloud(userId, payload = {}, resolvedPolicy = null) {
+  const id = toText(payload.library_item_id || payload.libraryItemId || payload.id, null);
+  if (!id) throw new Error('cloud_library_item_id_required');
+  const row = await findLibraryItemById(userId, id);
+  if (!row || !isActiveCloudLibraryItem(row)) throw new Error('cloud_book_not_found');
+  const objectPath = String(row.storage_ref || '').trim();
+  if (objectPath) {
+    await supabaseStorageObject(CLOUD_BOOK_BUCKET, objectPath, { method: 'DELETE' }).catch((error) => {
+      if (Number(error?.status) !== 404) throw error;
+    });
+  }
+  const now = new Date().toISOString();
+  const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*`, {
+    method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: { status: 'deleted', deleted_at: now, updated_at: now },
+  }).catch(() => null);
+  const updated = Array.isArray(data) && data[0] ? data[0] : { ...row, status: 'deleted', deleted_at: now, updated_at: now };
+  const tier = normalizeCloudTier(resolvedPolicy?.policy?.tier || resolvedPolicy?.entitlementSnapshot?.tier || 'basic');
+  return { row: serializeLibraryItemRow(updated), cloudSummary: getCloudStorageSummary(await getLibraryItemsRows(userId, { includeDeleted: false, limit: 500 }), tier) };
+}
+
+async function restoreCloudBook(userId, payload = {}) {
+  const id = toText(payload.library_item_id || payload.libraryItemId || payload.id, null);
+  if (!id) throw new Error('cloud_library_item_id_required');
+  const row = await findLibraryItemById(userId, id);
+  if (!row || !isActiveCloudLibraryItem(row)) throw new Error('cloud_book_not_found');
+  const objectPath = String(row.storage_ref || '').trim();
+  if (!objectPath) throw new Error('cloud_book_storage_ref_missing');
+  const out = await supabaseStorageObject(CLOUD_BOOK_BUCKET, objectPath, { method: 'GET' });
+  const data = out.data && typeof out.data === 'object' ? out.data : JSON.parse(String(out.text || '{}'));
+  if (!data || String(data.schema || '') !== 'jubly-cloud-book-v1' || typeof data.markdown !== 'string') throw new Error('cloud_book_payload_invalid');
+  return {
+    row: serializeLibraryItemRow(row),
+    book: {
+      id: `cloud-${row.id}`,
+      title: data.title || row.title || 'Untitled',
+      markdown: data.markdown || '',
+      sourceName: data.sourceName || row.source_name || row.title || null,
+      importKind: data.importKind || row.import_kind || 'text',
+      byteSize: Math.max(0, toInt(data.byteSize, toInt(row.byte_size, 0))),
+      pageCount: Math.max(0, toInt(data.pageCount, toInt(row.page_count, 0))),
+      contentFingerprint: data.contentFingerprint || row.content_fingerprint || null,
+      createdAt: Date.now(),
+      cloudLibraryItemId: row.id,
+      cloudStorageRef: row.storage_ref,
+    },
+  };
 }
 
 function normalizeBookId(bookId) {
@@ -811,10 +1017,12 @@ async function buildSnapshot(req, user) {
   const progressRows = (progressRowsRaw || []).map((row) => serializeProgressRow(row, libraryItemMap)).filter(Boolean);
   const bookMetricsRows = (bookMetricsRaw || []).map((row) => serializeBookMetricRow(row, libraryItemMap)).filter(Boolean);
   const serializedDailyStatsRows = (dailyStatsRows || []).map(serializeDailyStatRow).filter(Boolean);
+  const cloudLibrarySummary = getCloudStorageSummary(libraryItemsRaw || [], resolved?.policy?.tier || resolved?.entitlementSnapshot?.tier || 'basic');
   return {
     usersRow,
     settingsRow,
     libraryItems,
+    cloudLibrarySummary,
     progressRows,
     bookMetricsRows,
     dailyStatsRows: serializedDailyStatsRows,
@@ -861,6 +1069,14 @@ export default async function handler(req, res) {
       const bookId = getParam(req, 'book_id');
       const row = await getRestoreRow(auth.user.id, bookId).catch(() => null);
       return json(res, 200, { ok: true, row });
+    }
+    if (scope === 'cloud-book') {
+      try {
+        const row = await restoreCloudBook(auth.user.id, { library_item_id: getParam(req, 'library_item_id') || getParam(req, 'libraryItemId') || getParam(req, 'id') });
+        return json(res, 200, { ok: true, ...row });
+      } catch (error) {
+        return json(res, 400, { ok: false, reason: String(error?.code || error?.message || 'cloud_book_restore_failed'), details: error?.details || null });
+      }
     }
     if (scope === 'annotations-bootstrap') {
       const bookId = getParam(req, 'book_id') || getParam(req, 'bookId');
@@ -911,6 +1127,16 @@ export default async function handler(req, res) {
         case 'delete_annotation':
           row = await deleteAnnotation(auth.user.id, body?.payload?.id || body?.payload?.annotation_id || body?.payload?.annotationId, body?.payload || {});
           break;
+        case 'save_book_to_cloud': {
+          const resolvedPolicy = await getResolvedRuntimePolicyForRequest(req).catch(() => null);
+          row = await saveBookToCloud(auth.user.id, body?.payload || {}, resolvedPolicy);
+          break;
+        }
+        case 'remove_book_from_cloud': {
+          const resolvedPolicy = await getResolvedRuntimePolicyForRequest(req).catch(() => null);
+          row = await removeBookFromCloud(auth.user.id, body?.payload || {}, resolvedPolicy);
+          break;
+        }
         case 'delete_library_item': {
           const storageRef = body?.payload?.storage_ref || body?.payload?.storageRef || body?.payload?.book_id || body?.payload?.bookId;
           const purge = toBool(body?.payload?.purge, false);

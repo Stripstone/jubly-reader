@@ -80,7 +80,7 @@ window.__rcReadingTarget = { sourceType: '', bookId: '', chapterIndex: -1, pageI
     tier: 'basic',
     simulationAllowed: false,
     usageDailyLimit: 100,
-    importSlotLimit: 2,
+    importSlotLimit: 20,
     features: Object.freeze({
       modes: Object.freeze({
         reading: true,

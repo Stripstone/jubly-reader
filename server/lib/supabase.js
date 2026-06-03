@@ -188,6 +188,45 @@ export async function supabaseRest(path, opts = {}) {
   return data;
 }
 
+
+function encodeStorageObjectPath(objectPath) {
+  return String(objectPath || '')
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/');
+}
+
+export async function supabaseStorageObject(bucket, objectPath, opts = {}) {
+  const safeBucket = String(bucket || '').trim();
+  const safePath = String(objectPath || '').replace(/^\/+/, '').trim();
+  if (!safeBucket || !safePath) throw new Error('Supabase Storage bucket and object path are required.');
+  const url = `${supabaseBaseUrl()}/storage/v1/object/${encodeURIComponent(safeBucket)}/${encodeStorageObjectPath(safePath)}`;
+  const method = opts.method || 'GET';
+  const headers = {
+    apikey: supabaseServiceKey(),
+    Authorization: `Bearer ${supabaseServiceKey()}`,
+    ...opts.headers,
+  };
+  const init = { method, headers };
+  if (typeof opts.body !== 'undefined') {
+    init.body = opts.body;
+  }
+  const response = await fetch(url, init);
+  const text = await response.text().catch(() => '');
+  let data = text;
+  try { data = text ? JSON.parse(text) : null; } catch (_) {}
+  if (!response.ok) {
+    const detail = (data && typeof data === 'object')
+      ? (data.message || data.hint || data.details || data.error || JSON.stringify(data))
+      : (typeof data === 'string' ? data : '');
+    const error = new Error(`Supabase Storage ${response.status}${detail ? ` – ${detail}` : ''}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return { response, data, text };
+}
+
 const ENTITLEMENT_SELECT = 'user_id,provider,tier,status,stripe_customer_id,stripe_subscription_id,period_start,period_end,created_at,updated_at';
 const ENTITLEMENT_FIELDS = [
   'user_id',

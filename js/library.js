@@ -2885,71 +2885,302 @@
       deletedModal.setAttribute('aria-hidden', 'true');
     }
 
+    function getCloudLimitsForCurrentTier() {
+      const tier = (window.rcPolicy && typeof window.rcPolicy.getTier === 'function') ? String(window.rcPolicy.getTier() || 'basic') : 'basic';
+      const proLike = tier === 'pro' || tier === 'premium';
+      return {
+        tier: proLike ? 'pro' : 'basic',
+        deviceBooks: proLike ? 50 : 20,
+        cloudBooks: proLike ? 20 : 3,
+        cloudStorageBytes: proLike ? 200 * 1024 * 1024 : 22 * 1024 * 1024,
+        maxUploadBytes: proLike ? 25 * 1024 * 1024 : 10 * 1024 * 1024,
+      };
+    }
+
+    function formatBytes(bytes) {
+      const n = Math.max(0, Number(bytes) || 0);
+      if (n >= 1024 * 1024) return `${Math.round((n / (1024 * 1024)) * 10) / 10} MB`;
+      if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+      return `${Math.round(n)} B`;
+    }
+
+    function isActiveCloudItem(item) {
+      return !!item && String(item.status || 'active') === 'active' && String(item.storage_kind || '') === 'supabase_storage' && !!String(item.storage_ref || '').trim();
+    }
+
+    function getRemoteCloudItems() {
+      try {
+        const items = (window.rcSync && typeof window.rcSync.getRemoteLibraryItems === 'function') ? window.rcSync.getRemoteLibraryItems() : [];
+        return (Array.isArray(items) ? items : []).filter(isActiveCloudItem);
+      } catch (_) { return []; }
+    }
+
+    function getCloudSummaryFromItems(items) {
+      const limits = getCloudLimitsForCurrentTier();
+      const cloudItems = Array.isArray(items) ? items : [];
+      const used = cloudItems.reduce((sum, row) => sum + Math.max(0, Number(row.byte_size) || 0), 0);
+      const serverSummary = (window.rcSync && typeof window.rcSync.getCloudLibrarySummary === 'function') ? window.rcSync.getCloudLibrarySummary() : null;
+      return {
+        cloudBooks: Number.isFinite(Number(serverSummary?.cloudBooks)) ? Number(serverSummary.cloudBooks) : cloudItems.length,
+        cloudBookLimit: Number.isFinite(Number(serverSummary?.cloudBookLimit)) ? Number(serverSummary.cloudBookLimit) : limits.cloudBooks,
+        cloudStorageBytes: Number.isFinite(Number(serverSummary?.cloudStorageBytes)) ? Number(serverSummary.cloudStorageBytes) : used,
+        cloudStorageLimitBytes: Number.isFinite(Number(serverSummary?.cloudStorageLimitBytes)) ? Number(serverSummary.cloudStorageLimitBytes) : limits.cloudStorageBytes,
+        maxUploadBytes: Number.isFinite(Number(serverSummary?.maxUploadBytes)) ? Number(serverSummary.maxUploadBytes) : limits.maxUploadBytes,
+      };
+    }
+
+    function cloudMatchForLocalBook(book, cloudItems = []) {
+      const fingerprint = String(book?.contentFingerprint || '').trim();
+      if (fingerprint) {
+        const match = cloudItems.find((item) => String(item.content_fingerprint || '').trim() === fingerprint);
+        if (match) return match;
+      }
+      const localCloudId = String(book?.cloudLibraryItemId || '').trim();
+      if (localCloudId) {
+        const match = cloudItems.find((item) => String(item.id || '') === localCloudId);
+        if (match) return match;
+      }
+      const sourceName = String(book?.sourceName || book?.title || '').trim();
+      const byteSize = Math.max(0, Number(book?.byteSize) || 0);
+      return cloudItems.find((item) => String(item.source_name || item.title || '').trim() === sourceName && Math.max(0, Number(item.byte_size) || 0) === byteSize) || null;
+    }
+
+    function appendCloudPill(parent, label, tone) {
+      const pill = document.createElement('span');
+      pill.className = `library-cloud-pill ${tone || ''}`.trim();
+      pill.textContent = label;
+      parent.appendChild(pill);
+      return pill;
+    }
+
+    function showManageMessage(message, tone = '') {
+      let el = listEl.querySelector('[data-cloud-manage-message="true"]');
+      if (!message) { if (el) el.remove(); return; }
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'import-status cloud-manage-message';
+        el.dataset.cloudManageMessage = 'true';
+        listEl.insertBefore(el, listEl.firstChild ? listEl.firstChild.nextSibling : null);
+      }
+      el.textContent = String(message || '');
+      el.dataset.tone = tone || '';
+    }
+
     async function render() {
       listEl.innerHTML = '';
       let books = [];
       try { books = await localBooksGetAll(); } catch (_) { books = []; }
-
+      const cloudItems = getRemoteCloudItems();
+      const cloudSummary = getCloudSummaryFromItems(cloudItems);
       const count = books.length;
       const limit = (window.rcPolicy && typeof window.rcPolicy.getImportSlotLimit === 'function')
         ? window.rcPolicy.getImportSlotLimit()
-        : null;
-      const meta = document.createElement('div');
-      meta.className = 'import-status';
-      meta.textContent = limit == null
-        ? `Saved on this device: ${count}`
-        : `Saved on this device: ${count}/${limit}`;
-      listEl.appendChild(meta);
+        : getCloudLimitsForCurrentTier().deviceBooks;
 
-      if (!books.length) {
+      const summary = document.createElement('div');
+      summary.className = 'library-cloud-summary';
+      const deviceCard = document.createElement('div');
+      deviceCard.className = 'library-cloud-summary-card';
+      deviceCard.innerHTML = `<strong>Device Library</strong><span>${count}/${limit == null ? '∞' : limit}</span><small>Books on this device</small>`;
+      const cloudCard = document.createElement('div');
+      cloudCard.className = 'library-cloud-summary-card';
+      cloudCard.innerHTML = `<strong>Cloud Library</strong><span>${cloudSummary.cloudBooks}/${cloudSummary.cloudBookLimit}</span><small>${formatBytes(cloudSummary.cloudStorageBytes)} / ${formatBytes(cloudSummary.cloudStorageLimitBytes)} · max ${formatBytes(cloudSummary.maxUploadBytes)}</small>`;
+      summary.appendChild(deviceCard);
+      summary.appendChild(cloudCard);
+      listEl.appendChild(summary);
+
+      const help = document.createElement('div');
+      help.className = 'import-status';
+      help.textContent = 'Imported books live on this device first. Save to Cloud stores the actual book content in your account so it can be restored elsewhere.';
+      listEl.appendChild(help);
+
+      const localIdsMatchedToCloud = new Set();
+      if (books.length) {
+        books
+          .slice()
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+          .forEach((b) => {
+            const cloudItem = cloudMatchForLocalBook(b, cloudItems);
+            if (cloudItem?.id) localIdsMatchedToCloud.add(String(cloudItem.id));
+            const row = document.createElement('div');
+            row.className = 'library-row';
+            if (cloudItem) row.classList.add('library-row-cloud-owned');
+
+            const left = document.createElement('div');
+            const t = document.createElement('div');
+            t.className = 'library-row-title';
+            t.textContent = b.title || 'Untitled';
+            const m = document.createElement('div');
+            m.className = 'library-row-meta';
+            const kb = Math.round((b.byteSize || 0) / 1024);
+            const pages = (String(b.markdown || '').match(/^\s*##\s+/gm) || []).length;
+            m.textContent = cloudItem
+              ? `Cloud Library · available across devices · ${pages} pages · ~${kb} KB`
+              : `This device · stored in this browser · ${pages} pages · ~${kb} KB`;
+            const pills = document.createElement('div');
+            pills.className = 'library-cloud-pills';
+            appendCloudPill(pills, cloudItem ? 'Cloud Library' : 'This Device', cloudItem ? 'cloud' : 'device');
+            left.appendChild(t);
+            left.appendChild(m);
+            left.appendChild(pills);
+
+            const actions = document.createElement('div');
+            actions.className = 'library-row-actions';
+            if (cloudItem) {
+              const remove = document.createElement('button');
+              remove.className = 'btn-mini';
+              remove.type = 'button';
+              remove.textContent = 'Remove from Cloud';
+              remove.addEventListener('click', async () => {
+                const ok = confirm(`Remove “${b.title || 'this book'}” from Cloud?\n\nThe copy on this device will stay. It will stop appearing on other devices.`);
+                if (!ok) return;
+                setButtonBusy(remove, true, 'Removing…');
+                showManageMessage('');
+                const result = await (window.rcSync && typeof window.rcSync.removeBookFromCloud === 'function' ? window.rcSync.removeBookFromCloud(cloudItem.id) : Promise.resolve({ ok: false, reason: 'sync_unavailable' }));
+                if (!result || result.ok === false) {
+                  setButtonBusy(remove, false);
+                  showManageMessage(`Remove from Cloud failed: ${String(result?.reason || 'unknown error')}`, 'error');
+                  return;
+                }
+                showManageMessage('Removed from Cloud. The local copy is still on this device.', 'success');
+                emitLibraryChanged();
+                render();
+              });
+              const disabledDelete = document.createElement('button');
+              disabledDelete.className = 'btn-danger btn-disabled';
+              disabledDelete.type = 'button';
+              disabledDelete.disabled = true;
+              disabledDelete.title = 'Delete is unavailable until this book is removed from Cloud.';
+              disabledDelete.textContent = 'Delete';
+              actions.appendChild(remove);
+              actions.appendChild(disabledDelete);
+              const note = document.createElement('div');
+              note.className = 'library-row-note';
+              note.textContent = 'Delete is unavailable until this book is removed from Cloud.';
+              left.appendChild(note);
+            } else {
+              const save = document.createElement('button');
+              save.className = 'btn-primary';
+              save.type = 'button';
+              save.textContent = 'Save to Cloud';
+              save.addEventListener('click', async () => {
+                const ok = confirm(`Save “${b.title || 'this book'}” to Cloud?\n\nJubly will store the book content in your account and use one Cloud Library slot.`);
+                if (!ok) return;
+                setButtonBusy(save, true, 'Saving…');
+                showManageMessage('');
+                const result = await (window.rcSync && typeof window.rcSync.saveBookToCloud === 'function' ? window.rcSync.saveBookToCloud(b) : Promise.resolve({ ok: false, reason: 'sync_unavailable' }));
+                if (!result || result.ok === false) {
+                  setButtonBusy(save, false);
+                  showManageMessage(`Save to Cloud failed: ${String(result?.reason || 'unknown error')}`, 'error');
+                  return;
+                }
+                showManageMessage('Saved to Cloud. This book can be restored when signed in elsewhere.', 'success');
+                emitLibraryChanged();
+                render();
+              });
+              const del = document.createElement('button');
+              del.className = 'btn-danger';
+              del.type = 'button';
+              del.textContent = 'Delete';
+              del.addEventListener('click', async () => {
+                const ok = confirm(`Move “${b.title || 'this book'}” to Deleted Files?\n\nIt will leave your Library now, stay on this device, and can be restored later from Profile.`);
+                if (!ok) return;
+                try {
+                  await moveLocalBookToDeleted(b.id);
+                  await refreshBookSelect();
+                  emitLibraryChanged();
+                  emitDeletedChanged();
+                  await renderDeletedCount();
+                  render();
+                } catch (_) {
+                  alert('Delete failed.');
+                }
+              });
+              actions.appendChild(save);
+              actions.appendChild(del);
+            }
+
+            row.appendChild(left);
+            row.appendChild(actions);
+            listEl.appendChild(row);
+          });
+      } else {
         const empty = document.createElement('div');
         empty.className = 'import-status';
         empty.textContent = 'No local books yet. Use Import Book to add one.';
         listEl.appendChild(empty);
-        return;
       }
 
-      books
-        .slice()
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-        .forEach((b) => {
+      cloudItems
+        .filter((item) => !localIdsMatchedToCloud.has(String(item.id || '')))
+        .forEach((item) => {
           const row = document.createElement('div');
-          row.className = 'library-row';
-
+          row.className = 'library-row library-row-cloud-restore';
           const left = document.createElement('div');
           const t = document.createElement('div');
           t.className = 'library-row-title';
-          t.textContent = b.title || 'Untitled';
+          t.textContent = item.title || 'Cloud book';
           const m = document.createElement('div');
           m.className = 'library-row-meta';
-          const kb = Math.round((b.byteSize || 0) / 1024);
-          const pages = (String(b.markdown || '').match(/^\s*##\s+/gm) || []).length;
-          m.textContent = `${pages} pages • ~${kb} KB • ${new Date(b.createdAt || Date.now()).toLocaleDateString()}`;
+          m.textContent = `Cloud Library · available to restore · ${formatBytes(item.byte_size || 0)}`;
+          const pills = document.createElement('div');
+          pills.className = 'library-cloud-pills';
+          appendCloudPill(pills, 'Cloud Library', 'cloud');
           left.appendChild(t);
           left.appendChild(m);
-
+          left.appendChild(pills);
           const actions = document.createElement('div');
           actions.className = 'library-row-actions';
-          const del = document.createElement('button');
-          del.className = 'btn-danger';
-          del.type = 'button';
-          del.textContent = 'Delete';
-          del.addEventListener('click', async () => {
-            const ok = confirm(`Move “${b.title || 'this book'}” to Deleted Files?\n\nIt will leave your Library now, stay on this device, and can be restored later from Profile.`);
-            if (!ok) return;
+          const restore = document.createElement('button');
+          restore.className = 'btn-primary';
+          restore.type = 'button';
+          restore.textContent = 'Restore to Device';
+          restore.addEventListener('click', async () => {
+            setButtonBusy(restore, true, 'Restoring…');
+            showManageMessage('');
             try {
-              await moveLocalBookToDeleted(b.id);
+              const guard = await guardRestoreCapacity();
+              if (!guard.ok) {
+                setButtonBusy(restore, false);
+                showManageMessage(guard.message || 'Restoring failed. Your device library is full.', 'error');
+                return;
+              }
+              const result = await (window.rcSync && typeof window.rcSync.restoreCloudBook === 'function' ? window.rcSync.restoreCloudBook(item.id) : Promise.resolve({ ok: false, reason: 'sync_unavailable' }));
+              if (!result || result.ok === false || !result.book) {
+                setButtonBusy(restore, false);
+                showManageMessage(`Restore failed: ${String(result?.reason || 'unknown error')}`, 'error');
+                return;
+              }
+              await localBookPut({ ...result.book, id: result.book.id || `cloud-${item.id}`, createdAt: Date.now() });
               await refreshBookSelect();
               emitLibraryChanged();
-              emitDeletedChanged();
-              await renderDeletedCount();
+              showManageMessage('Restored to this device.', 'success');
               render();
-            } catch (_) {
-              alert('Delete failed.');
+            } catch (error) {
+              setButtonBusy(restore, false);
+              showManageMessage(`Restore failed: ${String(error?.message || error || 'unknown error')}`, 'error');
             }
           });
-          actions.appendChild(del);
-
+          const remove = document.createElement('button');
+          remove.className = 'btn-mini';
+          remove.type = 'button';
+          remove.textContent = 'Remove from Cloud';
+          remove.addEventListener('click', async () => {
+            const ok = confirm(`Remove “${item.title || 'this book'}” from Cloud?\n\nIt will stop appearing on other devices.`);
+            if (!ok) return;
+            setButtonBusy(remove, true, 'Removing…');
+            const result = await (window.rcSync && typeof window.rcSync.removeBookFromCloud === 'function' ? window.rcSync.removeBookFromCloud(item.id) : Promise.resolve({ ok: false, reason: 'sync_unavailable' }));
+            if (!result || result.ok === false) {
+              setButtonBusy(remove, false);
+              showManageMessage(`Remove from Cloud failed: ${String(result?.reason || 'unknown error')}`, 'error');
+              return;
+            }
+            showManageMessage('Removed from Cloud.', 'success');
+            emitLibraryChanged();
+            render();
+          });
+          actions.appendChild(restore);
+          actions.appendChild(remove);
           row.appendChild(left);
           row.appendChild(actions);
           listEl.appendChild(row);

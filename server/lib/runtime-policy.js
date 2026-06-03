@@ -121,10 +121,10 @@ export function buildRuntimePolicy(inputTier = 'basic') {
       : 100;
 
   const importSlotLimit = tier === 'premium'
-    ? null
+    ? 50
     : tier === 'pro'
-      ? 5
-      : 2;
+      ? 50
+      : 20;
 
   return {
     version: 1,

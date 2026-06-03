@@ -167,3 +167,24 @@ Pending UI should not be added to every control.
 - Playback-start failure migration is not complete until runtime exposes a settled retry-exhausted/start-error signal that shell can read without touching `tts.js`.
 - Settings stay optimistic/local first; the shared save-failure seam is enough for this pass.
 - Recoverable error banners now standardize to `Try again`, `Refresh`, `Open login`, or `Dismiss`.
+
+## 1C Cloud Books — staging patch notes
+
+Status: implemented as a server-owned Cloud Books flow, pending live Supabase Storage validation.
+
+Authoritative owner:
+- `user_library_items` owns account metadata/status/limits.
+- Supabase Storage bucket `jubly-book-content` owns actual book content objects.
+- `server/lib/app-durable-sync.js` owns Save to Cloud, Remove from Cloud, and Restore Cloud Book server actions.
+- `js/library.js` owns the Manage Library UI only.
+
+Truth boundary:
+- A book may be labeled `Cloud Library` only when an active `user_library_items` row has `storage_kind = supabase_storage` and `storage_ref` points to a stored content object.
+- Metadata alone is not treated as Cloud Library completion.
+- Device delete is disabled while an active cloud copy exists. The user must Remove from Cloud first.
+
+Required runtime validation:
+- Save to Cloud creates a Storage object and active `user_library_items` row.
+- Cloud count/storage used updates from server snapshot.
+- Fresh browser/account session can restore/open the stored content object.
+- Remove from Cloud deletes/removes the Storage object, marks the cloud row inactive, keeps the local copy, and frees the Cloud Library slot.
