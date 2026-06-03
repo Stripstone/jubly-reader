@@ -2898,6 +2898,37 @@ window.rcInteraction = (function () {
         applyLibrarySurfaceStateNow(normalized, reason);
     }
 
+    function isReadableDashboardCloudItem(item) {
+        return !!item
+            && String(item.status || 'active') === 'active'
+            && String(item.storage_kind || '') === 'supabase_storage'
+            && !!String(item.storage_ref || '').trim()
+            && !!String(item.id || '').trim();
+    }
+
+    function getReadableDashboardCloudItems() {
+        try {
+            const items = (window.rcSync && typeof window.rcSync.getRemoteLibraryItems === 'function')
+                ? window.rcSync.getRemoteLibraryItems()
+                : [];
+            return (Array.isArray(items) ? items : []).filter(isReadableDashboardCloudItem);
+        } catch (_) { return []; }
+    }
+
+    function getCloudDashboardMeta(item) {
+        const bytes = Math.max(0, Number(item && item.byte_size) || 0);
+        const kb = bytes ? Math.max(1, Math.round(bytes / 1024)) : 0;
+        const pages = Math.max(0, Number(item && (item.page_count || item.pageCount)) || 0);
+        if (pages && kb) return `Saved to Cloud • ${pages} pages • ~${kb} KB`;
+        if (kb) return `Saved to Cloud • ~${kb} KB`;
+        return 'Saved to Cloud';
+    }
+
+    function getLocalDashboardMeta(book) {
+        const date = new Date(book && book.createdAt || Date.now()).toLocaleDateString();
+        return `This Device • Added ${date}`;
+    }
+
     async function refreshLibrary(reason = 'unknown') {
         const rowsEl  = document.getElementById('library-rows');
         // NOTE: #dashboard-subtitle is NOT owned by refreshLibrary.
@@ -2918,22 +2949,11 @@ window.rcInteraction = (function () {
             return;
         }
 
-        // Runtime honesty contract for the dashboard books area:
-        // keep the container visible immediately, keep books truth owned by the
-        // local library runtime, and show a neutral pending state until the first
-        // truthful local-library read resolves to populated vs empty/importer.
-        // After that first truthful read, later refreshes keep the current visible
-        // surface instead of flashing back through pending.
         if (!_libraryInitialResolutionComplete) {
             setLibrarySurfaceState('pending', reason);
             scheduleLibraryPendingBanner();
         }
 
-        // Until runtime book storage is actually available, do not imply an empty
-        // library and do not leave a blank gap. Keep the pending surface visible
-        // and retry owner discovery.
-        // IMPORTANT: the inner retry call is fire-and-forget — do NOT await it here,
-        // or successive unavailability creates an infinite chain that hangs the page.
         if (!hasLocalLibraryOwner) {
             if (libraryRefreshRetryTimer) clearTimeout(libraryRefreshRetryTimer);
             return new Promise(resolve => {
@@ -2945,37 +2965,60 @@ window.rcInteraction = (function () {
             });
         }
         const refreshSeq = ++_libraryRefreshSequence;
-        let books = [];
-        try { books = await localBooksGetAll(); } catch(_) { books = []; }
+        let deviceBooks = [];
+        try { deviceBooks = await localBooksGetAll(); } catch(_) { deviceBooks = []; }
+        const cloudBooks = getReadableDashboardCloudItems();
         if (refreshSeq !== _libraryRefreshSequence) return;
         _loggedFirstLocalLibraryRead = true;
         _libraryInitialResolutionComplete = true;
         clearLibraryPendingBanner();
-        const has = books.length > 0;
+        const has = deviceBooks.length > 0 || cloudBooks.length > 0;
         if (!has) {
             setLibrarySurfaceState('empty', reason);
             try { renderSubscriptionSurface([]); } catch (_) {}
             return;
         }
-        books.sort((a, b) => (b.createdAt||0) - (a.createdAt||0));
-        const rows = books.map(b => {
+        const sourceRows = [];
+        deviceBooks
+            .slice()
+            .sort((a, b) => (b.createdAt||0) - (a.createdAt||0))
+            .forEach((b) => sourceRows.push({ source: 'device', book: b, createdAt: Number(b.createdAt || 0) || 0 }));
+        cloudBooks
+            .slice()
+            .sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')))
+            .forEach((item) => sourceRows.push({ source: 'cloud', item, createdAt: 0 }));
+
+        const rows = sourceRows.map(row => {
+            if (row.source === 'cloud') {
+                const item = row.item || {};
+                const pages = Math.max(1, Number(item.page_count || item.pageCount) || 1);
+                const id = ('cloud:' + String(item.id)).replace(/'/g,"\\'");
+                const title = escHtml(item.title || item.source_name || 'Cloud book');
+                const surface = (window.rcLibraryData && typeof window.rcLibraryData.getBookSurfaceData === 'function')
+                    ? window.rcLibraryData.getBookSurfaceData(`cloud:${String(item.id)}`, pages, { record: item })
+                    : { status: 'Cloud', timeLabel: 'Saved to Cloud' };
+                return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="library-row library-row-cloud px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
+                <div class="library-row-main flex-grow flex items-center gap-3"><div class="library-doc-icon w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">☁️</div><div class="library-doc-copy"><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">${escHtml(getCloudDashboardMeta(item))}</p></div></div>
+                <div class="library-row-meta"><div class="library-row-status w-32 hidden md:block"><span class="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-bold">Saved to Cloud</span></div><div class="library-row-time w-32 hidden md:block text-sm text-slate-500 font-medium">${escHtml(surface.timeLabel || 'Cloud')}</div></div>
+                <div class="library-row-arrow w-8 text-slate-300">→</div></div>`;
+            }
+            const b = row.book || {};
             const pages = (window.rcLibraryData && typeof window.rcLibraryData.countPagesFromMarkdown === 'function')
                 ? window.rcLibraryData.countPagesFromMarkdown(b.markdown || '')
                 : Math.max(1, (String(b.markdown||'').match(/^\s*##\s+/gm)||[]).length || 1);
             const surface = (window.rcLibraryData && typeof window.rcLibraryData.getBookSurfaceData === 'function')
                 ? window.rcLibraryData.getBookSurfaceData(`local:${String(b.id)}`, pages, { record: b })
                 : { status: 'Unread', timeLabel: `${Math.max(1, Math.ceil(pages * 2.5))} min left` };
-            const date = new Date(b.createdAt||Date.now()).toLocaleDateString();
             const id = ('local:' + String(b.id)).replace(/'/g,"\\'");
             const title = escHtml(b.title||'Untitled');
-            return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\'")}')" class="library-row px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
-                <div class="library-row-main flex-grow flex items-center gap-3"><div class="library-doc-icon w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div class="library-doc-copy"><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">Added ${date}</p></div></div>
+            return `<div onclick="openPreview('${id}','${title.replace(/'/g,"\\'")}')" class="library-row px-6 py-4 flex items-center hover:bg-slate-50 cursor-pointer transition-colors border-b border-slate-100">
+                <div class="library-row-main flex-grow flex items-center gap-3"><div class="library-doc-icon w-8 h-8 rounded flex items-center justify-center text-lg bg-accent-soft text-accent flex-shrink-0">📄</div><div class="library-doc-copy"><p class="font-semibold text-slate-800 text-sm">${title}</p><p class="text-xs text-slate-400">${escHtml(getLocalDashboardMeta(b))}</p></div></div>
                 <div class="library-row-meta"><div class="library-row-status w-32 hidden md:block"><span class="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">${surface.status}</span></div><div class="library-row-time w-32 hidden md:block text-sm text-slate-500 font-medium">${surface.timeLabel}</div></div>
                 <div class="library-row-arrow w-8 text-slate-300">→</div></div>`;
         });
         rowsEl.innerHTML = rows.join('');
         setLibrarySurfaceState('populated', reason);
-        try { renderSubscriptionSurface(books); } catch (_) {}
+        try { renderSubscriptionSurface(deviceBooks); } catch (_) {}
 
     }
     // Scroll affordance — called by library.js via __jublyAfterRender after render()
@@ -3347,6 +3390,7 @@ window.rcInteraction = (function () {
         document.addEventListener('rc:prefs-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} });
         document.addEventListener('rc:durable-data-hydrated', (e) => { const section = getCurrentVisibleSection(); const kind = e && e.detail ? String(e.detail.kind || 'sync') : 'sync'; try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (section === 'profile-page') { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} } if (section === 'dashboard') { try { refreshLibrary(`durable-hydrated:${kind}`); } catch (_) {} } });
         window.addEventListener('rc:local-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (getCurrentVisibleSection() === 'dashboard') { try { refreshLibrary('local-library-changed'); } catch (_) {} } });
+        window.addEventListener('rc:remote-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} try { renderLibrarySubtitle(isAuthedUser()); } catch (_) {} if (getCurrentVisibleSection() === 'dashboard') { try { refreshLibrary('remote-library-changed'); } catch (_) {} } });
         window.addEventListener('rc:deleted-library-changed', () => { try { renderProfileSurface(); } catch (_) {} try { renderSubscriptionSurface(); } catch (_) {} });
         window.addEventListener('rc:usage-changed', () => { try { renderUsageSurface(); } catch (_) {} });
         try { switchReadingSettingsTab('general'); } catch (_) {}
