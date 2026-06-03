@@ -150,18 +150,18 @@ function normalizeCloudBookPayload(payload = {}) {
   const sourceName = toText(payload.source_name || payload.sourceName, null);
   const importKind = toText(payload.import_kind || payload.importKind, 'text');
   const contentFingerprint = toText(payload.content_fingerprint || payload.contentFingerprint, null);
+  const cloudLibraryItemId = toText(payload.cloud_library_item_id || payload.cloudLibraryItemId, null);
+  const cloudStorageRef = toText(payload.cloud_storage_ref || payload.cloudStorageRef, null);
   const pageCount = Math.max(0, toInt(payload.page_count ?? payload.pageCount, 0));
   const createdAt = toText(payload.created_at || payload.createdAt, null);
   const byteSize = Math.max(0, toInt(payload.byte_size ?? payload.byteSize, Buffer.byteLength(markdown, 'utf8')));
   if (!localId) throw new Error('local_book_id_required');
   if (!markdown.trim()) throw new Error('cloud_book_content_required');
-  return { localId, title, markdown, sourceName, importKind, contentFingerprint, pageCount, createdAt, byteSize };
+  return { localId, title, markdown, sourceName, importKind, contentFingerprint, cloudLibraryItemId, cloudStorageRef, pageCount, createdAt, byteSize };
 }
 
-function buildCloudStoragePath(userId, libraryItemId, importKind = 'text') {
-  const kind = String(importKind || '').trim().toLowerCase();
-  const ext = kind === 'epub' ? 'json' : 'json';
-  return `${String(userId || '').trim()}/${String(libraryItemId || '').trim()}/original.${ext}`;
+function buildCloudStoragePath(userId, libraryItemId) {
+  return `${String(userId || '').trim()}/${String(libraryItemId || '').trim()}/original.json`;
 }
 
 function serializeCloudBookContent(book, row) {
@@ -181,18 +181,18 @@ function serializeCloudBookContent(book, row) {
 }
 
 async function findCloudLibraryItemForBook(userId, book) {
-  if (book.contentFingerprint) {
-    const data = await supabaseRest(`/rest/v1/user_library_items?user_id=eq.${encodeURIComponent(userId)}&storage_kind=eq.${encodeURIComponent(CLOUD_STORAGE_KIND)}&content_fingerprint=eq.${encodeURIComponent(book.contentFingerprint)}&status=eq.active&select=*&order=updated_at.desc&limit=1`, {
-      method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
-    }).catch(() => null);
-    if (Array.isArray(data) && data[0]) return data[0];
+  // Final 1C identity guard: never match cloud ownership by title, source name,
+  // byte size, or fingerprint. A same-title local book must not become Cloud-owned
+  // unless it carries an explicit server-confirmed cloud item id/ref.
+  if (book.cloudLibraryItemId) {
+    const row = await findLibraryItemById(userId, book.cloudLibraryItemId).catch(() => null);
+    if (row && isActiveCloudLibraryItem(row)) return row;
   }
-  const sourceName = String(book.sourceName || book.title || '').trim();
-  if (sourceName) {
-    const data = await supabaseRest(`/rest/v1/user_library_items?user_id=eq.${encodeURIComponent(userId)}&storage_kind=eq.${encodeURIComponent(CLOUD_STORAGE_KIND)}&source_name=eq.${encodeURIComponent(sourceName)}&byte_size=eq.${encodeURIComponent(String(book.byteSize || 0))}&status=eq.active&select=*&order=updated_at.desc&limit=1`, {
+  if (book.cloudStorageRef) {
+    const data = await supabaseRest(`/rest/v1/user_library_items?user_id=eq.${encodeURIComponent(userId)}&storage_ref=eq.${encodeURIComponent(book.cloudStorageRef)}&status=eq.active&select=*&order=updated_at.desc&limit=1`, {
       method: 'GET', asService: true, headers: { Prefer: 'count=exact' },
     }).catch(() => null);
-    if (Array.isArray(data) && data[0]) return data[0];
+    if (Array.isArray(data) && data[0] && isActiveCloudLibraryItem(data[0])) return data[0];
   }
   return null;
 }
@@ -226,7 +226,7 @@ async function saveBookToCloud(userId, payload = {}, resolvedPolicy = null) {
     throw err;
   }
   const libraryItemId = String(existingCloud?.id || crypto.randomUUID());
-  const objectPath = String(existingCloud?.storage_ref || buildCloudStoragePath(userId, libraryItemId, book.importKind));
+  const objectPath = String(existingCloud?.storage_ref || buildCloudStoragePath(userId, libraryItemId));
   const payloadRow = {
     id: libraryItemId,
     user_id: userId,
@@ -265,26 +265,6 @@ async function saveBookToCloud(userId, payload = {}, resolvedPolicy = null) {
   return { row: serializeLibraryItemRow(row), cloudSummary: getCloudStorageSummary(await getLibraryItemsRows(userId, { includeDeleted: false, limit: 500 }), tier) };
 }
 
-async function removeBookFromCloud(userId, payload = {}, resolvedPolicy = null) {
-  const id = toText(payload.library_item_id || payload.libraryItemId || payload.id, null);
-  if (!id) throw new Error('cloud_library_item_id_required');
-  const row = await findLibraryItemById(userId, id);
-  if (!row || !isActiveCloudLibraryItem(row)) throw new Error('cloud_book_not_found');
-  const objectPath = String(row.storage_ref || '').trim();
-  if (objectPath) {
-    await supabaseStorageObject(CLOUD_BOOK_BUCKET, objectPath, { method: 'DELETE' }).catch((error) => {
-      if (Number(error?.status) !== 404) throw error;
-    });
-  }
-  const now = new Date().toISOString();
-  const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*`, {
-    method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: { status: 'deleted', deleted_at: now, updated_at: now },
-  }).catch(() => null);
-  const updated = Array.isArray(data) && data[0] ? data[0] : { ...row, status: 'deleted', deleted_at: now, updated_at: now };
-  const tier = normalizeCloudTier(resolvedPolicy?.policy?.tier || resolvedPolicy?.entitlementSnapshot?.tier || 'basic');
-  return { row: serializeLibraryItemRow(updated), cloudSummary: getCloudStorageSummary(await getLibraryItemsRows(userId, { includeDeleted: false, limit: 500 }), tier) };
-}
-
 async function restoreCloudBook(userId, payload = {}) {
   const id = toText(payload.library_item_id || payload.libraryItemId || payload.id, null);
   if (!id) throw new Error('cloud_library_item_id_required');
@@ -311,6 +291,26 @@ async function restoreCloudBook(userId, payload = {}) {
       cloudStorageRef: row.storage_ref,
     },
   };
+}
+
+async function removeBookFromCloud(userId, payload = {}, resolvedPolicy = null) {
+  const id = toText(payload.library_item_id || payload.libraryItemId || payload.id, null);
+  if (!id) throw new Error('cloud_library_item_id_required');
+  const row = await findLibraryItemById(userId, id);
+  if (!row || !isActiveCloudLibraryItem(row)) throw new Error('cloud_book_not_found');
+  const objectPath = String(row.storage_ref || '').trim();
+  if (objectPath) {
+    await supabaseStorageObject(CLOUD_BOOK_BUCKET, objectPath, { method: 'DELETE' }).catch((error) => {
+      if (Number(error?.status) !== 404) throw error;
+    });
+  }
+  const now = new Date().toISOString();
+  const data = await supabaseRest(`/rest/v1/user_library_items?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&select=*`, {
+    method: 'PATCH', asService: true, headers: { Prefer: 'return=representation' }, body: { status: 'deleted', deleted_at: now, updated_at: now },
+  }).catch(() => null);
+  const updated = Array.isArray(data) && data[0] ? data[0] : { ...row, status: 'deleted', deleted_at: now, updated_at: now };
+  const tier = normalizeCloudTier(resolvedPolicy?.policy?.tier || resolvedPolicy?.entitlementSnapshot?.tier || 'basic');
+  return { row: serializeLibraryItemRow(updated), cloudSummary: getCloudStorageSummary(await getLibraryItemsRows(userId, { includeDeleted: false, limit: 500 }), tier) };
 }
 
 function normalizeBookId(bookId) {
@@ -1072,8 +1072,8 @@ export default async function handler(req, res) {
     }
     if (scope === 'cloud-book') {
       try {
-        const row = await restoreCloudBook(auth.user.id, { library_item_id: getParam(req, 'library_item_id') || getParam(req, 'libraryItemId') || getParam(req, 'id') });
-        return json(res, 200, { ok: true, ...row });
+        const result = await restoreCloudBook(auth.user.id, { library_item_id: getParam(req, 'library_item_id') || getParam(req, 'libraryItemId') || getParam(req, 'id') });
+        return json(res, 200, { ok: true, ...result });
       } catch (error) {
         return json(res, 400, { ok: false, reason: String(error?.code || error?.message || 'cloud_book_restore_failed'), details: error?.details || null });
       }

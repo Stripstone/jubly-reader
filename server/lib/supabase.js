@@ -188,7 +188,6 @@ export async function supabaseRest(path, opts = {}) {
   return data;
 }
 
-
 function encodeStorageObjectPath(objectPath) {
   return String(objectPath || '')
     .split('/')
@@ -208,9 +207,7 @@ export async function supabaseStorageObject(bucket, objectPath, opts = {}) {
     ...opts.headers,
   };
   const init = { method, headers };
-  if (typeof opts.body !== 'undefined') {
-    init.body = opts.body;
-  }
+  if (typeof opts.body !== 'undefined') init.body = opts.body;
   const response = await fetch(url, init);
   const text = await response.text().catch(() => '');
   let data = text;

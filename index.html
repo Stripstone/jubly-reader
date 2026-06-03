@@ -334,11 +334,11 @@
 <div id="manageLibraryModal" class="modal-overlay" style="display:none;" aria-hidden="true">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="manageLibraryTitle">
         <div class="modal-header">
-            <h2 id="manageLibraryTitle">🗂️ Manage Library</h2>
+            <h2 id="manageLibraryTitle">📁 Manage Library</h2>
             <button id="manageLibraryClose" class="modal-close" type="button" aria-label="Close">✕</button>
         </div>
         <div class="modal-body">
-            <p class="import-hint" style="margin-top:0; margin-bottom:12px;">Device books stay local first. Save to Cloud stores the actual book content in your account; Remove from Cloud keeps the local copy on this device.</p>
+            <p class="import-hint" style="margin-top:0; margin-bottom:12px;">Device books stay local first. Save to Cloud stores the actual book content in your account; Remove from Cloud moves the book back to this device.</p>
             <div id="manageLibraryList" class="library-list"></div>
         </div>
     </div>
@@ -965,24 +965,24 @@
             <div id="tab-subscription" class="tab-content hidden-section space-y-5">
                 <div class="sub-hero">
                     <h3 class="text-2xl font-extrabold mb-1">Account access</h3>
-                    <p id="subscription-status-copy" class="text-purple-200 text-sm mb-5">Check your current plan, device storage, and renewal status here. Use View Pricing to compare plans or Manage Billing when available for your account.</p>
+                    <p id="subscription-status-copy" class="text-purple-200 text-sm mb-5">Check your current plan and saved library capacity here. Use View Pricing to compare plans or Manage Billing when available for your account.</p>
                     <div class="flex gap-3 flex-wrap">
                         <button id="subscription-primary-btn" onclick="openModal('pricing-modal')" class="bg-white text-indigo-700 font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-indigo-50 transition">View Pricing</button>
                         <button id="subscription-secondary-btn" onclick="openCustomerPortal()" class="bg-white/20 text-white font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-white/30 transition border border-white/30">Manage Billing</button>
                     </div>
                 </div>
                 <div id="billing-message" class="hidden-section section-card shadow-sm text-sm font-semibold"></div>
-                <div class="subscription-metrics-group grid grid-cols-3 gap-4">
+                <div class="subscription-metrics-group subscription-library-metrics grid grid-cols-3 gap-4">
                     <div class="subscription-metric-card section-card shadow-sm text-center">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Books</p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Device</p>
                         <p id="subscription-books-value" class="text-2xl font-black text-slate-800">—</p>
                     </div>
                     <div class="subscription-metric-card section-card shadow-sm text-center">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Storage</p>
-                        <p id="subscription-storage-value" class="text-2xl font-black text-slate-800">—</p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Cloud</p>
+                        <p id="subscription-cloud-value" class="text-2xl font-black text-slate-800">—</p>
                     </div>
                     <div class="subscription-metric-card section-card shadow-sm text-center">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Renews</p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Plan</p>
                         <p id="subscription-billing-state" class="text-xl font-black text-slate-800 mt-1">—</p>
                     </div>
                 </div>

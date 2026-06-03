@@ -168,23 +168,20 @@ Pending UI should not be added to every control.
 - Settings stay optimistic/local first; the shared save-failure seam is enough for this pass.
 - Recoverable error banners now standardize to `Try again`, `Refresh`, `Open login`, or `Dismiss`.
 
-## 1C Cloud Books — staging patch notes
+## 1C Cloud Books — final mutually exclusive storage contract
 
-Status: implemented as a server-owned Cloud Books flow, pending live Supabase Storage validation.
+Status: implemented for staging validation.
 
-Authoritative owner:
-- `user_library_items` owns account metadata/status/limits.
-- Supabase Storage bucket `jubly-book-content` owns actual book content objects.
-- `server/lib/app-durable-sync.js` owns Save to Cloud, Remove from Cloud, and Restore Cloud Book server actions.
-- `js/library.js` owns the Manage Library UI only.
+Contract:
+- A managed book is either saved on this device or saved to Cloud. The normal Manage Library view must not show a dual-state copy.
+- Device → Cloud: Save to Cloud stores the actual content object in Supabase Storage, creates/updates `user_library_items.storage_ref`, then removes the local IndexedDB device copy after server success.
+- Save failure keeps/restores the device row and leaves no fake Cloud state.
+- Cloud → Device: Remove from Cloud means move back to this device. Runtime first restores/downloads cloud content, then writes local IndexedDB, then removes the cloud object/ownership row. If local write fails, Cloud remains. If Cloud removal fails after local write, the UI surfaces a guarded error and does not present the move as complete.
+- Delete appears only for device books and remains the existing Trash → Permanent Delete flow.
+- Manage Library groups rows as Cloud Library and This Device.
+- Summary copy is: Saved on this device; Saved to cloud; Cloud storage.
 
-Truth boundary:
-- A book may be labeled `Cloud Library` only when an active `user_library_items` row has `storage_kind = supabase_storage` and `storage_ref` points to a stored content object.
-- Metadata alone is not treated as Cloud Library completion.
-- Device delete is disabled while an active cloud copy exists. The user must Remove from Cloud first.
-
-Required runtime validation:
-- Save to Cloud creates a Storage object and active `user_library_items` row.
-- Cloud count/storage used updates from server snapshot.
-- Fresh browser/account session can restore/open the stored content object.
-- Remove from Cloud deletes/removes the Storage object, marks the cloud row inactive, keeps the local copy, and frees the Cloud Library slot.
+Authority boundary:
+- Server/Supabase remains the Cloud truth owner.
+- `library.js` reflects `rcSync` remote rows and performs local IndexedDB moves only at the contract transition points.
+- Same-title books are isolated by explicit id/ref, not by title/name/fingerprint fallback.
