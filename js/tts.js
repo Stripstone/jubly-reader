@@ -941,9 +941,22 @@ function getStoredSelectedVoice() {
 
 function getSelectedVoicePreference() {
   const stored = getStoredSelectedVoice();
-  const type = stored.startsWith('cloud:') || stored.startsWith('polly:') || stored.startsWith('azure:') ? 'cloud' : (stored ? 'browser' : 'auto');
+  const rawType = stored.startsWith('cloud:') || stored.startsWith('polly:') || stored.startsWith('azure:') ? 'cloud' : (stored ? 'browser' : 'auto');
+  let cloudAllowed = false;
+  try {
+    cloudAllowed = !!(window.rcPolicy && typeof window.rcPolicy.canUseCloudVoices === 'function' && window.rcPolicy.canUseCloudVoices());
+  } catch (_) { cloudAllowed = false; }
+  // 1A safety: preserve a premium preference for future Pro contexts, but do
+  // not let a Basic/browser-only runtime carry a dead cloud voice into Read Aloud.
+  // Public/onboarding preview uses window.rcVoicePreview and does not depend on
+  // this active runtime selection.
+  const blockedCloud = rawType === 'cloud' && !cloudAllowed;
+  const type = blockedCloud ? 'auto' : rawType;
   return {
-    stored, type,
+    stored: blockedCloud ? '' : stored,
+    originalStored: stored,
+    type,
+    blockedCloud,
     explicitCloud: type === 'cloud',
     requestedCloudVoiceId: type === 'cloud' ? stored.replace(/^(cloud:|polly:|azure:)/, '') : null,
   };
@@ -3270,7 +3283,6 @@ async function cloudFetchUrl(text, opts = {}) {
   TTS_DEBUG.lastCloudRequest = { chars: requestText.length, textHash: requestTextHash, sentenceMarks: !!(opts && opts.sentenceMarks), requestMode: opts && opts.requestMode ? String(opts.requestMode) : '', selectedVoice: selectedVoicePref.stored, selectedVoiceType: selectedVoicePref.type, requestedVoiceId: selectedVoicePref.requestedCloudVoiceId, variant: TTS_STATE.voiceVariant || 'female' };
   try { const qs = new URLSearchParams(window.location.search); if (qs.get('debug') === '1') payload.debug = '1'; } catch (_) {}
   try { if (String(TTS_STATE.voiceVariant || '').toLowerCase() === 'male') payload.voiceVariant = 'male'; } catch (_) {}
-  try { const saved = getStoredSelectedVoice(); if (saved.startsWith('cloud:')) payload.voiceId = saved.slice('cloud:'.length); } catch (_) {}
   try { if (localStorage.getItem('tts_nocache') === '1') payload.nocache = true; } catch (_) {}
   const endpoint = apiUrl('/api/ai?action=tts');
   const res = await fetch(endpoint, {

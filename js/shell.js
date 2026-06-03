@@ -70,7 +70,7 @@
     let _currentSection = 'landing-page';
     let _publicIntroLibraryVisible = false;
     let _publicSampleSessionActive = false;
-    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'mara', theme: 'default', speed: 1 });
+    const PUBLIC_ONBOARDING_DEFAULTS = Object.freeze({ goal: 'finish', voice: 'sara', theme: 'default', speed: 1 });
     let _publicOnboardingChoices = Object.assign({}, PUBLIC_ONBOARDING_DEFAULTS);
     let _publicOnboardingTimer = null;
     let _shellAuthBootstrapped = false;
@@ -1405,6 +1405,20 @@ window.rcInteraction = (function () {
         goToPublicOnboardingStep(1);
     }
 
+
+    function previewJublyVoiceHey(voiceName, context) {
+        // 1A: lightweight/non-stateful preview only. Do not call cloud TTS,
+        // queue ownership, or usage consume. Failure stays silent.
+        const name = String(voiceName || '').trim();
+        try { window.__rcPreferredPremiumVoice = name ? name.toLowerCase() : ''; } catch (_) {}
+        try { if (name) localStorage.setItem('rc_preferred_premium_voice', name.toLowerCase()); } catch (_) {}
+        try {
+            if (window.rcVoicePreview && typeof window.rcVoicePreview.sayHey === 'function') {
+                window.rcVoicePreview.sayHey(name, { context: context || 'unknown' });
+            }
+        } catch (_) {}
+    }
+
     function selectPublicOnboardingChoice(button) {
         const group = button && button.closest ? button.closest('[data-onboarding-group]') : null;
         if (!group) return;
@@ -1417,6 +1431,7 @@ window.rcInteraction = (function () {
         });
         if (key === 'goal' || key === 'voice' || key === 'theme') _publicOnboardingChoices[key] = value;
         if (key === 'theme') applyPublicOnboardingTheme(value);
+        if (key === 'voice') previewJublyVoiceHey(value, 'public-onboarding');
         window.__jublyPublicOnboarding = Object.assign({ source: 'public-onboarding', durable: false }, _publicOnboardingChoices);
     }
 

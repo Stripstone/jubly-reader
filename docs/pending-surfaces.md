@@ -67,7 +67,7 @@ Maintenance rule:
 | Surface | What it does | Status |
 |---|---|---|
 | Login / Create account surface with pending paid intent | Email step resolves, account state is checked, auth settles, then paid checkout handoff begins | ✅ Inline auth copy stays honest: step-one email fully settles before account creation continues, existing-account emails are steered to `Log In`, signup success uses `Check your email to verify your account`, backing out clears stale paid-intent markers, verified returns land on login, and successful paid auth communicates `Redirecting to … checkout…` while checkout starts |
-| Pricing modal → **Continue for free / Choose Pro** buttons | `fetchPublicConfig` + `fetchRuntimeSnapshot` + Pro trial eligibility check | ✅ Settled modal entry remains required before the Basic/Pro modal appears. Premium is no longer customer-facing in launch pricing; any internal Premium state must map to Pro-facing language rather than a third visible card. Buttons remain disabled while the hidden settle completes. |
+| Pricing modal → **Continue for free / Choose Pro** buttons | `fetchPublicConfig` + `fetchRuntimeSnapshot` + Pro trial eligibility check | ✅ Settled modal entry remains required before the compact Basic/Pro modal appears. Premium is no longer customer-facing in launch pricing; any internal Premium state must map to Pro-facing language rather than a third visible card. Buttons remain disabled while the hidden settle completes. |
 | Profile → Subscription tab (renders on open) | `fetchRuntimeSnapshot` | ✅ Inline copy: `Checking your account…` / `—` while in flight |
 | Pricing modal → **Choose Pro** (signed in) | `POST /api/billing?action=checkout` | ✅ Inline clicked-button state: `Preparing…` + banner: `Preparing checkout…`; error resolves to `Try again` or `Open login` if auth expired |
 | Profile → Subscription → **Manage Billing** button | `POST /api/billing?action=portal` | ✅ Inline clicked-button state: `Opening…` + banner: `Opening billing…`; error resolves to `Try again` or `Open login` if auth expired |
@@ -81,7 +81,9 @@ Maintenance rule:
 | Surface | What it does | Status |
 |---|---|---|
 | Nav → **Usage pill** (renders on auth) | Usage snapshot hydration | ✅ Inline neutral pending: `Checking…` until truth is authoritative |
-| Reader → protected cloud **Read page** usage gate | `rcUsage.check('tts')` before protected cloud request, then `rcUsage.consume('tts')` only after runtime playback commit | ◐ Runtime-owned TTS seam. Replay-window covered pages skip check/consume; browser/basic/public/nonprotected paths do not consume. Consumption diagnostics distinguish `usage-check`, `usage-consume-after-playback-commit`, `usage-consume-skipped-replay-window`, and `usage-consume-skipped-nonprotected-path`. |
+
+| Onboarding / reading settings → **voice selection preview** | Local `speechSynthesis` one-word preview | — 1A lightweight preview only. Selecting Sara/Jenny/William/Davis in onboarding, or changing voice in reading settings, may utter `Hey` through browser speech synthesis. It does not call cloud TTS, does not consume usage, does not enter the Read Aloud queue, and fails silently. Basic/browser contexts must not carry dead cloud selections into runtime playback. |
+| Reader → protected cloud **Read page** usage gate | `rcUsage.check('tts')` before protected cloud request, then `rcUsage.consume('tts')` only after runtime playback commit | ◐ Runtime-owned TTS seam. Reading settings surfaces the commitment cost as `Uses ✨ 2`; replay-window covered pages skip check/consume; browser/basic/public/nonprotected paths do not consume. Consumption diagnostics distinguish `usage-check`, `usage-consume-after-playback-commit`, `usage-consume-skipped-replay-window`, and `usage-consume-skipped-nonprotected-path`. |
 
 ---
 
@@ -90,9 +92,9 @@ Maintenance rule:
 | Surface | What it does | Status |
 |---|---|---|
 | Importer → **Scan Contents** button | EPUB parse via JSZip | ✅ Inline button state: `Scanning…` + existing inline step text such as `Reading book…` |
-| Importer → **Import** button (post-scan) | `POST /api/content?action=page-break` then IndexedDB write | ✅ Inline progress stage now includes explicit page-builder step before save |
+| Importer → **Import** button (post-scan) | `POST /api/content?action=page-break` then IndexedDB write | ✅ Final import commit button surfaces `Uses ✨ 6`; inline progress stage includes explicit page-builder step before save |
 | Importer → **Import** button (non-EPUB file) | Upload → FreeConvert → poll → fetch EPUB → parse | ✅ Existing inline multi-step copy retained (`Preparing upload…`, `Uploading…`, `Converting…`, `Reading book…`) |
-| Importer → **Import Text** button | Markdown chapter parse + IndexedDB write | ✅ Inline button state: `Importing…` + progress stage appears before page-break await |
+| Importer → **Import Text** button | Markdown chapter parse + IndexedDB write | ✅ Final text import button surfaces `Uses ✨ 6`; inline button state: `Importing…` + progress stage appears before page-break await |
 | Importer capacity gate (Import Text / Scan Contents / final save) | `POST /api/app?kind=import-capacity` | ◐ Server-backed action gate. The importer opens normally; selecting or dropping a file is not the capacity gate. Import Text and Scan Contents run the shared gate before parsing/import work. `library_full` at those user action gates keeps the importer surface open and shows `Your library is full. See plans for more options.`; the See plans link is explicit user intent for opening billing. |
 
 ---

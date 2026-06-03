@@ -92,6 +92,51 @@
     });
   })();
 
+
+  // 1A: lightweight voice preview. This intentionally uses browser speech
+  // synthesis only; it does not call cloud TTS, consume usage, or enter the
+  // Read Aloud queue. Preview failure stays silent.
+  (function initJublyVoicePreview() {
+    if (window.rcVoicePreview && typeof window.rcVoicePreview.sayHey === 'function') return;
+    const PREMIUM_NAME_HINTS = Object.freeze({
+      sara: ['sara','aria','samantha','serena'],
+      jenny: ['jenny','samantha','aria','serena'],
+      william: ['william','guy','daniel','david','alex'],
+      davis: ['davis','guy','david','alex','daniel'],
+    });
+    function pickPreviewVoice(name) {
+      try {
+        const voices = (window.speechSynthesis && window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [])
+          .filter(v => String(v.lang || '').toLowerCase().startsWith('en'));
+        if (!voices.length) return null;
+        const key = String(name || '').trim().toLowerCase();
+        const hints = PREMIUM_NAME_HINTS[key] || [key];
+        for (const hint of hints) {
+          const found = voices.find(v => String(v.name || '').toLowerCase().includes(hint));
+          if (found) return found;
+        }
+        return voices[0] || null;
+      } catch (_) { return null; }
+    }
+    window.rcVoicePreview = {
+      sayHey(name, context) {
+        try {
+          if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') return false;
+          try { window.speechSynthesis.cancel(); } catch (_) {}
+          const utterance = new SpeechSynthesisUtterance('Hey');
+          const voice = pickPreviewVoice(name);
+          if (voice) utterance.voice = voice;
+          utterance.volume = 0.85;
+          utterance.rate = 1;
+          utterance.pitch = 1;
+          window.speechSynthesis.speak(utterance);
+          try { window.__rcLastVoicePreview = { name: String(name || ''), context: context || null, text: 'Hey', at: Date.now(), localOnly: true }; } catch (_) {}
+          return true;
+        } catch (_) { return false; }
+      }
+    };
+  })();
+
   // ===================================
   // 🛠️ Utility Panels (Volume + Diagnostics)
   // ===================================
@@ -174,6 +219,26 @@
         try { window.__rcSessionVoiceVariant = vv; } catch (_) {}
       }
 
+
+      function rememberPremiumVoicePreference(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return;
+        const name = raw.replace(/^(cloud:|polly:|azure:)/, '').replace(/^en-[A-Z]{2}-/i, '').replace(/Neural$/i, '').toLowerCase();
+        if (!['sara','jenny','william','davis','aria','guy'].some(n => name.includes(n))) return;
+        try { window.__rcPreferredPremiumVoice = name; } catch (_) {}
+        try { localStorage.setItem('rc_preferred_premium_voice', name); } catch (_) {}
+      }
+
+      function previewSelectedVoice(value, context) {
+        try {
+          if (!(window.rcVoicePreview && typeof window.rcVoicePreview.sayHey === 'function')) return;
+          const raw = String(value || '').trim();
+          if (!raw) return;
+          const cleaned = raw.replace(/^(cloud:|polly:|azure:)/, '').replace(/^en-[A-Z]{2}-/i, '').replace(/Neural$/i, '');
+          window.rcVoicePreview.sayHey(cleaned, { context: context || 'reading-settings' });
+        } catch (_) {}
+      }
+
       // Voice selects — two dropdowns, one per gender.
       // Selecting from either dropdown sets both the active variant and specific voice.
       // Free tier: browser voices only.
@@ -187,8 +252,8 @@
         'Superstar','Whisper','Zarvox','Trinoids'
       ];
 
-      const FEMALE_NAMES = ['Aria','Jenny','Samantha','Karen','Moira','Serena','Tessa','Zira','Eva','Susan','Victoria','Fiona','Allison','Ava','Nora'];
-      const MALE_NAMES   = ['Daniel','Rishi','Alex','Guy','Ryan','Fred','David','Mark','Tom','Bruce','James'];
+      const FEMALE_NAMES = ['Sara','Jenny','Aria','Samantha','Karen','Moira','Serena','Tessa','Zira','Eva','Susan','Victoria','Fiona','Allison','Ava','Nora'];
+      const MALE_NAMES   = ['William','Davis','Guy','Daniel','Rishi','Alex','Ryan','Fred','David','Mark','Tom','Bruce','James'];
 
       function buildVoiceSelect(selectEl, gender) {
         if (!selectEl) return;
@@ -196,7 +261,8 @@
         const cloudVoicesAllowed = !!resolvedPolicy?.features?.cloudVoices;
         const isFree      = !cloudVoicesAllowed;
         const isActive    = String(TTS_STATE?.voiceVariant || 'female').toLowerCase() === gender;
-        const savedBrowser = (() => { try { return (typeof getStoredSelectedVoice === 'function' ? getStoredSelectedVoice() : (window.__rcSessionVoiceSelection || '')) || ''; } catch(_) { return ''; } })();
+        const rawSavedVoice = (() => { try { return (typeof getStoredSelectedVoice === 'function' ? getStoredSelectedVoice() : (window.__rcSessionVoiceSelection || '')) || ''; } catch(_) { return ''; } })();
+        const savedBrowser = (isFree && /^(cloud:|polly:|azure:)/.test(rawSavedVoice)) ? '' : rawSavedVoice;
         const savedVariant = (() => { try { return String(TTS_STATE?.voiceVariant || window.__rcSessionVoiceVariant || 'female'); } catch(_) { return 'female'; } })();
         const isThisVoiceActive = isActive && (savedVariant === gender);
 
@@ -254,6 +320,7 @@
             const opt = document.createElement('option');
             opt.value = `cloud:${v.id}`;
             opt.textContent = v.label;
+            opt.dataset.previewName = v.label.split(' ')[0] || v.label;
             if (savedVariant === gender && savedBrowser === `cloud:${v.id}`) opt.selected = true;
             if (!savedBrowser && savedVariant === gender && v === AZURE_VOICES[0]) opt.selected = true;
             cloudGrp.appendChild(opt);
@@ -268,6 +335,7 @@
             quality.forEach(v => {
               const opt = document.createElement('option');
               opt.value = v.name;
+              opt.dataset.previewName = v.name;
               opt.textContent = v.name.replace(/^com\.apple\.[^.]+\./, '').replace(/-compact$/, '');
               if (v.name === savedBrowser && savedVariant === gender) opt.selected = true;
               selectEl.appendChild(opt);
@@ -278,6 +346,7 @@
             quality.forEach(v => {
               const opt = document.createElement('option');
               opt.value = v.name;
+              opt.dataset.previewName = v.name;
               opt.textContent = v.name.replace(/^com\.apple\.[^.]+\./, '').replace(/-compact$/, '');
               if (v.name === savedBrowser && savedVariant === gender) opt.selected = true;
               grp.appendChild(opt);
@@ -306,10 +375,13 @@
           if (val.startsWith('polly:') || val.startsWith('cloud:')) {
             // Cloud voice — store the full value so cloudFetchUrl can forward the selected model id
             try { window.__rcSessionVoiceSelection = val; } catch(_) {}
+            rememberPremiumVoicePreference(val);
           } else {
             // Browser voice
             try { window.__rcSessionVoiceSelection = val; } catch(_) {}
           }
+          const selectedOption = selectEl.options && selectEl.selectedIndex >= 0 ? selectEl.options[selectEl.selectedIndex] : null;
+          previewSelectedVoice((selectedOption && selectedOption.dataset && selectedOption.dataset.previewName) || val, 'reading-settings');
           populateBrowserVoicePicker();
         });
       }

@@ -5977,3 +5977,101 @@ body.shell-signed-in #library-rows > .library-row > .library-row-arrow {
     margin: 0 !important;
   }
 }
+
+/* 1B cost surfaces — quiet commitment-point labels. */
+.settings-mode-control {
+  display:flex;
+  align-items:center;
+  gap:0.55rem;
+  min-width:0;
+}
+.usage-cost-chip {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:1.65rem;
+  padding:0.24rem 0.58rem;
+  border-radius:999px;
+  background:#f8fafc;
+  border:1px solid #e2e8f0;
+  color:#475569;
+  font-size:0.72rem;
+  font-weight:850;
+  white-space:nowrap;
+  line-height:1;
+}
+.import-cost-chip {
+  background:#fff;
+  color:#475569;
+}
+body.app-dark .usage-cost-chip {
+  background:#0f172a;
+  border-color:#334155;
+  color:#cbd5e1;
+}
+
+/* 1B pricing correction — keep Basic/Pro comparison compact on wide view. */
+#pricing-modal > .pricing-modal-card {
+  max-width: 640px;
+}
+.pricing-modal-header {
+  padding:1.35rem 1.65rem 0.95rem;
+}
+.pricing-modal-header h2 {
+  font-size:1.65rem !important;
+  line-height:1.12;
+}
+.pricing-modal-body {
+  padding:0 1.55rem 1.45rem;
+}
+.pricing-plan-grid {
+  gap:1rem;
+}
+.pricing-plan-card {
+  border-radius:20px;
+  padding:1.2rem;
+}
+.pricing-plan-eyebrow {
+  margin:0 0 0.62rem;
+  font-size:0.72rem;
+  letter-spacing:0.15em;
+}
+.pricing-plan-badge {
+  padding:0.22rem 0.58rem;
+  font-size:0.68rem;
+}
+.pricing-plan-price {
+  font-size:clamp(2rem, 4vw, 2.65rem);
+}
+.pricing-plan-sub {
+  margin:0.48rem 0 1.05rem;
+  font-size:0.86rem;
+}
+.pricing-feature-list {
+  gap:0.54rem;
+  margin:0 0 1.1rem;
+}
+.pricing-feature {
+  grid-template-columns:1.1rem minmax(0,1fr);
+  gap:0.56rem;
+  font-size:0.9rem;
+  line-height:1.16;
+}
+.pricing-feature > span:first-child {
+  font-size:1rem;
+}
+.pricing-plan-button {
+  min-height:2.65rem;
+  border-radius:0.86rem;
+  font-size:0.9rem;
+}
+.pricing-plan-button-pro {
+  box-shadow:0 5px 0 #4b32bc, 0 10px 20px rgba(99,68,245,0.22);
+}
+.pricing-plan-button-pro:not(:disabled):hover {
+  box-shadow:0 5px 0 #4b32bc, 0 14px 24px rgba(99,68,245,0.28);
+}
+@media (max-width: 760px) {
+  #pricing-modal > .pricing-modal-card { max-width: 390px; }
+  .pricing-plan-card { padding:1.2rem; }
+}

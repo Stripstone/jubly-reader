@@ -54,9 +54,12 @@
         <div class="rs-panel" id="rs-panel-general">
             <div class="settings-mode-row">
                 <span class="settings-mode-label">Mode</span>
-                <select id="modeSelect" class="settings-mode-select">
+                <div class="settings-mode-control">
+                    <select id="modeSelect" class="settings-mode-select">
                     <option value="reading" selected>Reading</option>
                                     </select>
+                    <span class="usage-cost-chip" aria-label="Read Aloud cost">Uses ✨ 2</span>
+                </div>
             </div>
             <div class="rs-simple-row">
                 <div>
@@ -266,6 +269,7 @@
                 <div class="import-actions mt-3">
                     <button id="importScanBtn" type="button" class="btn-primary" disabled>Scan Contents</button>
                     <button id="importTextImportBtn" type="button" class="btn-primary hidden-section" disabled>Import Text</button>
+                    <span class="usage-cost-chip import-cost-chip" aria-label="Import cost">Uses ✨ 6</span>
                 </div>
             </div>
             <!-- Stage 2: Chapter picker -->
@@ -296,6 +300,7 @@
                                 <button id="importBackBtn"        type="button" class="btn-mini" style="display:none;">Back</button>
                                 <button id="importAdvancedToggle" type="button" class="btn-mini">Advanced</button>
                                 <button id="importDoImport"       type="button" class="btn-primary">Import selected</button>
+                                <span class="usage-cost-chip import-cost-chip" aria-label="Import cost">Uses ✨ 6</span>
                             </div>
                         </div>
                     </div>
